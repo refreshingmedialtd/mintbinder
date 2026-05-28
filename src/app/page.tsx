@@ -343,10 +343,36 @@ export default function Home() {
     showToast(`${catalogueItem.name} added to wishlist.`);
   }
 
-  function duplicateItem(itemId: string) {
+  async function duplicateItem(itemId: string) {
     const source = collection.find((item) => item.id === itemId);
     if (!source) {
       return;
+    }
+
+    const catalogueItem = catalogueById.get(source.catalogueId);
+    const payload = payloadFromCollectionItem(source);
+
+    if (dataSource === "database") {
+      try {
+        const response = await fetch("/api/collection-items", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Duplicate collection item failed with ${response.status}`);
+        }
+
+        const result = (await response.json()) as { item: CollectionItem };
+        setCollection((items) => [...items, result.item]);
+        setAppState((current) => ({ ...current, selectedItemId: result.item.id }));
+        showToast(`${catalogueItem?.name ?? "Item"} duplicated.`);
+        return;
+      } catch (error) {
+        console.warn("Falling back to local duplicate.", error);
+        showToast("Database duplicate failed, so this duplicate is local for now.");
+      }
     }
 
     const copy = {
@@ -358,6 +384,121 @@ export default function Home() {
     setCollection((items) => [...items, copy]);
     setAppState((current) => ({ ...current, selectedItemId: copy.id }));
     showToast("Lot duplicated.");
+  }
+
+  async function updateCollectionItem(itemId: string, formData: FormData) {
+    const source = collection.find((item) => item.id === itemId);
+    const catalogueItem = source ? catalogueById.get(source.catalogueId) : undefined;
+
+    if (!source || !catalogueItem) {
+      return false;
+    }
+
+    const payload = {
+      quantity: Number(formData.get("quantity") ?? source.quantity),
+      condition: String(formData.get("condition") ?? source.condition),
+      language: String(formData.get("language") ?? source.language),
+      variant: String(formData.get("variant") ?? source.variant),
+      paid: String(formData.get("paid") ?? ""),
+      location: String(formData.get("location") ?? source.location),
+      notes: String(formData.get("notes") ?? ""),
+    };
+
+    if (dataSource === "database") {
+      try {
+        const response = await fetch(`/api/collection-items/${encodeURIComponent(itemId)}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Update collection item failed with ${response.status}`);
+        }
+
+        const result = (await response.json()) as { item: CollectionItem };
+        setCollection((items) => items.map((item) => (item.id === itemId ? result.item : item)));
+        showToast(`${catalogueItem.name} updated.`);
+        return true;
+      } catch (error) {
+        console.warn("Falling back to local collection update.", error);
+        showToast("Database update failed, so this change is local for now.");
+      }
+    }
+
+    const paidInput = payload.paid.replace(/[^0-9.]/g, "");
+    const paidValue = paidInput ? Math.round(Number(paidInput) * 100) : undefined;
+    const updated: CollectionItem = {
+      ...source,
+      quantity: Math.max(1, payload.quantity),
+      condition: payload.condition,
+      language: payload.language,
+      variant: payload.variant,
+      purchasePriceMinor:
+        paidValue !== undefined && Number.isFinite(paidValue) ? paidValue : undefined,
+      purchaseDate: paidValue !== undefined && Number.isFinite(paidValue)
+        ? new Date().toISOString().slice(0, 10)
+        : undefined,
+      location: payload.location,
+      notes: payload.notes || undefined,
+    };
+
+    setCollection((items) => items.map((item) => (item.id === itemId ? updated : item)));
+    showToast(`${catalogueItem.name} updated.`);
+    return true;
+  }
+
+  async function archiveCollectionItem(itemId: string) {
+    const source = collection.find((item) => item.id === itemId);
+    const catalogueItem = source ? catalogueById.get(source.catalogueId) : undefined;
+
+    if (!source) {
+      return false;
+    }
+
+    if (dataSource === "database") {
+      try {
+        const response = await fetch(`/api/collection-items/${encodeURIComponent(itemId)}`, {
+          method: "DELETE",
+        });
+
+        if (!response.ok) {
+          throw new Error(`Remove collection item failed with ${response.status}`);
+        }
+      } catch (error) {
+        console.warn("Falling back to local collection removal.", error);
+        showToast("Database remove failed, so this change is local for now.");
+      }
+    }
+
+    setCollection((items) => {
+      const nextItems = items.filter((item) => item.id !== itemId);
+      setAppState((current) => ({
+        ...current,
+        screen: "collection",
+        selectedItemId: nextItems[0]?.id ?? "",
+      }));
+      return nextItems;
+    });
+
+    if (catalogueItem?.type === "card") {
+      const stillOwned = collection.some(
+        (item) => item.id !== source.id && item.catalogueId === source.catalogueId,
+      );
+
+      if (!stillOwned) {
+        setSets((current) =>
+          current.map((set) =>
+            set.name === catalogueItem.set
+              ? { ...set, owned: Math.max(0, set.owned - 1) }
+              : set,
+          ),
+        );
+      }
+    }
+
+    showToast(`${catalogueItem?.name ?? "Item"} removed from collection.`);
+    return true;
   }
 
   function resetSampleData() {
@@ -467,6 +608,8 @@ export default function Home() {
     wishlist,
     wishlistTotal,
     addToCollection,
+    updateCollectionItem,
+    archiveCollectionItem,
     addToWishlist,
     duplicateItem,
     removeWishlistItem,
@@ -523,8 +666,10 @@ type ScreenContext = {
   wishlist: WishlistItem[];
   wishlistTotal: number;
   addToCollection: (catalogueId: string, formData?: FormData) => Promise<void>;
+  updateCollectionItem: (itemId: string, formData: FormData) => Promise<boolean>;
+  archiveCollectionItem: (itemId: string) => Promise<boolean>;
   addToWishlist: (catalogueId: string) => Promise<void>;
-  duplicateItem: (itemId: string) => void;
+  duplicateItem: (itemId: string) => Promise<void>;
   removeWishlistItem: (id: string, options?: { quiet?: boolean }) => Promise<void>;
   setAppState: Dispatch<SetStateAction<AppState>>;
   showToast: (message: string) => void;
@@ -1158,11 +1303,16 @@ function AddScreen({
 
 function ItemDetailScreen({
   appState,
+  archiveCollectionItem,
   catalogueById,
   collection,
   duplicateItem,
   navigate,
+  updateCollectionItem,
 }: ScreenContext) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isRemoving, setIsRemoving] = useState(false);
   const owned = collection.find((item) => item.id === appState.selectedItemId) ?? collection[0];
 
   if (!owned) {
@@ -1178,6 +1328,30 @@ function ItemDetailScreen({
   const value = getOwnedValue(owned, item);
   const cost = owned.purchasePriceMinor ?? null;
   const gain = value !== null && cost !== null ? value - cost : null;
+  const itemName = item.name;
+  const locationOptions = uniqueValues(["Blue Binder", "Sealed Box 1", "Safe", "Unassigned", owned.location]);
+
+  async function handleUpdate(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setIsSaving(true);
+
+    const saved = await updateCollectionItem(owned.id, new FormData(event.currentTarget));
+    setIsSaving(false);
+
+    if (saved) {
+      setIsEditing(false);
+    }
+  }
+
+  async function handleRemove() {
+    if (!window.confirm(`Remove ${itemName} from your collection?`)) {
+      return;
+    }
+
+    setIsRemoving(true);
+    await archiveCollectionItem(owned.id);
+    setIsRemoving(false);
+  }
 
   return (
     <section className="page">
@@ -1189,7 +1363,11 @@ function ItemDetailScreen({
               <ArrowLeft size={17} />
               Collection
             </button>
-            <button className="button primary" onClick={() => duplicateItem(owned.id)}>
+            <button className="button" onClick={() => setIsEditing((current) => !current)}>
+              {isEditing ? <X size={17} /> : <Settings size={17} />}
+              {isEditing ? "Cancel edit" : "Edit"}
+            </button>
+            <button className="button primary" onClick={() => void duplicateItem(owned.id)}>
               <Plus size={17} />
               Duplicate lot
             </button>
@@ -1200,17 +1378,85 @@ function ItemDetailScreen({
       <div className="detail-layout">
         <div className="detail-image">{renderItemImage(item)}</div>
         <div className="detail-stack">
-          <MetricPanel
-            title="Owned details"
-            rows={[
-              ["Quantity", owned.quantity],
-              ["Condition", owned.condition],
-              ["Language", owned.language],
-              ["Variant", owned.variant],
-              ["Grade", owned.grade],
-              ["Location", owned.location],
-            ]}
-          />
+          {isEditing ? (
+            <section className="tool-panel">
+              <h2>Edit owned details</h2>
+              <form className="form-stack" onSubmit={handleUpdate}>
+                <div className="field-grid">
+                  <Field label="Condition">
+                    <select name="condition" defaultValue={owned.condition}>
+                      <option>Near Mint</option>
+                      <option>Excellent</option>
+                      <option>Light Played</option>
+                      <option>Played</option>
+                      <option>Mint</option>
+                      <option>Sealed</option>
+                      <option>Unknown</option>
+                    </select>
+                  </Field>
+                  <Field label="Language">
+                    <select name="language" defaultValue={owned.language}>
+                      <option>English</option>
+                      <option>Japanese</option>
+                      <option>German</option>
+                      <option>French</option>
+                      <option>Other</option>
+                    </select>
+                  </Field>
+                  <Field label="Quantity">
+                    <input name="quantity" type="number" min={1} defaultValue={owned.quantity} />
+                  </Field>
+                  <Field label="Paid">
+                    <input
+                      name="paid"
+                      inputMode="decimal"
+                      defaultValue={moneyInputValue(owned.purchasePriceMinor)}
+                      placeholder="GBP 0.00"
+                    />
+                  </Field>
+                  <Field label="Location">
+                    <select name="location" defaultValue={owned.location}>
+                      {locationOptions.map((location) => (
+                        <option key={location}>{location}</option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label="Variant">
+                    <input name="variant" defaultValue={owned.variant} />
+                  </Field>
+                </div>
+                <Field label="Notes">
+                  <textarea name="notes" defaultValue={owned.notes ?? ""} placeholder="Optional" />
+                </Field>
+                <div className="actions">
+                  <button className="button primary" type="submit" disabled={isSaving}>
+                    <Check size={17} />
+                    {isSaving ? "Saving" : "Save changes"}
+                  </button>
+                  <button className="button" type="button" onClick={() => setIsEditing(false)}>
+                    <X size={17} />
+                    Cancel
+                  </button>
+                  <button className="button danger" type="button" onClick={handleRemove} disabled={isRemoving}>
+                    <Trash2 size={17} />
+                    {isRemoving ? "Removing" : "Remove item"}
+                  </button>
+                </div>
+              </form>
+            </section>
+          ) : (
+            <MetricPanel
+              title="Owned details"
+              rows={[
+                ["Quantity", owned.quantity],
+                ["Condition", owned.condition],
+                ["Language", owned.language],
+                ["Variant", owned.variant],
+                ["Grade", owned.grade],
+                ["Location", owned.location],
+              ]}
+            />
+          )}
           <MetricPanel
             title="Value"
             rows={[
@@ -1853,6 +2099,27 @@ function getOwnedValue(item: CollectionItem, catalogueItem?: CatalogueItem) {
   }
 
   return item.overrideValueMinor ?? catalogueItem.valueMinor * item.quantity;
+}
+
+function payloadFromCollectionItem(item: CollectionItem) {
+  return {
+    catalogueId: item.catalogueId,
+    quantity: item.quantity,
+    condition: item.condition,
+    language: item.language,
+    variant: item.variant,
+    paid: moneyInputValue(item.purchasePriceMinor),
+    location: item.location,
+    notes: item.notes ?? "",
+  };
+}
+
+function moneyInputValue(value?: number) {
+  return value === undefined ? "" : (value / 100).toFixed(2);
+}
+
+function uniqueValues(values: string[]) {
+  return Array.from(new Set(values.filter(Boolean)));
 }
 
 function capitalize(value: string) {

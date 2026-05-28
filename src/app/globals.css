@@ -317,6 +317,16 @@ h3 {
   background: var(--accent-dark);
 }
 
+.button.danger {
+  border-color: rgba(220, 38, 38, 0.35);
+  color: var(--accent-dark);
+}
+
+.button.danger:hover {
+  border-color: var(--accent);
+  background: #fef2f2;
+}
+
 .button.full {
   width: 100%;
 }

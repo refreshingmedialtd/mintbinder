@@ -25,6 +25,8 @@ export type CreateCollectionItemInput = {
   notes?: string;
 };
 
+export type UpdateCollectionItemInput = Omit<CreateCollectionItemInput, "catalogueId">;
+
 export function sampleDataFallback(notice: string): AppData {
   return {
     ...sampleAppData,
@@ -228,6 +230,99 @@ export async function createCollectionItem(
   });
 
   return mapCollectionItem(created);
+}
+
+export async function updateCollectionItem(
+  userId: string,
+  id: string,
+  input: UpdateCollectionItemInput,
+): Promise<CollectionItem> {
+  assertDatabaseConfigured();
+
+  const existing = await prisma.collectionItem.findFirst({
+    where: {
+      id,
+      userId,
+      archivedAt: null,
+    },
+    select: {
+      id: true,
+      itemType: true,
+    },
+  });
+
+  if (!existing) {
+    throw new Error("Collection item not found.");
+  }
+
+  const storageLocationId = await resolveStorageLocationId(userId, input.location);
+  const paidMinor = parseMoneyToMinor(input.paid);
+  const quantity = Math.max(1, Number(input.quantity ?? 1));
+
+  const updated = await prisma.collectionItem.update({
+    where: { id: existing.id },
+    data: {
+      quantity,
+      condition: conditionToEnum(input.condition, existing.itemType),
+      language: languageToCode(input.language),
+      variantLabel: input.variant || defaultVariant(existing.itemType),
+      purchasePriceMinor: paidMinor ?? null,
+      purchaseCurrency: paidMinor === undefined ? null : "GBP",
+      purchaseDate: paidMinor === undefined ? null : new Date(),
+      storageLocationId: storageLocationId ?? null,
+      notes: input.notes || null,
+      events: {
+        create: {
+          userId,
+          eventType: CollectionEventType.EDITED,
+          quantity,
+          occurredAt: new Date(),
+          notes: "Updated from app API.",
+          metadata: { source: "app_api" },
+        },
+      },
+    },
+    include: collectionItemInclude,
+  });
+
+  return mapCollectionItem(updated);
+}
+
+export async function archiveCollectionItem(userId: string, id: string) {
+  assertDatabaseConfigured();
+
+  const existing = await prisma.collectionItem.findFirst({
+    where: {
+      id,
+      userId,
+      archivedAt: null,
+    },
+    select: {
+      id: true,
+      quantity: true,
+    },
+  });
+
+  if (!existing) {
+    throw new Error("Collection item not found.");
+  }
+
+  await prisma.collectionItem.update({
+    where: { id: existing.id },
+    data: {
+      archivedAt: new Date(),
+      events: {
+        create: {
+          userId,
+          eventType: CollectionEventType.REMOVED,
+          quantity: existing.quantity,
+          occurredAt: new Date(),
+          notes: "Archived from app API.",
+          metadata: { source: "app_api" },
+        },
+      },
+    },
+  });
 }
 
 export async function createWishlistItem(userId: string, catalogueId: string): Promise<WishlistItem> {
@@ -434,6 +529,22 @@ function mapSetProgress(set: {
     total: set.total ?? set.cardPrintings.length,
   };
 }
+
+const collectionItemInclude = {
+  cardPrinting: {
+    include: {
+      cardSet: true,
+      priceSnapshots: { orderBy: { observedAt: "desc" }, take: 1 },
+    },
+  },
+  sealedProduct: {
+    include: {
+      relatedCardSet: true,
+      priceSnapshots: { orderBy: { observedAt: "desc" }, take: 1 },
+    },
+  },
+  storageLocation: true,
+} as const;
 
 function itemTypeToClient(value: string): ItemType {
   return value === PrismaItemType.SEALED_PRODUCT ? "sealed" : "card";

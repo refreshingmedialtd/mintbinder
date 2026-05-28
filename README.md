@@ -87,6 +87,8 @@ Creating an account from the sign-in screen creates a new collector profile with
 
 - `GET /api/app-data`: returns catalogue, collection, wishlist, set progress, and data-source status for the signed-in user.
 - `POST /api/collection-items`: creates a collection item and matching collection event for the signed-in user.
+- `PATCH /api/collection-items/:id`: updates owned item details and records an edit event for the signed-in user.
+- `DELETE /api/collection-items/:id`: archives an owned item and records a remove event for the signed-in user.
 - `POST /api/wishlist-items`: creates or returns a wishlist item for the signed-in user.
 - `DELETE /api/wishlist-items?id=...`: removes a wishlist item for the signed-in user.
 
@@ -108,4 +110,4 @@ http://127.0.0.1:8095/
 
 ## Next Step
 
-The next logical step is account hardening: password reset, email verification, rate limiting, and optional OAuth or magic-link sign-in.
+The next logical step is storage and history: surface collection event history, add storage location management, and use the event stream for early analytics.
