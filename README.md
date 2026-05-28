@@ -8,6 +8,7 @@ PokeStop is a working title for a Pokemon card and sealed product collection tra
 - [MVP_SPEC.md](MVP_SPEC.md): MVP scope, screens, user flows, and build milestones.
 - [DATA_MODEL.md](DATA_MODEL.md): database model, relationships, constraints, enums, and valuation rules.
 - [ARCHITECTURE.md](ARCHITECTURE.md): recommended stack, app layers, API surface, entitlements, jobs, and deployment strategy.
+- [UX_WIREFRAMES.md](UX_WIREFRAMES.md): navigation, screen wireframes, user flows, states, and prototype scope.
 
 ## Current Technical Direction
 
@@ -21,5 +22,4 @@ PokeStop is a working title for a Pokemon card and sealed product collection tra
 
 ## Next Step
 
-The next logical step is UX planning: define the first clickable screen flow for dashboard, collection, add item, set progress, wishlist, and the Plus analytics gate.
-
+The next logical step is a static clickable prototype for dashboard, collection, add item, set progress, wishlist, and the Plus analytics gate.

@@ -139,6 +139,8 @@ For MVP, Plus features can be partially implemented behind gates while the produ
 
 ## Core Screens
 
+The screen-level UX plan and wireframes live in [UX_WIREFRAMES.md](UX_WIREFRAMES.md).
+
 ### 1. Dashboard
 
 Purpose: give users a fast summary of the collection.
