@@ -7,6 +7,7 @@ out/
 dist/
 build/
 coverage/
+tsconfig.tsbuildinfo
 
 # Environment and secrets
 .env
@@ -30,4 +31,3 @@ Thumbs.db
 *.sqlite
 *.sqlite3
 *.db
-

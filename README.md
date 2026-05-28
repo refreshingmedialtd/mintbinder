@@ -1,6 +1,6 @@
 # PokeStop
 
-PokeStop is a working title for a Pokemon card and sealed product collection tracking app. The project is currently in planning, with app code intentionally deferred until the product, data model, and architecture are clear.
+PokeStop is a working title for a Pokemon card and sealed product collection tracking app. The project now has a Next.js app foundation plus the original planning docs and static prototype.
 
 ## Planning Docs
 
@@ -20,9 +20,34 @@ PokeStop is a working title for a Pokemon card and sealed product collection tra
 - Stripe for subscriptions.
 - Provider-agnostic catalogue and pricing integrations.
 
+## Next.js App
+
+The real app foundation lives in [src/](src/). It currently uses typed sample data and frontend state while the backend/auth/database work is still pending.
+
+Run it locally:
+
+```sh
+npm run dev
+```
+
+Then open:
+
+```text
+http://127.0.0.1:3000/
+```
+
+Useful checks:
+
+```sh
+npm run typecheck
+npm run lint
+npm run build
+npm audit --audit-level=moderate
+```
+
 ## Static Prototype
 
-The first clickable prototype lives in [prototype/](prototype/). It is frontend-only and uses sample data in the browser.
+The first static clickable prototype lives in [prototype/](prototype/). It is retained as a reference artifact.
 
 Run it locally:
 
@@ -38,4 +63,4 @@ http://127.0.0.1:8095/
 
 ## Next Step
 
-The next logical step is reviewing the prototype flow, then deciding whether to iterate on UX polish or scaffold the real Next.js app.
+The next logical step is connecting the app foundation to persistence: Prisma, PostgreSQL schema, and collection/catalogue seed data.
