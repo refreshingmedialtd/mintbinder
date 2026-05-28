@@ -1,4 +1,4 @@
-import type { CatalogueItem, CollectionItem, SetProgress, WishlistItem } from "./types";
+import type { AppData, CatalogueItem, CollectionItem, SetProgress, WishlistItem } from "./types";
 
 export const catalogue: CatalogueItem[] = [
   {
@@ -148,3 +148,11 @@ export const setProgress: SetProgress[] = [
   },
 ];
 
+export const sampleAppData: AppData = {
+  catalogue,
+  collection: initialCollection,
+  wishlist: initialWishlist,
+  sets: setProgress,
+  source: "sample",
+  notice: "Using sample data because no database connection is active.",
+};

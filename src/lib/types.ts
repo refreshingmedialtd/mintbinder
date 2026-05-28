@@ -42,6 +42,17 @@ export type SetProgress = {
   total: number;
 };
 
+export type AppDataSource = "database" | "sample";
+
+export type AppData = {
+  catalogue: CatalogueItem[];
+  collection: CollectionItem[];
+  wishlist: WishlistItem[];
+  sets: SetProgress[];
+  source: AppDataSource;
+  notice?: string;
+};
+
 export type Screen =
   | "dashboard"
   | "collection"
@@ -52,4 +63,3 @@ export type Screen =
   | "wishlist"
   | "analytics"
   | "settings";
-

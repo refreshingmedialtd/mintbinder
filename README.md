@@ -22,7 +22,7 @@ PokeStop is a working title for a Pokemon card and sealed product collection tra
 
 ## Next.js App
 
-The real app foundation lives in [src/](src/). It currently uses typed sample data and frontend state while the backend/auth/database work is still pending.
+The real app foundation lives in [src/](src/). The UI hydrates through local API routes, writes collection and wishlist changes through Prisma-backed handlers when a database is configured, and falls back to typed sample data when no database connection is active.
 
 Run it locally:
 
@@ -60,6 +60,15 @@ npm run db:migrate
 npm run db:seed
 ```
 
+The app currently uses the seeded demo user `liam@example.com` for local collection and wishlist data.
+
+## API Routes
+
+- `GET /api/app-data`: returns catalogue, collection, wishlist, set progress, and data-source status.
+- `POST /api/collection-items`: creates a collection item and matching collection event.
+- `POST /api/wishlist-items`: creates or returns a wishlist item.
+- `DELETE /api/wishlist-items?id=...`: removes a wishlist item for the demo user.
+
 ## Static Prototype
 
 The first static clickable prototype lives in [prototype/](prototype/). It is retained as a reference artifact.
@@ -78,4 +87,4 @@ http://127.0.0.1:8095/
 
 ## Next Step
 
-The next logical step is connecting the app foundation to persistence: Prisma, PostgreSQL schema, and collection/catalogue seed data.
+The next logical step is running a real PostgreSQL database locally, applying the Prisma migration, and seeding the demo catalogue so the API routes can operate against persisted data instead of the sample fallback.

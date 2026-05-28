@@ -23,15 +23,19 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import type { Dispatch, FormEvent, ReactNode, SetStateAction } from "react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { completionPercent, formatMoney } from "@/lib/format";
-import {
-  catalogue,
-  initialCollection,
-  initialWishlist,
-  setProgress,
-} from "@/lib/sample-data";
-import type { CatalogueItem, CollectionItem, ItemType, Screen, WishlistItem } from "@/lib/types";
+import { sampleAppData } from "@/lib/sample-data";
+import type {
+  AppData,
+  AppDataSource,
+  CatalogueItem,
+  CollectionItem,
+  ItemType,
+  Screen,
+  SetProgress,
+  WishlistItem,
+} from "@/lib/types";
 
 type AppState = {
   screen: Screen;
@@ -57,15 +61,83 @@ const initialState: AppState = {
 
 export default function Home() {
   const [appState, setAppState] = useState(initialState);
-  const [collection, setCollection] = useState<CollectionItem[]>(initialCollection);
-  const [wishlist, setWishlist] = useState<WishlistItem[]>(initialWishlist);
+  const [catalogueItems, setCatalogueItems] = useState<CatalogueItem[]>(sampleAppData.catalogue);
+  const [collection, setCollection] = useState<CollectionItem[]>(sampleAppData.collection);
+  const [wishlist, setWishlist] = useState<WishlistItem[]>(sampleAppData.wishlist);
+  const [sets, setSets] = useState<SetProgress[]>(sampleAppData.sets);
+  const [dataSource, setDataSource] = useState<AppDataSource>(sampleAppData.source);
+  const [dataNotice, setDataNotice] = useState(sampleAppData.notice ?? "");
+  const [isLoadingData, setIsLoadingData] = useState(true);
   const [toast, setToast] = useState("");
   const [collectionSearch, setCollectionSearch] = useState("");
   const [addSearch, setAddSearch] = useState("");
   const [setSearch, setSetSearch] = useState("");
 
   const catalogueById = useMemo(() => {
-    return new Map(catalogue.map((item) => [item.id, item]));
+    return new Map(catalogueItems.map((item) => [item.id, item]));
+  }, [catalogueItems]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadAppData() {
+      try {
+        const response = await fetch("/api/app-data", { cache: "no-store" });
+
+        if (!response.ok) {
+          throw new Error(`App data request failed with ${response.status}`);
+        }
+
+        const data = (await response.json()) as AppData;
+
+        if (cancelled) {
+          return;
+        }
+
+        applyAppData(data);
+      } catch (error) {
+        console.warn("Using sample app data after API load failed.", error);
+        if (!cancelled) {
+          applyAppData({
+            ...sampleAppData,
+            notice: "Using sample data because the app data API could not be reached.",
+          });
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingData(false);
+        }
+      }
+    }
+
+    function applyAppData(data: AppData) {
+      setCatalogueItems(data.catalogue);
+      setCollection(data.collection);
+      setWishlist(data.wishlist);
+      setSets(data.sets);
+      setDataSource(data.source);
+      setDataNotice(data.notice ?? "");
+      setAppState((current) => ({
+        ...current,
+        selectedItemId: data.collection.some((item) => item.id === current.selectedItemId)
+          ? current.selectedItemId
+          : data.collection[0]?.id ?? current.selectedItemId,
+        selectedCatalogueId: data.catalogue.some((item) => item.id === current.selectedCatalogueId)
+          ? current.selectedCatalogueId
+          : data.catalogue.find((item) => item.type === current.addType)?.id ??
+            data.catalogue[0]?.id ??
+            current.selectedCatalogueId,
+        selectedSetId: data.sets.some((set) => set.id === current.selectedSetId)
+          ? current.selectedSetId
+          : data.sets[0]?.id ?? current.selectedSetId,
+      }));
+    }
+
+    void loadAppData();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const summary = useMemo(() => {
@@ -107,7 +179,7 @@ export default function Home() {
   }
 
   function startAdd(type: ItemType) {
-    const firstItem = catalogue.find((item) => item.type === type);
+    const firstItem = catalogueItems.find((item) => item.type === type);
     setAppState((current) => ({
       ...current,
       screen: "add",
@@ -122,18 +194,15 @@ export default function Home() {
     window.setTimeout(() => setToast(""), 2400);
   }
 
-  function addToCollection(catalogueId: string, formData?: FormData) {
+  async function addToCollection(catalogueId: string, formData?: FormData) {
     const catalogueItem = catalogueById.get(catalogueId);
     if (!catalogueItem) {
       return;
     }
 
-    const paidInput = String(formData?.get("paid") ?? "").replace(/[^0-9.]/g, "");
-    const paidValue = paidInput ? Math.round(Number(paidInput) * 100) : undefined;
-    const nextItem: CollectionItem = {
-      id: `owned-${Date.now()}`,
+    const payload = {
       catalogueId,
-      quantity: Math.max(1, Number(formData?.get("quantity") ?? 1)),
+      quantity: Number(formData?.get("quantity") ?? 1),
       condition:
         String(formData?.get("condition") ?? "") ||
         (catalogueItem.type === "sealed" ? "Sealed" : "Near mint"),
@@ -141,12 +210,60 @@ export default function Home() {
       variant:
         String(formData?.get("variant") ?? "") ||
         (catalogueItem.type === "sealed" ? "Factory sealed" : "Standard"),
+      paid: String(formData?.get("paid") ?? ""),
+      location: String(formData?.get("location") ?? "Unassigned"),
+      notes: String(formData?.get("notes") ?? ""),
+    };
+
+    if (dataSource === "database") {
+      try {
+        const response = await fetch("/api/collection-items", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Create collection item failed with ${response.status}`);
+        }
+
+        const result = (await response.json()) as { item: CollectionItem };
+        const matchingWishlist = wishlist.find((item) => item.catalogueId === catalogueId);
+
+        if (matchingWishlist) {
+          void removeWishlistItem(matchingWishlist.id, { quiet: true });
+        }
+
+        setCollection((items) => [...items, result.item]);
+        setWishlist((items) => items.filter((item) => item.catalogueId !== catalogueId));
+        setAppState((current) => ({
+          ...current,
+          screen: "item",
+          selectedItemId: result.item.id,
+        }));
+        showToast(`${catalogueItem.name} added to collection.`);
+        return;
+      } catch (error) {
+        console.warn("Falling back to local collection update.", error);
+        showToast("Database save failed, so this change is local for now.");
+      }
+    }
+
+    const paidInput = String(formData?.get("paid") ?? "").replace(/[^0-9.]/g, "");
+    const paidValue = paidInput ? Math.round(Number(paidInput) * 100) : undefined;
+    const nextItem: CollectionItem = {
+      id: `owned-${Date.now()}`,
+      catalogueId,
+      quantity: Math.max(1, payload.quantity),
+      condition: payload.condition,
+      language: payload.language,
+      variant: payload.variant,
       grade: catalogueItem.type === "sealed" ? "N/A" : "Raw",
       purchasePriceMinor:
         paidValue !== undefined && Number.isFinite(paidValue) ? paidValue : undefined,
       purchaseDate: new Date().toISOString().slice(0, 10),
-      location: String(formData?.get("location") ?? "Unassigned"),
-      notes: String(formData?.get("notes") ?? ""),
+      location: payload.location,
+      notes: payload.notes,
     };
 
     setCollection((items) => [...items, nextItem]);
@@ -155,11 +272,34 @@ export default function Home() {
     showToast(`${catalogueItem.name} added to collection.`);
   }
 
-  function addToWishlist(catalogueId: string) {
+  async function addToWishlist(catalogueId: string) {
     const catalogueItem = catalogueById.get(catalogueId);
     if (!catalogueItem || wishlist.some((item) => item.catalogueId === catalogueId)) {
       showToast("That item is already on the wishlist.");
       return;
+    }
+
+    if (dataSource === "database") {
+      try {
+        const response = await fetch("/api/wishlist-items", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ catalogueId }),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Create wishlist item failed with ${response.status}`);
+        }
+
+        const result = (await response.json()) as { item: WishlistItem };
+
+        setWishlist((items) => [...items, result.item]);
+        showToast(`${catalogueItem.name} added to wishlist.`);
+        return;
+      } catch (error) {
+        console.warn("Falling back to local wishlist update.", error);
+        showToast("Database save failed, so this wishlist change is local for now.");
+      }
     }
 
     setWishlist((items) => [
@@ -193,16 +333,50 @@ export default function Home() {
   }
 
   function resetSampleData() {
-    setCollection(initialCollection);
-    setWishlist(initialWishlist);
+    setCatalogueItems(sampleAppData.catalogue);
+    setCollection(sampleAppData.collection);
+    setWishlist(sampleAppData.wishlist);
+    setSets(sampleAppData.sets);
+    setDataSource(sampleAppData.source);
+    setDataNotice(sampleAppData.notice ?? "");
     setAppState(initialState);
     showToast("Sample data reset.");
   }
 
+  async function removeWishlistItem(id: string, options?: { quiet?: boolean }) {
+    if (dataSource === "database") {
+      try {
+        const response = await fetch(`/api/wishlist-items?id=${encodeURIComponent(id)}`, {
+          method: "DELETE",
+        });
+
+        if (!response.ok) {
+          throw new Error(`Delete wishlist item failed with ${response.status}`);
+        }
+      } catch (error) {
+        console.warn("Falling back to local wishlist deletion.", error);
+        if (!options?.quiet) {
+          showToast("Database delete failed, so this change is local for now.");
+        }
+      }
+    }
+
+    setWishlist((items) => items.filter((item) => item.id !== id));
+
+    if (!options?.quiet) {
+      showToast("Wishlist item removed.");
+    }
+  }
+
   const context = {
     appState,
+    catalogueItems,
     catalogueById,
     collection,
+    sets,
+    dataSource,
+    dataNotice,
+    isLoadingData,
     collectionSearch,
     setCollectionSearch,
     addSearch,
@@ -217,8 +391,8 @@ export default function Home() {
     addToCollection,
     addToWishlist,
     duplicateItem,
+    removeWishlistItem,
     setAppState,
-    setWishlist,
     showToast,
     resetSampleData,
   };
@@ -238,8 +412,13 @@ export default function Home() {
 
 type ScreenContext = {
   appState: AppState;
+  catalogueItems: CatalogueItem[];
   catalogueById: Map<string, CatalogueItem>;
   collection: CollectionItem[];
+  sets: SetProgress[];
+  dataSource: AppDataSource;
+  dataNotice: string;
+  isLoadingData: boolean;
   collectionSearch: string;
   setCollectionSearch: (value: string) => void;
   addSearch: string;
@@ -258,11 +437,11 @@ type ScreenContext = {
   };
   wishlist: WishlistItem[];
   wishlistTotal: number;
-  addToCollection: (catalogueId: string, formData?: FormData) => void;
-  addToWishlist: (catalogueId: string) => void;
+  addToCollection: (catalogueId: string, formData?: FormData) => Promise<void>;
+  addToWishlist: (catalogueId: string) => Promise<void>;
   duplicateItem: (itemId: string) => void;
+  removeWishlistItem: (id: string, options?: { quiet?: boolean }) => Promise<void>;
   setAppState: Dispatch<SetStateAction<AppState>>;
-  setWishlist: Dispatch<SetStateAction<WishlistItem[]>>;
   showToast: (message: string) => void;
   resetSampleData: () => void;
 };
@@ -405,6 +584,10 @@ function MobileNavButton({
 function DashboardScreen({
   collection,
   catalogueById,
+  sets,
+  dataSource,
+  dataNotice,
+  isLoadingData,
   navigate,
   startAdd,
   summary,
@@ -455,7 +638,12 @@ function DashboardScreen({
 
         <div className="side-stack">
           <section className="tool-panel">
-            <h2>Quick actions</h2>
+            <div className="panel-title-row">
+              <h2>Quick actions</h2>
+              <span className={dataSource === "database" ? "status-pill" : "tag amber"}>
+                {isLoadingData ? "Loading" : dataSource === "database" ? "Database" : "Sample"}
+              </span>
+            </div>
             <div className="actions">
               <button className="button primary" onClick={() => startAdd("card")}>
                 <Plus size={17} />
@@ -470,12 +658,13 @@ function DashboardScreen({
                 Wishlist
               </button>
             </div>
+            {dataNotice ? <p className="muted">{dataNotice}</p> : null}
           </section>
 
           <section className="section-block">
             <SectionHeader title="Set progress" action={<button className="button" onClick={() => navigate("sets")}>Open sets</button>} />
             <div className="set-list">
-              {setProgress.map((set) => (
+              {sets.map((set) => (
                 <SetProgressCard
                   key={set.id}
                   set={set}
@@ -612,6 +801,7 @@ function CollectionScreen({
 
 function AddScreen({
   appState,
+  catalogueItems,
   addSearch,
   setAddSearch,
   setAppState,
@@ -619,13 +809,13 @@ function AddScreen({
   addToWishlist,
   navigate,
 }: ScreenContext) {
-  const results = catalogue.filter((item) => item.type === appState.addType);
+  const results = catalogueItems.filter((item) => item.type === appState.addType);
   const normalizedSearch = addSearch.trim().toLowerCase();
   const filteredResults = results.filter((item) =>
     `${item.name} ${item.set} ${item.number}`.toLowerCase().includes(normalizedSearch),
   );
   const selected =
-    catalogue.find((item) => item.id === appState.selectedCatalogueId && item.type === appState.addType) ??
+    catalogueItems.find((item) => item.id === appState.selectedCatalogueId && item.type === appState.addType) ??
     results[0];
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -634,7 +824,7 @@ function AddScreen({
       return;
     }
 
-    addToCollection(selected.id, new FormData(event.currentTarget));
+    void addToCollection(selected.id, new FormData(event.currentTarget));
   }
 
   return (
@@ -658,7 +848,7 @@ function AddScreen({
                 setAppState((current) => ({
                   ...current,
                   addType: "card",
-                  selectedCatalogueId: catalogue.find((item) => item.type === "card")?.id ?? current.selectedCatalogueId,
+                  selectedCatalogueId: catalogueItems.find((item) => item.type === "card")?.id ?? current.selectedCatalogueId,
                 }))
               }
             >
@@ -670,7 +860,7 @@ function AddScreen({
                 setAppState((current) => ({
                   ...current,
                   addType: "sealed",
-                  selectedCatalogueId: catalogue.find((item) => item.type === "sealed")?.id ?? current.selectedCatalogueId,
+                  selectedCatalogueId: catalogueItems.find((item) => item.type === "sealed")?.id ?? current.selectedCatalogueId,
                 }))
               }
             >
@@ -745,7 +935,7 @@ function AddScreen({
                 <Check size={17} />
                 Save to collection
               </button>
-              <button className="button" type="button" onClick={() => selected && addToWishlist(selected.id)}>
+              <button className="button" type="button" onClick={() => selected && void addToWishlist(selected.id)}>
                 <Heart size={17} />
                 Add to wishlist
               </button>
@@ -765,6 +955,11 @@ function ItemDetailScreen({
   navigate,
 }: ScreenContext) {
   const owned = collection.find((item) => item.id === appState.selectedItemId) ?? collection[0];
+
+  if (!owned) {
+    return <EmptyState title="No collection items yet" />;
+  }
+
   const item = catalogueById.get(owned.catalogueId);
 
   if (!item) {
@@ -829,11 +1024,12 @@ function ItemDetailScreen({
 
 function SetsScreen({
   appState,
+  sets,
   setSearch,
   setSetSearch,
   setAppState,
 }: ScreenContext) {
-  const sets = setProgress.filter((set) => set.name.toLowerCase().includes(setSearch.toLowerCase()));
+  const filteredSets = sets.filter((set) => set.name.toLowerCase().includes(setSearch.toLowerCase()));
 
   return (
     <section className="page">
@@ -843,7 +1039,7 @@ function SetsScreen({
         <input value={setSearch} onChange={(event) => setSetSearch(event.target.value)} placeholder="Search sets" />
       </label>
       <div className="set-list">
-        {sets.map((set) => (
+        {filteredSets.map((set) => (
           <SetProgressCard
             key={set.id}
             set={set}
@@ -857,14 +1053,21 @@ function SetsScreen({
 
 function SetDetailScreen({
   appState,
+  catalogueItems,
   collection,
+  sets,
   wishlist,
   setAppState,
   addToWishlist,
   navigate,
 }: ScreenContext) {
-  const set = setProgress.find((item) => item.id === appState.selectedSetId) ?? setProgress[0];
-  const setCards = catalogue.filter((item) => item.type === "card" && item.set === set.name);
+  const set = sets.find((item) => item.id === appState.selectedSetId) ?? sets[0];
+
+  if (!set) {
+    return <EmptyState title="No sets found" />;
+  }
+
+  const setCards = catalogueItems.filter((item) => item.type === "card" && item.set === set.name);
   const done = completionPercent(set.owned, set.total);
 
   const visibleCards = setCards.filter((item) => {
@@ -955,7 +1158,7 @@ function SetDetailScreen({
                       Add
                     </button>
                   )}
-                  <button className="button" onClick={() => addToWishlist(item.id)}>
+                  <button className="button" onClick={() => void addToWishlist(item.id)}>
                     <Heart size={17} />
                     Want
                   </button>
@@ -973,10 +1176,9 @@ function WishlistScreen({
   catalogueById,
   wishlist,
   wishlistTotal,
-  setWishlist,
   addToCollection,
+  removeWishlistItem,
   startAdd,
-  showToast,
 }: ScreenContext) {
   return (
     <section className="page">
@@ -1016,16 +1218,13 @@ function WishlistScreen({
                   <p className="item-value">Target {formatMoney(item.targetPriceMinor ?? catalogueItem.valueMinor)}</p>
                   <p className="muted">{item.notes}</p>
                   <div className="actions">
-                    <button className="button primary" onClick={() => addToCollection(item.catalogueId)}>
+                    <button className="button primary" onClick={() => void addToCollection(item.catalogueId)}>
                       <Check size={17} />
                       Move to collection
                     </button>
                     <button
                       className="button"
-                      onClick={() => {
-                        setWishlist((items) => items.filter((entry) => entry.id !== item.id));
-                        showToast("Wishlist item removed.");
-                      }}
+                      onClick={() => void removeWishlistItem(item.id)}
                     >
                       <Trash2 size={17} />
                       Remove
@@ -1109,7 +1308,14 @@ function AnalyticsScreen({ appState, summary, wishlistTotal, setAppState }: Scre
   );
 }
 
-function SettingsScreen({ appState, resetSampleData, showToast }: ScreenContext) {
+function SettingsScreen({
+  appState,
+  dataSource,
+  dataNotice,
+  isLoadingData,
+  resetSampleData,
+  showToast,
+}: ScreenContext) {
   return (
     <section className="page">
       <PageHeader title="Settings" />
@@ -1128,6 +1334,13 @@ function SettingsScreen({ appState, resetSampleData, showToast }: ScreenContext)
           rows={[
             ["Plan", appState.plus ? "Plus" : "Free"],
             ["Billing", appState.plus ? "Active sample state" : "Not connected"],
+          ]}
+        />
+        <MetricPanel
+          title="Data source"
+          rows={[
+            ["Mode", isLoadingData ? "Loading" : dataSource === "database" ? "Prisma database" : "Sample fallback"],
+            ["Status", dataNotice || "Connected"],
           ]}
         />
         <section className="tool-panel">
@@ -1294,7 +1507,7 @@ function CataloguePreview({ item }: { item: CatalogueItem }) {
   );
 }
 
-function SetProgressCard({ set, onClick }: { set: (typeof setProgress)[number]; onClick: () => void }) {
+function SetProgressCard({ set, onClick }: { set: SetProgress; onClick: () => void }) {
   const done = completionPercent(set.owned, set.total);
 
   return (
