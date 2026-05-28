@@ -1,12 +1,19 @@
 import { NextResponse } from "next/server";
+import { auth } from "@/auth";
 import { createWishlistItem, deleteWishlistItem } from "@/lib/db/app-data";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
   try {
+    const session = await auth();
+
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+    }
+
     const body = await request.json();
-    const item = await createWishlistItem(String(body.catalogueId ?? ""));
+    const item = await createWishlistItem(session.user.id, String(body.catalogueId ?? ""));
 
     return NextResponse.json({ item });
   } catch (error) {
@@ -18,13 +25,19 @@ export async function POST(request: Request) {
 
 export async function DELETE(request: Request) {
   try {
+    const session = await auth();
+
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+    }
+
     const id = new URL(request.url).searchParams.get("id");
 
     if (!id) {
       return NextResponse.json({ error: "Wishlist item id is required." }, { status: 400 });
     }
 
-    await deleteWishlistItem(id);
+    await deleteWishlistItem(session.user.id, id);
 
     return NextResponse.json({ ok: true });
   } catch (error) {
@@ -33,4 +46,3 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: message }, { status: 400 });
   }
 }
-

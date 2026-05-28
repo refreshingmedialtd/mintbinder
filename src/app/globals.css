@@ -321,6 +321,50 @@ h3 {
   width: 100%;
 }
 
+.button.small {
+  min-height: 34px;
+  padding: 7px 10px;
+  font-size: 13px;
+}
+
+.button:disabled {
+  cursor: default;
+  opacity: 0.65;
+}
+
+.auth-shell {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 18px;
+}
+
+.auth-card {
+  display: grid;
+  width: min(100%, 420px);
+  gap: 16px;
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.auth-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 18px;
+  font-weight: 850;
+}
+
+.auth-error {
+  margin: 0;
+  color: var(--accent-dark);
+  font-size: 14px;
+  font-weight: 850;
+}
+
 .nav-button {
   display: flex;
   width: 100%;

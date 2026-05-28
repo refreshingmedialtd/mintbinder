@@ -62,6 +62,7 @@ Use this local development connection string:
 
 ```env
 DATABASE_URL="postgresql://postgres:postgres@localhost:5432/pokestop?schema=public"
+AUTH_SECRET="replace-with-a-random-32-byte-secret"
 ```
 
 Useful commands:
@@ -73,14 +74,14 @@ npm run db:migrate -- --name init
 npm run db:seed
 ```
 
-The app currently uses the seeded demo user `liam@example.com` for local collection and wishlist data.
+The local sign-in flow uses Auth.js credentials. Signing in as `liam@example.com` opens the seeded demo collection; signing in with another email creates a new collector profile with an empty collection against the same global catalogue.
 
 ## API Routes
 
-- `GET /api/app-data`: returns catalogue, collection, wishlist, set progress, and data-source status.
-- `POST /api/collection-items`: creates a collection item and matching collection event.
-- `POST /api/wishlist-items`: creates or returns a wishlist item.
-- `DELETE /api/wishlist-items?id=...`: removes a wishlist item for the demo user.
+- `GET /api/app-data`: returns catalogue, collection, wishlist, set progress, and data-source status for the signed-in user.
+- `POST /api/collection-items`: creates a collection item and matching collection event for the signed-in user.
+- `POST /api/wishlist-items`: creates or returns a wishlist item for the signed-in user.
+- `DELETE /api/wishlist-items?id=...`: removes a wishlist item for the signed-in user.
 
 ## Static Prototype
 
@@ -100,4 +101,4 @@ http://127.0.0.1:8095/
 
 ## Next Step
 
-The next logical step is adding authentication and replacing the hard-coded demo user with the signed-in user across the API routes.
+The next logical step is replacing the local credentials shortcut with a production-grade sign-in option such as magic links, OAuth, or password-backed accounts.

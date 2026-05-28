@@ -10,6 +10,8 @@ import {
   Heart,
   Layers3,
   LayoutDashboard,
+  LogIn,
+  LogOut,
   Lock,
   PackagePlus,
   Plus,
@@ -22,6 +24,7 @@ import {
   X,
 } from "lucide-react";
 import Image from "next/image";
+import { signIn, signOut, useSession } from "next-auth/react";
 import type { Dispatch, FormEvent, ReactNode, SetStateAction } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { completionPercent, formatMoney } from "@/lib/format";
@@ -48,6 +51,11 @@ type AppState = {
   plus: boolean;
 };
 
+type Viewer = {
+  name: string;
+  email: string;
+};
+
 const initialState: AppState = {
   screen: "dashboard",
   addType: "card",
@@ -60,6 +68,7 @@ const initialState: AppState = {
 };
 
 export default function Home() {
+  const { data: session, status } = useSession();
   const [appState, setAppState] = useState(initialState);
   const [catalogueItems, setCatalogueItems] = useState<CatalogueItem[]>(sampleAppData.catalogue);
   const [collection, setCollection] = useState<CollectionItem[]>(sampleAppData.collection);
@@ -69,6 +78,10 @@ export default function Home() {
   const [dataNotice, setDataNotice] = useState(sampleAppData.notice ?? "");
   const [isLoadingData, setIsLoadingData] = useState(true);
   const [toast, setToast] = useState("");
+  const [signInEmail, setSignInEmail] = useState("liam@example.com");
+  const [signInName, setSignInName] = useState("Liam");
+  const [signInError, setSignInError] = useState("");
+  const [isSigningIn, setIsSigningIn] = useState(false);
   const [collectionSearch, setCollectionSearch] = useState("");
   const [addSearch, setAddSearch] = useState("");
   const [setSearch, setSetSearch] = useState("");
@@ -77,8 +90,19 @@ export default function Home() {
     return new Map(catalogueItems.map((item) => [item.id, item]));
   }, [catalogueItems]);
 
+  const viewer: Viewer = {
+    name: session?.user?.name || "Collector",
+    email: session?.user?.email || "",
+  };
+
   useEffect(() => {
+    if (status !== "authenticated" || !session?.user?.id) {
+      setIsLoadingData(status === "loading");
+      return;
+    }
+
     let cancelled = false;
+    setIsLoadingData(true);
 
     async function loadAppData() {
       try {
@@ -138,7 +162,7 @@ export default function Home() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [session?.user?.id, status]);
 
   const summary = useMemo(() => {
     return collection.reduce(
@@ -368,8 +392,45 @@ export default function Home() {
     }
   }
 
+  async function handleSignIn(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setIsSigningIn(true);
+    setSignInError("");
+
+    const result = await signIn("credentials", {
+      email: signInEmail,
+      name: signInName,
+      redirect: false,
+    });
+
+    setIsSigningIn(false);
+
+    if (result?.error) {
+      setSignInError("Could not sign in with those details.");
+    }
+  }
+
+  if (status === "loading") {
+    return <AuthStatusScreen />;
+  }
+
+  if (status === "unauthenticated") {
+    return (
+      <SignInScreen
+        email={signInEmail}
+        error={signInError}
+        isSubmitting={isSigningIn}
+        name={signInName}
+        onEmailChange={setSignInEmail}
+        onNameChange={setSignInName}
+        onSubmit={handleSignIn}
+      />
+    );
+  }
+
   const context = {
     appState,
+    viewer,
     catalogueItems,
     catalogueById,
     collection,
@@ -399,7 +460,13 @@ export default function Home() {
 
   return (
     <div className="app-shell">
-      <Header plus={appState.plus} onNavigate={navigate} />
+      <Header
+        plus={appState.plus}
+        userEmail={viewer.email}
+        userName={viewer.name}
+        onNavigate={navigate}
+        onSignOut={() => void signOut({ redirect: false })}
+      />
       <div className="app-body">
         <Sidebar active={appState.screen} onNavigate={navigate} />
         <main className="main">{renderScreen(context)}</main>
@@ -412,6 +479,7 @@ export default function Home() {
 
 type ScreenContext = {
   appState: AppState;
+  viewer: Viewer;
   catalogueItems: CatalogueItem[];
   catalogueById: Map<string, CatalogueItem>;
   collection: CollectionItem[];
@@ -470,12 +538,91 @@ function renderScreen(context: ScreenContext) {
   }
 }
 
+function AuthStatusScreen() {
+  return (
+    <main className="auth-shell">
+      <section className="auth-card">
+        <AuthBrand />
+        <h1>Checking session</h1>
+        <p className="muted">Preparing your collection workspace.</p>
+      </section>
+    </main>
+  );
+}
+
+function SignInScreen({
+  email,
+  error,
+  isSubmitting,
+  name,
+  onEmailChange,
+  onNameChange,
+  onSubmit,
+}: {
+  email: string;
+  error: string;
+  isSubmitting: boolean;
+  name: string;
+  onEmailChange: (value: string) => void;
+  onNameChange: (value: string) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  return (
+    <main className="auth-shell">
+      <form className="auth-card" onSubmit={onSubmit}>
+        <AuthBrand />
+        <div>
+          <h1>Sign in</h1>
+          <p className="muted">Use the seeded demo account or enter a new collector profile.</p>
+        </div>
+        <Field label="Email">
+          <input
+            type="email"
+            value={email}
+            onChange={(event) => onEmailChange(event.target.value)}
+            required
+          />
+        </Field>
+        <Field label="Display name">
+          <input
+            value={name}
+            onChange={(event) => onNameChange(event.target.value)}
+            required
+          />
+        </Field>
+        {error ? <p className="auth-error">{error}</p> : null}
+        <button className="button primary full" type="submit" disabled={isSubmitting}>
+          <LogIn size={17} />
+          {isSubmitting ? "Signing in" : "Sign in"}
+        </button>
+      </form>
+    </main>
+  );
+}
+
+function AuthBrand() {
+  return (
+    <div className="auth-brand">
+      <span className="brand-mark">
+        <span className="brand-dot" />
+      </span>
+      <span>PokeStop</span>
+    </div>
+  );
+}
+
 function Header({
   plus,
+  userEmail,
+  userName,
   onNavigate,
+  onSignOut,
 }: {
   plus: boolean;
+  userEmail: string;
+  userName: string;
   onNavigate: (screen: Screen) => void;
+  onSignOut: () => void;
 }) {
   return (
     <header className="topbar">
@@ -490,9 +637,13 @@ function Header({
           {plus ? <Sparkles size={17} /> : <Lock size={17} />}
           {plus ? "Plus" : "Free"}
         </button>
-        <button className="user-pill" onClick={() => onNavigate("settings")}>
+        <button className="user-pill" onClick={() => onNavigate("settings")} title={userEmail}>
           <UserRound size={17} />
-          Liam
+          {userName}
+        </button>
+        <button className="button small" onClick={onSignOut}>
+          <LogOut size={17} />
+          Sign out
         </button>
       </div>
     </header>
@@ -1310,6 +1461,7 @@ function AnalyticsScreen({ appState, summary, wishlistTotal, setAppState }: Scre
 
 function SettingsScreen({
   appState,
+  viewer,
   dataSource,
   dataNotice,
   isLoadingData,
@@ -1323,8 +1475,8 @@ function SettingsScreen({
         <MetricPanel
           title="Profile"
           rows={[
-            ["Name", "Liam"],
-            ["Email", "liam@example.com"],
+            ["Name", viewer.name],
+            ["Email", viewer.email],
             ["Currency", "GBP"],
             ["Region", "United Kingdom"],
           ]}

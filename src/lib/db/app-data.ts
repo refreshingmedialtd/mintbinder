@@ -9,8 +9,6 @@ import { sampleAppData } from "@/lib/sample-data";
 import type { AppData, CatalogueItem, CollectionItem, ItemType, SetProgress, WishlistItem } from "@/lib/types";
 import { prisma } from "./prisma";
 
-const SAMPLE_USER_EMAIL = "liam@example.com";
-
 type PriceLike = {
   priceMinor: number;
   confidenceScore: number;
@@ -34,21 +32,12 @@ export function sampleDataFallback(notice: string): AppData {
   };
 }
 
-export async function getAppData(): Promise<AppData> {
+export async function getAppData(userId: string): Promise<AppData> {
   if (!process.env.DATABASE_URL) {
     return sampleDataFallback("Using sample data because DATABASE_URL is not configured.");
   }
 
   try {
-    const user = await prisma.user.findUnique({
-      where: { email: SAMPLE_USER_EMAIL },
-      select: { id: true },
-    });
-
-    if (!user) {
-      return sampleDataFallback("Using sample data because the seeded demo user was not found.");
-    }
-
     const [cardPrintings, sealedProducts, collectionItems, wishlistItems, cardSets] =
       await Promise.all([
         prisma.cardPrinting.findMany({
@@ -73,7 +62,7 @@ export async function getAppData(): Promise<AppData> {
         }),
         prisma.collectionItem.findMany({
           where: {
-            userId: user.id,
+            userId,
             archivedAt: null,
           },
           include: {
@@ -100,7 +89,7 @@ export async function getAppData(): Promise<AppData> {
           orderBy: { createdAt: "asc" },
         }),
         prisma.wishlistItem.findMany({
-          where: { userId: user.id },
+          where: { userId },
           include: {
             cardPrinting: {
               include: {
@@ -130,7 +119,7 @@ export async function getAppData(): Promise<AppData> {
                 id: true,
                 collectionItems: {
                   where: {
-                    userId: user.id,
+                    userId,
                     archivedAt: null,
                   },
                   select: { id: true },
@@ -164,10 +153,12 @@ export async function getAppData(): Promise<AppData> {
   }
 }
 
-export async function createCollectionItem(input: CreateCollectionItemInput): Promise<CollectionItem> {
+export async function createCollectionItem(
+  userId: string,
+  input: CreateCollectionItemInput,
+): Promise<CollectionItem> {
   assertDatabaseConfigured();
 
-  const user = await getSampleUser();
   const [cardPrinting, sealedProduct] = await Promise.all([
     prisma.cardPrinting.findUnique({
       where: { id: input.catalogueId },
@@ -190,12 +181,12 @@ export async function createCollectionItem(input: CreateCollectionItemInput): Pr
   }
 
   const itemType = cardPrinting ? PrismaItemType.CARD : PrismaItemType.SEALED_PRODUCT;
-  const storageLocationId = await resolveStorageLocationId(user.id, input.location);
+  const storageLocationId = await resolveStorageLocationId(userId, input.location);
   const paidMinor = parseMoneyToMinor(input.paid);
 
   const created = await prisma.collectionItem.create({
     data: {
-      userId: user.id,
+      userId,
       itemType,
       cardPrintingId: cardPrinting?.id,
       sealedProductId: sealedProduct?.id,
@@ -210,7 +201,7 @@ export async function createCollectionItem(input: CreateCollectionItemInput): Pr
       notes: input.notes || undefined,
       events: {
         create: {
-          userId: user.id,
+          userId,
           eventType: CollectionEventType.ADDED,
           quantity: Math.max(1, Number(input.quantity ?? 1)),
           occurredAt: new Date(),
@@ -239,10 +230,9 @@ export async function createCollectionItem(input: CreateCollectionItemInput): Pr
   return mapCollectionItem(created);
 }
 
-export async function createWishlistItem(catalogueId: string): Promise<WishlistItem> {
+export async function createWishlistItem(userId: string, catalogueId: string): Promise<WishlistItem> {
   assertDatabaseConfigured();
 
-  const user = await getSampleUser();
   const [cardPrinting, sealedProduct] = await Promise.all([
     prisma.cardPrinting.findUnique({
       where: { id: catalogueId },
@@ -262,11 +252,11 @@ export async function createWishlistItem(catalogueId: string): Promise<WishlistI
 
   const created = await prisma.wishlistItem.upsert({
     where: cardPrinting
-      ? { userId_cardPrintingId: { userId: user.id, cardPrintingId: cardPrinting.id } }
-      : { userId_sealedProductId: { userId: user.id, sealedProductId: sealedProduct!.id } },
+      ? { userId_cardPrintingId: { userId, cardPrintingId: cardPrinting.id } }
+      : { userId_sealedProductId: { userId, sealedProductId: sealedProduct!.id } },
     update: {},
     create: {
-      userId: user.id,
+      userId,
       itemType: cardPrinting ? PrismaItemType.CARD : PrismaItemType.SEALED_PRODUCT,
       cardPrintingId: cardPrinting?.id,
       sealedProductId: sealedProduct?.id,
@@ -297,30 +287,15 @@ export async function createWishlistItem(catalogueId: string): Promise<WishlistI
   return mapWishlistItem(created);
 }
 
-export async function deleteWishlistItem(id: string) {
+export async function deleteWishlistItem(userId: string, id: string) {
   assertDatabaseConfigured();
-
-  const user = await getSampleUser();
 
   await prisma.wishlistItem.deleteMany({
     where: {
       id,
-      userId: user.id,
+      userId,
     },
   });
-}
-
-async function getSampleUser() {
-  const user = await prisma.user.findUnique({
-    where: { email: SAMPLE_USER_EMAIL },
-    select: { id: true },
-  });
-
-  if (!user) {
-    throw new Error("Seeded demo user not found.");
-  }
-
-  return user;
 }
 
 async function resolveStorageLocationId(userId: string, location?: string) {
