@@ -74,7 +74,14 @@ npm run db:migrate -- --name init
 npm run db:seed
 ```
 
-The local sign-in flow uses Auth.js credentials. Signing in as `liam@example.com` opens the seeded demo collection; signing in with another email creates a new collector profile with an empty collection against the same global catalogue.
+The local sign-in flow uses Auth.js credentials with scrypt-hashed passwords. The seeded demo account is:
+
+```text
+Email: liam@example.com
+Password: PokeStop2026!
+```
+
+Creating an account from the sign-in screen creates a new collector profile with an empty collection against the same global catalogue.
 
 ## API Routes
 
@@ -101,4 +108,4 @@ http://127.0.0.1:8095/
 
 ## Next Step
 
-The next logical step is replacing the local credentials shortcut with a production-grade sign-in option such as magic links, OAuth, or password-backed accounts.
+The next logical step is account hardening: password reset, email verification, rate limiting, and optional OAuth or magic-link sign-in.

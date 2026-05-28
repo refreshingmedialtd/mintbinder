@@ -122,6 +122,7 @@ model User {
   id                String            @id @default(uuid()) @db.Uuid
   email             String            @unique
   displayName       String?           @map("display_name")
+  passwordHash      String?           @map("password_hash")
   preferredCurrency String            @default("GBP") @map("preferred_currency")
   preferredRegion   String?           @map("preferred_region")
   role              UserRole          @default(USER)

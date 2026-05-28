@@ -1,3 +1,4 @@
+import { randomBytes, scryptSync } from "node:crypto";
 import {
   CatalogueVisibility,
   CollectionEventType,
@@ -13,6 +14,7 @@ import {
 } from "@prisma/client";
 
 const prisma = new PrismaClient();
+const demoPassword = "PokeStop2026!";
 
 const ids = {
   user: "11111111-1111-4111-8111-111111111111",
@@ -51,10 +53,13 @@ const ids = {
 const observedAt = new Date("2026-05-28T12:00:00.000Z");
 
 async function main() {
+  const demoPasswordHash = hashPassword(demoPassword);
+
   await prisma.user.upsert({
     where: { email: "liam@example.com" },
     update: {
       displayName: "Liam",
+      passwordHash: demoPasswordHash,
       preferredCurrency: "GBP",
       preferredRegion: "GB",
     },
@@ -62,6 +67,7 @@ async function main() {
       id: ids.user,
       email: "liam@example.com",
       displayName: "Liam",
+      passwordHash: demoPasswordHash,
       preferredCurrency: "GBP",
       preferredRegion: "GB",
     },
@@ -506,3 +512,14 @@ main()
     process.exit(1);
   });
 
+function hashPassword(password) {
+  const salt = randomBytes(16).toString("base64url");
+  const hash = scryptSync(password, salt, 64, {
+    N: 16384,
+    r: 8,
+    p: 1,
+    maxmem: 32 * 1024 * 1024,
+  }).toString("base64url");
+
+  return `scrypt$16384$8$1$${salt}$${hash}`;
+}

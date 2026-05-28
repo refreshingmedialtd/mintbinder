@@ -56,6 +56,8 @@ type Viewer = {
   email: string;
 };
 
+type AuthMode = "sign-in" | "register";
+
 const initialState: AppState = {
   screen: "dashboard",
   addType: "card",
@@ -78,8 +80,10 @@ export default function Home() {
   const [dataNotice, setDataNotice] = useState(sampleAppData.notice ?? "");
   const [isLoadingData, setIsLoadingData] = useState(true);
   const [toast, setToast] = useState("");
+  const [authMode, setAuthMode] = useState<AuthMode>("sign-in");
   const [signInEmail, setSignInEmail] = useState("liam@example.com");
   const [signInName, setSignInName] = useState("Liam");
+  const [signInPassword, setSignInPassword] = useState("PokeStop2026!");
   const [signInError, setSignInError] = useState("");
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [collectionSearch, setCollectionSearch] = useState("");
@@ -399,6 +403,8 @@ export default function Home() {
 
     const result = await signIn("credentials", {
       email: signInEmail,
+      password: signInPassword,
+      mode: authMode,
       name: signInName,
       redirect: false,
     });
@@ -406,7 +412,11 @@ export default function Home() {
     setIsSigningIn(false);
 
     if (result?.error) {
-      setSignInError("Could not sign in with those details.");
+      setSignInError(
+        authMode === "register"
+          ? "Could not create that account."
+          : "Could not sign in with those details.",
+      );
     }
   }
 
@@ -417,12 +427,19 @@ export default function Home() {
   if (status === "unauthenticated") {
     return (
       <SignInScreen
+        authMode={authMode}
         email={signInEmail}
         error={signInError}
         isSubmitting={isSigningIn}
         name={signInName}
+        password={signInPassword}
+        onAuthModeChange={(mode) => {
+          setAuthMode(mode);
+          setSignInError("");
+        }}
         onEmailChange={setSignInEmail}
         onNameChange={setSignInName}
+        onPasswordChange={setSignInPassword}
         onSubmit={handleSignIn}
       />
     );
@@ -551,20 +568,28 @@ function AuthStatusScreen() {
 }
 
 function SignInScreen({
+  authMode,
   email,
   error,
   isSubmitting,
   name,
+  password,
+  onAuthModeChange,
   onEmailChange,
   onNameChange,
+  onPasswordChange,
   onSubmit,
 }: {
+  authMode: AuthMode;
   email: string;
   error: string;
   isSubmitting: boolean;
   name: string;
+  password: string;
+  onAuthModeChange: (value: AuthMode) => void;
   onEmailChange: (value: string) => void;
   onNameChange: (value: string) => void;
+  onPasswordChange: (value: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
   return (
@@ -572,8 +597,24 @@ function SignInScreen({
       <form className="auth-card" onSubmit={onSubmit}>
         <AuthBrand />
         <div>
-          <h1>Sign in</h1>
-          <p className="muted">Use the seeded demo account or enter a new collector profile.</p>
+          <h1>{authMode === "register" ? "Create account" : "Sign in"}</h1>
+          <p className="muted">Your collection, wishlist, and set progress stay attached to your account.</p>
+        </div>
+        <div className="segmented" aria-label="Authentication mode">
+          <button
+            className={authMode === "sign-in" ? "active" : ""}
+            type="button"
+            onClick={() => onAuthModeChange("sign-in")}
+          >
+            Sign in
+          </button>
+          <button
+            className={authMode === "register" ? "active" : ""}
+            type="button"
+            onClick={() => onAuthModeChange("register")}
+          >
+            Create account
+          </button>
         </div>
         <Field label="Email">
           <input
@@ -583,17 +624,34 @@ function SignInScreen({
             required
           />
         </Field>
-        <Field label="Display name">
+        <Field label="Password">
           <input
-            value={name}
-            onChange={(event) => onNameChange(event.target.value)}
+            type="password"
+            value={password}
+            onChange={(event) => onPasswordChange(event.target.value)}
+            minLength={8}
             required
           />
         </Field>
+        {authMode === "register" ? (
+          <Field label="Display name">
+            <input
+              value={name}
+              onChange={(event) => onNameChange(event.target.value)}
+              required
+            />
+          </Field>
+        ) : null}
         {error ? <p className="auth-error">{error}</p> : null}
         <button className="button primary full" type="submit" disabled={isSubmitting}>
-          <LogIn size={17} />
-          {isSubmitting ? "Signing in" : "Sign in"}
+          {authMode === "register" ? <UserRound size={17} /> : <LogIn size={17} />}
+          {isSubmitting
+            ? authMode === "register"
+              ? "Creating account"
+              : "Signing in"
+            : authMode === "register"
+              ? "Create account"
+              : "Sign in"}
         </button>
       </form>
     </main>
