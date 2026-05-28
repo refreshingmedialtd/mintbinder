@@ -18,11 +18,13 @@ The recommended initial stack is:
 - Frontend: Next.js with TypeScript.
 - Backend: Next.js API routes or a dedicated TypeScript API service.
 - Database: PostgreSQL.
-- ORM: Prisma or Drizzle.
+- ORM: Prisma.
 - Auth: managed auth or app-native email/password plus OAuth later.
 - Payments: Stripe.
 - Storage: S3-compatible object storage for future owned-copy photos and exports.
 - Background jobs: scheduled workers for catalogue sync and price snapshots.
+
+The fuller technical plan lives in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 The architecture should keep these areas separate:
 
@@ -301,6 +303,8 @@ Acceptance criteria:
 
 ## Data Model Draft
 
+This section is the MVP summary. The fuller implementation model lives in [DATA_MODEL.md](DATA_MODEL.md).
+
 ### User
 
 - id.
@@ -455,8 +459,8 @@ MVP can store confidence even if the first implementation uses a simple score.
 
 - Project brief.
 - MVP spec.
-- Data model confirmed.
-- Stack confirmed.
+- Data model documented.
+- Architecture documented.
 
 ### Milestone 2: UX Prototype
 
@@ -503,7 +507,6 @@ MVP can store confidence even if the first implementation uses a simple score.
 ## Open Decisions
 
 - Final product name.
-- Exact stack choice.
 - Auth provider.
 - Database hosting.
 - Pricing data providers.
@@ -520,4 +523,3 @@ MVP can store confidence even if the first implementation uses a simple score.
 - Keep pricing providers swappable.
 - Prefer useful estimates over false precision.
 - Preserve hobby joy while making analytics feel powerful.
-

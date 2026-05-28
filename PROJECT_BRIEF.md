@@ -240,9 +240,9 @@ Scanning, marketplace selling, social features, and native apps are attractive b
 
 - Project brief.
 - MVP spec.
-- Data model draft.
+- Data model document.
+- Architecture document.
 - Wireframes.
-- Technical architecture decision.
 
 ### Phase 1: Prototype
 
@@ -281,4 +281,3 @@ Scanning, marketplace selling, social features, and native apps are attractive b
 - Pricing source evaluation.
 - Feedback loop.
 - Mobile PWA polish.
-
