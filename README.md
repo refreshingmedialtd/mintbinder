@@ -20,6 +20,22 @@ PokeStop is a working title for a Pokemon card and sealed product collection tra
 - Stripe for subscriptions.
 - Provider-agnostic catalogue and pricing integrations.
 
+## Static Prototype
+
+The first clickable prototype lives in [prototype/](prototype/). It is frontend-only and uses sample data in the browser.
+
+Run it locally:
+
+```sh
+node prototype/server.mjs --port 8095
+```
+
+Then open:
+
+```text
+http://127.0.0.1:8095/
+```
+
 ## Next Step
 
-The next logical step is a static clickable prototype for dashboard, collection, add item, set progress, wishlist, and the Plus analytics gate.
+The next logical step is reviewing the prototype flow, then deciding whether to iterate on UX polish or scaffold the real Next.js app.
