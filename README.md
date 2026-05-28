@@ -45,6 +45,21 @@ npm run build
 npm audit --audit-level=moderate
 ```
 
+## Database
+
+The Prisma schema lives in [prisma/schema.prisma](prisma/schema.prisma), with seed data in [prisma/seed.mjs](prisma/seed.mjs).
+
+Before running database commands, create a local `.env` from [.env.example](.env.example) and set `DATABASE_URL` to your PostgreSQL database.
+
+Useful commands:
+
+```sh
+npm run db:validate
+npm run db:generate
+npm run db:migrate
+npm run db:seed
+```
+
 ## Static Prototype
 
 The first static clickable prototype lives in [prototype/](prototype/). It is retained as a reference artifact.

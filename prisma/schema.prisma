@@ -1,0 +1,362 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  USER  @map("user")
+  ADMIN @map("admin")
+
+  @@map("user_role")
+}
+
+enum SubscriptionPlan {
+  FREE         @map("free")
+  PLUS_MONTHLY @map("plus_monthly")
+  PLUS_YEARLY  @map("plus_yearly")
+
+  @@map("subscription_plan")
+}
+
+enum SubscriptionStatus {
+  ACTIVE             @map("active")
+  TRIALING           @map("trialing")
+  PAST_DUE           @map("past_due")
+  CANCELED           @map("canceled")
+  INCOMPLETE         @map("incomplete")
+  INCOMPLETE_EXPIRED @map("incomplete_expired")
+  UNPAID             @map("unpaid")
+
+  @@map("subscription_status")
+}
+
+enum ItemType {
+  CARD           @map("card")
+  SEALED_PRODUCT @map("sealed_product")
+
+  @@map("item_type")
+}
+
+enum ItemCondition {
+  UNKNOWN      @map("unknown")
+  POOR         @map("poor")
+  PLAYED       @map("played")
+  LIGHT_PLAYED @map("light_played")
+  EXCELLENT    @map("excellent")
+  NEAR_MINT    @map("near_mint")
+  MINT         @map("mint")
+  SEALED       @map("sealed")
+
+  @@map("item_condition")
+}
+
+enum GradingCompany {
+  PSA   @map("psa")
+  BGS   @map("bgs")
+  CGC   @map("cgc")
+  ACE   @map("ace")
+  SGC   @map("sgc")
+  OTHER @map("other")
+
+  @@map("grading_company")
+}
+
+enum SealedProductType {
+  BOOSTER_BOX       @map("booster_box")
+  BOOSTER_PACK      @map("booster_pack")
+  ELITE_TRAINER_BOX @map("elite_trainer_box")
+  COLLECTION_BOX    @map("collection_box")
+  TIN               @map("tin")
+  BLISTER           @map("blister")
+  DECK              @map("deck")
+  CASE              @map("case")
+  OTHER             @map("other")
+
+  @@map("sealed_product_type")
+}
+
+enum StorageLocationType {
+  BINDER  @map("binder")
+  BOX     @map("box")
+  DISPLAY @map("display")
+  SAFE    @map("safe")
+  OTHER   @map("other")
+
+  @@map("storage_location_type")
+}
+
+enum WishlistPriority {
+  LOW    @map("low")
+  MEDIUM @map("medium")
+  HIGH   @map("high")
+  GRAIL  @map("grail")
+
+  @@map("wishlist_priority")
+}
+
+enum CollectionEventType {
+  ADDED    @map("added")
+  EDITED   @map("edited")
+  SOLD     @map("sold")
+  REMOVED  @map("removed")
+  GRADED   @map("graded")
+  MOVED    @map("moved")
+  IMPORTED @map("imported")
+
+  @@map("collection_event_type")
+}
+
+enum CatalogueVisibility {
+  GLOBAL         @map("global")
+  PRIVATE        @map("private")
+  PENDING_REVIEW @map("pending_review")
+
+  @@map("catalogue_visibility")
+}
+
+model User {
+  id                String            @id @default(uuid()) @db.Uuid
+  email             String            @unique
+  displayName       String?           @map("display_name")
+  preferredCurrency String            @default("GBP") @map("preferred_currency")
+  preferredRegion   String?           @map("preferred_region")
+  role              UserRole          @default(USER)
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
+  subscriptions     Subscription[]
+  createdSealed     SealedProduct[]   @relation("CreatedSealedProducts")
+  storageLocations  StorageLocation[]
+  collectionItems   CollectionItem[]
+  wishlistItems     WishlistItem[]
+  collectionEvents  CollectionEvent[]
+
+  @@map("users")
+}
+
+model Subscription {
+  id                     String             @id @default(uuid()) @db.Uuid
+  userId                 String             @map("user_id") @db.Uuid
+  provider               String
+  providerCustomerId     String?            @unique @map("provider_customer_id")
+  providerSubscriptionId String?            @unique @map("provider_subscription_id")
+  plan                   SubscriptionPlan   @default(FREE)
+  status                 SubscriptionStatus @default(ACTIVE)
+  currentPeriodEnd       DateTime?          @map("current_period_end")
+  cancelAtPeriodEnd      Boolean            @default(false) @map("cancel_at_period_end")
+  createdAt              DateTime           @default(now()) @map("created_at")
+  updatedAt              DateTime           @updatedAt @map("updated_at")
+  user                   User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("subscriptions")
+}
+
+model CardSet {
+  id             String          @id @default(uuid()) @db.Uuid
+  providerIds    Json            @default("{}") @map("provider_ids")
+  name           String
+  series         String?
+  releaseDate    DateTime?       @map("release_date") @db.Date
+  printedTotal   Int?            @map("printed_total")
+  total          Int?
+  symbolImageUrl String?         @map("symbol_image_url")
+  logoImageUrl   String?         @map("logo_image_url")
+  metadata       Json            @default("{}")
+  createdAt      DateTime        @default(now()) @map("created_at")
+  updatedAt      DateTime        @updatedAt @map("updated_at")
+  cardPrintings  CardPrinting[]
+  sealedProducts SealedProduct[]
+
+  @@index([name])
+  @@index([series])
+  @@map("card_sets")
+}
+
+model CardPrinting {
+  id              String           @id @default(uuid()) @db.Uuid
+  cardSetId       String           @map("card_set_id") @db.Uuid
+  providerIds     Json             @default("{}") @map("provider_ids")
+  name            String
+  number          String
+  rarity          String?
+  supertype       String?
+  subtypes        String[]
+  artist          String?
+  imageSmallUrl   String?          @map("image_small_url")
+  imageLargeUrl   String?          @map("image_large_url")
+  legalities      Json             @default("{}")
+  variantMetadata Json             @default("{}") @map("variant_metadata")
+  searchText      String           @map("search_text")
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+  cardSet         CardSet          @relation(fields: [cardSetId], references: [id], onDelete: Cascade)
+  collectionItems CollectionItem[]
+  wishlistItems   WishlistItem[]
+  priceSnapshots  PriceSnapshot[]
+
+  @@index([cardSetId])
+  @@index([name])
+  @@index([cardSetId, number])
+  @@index([searchText])
+  @@map("card_printings")
+}
+
+model SealedProduct {
+  id               String              @id @default(uuid()) @db.Uuid
+  createdByUserId  String?             @map("created_by_user_id") @db.Uuid
+  relatedCardSetId String?             @map("related_card_set_id") @db.Uuid
+  providerIds      Json                @default("{}") @map("provider_ids")
+  name             String
+  productType      SealedProductType   @map("product_type")
+  releaseDate      DateTime?           @map("release_date") @db.Date
+  imageUrl         String?             @map("image_url")
+  notes            String?
+  visibility       CatalogueVisibility @default(GLOBAL)
+  metadata         Json                @default("{}")
+  createdAt        DateTime            @default(now()) @map("created_at")
+  updatedAt        DateTime            @updatedAt @map("updated_at")
+  createdByUser    User?               @relation("CreatedSealedProducts", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  relatedCardSet   CardSet?            @relation(fields: [relatedCardSetId], references: [id], onDelete: SetNull)
+  collectionItems  CollectionItem[]
+  wishlistItems    WishlistItem[]
+  priceSnapshots   PriceSnapshot[]
+
+  @@index([name])
+  @@index([productType])
+  @@index([relatedCardSetId])
+  @@index([createdByUserId])
+  @@map("sealed_products")
+}
+
+model StorageLocation {
+  id              String              @id @default(uuid()) @db.Uuid
+  userId          String              @map("user_id") @db.Uuid
+  name            String
+  type            StorageLocationType
+  notes           String?
+  createdAt       DateTime            @default(now()) @map("created_at")
+  updatedAt       DateTime            @updatedAt @map("updated_at")
+  user            User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  collectionItems CollectionItem[]
+
+  @@unique([userId, name])
+  @@index([userId])
+  @@map("storage_locations")
+}
+
+model CollectionItem {
+  id                           String            @id @default(uuid()) @db.Uuid
+  userId                       String            @map("user_id") @db.Uuid
+  itemType                     ItemType          @map("item_type")
+  cardPrintingId               String?           @map("card_printing_id") @db.Uuid
+  sealedProductId              String?           @map("sealed_product_id") @db.Uuid
+  quantity                     Int
+  condition                    ItemCondition     @default(UNKNOWN)
+  language                     String            @default("en")
+  variantLabel                 String?           @map("variant_label")
+  gradedCompany                GradingCompany?   @map("graded_company")
+  gradedScore                  Decimal?          @map("graded_score") @db.Decimal(4, 1)
+  purchasePriceMinor           Int?              @map("purchase_price_minor")
+  purchaseCurrency             String?           @map("purchase_currency")
+  purchaseDate                 DateTime?         @map("purchase_date") @db.Date
+  currentValueOverrideMinor    Int?              @map("current_value_override_minor")
+  currentValueOverrideCurrency String?           @map("current_value_override_currency")
+  storageLocationId            String?           @map("storage_location_id") @db.Uuid
+  notes                        String?
+  acquiredAt                   DateTime          @default(now()) @map("acquired_at")
+  soldAt                       DateTime?         @map("sold_at")
+  archivedAt                   DateTime?         @map("archived_at")
+  createdAt                    DateTime          @default(now()) @map("created_at")
+  updatedAt                    DateTime          @updatedAt @map("updated_at")
+  user                         User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cardPrinting                 CardPrinting?     @relation(fields: [cardPrintingId], references: [id], onDelete: SetNull)
+  sealedProduct                SealedProduct?    @relation(fields: [sealedProductId], references: [id], onDelete: SetNull)
+  storageLocation              StorageLocation?  @relation(fields: [storageLocationId], references: [id], onDelete: SetNull)
+  events                       CollectionEvent[]
+
+  @@index([userId])
+  @@index([userId, itemType])
+  @@index([userId, cardPrintingId])
+  @@index([userId, sealedProductId])
+  @@index([userId, storageLocationId])
+  @@index([userId, archivedAt])
+  @@map("collection_items")
+}
+
+model WishlistItem {
+  id               String           @id @default(uuid()) @db.Uuid
+  userId           String           @map("user_id") @db.Uuid
+  itemType         ItemType         @map("item_type")
+  cardPrintingId   String?          @map("card_printing_id") @db.Uuid
+  sealedProductId  String?          @map("sealed_product_id") @db.Uuid
+  targetPriceMinor Int?             @map("target_price_minor")
+  targetCurrency   String?          @map("target_currency")
+  priority         WishlistPriority @default(MEDIUM)
+  notes            String?
+  createdAt        DateTime         @default(now()) @map("created_at")
+  updatedAt        DateTime         @updatedAt @map("updated_at")
+  user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cardPrinting     CardPrinting?    @relation(fields: [cardPrintingId], references: [id], onDelete: SetNull)
+  sealedProduct    SealedProduct?   @relation(fields: [sealedProductId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, cardPrintingId])
+  @@unique([userId, sealedProductId])
+  @@index([userId])
+  @@index([userId, priority])
+  @@map("wishlist_items")
+}
+
+model PriceSnapshot {
+  id              String          @id @default(uuid()) @db.Uuid
+  itemType        ItemType        @map("item_type")
+  cardPrintingId  String?         @map("card_printing_id") @db.Uuid
+  sealedProductId String?         @map("sealed_product_id") @db.Uuid
+  source          String
+  sourceRef       String?         @map("source_ref")
+  condition       ItemCondition?
+  language        String?
+  variantLabel    String?         @map("variant_label")
+  gradedCompany   GradingCompany? @map("graded_company")
+  gradedScore     Decimal?        @map("graded_score") @db.Decimal(4, 1)
+  priceMinor      Int             @map("price_minor")
+  currency        String
+  confidenceScore Int             @map("confidence_score")
+  sampleSize      Int?            @map("sample_size")
+  observedAt      DateTime        @map("observed_at")
+  createdAt       DateTime        @default(now()) @map("created_at")
+  metadata        Json            @default("{}")
+  cardPrinting    CardPrinting?   @relation(fields: [cardPrintingId], references: [id], onDelete: Cascade)
+  sealedProduct   SealedProduct?  @relation(fields: [sealedProductId], references: [id], onDelete: Cascade)
+
+  @@index([itemType, cardPrintingId, observedAt])
+  @@index([itemType, sealedProductId, observedAt])
+  @@index([source, observedAt])
+  @@index([currency, observedAt])
+  @@map("price_snapshots")
+}
+
+model CollectionEvent {
+  id               String              @id @default(uuid()) @db.Uuid
+  userId           String              @map("user_id") @db.Uuid
+  collectionItemId String              @map("collection_item_id") @db.Uuid
+  eventType        CollectionEventType @map("event_type")
+  quantity         Int?
+  amountMinor      Int?                @map("amount_minor")
+  currency         String?
+  occurredAt       DateTime            @map("occurred_at")
+  notes            String?
+  metadata         Json                @default("{}")
+  createdAt        DateTime            @default(now()) @map("created_at")
+  user             User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  collectionItem   CollectionItem      @relation(fields: [collectionItemId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([collectionItemId])
+  @@index([userId, occurredAt])
+  @@index([userId, eventType])
+  @@map("collection_events")
+}
