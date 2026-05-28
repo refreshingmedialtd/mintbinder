@@ -47,16 +47,29 @@ npm audit --audit-level=moderate
 
 ## Database
 
-The Prisma schema lives in [prisma/schema.prisma](prisma/schema.prisma), with seed data in [prisma/seed.mjs](prisma/seed.mjs).
+The Prisma schema lives in [prisma/schema.prisma](prisma/schema.prisma), migrations live in [prisma/migrations/](prisma/migrations/), and seed data lives in [prisma/seed.mjs](prisma/seed.mjs).
 
 Before running database commands, create a local `.env` from [.env.example](.env.example) and set `DATABASE_URL` to your PostgreSQL database.
+
+For a simple local Windows setup, install PostgreSQL 17 and create the `pokestop` database:
+
+```sh
+winget install --id PostgreSQL.PostgreSQL.17 --source winget
+createdb -h 127.0.0.1 -p 5432 -U postgres pokestop
+```
+
+Use this local development connection string:
+
+```env
+DATABASE_URL="postgresql://postgres:postgres@localhost:5432/pokestop?schema=public"
+```
 
 Useful commands:
 
 ```sh
 npm run db:validate
 npm run db:generate
-npm run db:migrate
+npm run db:migrate -- --name init
 npm run db:seed
 ```
 
@@ -87,4 +100,4 @@ http://127.0.0.1:8095/
 
 ## Next Step
 
-The next logical step is running a real PostgreSQL database locally, applying the Prisma migration, and seeding the demo catalogue so the API routes can operate against persisted data instead of the sample fallback.
+The next logical step is adding authentication and replacing the hard-coded demo user with the signed-in user across the API routes.
