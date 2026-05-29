@@ -591,6 +591,58 @@ export default function Home() {
     }
   }
 
+  async function updateWishlistItem(id: string, formData: FormData) {
+    const source = wishlist.find((item) => item.id === id);
+
+    if (!source) {
+      return false;
+    }
+
+    const payload = {
+      id,
+      priority: String(formData.get("priority") ?? source.priority),
+      targetPrice: String(formData.get("targetPrice") ?? ""),
+      notes: String(formData.get("notes") ?? ""),
+    };
+
+    if (dataSource === "database") {
+      try {
+        const response = await fetch("/api/wishlist-items", {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Update wishlist item failed with ${response.status}`);
+        }
+
+        const result = (await response.json()) as { item: WishlistItem };
+        setWishlist((items) => items.map((item) => (item.id === id ? result.item : item)));
+        showToast("Wishlist target updated.");
+        return true;
+      } catch (error) {
+        console.warn("Falling back to local wishlist update.", error);
+        showToast("Database save failed, so this wishlist target is local for now.");
+      }
+    }
+
+    setWishlist((items) =>
+      items.map((item) =>
+        item.id === id
+          ? {
+              ...item,
+              priority: normalizePriority(payload.priority),
+              targetPriceMinor: moneyInputToMinor(payload.targetPrice),
+              notes: payload.notes || undefined,
+            }
+          : item,
+      ),
+    );
+    showToast("Wishlist target updated.");
+    return true;
+  }
+
   async function createStorageLocation(formData: FormData) {
     const payload = {
       name: String(formData.get("name") ?? "").trim(),
@@ -851,6 +903,7 @@ export default function Home() {
     addToWishlist,
     duplicateItem,
     removeWishlistItem,
+    updateWishlistItem,
     createStorageLocation,
     deleteStorageLocation,
     exportCollectionCsv,
@@ -917,6 +970,7 @@ type ScreenContext = {
   addToWishlist: (catalogueId: string) => Promise<void>;
   duplicateItem: (itemId: string) => Promise<void>;
   removeWishlistItem: (id: string, options?: { quiet?: boolean }) => Promise<void>;
+  updateWishlistItem: (id: string, formData: FormData) => Promise<boolean>;
   createStorageLocation: (formData: FormData) => Promise<boolean>;
   deleteStorageLocation: (id: string) => Promise<boolean>;
   exportCollectionCsv: () => void;
@@ -1919,7 +1973,22 @@ function WishlistScreen({
   addToCollection,
   removeWishlistItem,
   startAdd,
+  updateWishlistItem,
 }: ScreenContext) {
+  const [editingId, setEditingId] = useState("");
+  const [savingId, setSavingId] = useState("");
+
+  async function handleUpdate(event: FormEvent<HTMLFormElement>, itemId: string) {
+    event.preventDefault();
+    setSavingId(itemId);
+    const saved = await updateWishlistItem(itemId, new FormData(event.currentTarget));
+    setSavingId("");
+
+    if (saved) {
+      setEditingId("");
+    }
+  }
+
   return (
     <section className="page">
       <PageHeader
@@ -1943,6 +2012,10 @@ function WishlistScreen({
             if (!catalogueItem) {
               return null;
             }
+            const isEditing = editingId === item.id;
+            const currentValue = catalogueItem.valueMinor;
+            const targetValue = item.targetPriceMinor ?? currentValue;
+            const delta = targetValue - currentValue;
 
             return (
               <article className="item-card" key={item.id}>
@@ -1955,21 +2028,66 @@ function WishlistScreen({
                     </div>
                     <span className="priority-pill">{item.priority}</span>
                   </div>
-                  <p className="item-value">Target {formatMoney(item.targetPriceMinor ?? catalogueItem.valueMinor)}</p>
-                  <p className="muted">{item.notes}</p>
-                  <div className="actions">
-                    <button className="button primary" onClick={() => void addToCollection(item.catalogueId)}>
-                      <Check size={17} />
-                      Move to collection
-                    </button>
-                    <button
-                      className="button"
-                      onClick={() => void removeWishlistItem(item.id)}
-                    >
-                      <Trash2 size={17} />
-                      Remove
-                    </button>
-                  </div>
+                  {isEditing ? (
+                    <form className="form-stack" onSubmit={(event) => void handleUpdate(event, item.id)}>
+                      <div className="field-grid">
+                        <Field label="Priority">
+                          <select name="priority" defaultValue={item.priority}>
+                            <option>Low</option>
+                            <option>Medium</option>
+                            <option>High</option>
+                            <option>Grail</option>
+                          </select>
+                        </Field>
+                        <Field label="Target price">
+                          <input
+                            name="targetPrice"
+                            inputMode="decimal"
+                            defaultValue={moneyInputValue(item.targetPriceMinor)}
+                            placeholder="GBP 0.00"
+                          />
+                        </Field>
+                      </div>
+                      <Field label="Notes">
+                        <textarea name="notes" defaultValue={item.notes ?? ""} placeholder="Optional" />
+                      </Field>
+                      <div className="actions">
+                        <button className="button primary" type="submit" disabled={savingId === item.id}>
+                          <Check size={17} />
+                          {savingId === item.id ? "Saving" : "Save target"}
+                        </button>
+                        <button className="button" type="button" onClick={() => setEditingId("")}>
+                          <X size={17} />
+                          Cancel
+                        </button>
+                      </div>
+                    </form>
+                  ) : (
+                    <>
+                      <p className="item-value">Target {formatMoney(targetValue)}</p>
+                      <p className={delta >= 0 ? "positive item-note" : "muted item-note"}>
+                        {wishlistDeltaText(delta)}
+                      </p>
+                      <p className="muted">{item.notes}</p>
+                      <div className="actions">
+                        <button className="button primary" onClick={() => void addToCollection(item.catalogueId)}>
+                          <Check size={17} />
+                          Move to collection
+                        </button>
+                        <button className="button" onClick={() => setEditingId(item.id)}>
+                          <Settings size={17} />
+                          Edit target
+                        </button>
+                        <button
+                          className="button"
+                          onClick={() => void removeWishlistItem(item.id)}
+                        >
+                          <Trash2 size={17} />
+                          Remove
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </div>
               </article>
             );
@@ -2813,6 +2931,23 @@ function moneyInputToMinor(value?: string) {
   }
 
   return Math.round(amount * 100);
+}
+
+function normalizePriority(value: string): WishlistItem["priority"] {
+  const priorities: WishlistItem["priority"][] = ["Low", "Medium", "High", "Grail"];
+  const match = priorities.find((priority) => priority.toLowerCase() === value.trim().toLowerCase());
+
+  return match ?? "Medium";
+}
+
+function wishlistDeltaText(deltaMinor: number) {
+  if (deltaMinor === 0) {
+    return "At target";
+  }
+
+  return deltaMinor > 0
+    ? `${formatMoney(deltaMinor)} below target`
+    : `${formatMoney(Math.abs(deltaMinor))} above target`;
 }
 
 function downloadCsv(filename: string, csv: string) {

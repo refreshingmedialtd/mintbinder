@@ -44,6 +44,12 @@ export type CreateStorageLocationInput = {
 
 export type UpdateStorageLocationInput = CreateStorageLocationInput;
 
+export type UpdateWishlistItemInput = {
+  priority?: string;
+  targetPrice?: string;
+  notes?: string;
+};
+
 export function sampleDataFallback(notice: string): AppData {
   return {
     ...sampleAppData,
@@ -483,6 +489,39 @@ export async function deleteWishlistItem(userId: string, id: string) {
   });
 }
 
+export async function updateWishlistItem(
+  userId: string,
+  id: string,
+  input: UpdateWishlistItemInput,
+): Promise<WishlistItem> {
+  assertDatabaseConfigured();
+
+  const existing = await prisma.wishlistItem.findFirst({
+    where: {
+      id,
+      userId,
+    },
+    select: { id: true },
+  });
+
+  if (!existing) {
+    throw new Error("Wishlist item not found.");
+  }
+
+  const targetPriceMinor = parseMoneyToMinor(input.targetPrice);
+  const updated = await prisma.wishlistItem.update({
+    where: { id: existing.id },
+    data: {
+      priority: input.priority === undefined ? undefined : priorityToEnum(input.priority),
+      targetPriceMinor: input.targetPrice === undefined ? undefined : targetPriceMinor ?? null,
+      targetCurrency: input.targetPrice === undefined ? undefined : targetPriceMinor === undefined ? null : "GBP",
+      notes: input.notes === undefined ? undefined : normalizeOptionalText(input.notes) ?? null,
+    },
+  });
+
+  return mapWishlistItem(updated);
+}
+
 async function resolveStorageLocationId(userId: string, location?: string) {
   if (!location || location === "Unassigned") {
     return undefined;
@@ -807,6 +846,18 @@ function conditionToEnum(value: string | undefined, itemType: PrismaItemType) {
   };
 
   return map[normalized] ?? ItemCondition.UNKNOWN;
+}
+
+function priorityToEnum(value?: string) {
+  const normalized = value?.trim().toLowerCase() ?? "";
+  const map: Record<string, WishlistPriority> = {
+    low: WishlistPriority.LOW,
+    medium: WishlistPriority.MEDIUM,
+    high: WishlistPriority.HIGH,
+    grail: WishlistPriority.GRAIL,
+  };
+
+  return map[normalized] ?? WishlistPriority.MEDIUM;
 }
 
 function defaultVariant(itemType: PrismaItemType) {
