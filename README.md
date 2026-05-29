@@ -41,6 +41,7 @@ Useful checks:
 ```sh
 npm run typecheck
 npm run lint
+npm run test:billing
 npm run build
 npm audit --audit-level=moderate
 ```
@@ -67,6 +68,13 @@ NEXT_PUBLIC_APP_URL="http://127.0.0.1:3000"
 STRIPE_SECRET_KEY=""
 STRIPE_PLUS_MONTHLY_PRICE_ID=""
 STRIPE_PLUS_YEARLY_PRICE_ID=""
+STRIPE_WEBHOOK_SECRET=""
+JOB_SECRET=""
+RESEND_API_KEY=""
+EMAIL_FROM="PokeStop <alerts@example.com>"
+POKEMON_TCG_API_KEY=""
+POKEMON_TCG_QUERY=""
+POKEMON_TCG_USD_TO_GBP_RATE=""
 ```
 
 Useful commands:
@@ -100,6 +108,20 @@ Creating an account from the sign-in screen creates a new collector profile with
 - `GET /api/reports/insurance`: exports a Plus-gated insurance-style HTML report.
 - `POST /api/billing/checkout`: creates a Stripe subscription Checkout session when Stripe env vars are configured.
 - `POST /api/billing/portal`: creates a Stripe billing portal session for users with a Stripe customer.
+- `POST /api/billing/webhook`: verifies Stripe webhook signatures and syncs Plus subscription status.
+- `POST /api/jobs/price-alerts`: sends or dry-runs Plus price alert email digests behind `JOB_SECRET`.
+- `POST /api/jobs/catalogue-refresh`: imports card catalogue pages from the Pokemon TCG API behind `JOB_SECRET`.
+- `POST /api/jobs/pricing-refresh`: imports Pokemon TCG API prices as GBP snapshots behind `JOB_SECRET`.
+
+## Jobs and Integrations
+
+Stripe webhook fulfillment expects events for `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, and `customer.subscription.deleted`. The webhook URL is:
+
+```text
+https://your-domain.example/api/billing/webhook
+```
+
+Job routes accept either `Authorization: Bearer <JOB_SECRET>` or `x-job-secret: <JOB_SECRET>`. Pricing refreshes convert Pokemon TCG API USD prices into GBP snapshots with `POKEMON_TCG_USD_TO_GBP_RATE`; keep that value current before running the job.
 
 ## Static Prototype
 
@@ -119,4 +141,4 @@ http://127.0.0.1:8095/
 
 ## Next Step
 
-The next logical step is storage and history: surface collection event history, add storage location management, and use the event stream for early analytics.
+The next logical step is to add user-controlled notification preferences and a real admin console for monitoring catalogue/pricing job runs.

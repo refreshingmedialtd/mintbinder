@@ -7,6 +7,7 @@ import {
   Bell,
   Boxes,
   Check,
+  CreditCard,
   Download,
   GalleryVerticalEnd,
   Grid2X2,
@@ -18,11 +19,14 @@ import {
   LogIn,
   LogOut,
   MapPin,
+  Mail,
   Lock,
   PackagePlus,
   Plus,
+  RefreshCw,
   Search,
   Settings,
+  ShieldCheck,
   SlidersHorizontal,
   Sparkles,
   Trash2,
@@ -142,6 +146,11 @@ export default function Home() {
   const [addSearch, setAddSearch] = useState("");
   const [setSearch, setSetSearch] = useState("");
 
+  const showToast = useCallback((message: string) => {
+    setToast(message);
+    window.setTimeout(() => setToast(""), 2400);
+  }, []);
+
   const catalogueById = useMemo(() => {
     return new Map(catalogueItems.map((item) => [item.id, item]));
   }, [catalogueItems]);
@@ -162,6 +171,7 @@ export default function Home() {
     setDataNotice(data.notice ?? "");
     setAppState((current) => ({
       ...current,
+      plus: data.subscription.plan === "plus",
       selectedItemId: data.collection.some((item) => item.id === current.selectedItemId)
         ? current.selectedItemId
         : data.collection[0]?.id ?? current.selectedItemId,
@@ -229,6 +239,30 @@ export default function Home() {
     };
   }, [refreshAppData, session?.user?.id, status]);
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const billing = params.get("billing");
+
+    if (!billing) {
+      return;
+    }
+
+    if (billing === "success") {
+      showToast("Checkout complete. Waiting for Stripe confirmation.");
+      void refreshAppData({ quiet: true });
+    } else if (billing === "cancelled") {
+      showToast("Checkout cancelled.");
+    } else if (billing === "portal") {
+      showToast("Billing portal closed.");
+      void refreshAppData({ quiet: true });
+    }
+
+    params.delete("billing");
+    params.delete("session_id");
+    const nextQuery = params.toString();
+    window.history.replaceState(null, "", `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ""}`);
+  }, [refreshAppData, showToast]);
+
   const summary = useMemo(() => {
     return collection.reduce(
       (total, item) => {
@@ -287,11 +321,6 @@ export default function Home() {
       selectedCatalogueId: firstItem?.id ?? current.selectedCatalogueId,
     }));
     setAddSearch("");
-  }
-
-  function showToast(message: string) {
-    setToast(message);
-    window.setTimeout(() => setToast(""), 2400);
   }
 
   async function addToCollection(catalogueId: string, formData?: FormData) {
@@ -978,6 +1007,14 @@ export default function Home() {
         sets,
         source: dataSource,
         storageLocations,
+        subscription: {
+          plan: appState.plus ? "plus" : "free",
+          entitlements: {
+            "billing.portal": appState.plus,
+            "exports.insurance_report": appState.plus,
+            "pricing.alerts": appState.plus,
+          },
+        },
         wishlist,
       },
       ownerEmail: viewer.email,
@@ -1430,9 +1467,9 @@ function Header({
         <span className="brand-text">PokeStop</span>
       </button>
       <div className="topbar-actions">
-        <button className="plan-pill" onClick={() => onNavigate("analytics")}>
+        <button className="plan-pill" onClick={() => onNavigate(plus ? "analytics" : "settings")}>
           {plus ? <Sparkles size={17} /> : <Lock size={17} />}
-          {plus ? "Plus" : "Free"}
+          {plus ? "Plus" : "Upgrade"}
         </button>
         <button
           className="status-pill alert-pill"
@@ -3354,22 +3391,40 @@ function BillingPanel({
         <h2>Billing</h2>
         {plus ? <span className="plan-pill"><Sparkles size={17} />Plus</span> : <span className="plan-pill"><Lock size={17} />Free</span>}
       </div>
-      <MetricList
-        rows={[
-          ["Monthly", "GBP 2.49"],
-          ["Yearly", "Discounted"],
-          ["Provider", "Stripe Checkout"],
-        ]}
-      />
+      <p className="muted">
+        {plus
+          ? "Your Plus tools are active. Manage renewals, cards, and invoices through Stripe."
+          : "Upgrade when you want price-alert emails, insurance exports, and deeper collection analytics."}
+      </p>
+      <div className="billing-plan-grid">
+        <article className="billing-plan">
+          <div>
+            <span className="tag">Monthly</span>
+            <strong>GBP 2.49</strong>
+          </div>
+          <button className="button primary" onClick={() => void onStartCheckout("monthly")} disabled={plus}>
+            <CreditCard size={17} />
+            Start monthly
+          </button>
+        </article>
+        <article className="billing-plan featured">
+          <div>
+            <span className="tag green">Best value</span>
+            <strong>Yearly</strong>
+          </div>
+          <button className="button" onClick={() => void onStartCheckout("yearly")} disabled={plus}>
+            <Sparkles size={17} />
+            Start yearly
+          </button>
+        </article>
+      </div>
+      <div className="feature-list">
+        <span><Bell size={16} />Price alert emails</span>
+        <span><ShieldCheck size={16} />Insurance report export</span>
+        <span><RefreshCw size={16} />Automated price refreshes</span>
+        <span><Mail size={16} />Wishlist target digests</span>
+      </div>
       <div className="actions">
-        <button className="button primary" onClick={() => void onStartCheckout("monthly")}>
-          <Sparkles size={17} />
-          Start monthly
-        </button>
-        <button className="button" onClick={() => void onStartCheckout("yearly")}>
-          <Sparkles size={17} />
-          Start yearly
-        </button>
         <button className="button" onClick={() => void onOpenBillingPortal()}>
           <Settings size={17} />
           Billing portal

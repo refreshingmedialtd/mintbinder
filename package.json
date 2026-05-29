@@ -2,10 +2,12 @@
   "name": "pokestop",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "next dev --hostname 127.0.0.1",
     "build": "next build",
     "start": "next start --hostname 127.0.0.1",
+    "test:billing": "node --experimental-strip-types --test tests/billing-webhook.test.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "db:validate": "prisma validate",

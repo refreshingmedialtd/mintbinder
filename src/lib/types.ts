@@ -68,6 +68,15 @@ export type CollectionEvent = {
 
 export type AppDataSource = "database" | "sample";
 
+export type AppSubscription = {
+  plan: "free" | "plus";
+  entitlements: {
+    "billing.portal": boolean;
+    "exports.insurance_report": boolean;
+    "pricing.alerts": boolean;
+  };
+};
+
 export type AppData = {
   catalogue: CatalogueItem[];
   collection: CollectionItem[];
@@ -76,6 +85,7 @@ export type AppData = {
   storageLocations: StorageLocation[];
   events: CollectionEvent[];
   source: AppDataSource;
+  subscription: AppSubscription;
   notice?: string;
 };
 

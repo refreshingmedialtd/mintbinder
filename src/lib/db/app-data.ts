@@ -9,6 +9,7 @@ import {
   WishlistPriority,
 } from "@prisma/client";
 import { sampleAppData } from "@/lib/sample-data";
+import { getEntitlements } from "@/lib/entitlements";
 import type {
   AppData,
   CatalogueItem,
@@ -85,6 +86,7 @@ export async function getAppData(userId: string): Promise<AppData> {
 
   try {
     const [
+      subscription,
       cardPrintings,
       sealedProducts,
       collectionItems,
@@ -94,6 +96,7 @@ export async function getAppData(userId: string): Promise<AppData> {
       collectionEvents,
     ] =
       await Promise.all([
+        getEntitlements(userId),
         prisma.cardPrinting.findMany({
           include: {
             cardSet: true,
@@ -198,6 +201,7 @@ export async function getAppData(userId: string): Promise<AppData> {
       storageLocations: mapStorageLocations(storageLocations, collectionItems),
       events: collectionEvents.map(mapCollectionEvent),
       source: "database",
+      subscription,
     };
   } catch (error) {
     console.warn("Falling back to sample data after Prisma read failed.", error);

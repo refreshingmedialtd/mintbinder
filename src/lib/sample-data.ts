@@ -238,5 +238,13 @@ export const sampleAppData: AppData = {
   storageLocations,
   events: collectionEvents,
   source: "sample",
+  subscription: {
+    plan: "free",
+    entitlements: {
+      "billing.portal": false,
+      "exports.insurance_report": false,
+      "pricing.alerts": false,
+    },
+  },
   notice: "Using sample data because no database connection is active.",
 };
