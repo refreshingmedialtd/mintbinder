@@ -756,13 +756,16 @@ h3 {
 }
 
 .storage-list,
-.event-list {
+.event-list,
+.insight-list,
+.bar-list {
   display: grid;
   gap: 10px;
 }
 
 .storage-row,
-.event-row {
+.event-row,
+.insight-row {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -772,13 +775,15 @@ h3 {
 }
 
 .storage-row:first-child,
-.event-row:first-child {
+.event-row:first-child,
+.insight-row:first-child {
   border-top: 0;
 }
 
 .storage-main,
 .storage-actions,
-.event-copy {
+.event-copy,
+.bar-label {
   display: grid;
   gap: 5px;
 }
@@ -788,10 +793,43 @@ h3 {
 }
 
 .storage-main > span,
-.event-copy span {
+.event-copy span,
+.bar-label span {
   color: var(--muted);
   font-size: 13px;
   font-weight: 750;
+}
+
+.insight-row {
+  justify-content: flex-start;
+}
+
+.insight-row p {
+  margin: 3px 0 0;
+}
+
+.bar-row {
+  display: grid;
+  gap: 8px;
+}
+
+.bar-label {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.bar-track {
+  height: 9px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e5e7eb;
+}
+
+.bar-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--teal), var(--accent));
 }
 
 .storage-main p {

@@ -36,6 +36,13 @@ import {
   type CollectionImportRow,
 } from "@/lib/csv";
 import { completionPercent, formatMoney } from "@/lib/format";
+import {
+  buildCollectionIntelligence,
+  type CollectionIntelligence,
+  type HoldingInsight,
+  type InsightAction,
+  type WishlistOpportunity,
+} from "@/lib/insights";
 import { sampleAppData } from "@/lib/sample-data";
 import type {
   AppData,
@@ -224,6 +231,17 @@ export default function Home() {
       return total + (item.targetPriceMinor ?? catalogueItem?.valueMinor ?? 0);
     }, 0);
   }, [catalogueById, wishlist]);
+
+  const intelligence = useMemo(() => {
+    return buildCollectionIntelligence({
+      catalogueById,
+      collection,
+      events: collectionEvents,
+      sets,
+      storageLocations,
+      wishlist,
+    });
+  }, [catalogueById, collection, collectionEvents, sets, storageLocations, wishlist]);
 
   function navigate(screen: Screen) {
     setAppState((current) => ({ ...current, screen }));
@@ -824,6 +842,7 @@ export default function Home() {
     navigate,
     startAdd,
     summary,
+    intelligence,
     wishlist,
     wishlistTotal,
     addToCollection,
@@ -889,6 +908,7 @@ type ScreenContext = {
     sealed: number;
     unvalued: number;
   };
+  intelligence: CollectionIntelligence;
   wishlist: WishlistItem[];
   wishlistTotal: number;
   addToCollection: (catalogueId: string, formData?: FormData) => Promise<void>;
@@ -1177,9 +1197,9 @@ function DashboardScreen({
   navigate,
   startAdd,
   summary,
+  intelligence,
   wishlist,
   wishlistTotal,
-  appState,
   setAppState,
 }: ScreenContext) {
   const recent = collection.slice(-3).reverse();
@@ -1273,13 +1293,21 @@ function DashboardScreen({
 
           <section className="tool-panel">
             <div className="panel-title-row">
-              <h2>Plus analytics</h2>
-              <span className="status-pill">{appState.plus ? "Unlocked" : "Preview"}</span>
+              <h2>Collector pulse</h2>
+              <span className="status-pill">{intelligence.healthLabel}</span>
             </div>
-            <MiniChart />
+            <MiniChart values={intelligence.valueTrend} />
+            <MetricList
+              rows={[
+                ["Health score", `${intelligence.healthScore}/100`],
+                ["Best performer", intelligence.bestPerformer ? gainLabel(intelligence.bestPerformer) : "Not enough cost data"],
+                ["Storage focus", intelligence.storageConcentration ? `${intelligence.storageConcentration.name} (${intelligence.storageConcentration.share}%)` : "No storage value yet"],
+                ["Action queue", `${intelligence.actionQueue.length} item${intelligence.actionQueue.length === 1 ? "" : "s"}`],
+              ]}
+            />
             <button className="button full" onClick={() => navigate("analytics")}>
               <BarChart3 size={17} />
-              Open analytics
+              Open intelligence
             </button>
           </section>
         </div>
@@ -1956,37 +1984,45 @@ function WishlistScreen({
 
 function AnalyticsScreen({
   appState,
-  catalogueById,
-  collection,
   collectionEvents,
-  storageLocations,
+  intelligence,
   summary,
   wishlistTotal,
   setAppState,
 }: ScreenContext) {
   const gain = summary.value - summary.cost;
-  const catalogueCounts = collection.reduce<Record<string, number>>((counts, item) => {
-    counts[item.catalogueId] = (counts[item.catalogueId] ?? 0) + item.quantity;
-    return counts;
-  }, {});
-  const duplicateItems = collection.filter((item) => (catalogueCounts[item.catalogueId] ?? 0) > 1);
-  const duplicateValue = duplicateItems.reduce((total, item) => {
-    return total + (getOwnedValue(item, catalogueById.get(item.catalogueId)) ?? 0);
-  }, 0);
-  const activeLocations = storageLocations.filter((location) => location.totalQuantity > 0).length;
-  const recentActivity = collectionEvents.length
-    ? `${collectionEvents[0].type} ${collectionEvents[0].itemName}`
-    : "No activity yet";
+  const duplicateValue = intelligence.duplicates.reduce((total, item) => total + item.valueMinor, 0);
+  const leadAction = intelligence.actionQueue[0];
 
   if (!appState.plus) {
     return (
       <section className="page">
-        <PageHeader title="Analytics" />
+        <PageHeader title="Analytics" action={<span className="plan-pill"><Lock size={17} />Free preview</span>} />
+        <div className="stats-grid">
+          <StatCard label="Health score" value={`${intelligence.healthScore}/100`} note={intelligence.healthLabel} />
+          <StatCard label="Current value" value={formatMoney(summary.value)} note={`${summary.items} tracked items`} />
+          <StatCard label="Gain/loss" value={formatMoney(gain)} note="Known cost basis" positive={gain >= 0} />
+          <StatCard label="Wishlist hits" value={intelligence.wishlistOpportunities.length.toString()} note={`${formatMoney(wishlistTotal)} target list`} />
+        </div>
         <div className="screen-split">
+          <section className="tool-panel">
+            <div className="panel-title-row">
+              <h2>Free snapshot</h2>
+              <BarChart3 size={18} />
+            </div>
+            <MetricList
+              rows={[
+                ["Top holding", intelligence.topHoldings[0]?.name ?? "Add more items"],
+                ["Best performer", intelligence.bestPerformer ? gainLabel(intelligence.bestPerformer) : "Add purchase prices"],
+                ["Next action", leadAction?.title ?? "Collection looks tidy"],
+                ["Recent activity", `${intelligence.activity.last30Days} events this month`],
+              ]}
+            />
+          </section>
           <section className="section-block">
-            <SectionHeader title="Preview" />
+            <SectionHeader title="Plus unlocks" />
             <div className="locked-list">
-              {["Value over time", "Best performers", "Duplicate review", "Price alerts"].map((label) => (
+              {["Value path", "Action queue", "Portfolio mix", "Wishlist targets"].map((label) => (
                 <div className="locked-tile" key={label}>
                   <strong>{label}</strong>
                   <span className="tag red">Locked</span>
@@ -2017,25 +2053,33 @@ function AnalyticsScreen({
     <section className="page">
       <PageHeader title="Analytics" action={<span className="plan-pill"><Sparkles size={17} />Plus active</span>} />
       <div className="stats-grid">
+        <StatCard label="Health score" value={`${intelligence.healthScore}/100`} note={intelligence.healthLabel} />
         <StatCard label="Current value" value={formatMoney(summary.value)} note={`${summary.items} tracked items`} />
-        <StatCard label="Cost basis" value={formatMoney(summary.cost)} note="Known purchase prices" />
         <StatCard label="Gain/loss" value={formatMoney(gain)} note="Against known cost" positive={gain >= 0} />
-        <StatCard label="Duplicates" value={duplicateItems.length.toString()} note={`${formatMoney(duplicateValue)} across duplicate lots`} />
+        <StatCard label="Duplicates" value={intelligence.duplicates.length.toString()} note={`${formatMoney(duplicateValue)} across duplicate lots`} />
+        <StatCard label="Wishlist hits" value={intelligence.wishlistOpportunities.length.toString()} note="At or below target" />
       </div>
       <div className="dashboard-grid">
         <section className="tool-panel">
-          <h2>Value over time</h2>
-          <MiniChart />
+          <div className="panel-title-row">
+            <h2>Value path</h2>
+            <span className="status-pill">{formatMoney(summary.value)}</span>
+          </div>
+          <MiniChart values={intelligence.valueTrend} />
         </section>
+        <ActionQueue actions={intelligence.actionQueue} />
+        <TopHoldings holdings={intelligence.topHoldings} />
+        <PortfolioMix rows={intelligence.portfolioMix} />
         <MetricPanel
-          title="Opportunities"
+          title="Collection review"
           rows={[
-            ["Recent activity", recentActivity],
-            ["Storage locations", `${activeLocations} active`],
-            ["Duplicate value", formatMoney(duplicateValue)],
-            ["Wishlist gap", formatMoney(wishlistTotal)],
+            ["Best performer", intelligence.bestPerformer ? gainLabel(intelligence.bestPerformer) : "Add purchase prices"],
+            ["Weak prices", `${intelligence.weakConfidence.count} holdings`],
+            ["Grading candidates", intelligence.gradingCandidates.length],
+            ["Set focus", intelligence.setFocus ? `${intelligence.setFocus.name} (${intelligence.setFocus.remaining} left)` : "No sets loaded"],
           ]}
         />
+        <WishlistOpportunities opportunities={intelligence.wishlistOpportunities} />
         <section className="tool-panel">
           <div className="panel-title-row">
             <h2>Activity feed</h2>
@@ -2101,6 +2145,114 @@ function SettingsScreen({
           onDelete={deleteStorageLocation}
         />
       </div>
+    </section>
+  );
+}
+
+function ActionQueue({ actions }: { actions: InsightAction[] }) {
+  return (
+    <section className="tool-panel">
+      <div className="panel-title-row">
+        <h2>Action queue</h2>
+        <Sparkles size={18} />
+      </div>
+      {actions.length ? (
+        <div className="insight-list">
+          {actions.map((action) => (
+            <article className="insight-row" key={action.title}>
+              <span className={`tag ${actionTagClass(action.tone)}`}>{action.tone}</span>
+              <div>
+                <strong>{action.title}</strong>
+                <p className="muted">{action.detail}</p>
+              </div>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <p className="muted">No obvious actions right now.</p>
+      )}
+    </section>
+  );
+}
+
+function TopHoldings({ holdings }: { holdings: HoldingInsight[] }) {
+  return (
+    <section className="tool-panel">
+      <div className="panel-title-row">
+        <h2>Top holdings</h2>
+        <Layers3 size={18} />
+      </div>
+      {holdings.length ? (
+        <div className="metric-list">
+          {holdings.slice(0, 5).map((holding) => (
+            <div className="metric-row" key={holding.id}>
+              <span>{holding.name}</span>
+              <strong>{formatMoney(holding.valueMinor)}</strong>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="muted">Add collection items to rank holdings.</p>
+      )}
+    </section>
+  );
+}
+
+function PortfolioMix({
+  rows,
+}: {
+  rows: CollectionIntelligence["portfolioMix"];
+}) {
+  return (
+    <section className="tool-panel">
+      <div className="panel-title-row">
+        <h2>Portfolio mix</h2>
+        <BarChart3 size={18} />
+      </div>
+      {rows.length ? (
+        <div className="bar-list">
+          {rows.map((row) => (
+            <div className="bar-row" key={row.label}>
+              <div className="bar-label">
+                <strong>{row.label}</strong>
+                <span>{formatMoney(row.valueMinor)} | {row.share}%</span>
+              </div>
+              <div className="bar-track">
+                <span style={{ width: `${Math.max(4, row.share)}%` }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="muted">No portfolio mix yet.</p>
+      )}
+    </section>
+  );
+}
+
+function WishlistOpportunities({
+  opportunities,
+}: {
+  opportunities: WishlistOpportunity[];
+}) {
+  return (
+    <section className="tool-panel">
+      <div className="panel-title-row">
+        <h2>Wishlist targets</h2>
+        <Heart size={18} />
+      </div>
+      {opportunities.length ? (
+        <div className="metric-list">
+          {opportunities.map((opportunity) => (
+            <div className="metric-row" key={opportunity.id}>
+              <span>{opportunity.name}</span>
+              <strong>{formatMoney(opportunity.currentValueMinor)}</strong>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="muted">No wishlist items are at target right now.</p>
+      )}
     </section>
   );
 }
@@ -2507,11 +2659,17 @@ function EmptyState({ title, action }: { title: string; action?: ReactNode }) {
   );
 }
 
-function MiniChart() {
+function MiniChart({ values }: { values?: number[] }) {
+  const source = values?.length ? values : [39, 45, 52, 58, 64, 74, 88];
+  const max = Math.max(...source, 1);
+
   return (
     <div className="mini-chart" aria-label="Value trend chart">
-      {[39, 45, 52, 58, 64, 74, 88].map((height) => (
-        <span key={height} style={{ height: `${height}%` }} />
+      {source.map((value, index) => (
+        <span
+          key={`${value}-${index}`}
+          style={{ height: `${Math.max(14, Math.round((value / max) * 100))}%` }}
+        />
       ))}
     </div>
   );
@@ -2548,6 +2706,28 @@ function getOwnedValue(item: CollectionItem, catalogueItem?: CatalogueItem) {
   }
 
   return item.overrideValueMinor ?? catalogueItem.valueMinor * item.quantity;
+}
+
+function gainLabel(holding: HoldingInsight) {
+  if (holding.gainMinor === null) {
+    return holding.name;
+  }
+
+  const prefix = holding.gainMinor >= 0 ? "+" : "";
+
+  return `${holding.name} ${prefix}${formatMoney(holding.gainMinor)}`;
+}
+
+function actionTagClass(tone: InsightAction["tone"]) {
+  if (tone === "good") {
+    return "green";
+  }
+
+  if (tone === "action") {
+    return "blue";
+  }
+
+  return "amber";
 }
 
 function importPayload(row: CollectionImportRow) {
