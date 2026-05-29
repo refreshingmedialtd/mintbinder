@@ -478,6 +478,36 @@ h3 {
   gap: 10px;
 }
 
+.collection-toolbar-head,
+.collection-sort-row,
+.toolbar-actions,
+.filter-panel-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.collection-toolbar-head {
+  align-items: stretch;
+}
+
+.collection-toolbar-head .search-box {
+  flex: 1 1 280px;
+}
+
+.toolbar-actions {
+  flex: 0 0 auto;
+}
+
+.collection-sort-row {
+  justify-content: space-between;
+}
+
+.collection-sort-row .muted {
+  margin: 0;
+}
+
 .search-box {
   display: flex;
   min-height: 44px;
@@ -677,6 +707,13 @@ h3 {
   box-shadow: 0 1px 6px rgba(15, 23, 42, 0.08);
 }
 
+.segmented.compact button {
+  display: grid;
+  width: 36px;
+  padding-inline: 0;
+  place-items: center;
+}
+
 .field-grid {
   display: grid;
   gap: 12px;
@@ -706,6 +743,47 @@ h3 {
 .field textarea {
   min-height: 84px;
   resize: vertical;
+}
+
+.sort-control {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #ffffff;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.sort-control select {
+  min-height: 38px;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-weight: 850;
+  outline: 0;
+}
+
+.filter-panel {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #ffffff;
+}
+
+.filter-panel-footer {
+  justify-content: space-between;
+}
+
+.filter-panel-footer .muted {
+  max-width: 580px;
+  margin: 0;
 }
 
 .selected-preview {
@@ -926,6 +1004,11 @@ h3 {
   display: none;
 }
 
+.collection-grid {
+  display: grid;
+  gap: 14px;
+}
+
 .toast {
   position: fixed;
   right: 16px;
@@ -986,6 +1069,10 @@ h3 {
   }
 
   .field-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .collection-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -1055,6 +1142,10 @@ h3 {
 @media (min-width: 1080px) {
   .dashboard-grid {
     grid-template-columns: minmax(0, 1fr) 380px;
+  }
+
+  .collection-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .main {

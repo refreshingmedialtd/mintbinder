@@ -2,15 +2,18 @@
 
 import {
   ArrowLeft,
+  ArrowDownUp,
   BarChart3,
   Bell,
   Boxes,
   Check,
   Download,
   GalleryVerticalEnd,
+  Grid2X2,
   Heart,
   History,
   Layers3,
+  List,
   LayoutDashboard,
   LogIn,
   LogOut,
@@ -20,6 +23,7 @@ import {
   Plus,
   Search,
   Settings,
+  SlidersHorizontal,
   Sparkles,
   Trash2,
   Upload,
@@ -62,6 +66,13 @@ type AppState = {
   screen: Screen;
   addType: ItemType;
   collectionFilter: "all" | ItemType | "graded" | "unknown";
+  collectionSetFilter: string;
+  collectionConditionFilter: string;
+  collectionLanguageFilter: string;
+  collectionLocationFilter: string;
+  collectionValueFilter: "all" | "profit" | "loss" | "unvalued" | "high";
+  collectionSort: "value-desc" | "value-asc" | "name" | "set" | "gain-desc" | "quantity-desc" | "recent";
+  collectionView: "list" | "grid";
   setFilter: "all" | "owned" | "missing" | "want";
   selectedItemId: string;
   selectedSetId: string;
@@ -80,6 +91,13 @@ const initialState: AppState = {
   screen: "dashboard",
   addType: "card",
   collectionFilter: "all",
+  collectionSetFilter: "all",
+  collectionConditionFilter: "all",
+  collectionLanguageFilter: "all",
+  collectionLocationFilter: "all",
+  collectionValueFilter: "all",
+  collectionSort: "value-desc",
+  collectionView: "list",
   setFilter: "all",
   selectedItemId: "owned-charizard",
   selectedSetId: "set-151",
@@ -1402,11 +1420,13 @@ function CollectionScreen({
   catalogueById,
   collection,
   collectionSearch,
+  storageLocations,
   setAppState,
   setCollectionSearch,
   startAdd,
   navigate,
 }: ScreenContext) {
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const filters: Array<[ScreenContext["appState"]["collectionFilter"], string]> = [
     ["all", "All"],
     ["card", "Cards"],
@@ -1415,45 +1435,183 @@ function CollectionScreen({
     ["unknown", "Unknown value"],
   ];
 
+  const setOptions = uniqueValues(
+    collection.map((item) => catalogueById.get(item.catalogueId)?.set ?? ""),
+  ).sort((left, right) => left.localeCompare(right));
+  const conditionOptions = uniqueValues(collection.map((item) => item.condition)).sort((left, right) =>
+    left.localeCompare(right),
+  );
+  const languageOptions = uniqueValues(collection.map((item) => item.language)).sort((left, right) =>
+    left.localeCompare(right),
+  );
+  const locationOptions = uniqueValues([
+    ...storageLocations.map((location) => location.name),
+    ...collection.map((item) => item.location),
+  ]).sort((left, right) => left.localeCompare(right));
   const normalizedSearch = collectionSearch.trim().toLowerCase();
-  const items = collection.filter((item) => {
+  const enrichedItems = collection.map((item, index) => {
     const catalogueItem = catalogueById.get(item.catalogueId);
     const value = getOwnedValue(item, catalogueItem);
-    const matchesFilter =
-      appState.collectionFilter === "all" ||
-      catalogueItem?.type === appState.collectionFilter ||
-      (appState.collectionFilter === "graded" && item.grade !== "Raw" && item.grade !== "N/A") ||
-      (appState.collectionFilter === "unknown" && value === null);
-    const matchesSearch =
-      !normalizedSearch ||
-      `${catalogueItem?.name} ${catalogueItem?.set} ${item.condition} ${item.location}`
-        .toLowerCase()
-        .includes(normalizedSearch);
+    const gain = value === null ? null : value - (item.purchasePriceMinor ?? 0);
 
-    return matchesFilter && matchesSearch;
+    return {
+      catalogueItem,
+      gain,
+      index,
+      item,
+      value,
+    };
   });
+  const items = enrichedItems
+    .filter(({ catalogueItem, gain, item, value }) => {
+      if (!catalogueItem) {
+        return false;
+      }
+
+      const matchesFilter =
+        appState.collectionFilter === "all" ||
+        catalogueItem.type === appState.collectionFilter ||
+        (appState.collectionFilter === "graded" && item.grade !== "Raw" && item.grade !== "N/A") ||
+        (appState.collectionFilter === "unknown" && value === null);
+      const matchesAdvancedFilters =
+        (appState.collectionSetFilter === "all" || catalogueItem.set === appState.collectionSetFilter) &&
+        (appState.collectionConditionFilter === "all" || item.condition === appState.collectionConditionFilter) &&
+        (appState.collectionLanguageFilter === "all" || item.language === appState.collectionLanguageFilter) &&
+        (appState.collectionLocationFilter === "all" || item.location === appState.collectionLocationFilter) &&
+        (appState.collectionValueFilter === "all" ||
+          (appState.collectionValueFilter === "profit" && gain !== null && gain > 0) ||
+          (appState.collectionValueFilter === "loss" && gain !== null && gain < 0) ||
+          (appState.collectionValueFilter === "unvalued" && value === null) ||
+          (appState.collectionValueFilter === "high" && value !== null && value >= 10000));
+      const matchesSearch =
+        !normalizedSearch ||
+        [
+          catalogueItem.name,
+          catalogueItem.set,
+          catalogueItem.number,
+          catalogueItem.rarity,
+          item.condition,
+          item.grade,
+          item.language,
+          item.location,
+          item.notes ?? "",
+          item.variant,
+        ]
+          .join(" ")
+          .toLowerCase()
+          .includes(normalizedSearch);
+
+      return matchesFilter && matchesAdvancedFilters && matchesSearch;
+    })
+    .sort((left, right) => {
+      if (appState.collectionSort === "value-asc") {
+        return compareNullableNumbers(left.value, right.value, "asc");
+      }
+
+      if (appState.collectionSort === "name") {
+        return (left.catalogueItem?.name ?? "").localeCompare(right.catalogueItem?.name ?? "", undefined, {
+          numeric: true,
+        });
+      }
+
+      if (appState.collectionSort === "set") {
+        return `${left.catalogueItem?.set ?? ""} ${left.catalogueItem?.number ?? ""}`.localeCompare(
+          `${right.catalogueItem?.set ?? ""} ${right.catalogueItem?.number ?? ""}`,
+          undefined,
+          { numeric: true },
+        );
+      }
+
+      if (appState.collectionSort === "gain-desc") {
+        return compareNullableNumbers(right.gain, left.gain, "desc");
+      }
+
+      if (appState.collectionSort === "quantity-desc") {
+        return right.item.quantity - left.item.quantity;
+      }
+
+      if (appState.collectionSort === "recent") {
+        return right.index - left.index;
+      }
+
+      return compareNullableNumbers(right.value, left.value, "desc");
+    })
+    .map(({ item }) => item);
+  const visibleValue = items.reduce(
+    (total, item) => total + (getOwnedValue(item, catalogueById.get(item.catalogueId)) ?? 0),
+    0,
+  );
+  const activeFilterCount = [
+    normalizedSearch.length > 0,
+    appState.collectionFilter !== "all",
+    appState.collectionSetFilter !== "all",
+    appState.collectionConditionFilter !== "all",
+    appState.collectionLanguageFilter !== "all",
+    appState.collectionLocationFilter !== "all",
+    appState.collectionValueFilter !== "all",
+  ].filter(Boolean).length;
+
+  function resetFilters() {
+    setCollectionSearch("");
+    setAppState((current) => ({
+      ...current,
+      collectionConditionFilter: "all",
+      collectionFilter: "all",
+      collectionLanguageFilter: "all",
+      collectionLocationFilter: "all",
+      collectionSetFilter: "all",
+      collectionValueFilter: "all",
+    }));
+  }
 
   return (
     <section className="page">
       <PageHeader
         title="Collection"
         action={
-          <button className="button primary" onClick={() => startAdd("card")}>
-            <Plus size={17} />
-            Add item
-          </button>
+          <>
+            <span className="status-pill">{items.length} shown</span>
+            <button className="button primary" onClick={() => startAdd("card")}>
+              <Plus size={17} />
+              Add item
+            </button>
+          </>
         }
       />
 
       <div className="toolbar">
-        <label className="search-box">
-          <Search size={18} />
-          <input
-            value={collectionSearch}
-            onChange={(event) => setCollectionSearch(event.target.value)}
-            placeholder="Search collection"
-          />
-        </label>
+        <div className="collection-toolbar-head">
+          <label className="search-box">
+            <Search size={18} />
+            <input
+              value={collectionSearch}
+              onChange={(event) => setCollectionSearch(event.target.value)}
+              placeholder="Search name, set, grade, notes"
+            />
+          </label>
+          <div className="toolbar-actions">
+            <button className="button" onClick={() => setFiltersOpen((open) => !open)}>
+              <SlidersHorizontal size={17} />
+              Filters{activeFilterCount ? ` (${activeFilterCount})` : ""}
+            </button>
+            <div className="segmented compact" aria-label="Collection view">
+              <button
+                className={appState.collectionView === "list" ? "active" : ""}
+                aria-label="List view"
+                onClick={() => setAppState((current) => ({ ...current, collectionView: "list" }))}
+              >
+                <List size={16} />
+              </button>
+              <button
+                className={appState.collectionView === "grid" ? "active" : ""}
+                aria-label="Grid view"
+                onClick={() => setAppState((current) => ({ ...current, collectionView: "grid" }))}
+              >
+                <Grid2X2 size={16} />
+              </button>
+            </div>
+          </div>
+        </div>
         <div className="filter-row">
           {filters.map(([id, label]) => (
             <button
@@ -1465,11 +1623,127 @@ function CollectionScreen({
             </button>
           ))}
         </div>
+        <div className="collection-sort-row">
+          <p className="muted">
+            {items.length} of {collection.length} lots | {formatMoney(visibleValue)} visible value
+          </p>
+          <label className="sort-control">
+            <ArrowDownUp size={16} />
+            <span>Sort</span>
+            <select
+              value={appState.collectionSort}
+              onChange={(event) =>
+                setAppState((current) => ({
+                  ...current,
+                  collectionSort: event.target.value as AppState["collectionSort"],
+                }))
+              }
+            >
+              <option value="value-desc">Value high to low</option>
+              <option value="value-asc">Value low to high</option>
+              <option value="gain-desc">Gain/loss</option>
+              <option value="quantity-desc">Quantity</option>
+              <option value="name">Name</option>
+              <option value="set">Set number</option>
+              <option value="recent">Recently added</option>
+            </select>
+          </label>
+        </div>
+        {filtersOpen || activeFilterCount > 0 ? (
+          <div className="filter-panel">
+            <div className="field-grid">
+              <Field label="Set">
+                <select
+                  value={appState.collectionSetFilter}
+                  onChange={(event) =>
+                    setAppState((current) => ({ ...current, collectionSetFilter: event.target.value }))
+                  }
+                >
+                  <option value="all">All sets</option>
+                  {setOptions.map((set) => (
+                    <option key={set} value={set}>
+                      {set}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Condition">
+                <select
+                  value={appState.collectionConditionFilter}
+                  onChange={(event) =>
+                    setAppState((current) => ({ ...current, collectionConditionFilter: event.target.value }))
+                  }
+                >
+                  <option value="all">All conditions</option>
+                  {conditionOptions.map((condition) => (
+                    <option key={condition} value={condition}>
+                      {condition}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Language">
+                <select
+                  value={appState.collectionLanguageFilter}
+                  onChange={(event) =>
+                    setAppState((current) => ({ ...current, collectionLanguageFilter: event.target.value }))
+                  }
+                >
+                  <option value="all">All languages</option>
+                  {languageOptions.map((language) => (
+                    <option key={language} value={language}>
+                      {language}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Storage">
+                <select
+                  value={appState.collectionLocationFilter}
+                  onChange={(event) =>
+                    setAppState((current) => ({ ...current, collectionLocationFilter: event.target.value }))
+                  }
+                >
+                  <option value="all">All locations</option>
+                  {locationOptions.map((location) => (
+                    <option key={location} value={location}>
+                      {location}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Value">
+                <select
+                  value={appState.collectionValueFilter}
+                  onChange={(event) =>
+                    setAppState((current) => ({
+                      ...current,
+                      collectionValueFilter: event.target.value as AppState["collectionValueFilter"],
+                    }))
+                  }
+                >
+                  <option value="all">All values</option>
+                  <option value="profit">Gain</option>
+                  <option value="loss">Loss</option>
+                  <option value="high">GBP 100+</option>
+                  <option value="unvalued">Unknown value</option>
+                </select>
+              </Field>
+            </div>
+            <div className="filter-panel-footer">
+              <p className="muted">Combine filters to find grading candidates, storage gaps, and high-value lots quickly.</p>
+              <button className="button" onClick={resetFilters} disabled={!activeFilterCount}>
+                <X size={17} />
+                Reset
+              </button>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       {items.length ? (
-        <>
-          <div className="mobile-list">
+        appState.collectionView === "grid" ? (
+          <div className="collection-grid">
             {items.map((item) => (
               <OwnedItemCard
                 key={item.id}
@@ -1482,19 +1756,45 @@ function CollectionScreen({
               />
             ))}
           </div>
-          <CollectionTable items={items} catalogueById={catalogueById} openItem={(id) => {
-            setAppState((current) => ({ ...current, selectedItemId: id }));
-            navigate("item");
-          }} />
-        </>
+        ) : (
+          <>
+            <div className="mobile-list">
+              {items.map((item) => (
+                <OwnedItemCard
+                  key={item.id}
+                  item={item}
+                  catalogueItem={catalogueById.get(item.catalogueId)}
+                  onClick={() => {
+                    setAppState((current) => ({ ...current, selectedItemId: item.id }));
+                    navigate("item");
+                  }}
+                />
+              ))}
+            </div>
+            <CollectionTable
+              items={items}
+              catalogueById={catalogueById}
+              openItem={(id) => {
+                setAppState((current) => ({ ...current, selectedItemId: id }));
+                navigate("item");
+              }}
+            />
+          </>
+        )
       ) : (
         <EmptyState
           title="No matching items"
           action={
-            <button className="button primary" onClick={() => startAdd("card")}>
-              <Plus size={17} />
-              Add card
-            </button>
+            <div className="actions">
+              <button className="button" onClick={resetFilters} disabled={!activeFilterCount}>
+                <X size={17} />
+                Reset filters
+              </button>
+              <button className="button primary" onClick={() => startAdd("card")}>
+                <Plus size={17} />
+                Add card
+              </button>
+            </div>
           }
         />
       )}
@@ -3038,6 +3338,16 @@ function impactTagClass(impact: InsightAction["impact"]) {
   }
 
   return "green";
+}
+
+function compareNullableNumbers(
+  left: number | null,
+  right: number | null,
+  direction: "asc" | "desc",
+) {
+  const emptyValue = direction === "asc" ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY;
+
+  return (left ?? emptyValue) - (right ?? emptyValue);
 }
 
 function importPayload(row: CollectionImportRow) {
