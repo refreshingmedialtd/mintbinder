@@ -41,6 +41,7 @@ import {
   type CollectionImportRow,
 } from "@/lib/csv";
 import { completionPercent, formatMoney } from "@/lib/format";
+import { buildInsuranceReportHtml } from "@/lib/reports/insurance";
 import {
   buildCollectionIntelligence,
   type CollectionIntelligence,
@@ -943,6 +944,86 @@ export default function Home() {
     showToast(`${collection.length} collection rows exported.`);
   }
 
+  async function exportInsuranceReport() {
+    if (!appState.plus) {
+      showToast("Insurance reports are a Plus feature.");
+      setAppState((current) => ({ ...current, screen: "analytics" }));
+      return;
+    }
+
+    if (dataSource === "database") {
+      try {
+        const response = await fetch("/api/reports/insurance", { cache: "no-store" });
+
+        if (!response.ok) {
+          const body = (await response.json().catch(() => ({}))) as { error?: string };
+          throw new Error(body.error ?? `Insurance report failed with ${response.status}`);
+        }
+
+        downloadBlob(`pokestop-insurance-report-${dateStamp()}.html`, await response.blob());
+        showToast("Insurance report exported.");
+        return;
+      } catch (error) {
+        console.warn("Insurance report export failed.", error);
+        showToast(error instanceof Error ? error.message : "Could not export insurance report.");
+        return;
+      }
+    }
+
+    const html = buildInsuranceReportHtml({
+      data: {
+        catalogue: catalogueItems,
+        collection,
+        events: collectionEvents,
+        sets,
+        source: dataSource,
+        storageLocations,
+        wishlist,
+      },
+      ownerEmail: viewer.email,
+      ownerName: viewer.name,
+    });
+
+    downloadBlob(`pokestop-insurance-report-${dateStamp()}.html`, new Blob([html], { type: "text/html" }));
+    showToast("Insurance report exported.");
+  }
+
+  async function startPlusCheckout(plan: "monthly" | "yearly") {
+    try {
+      const response = await fetch("/api/billing/checkout", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ plan }),
+      });
+      const body = (await response.json()) as { error?: string; url?: string };
+
+      if (!response.ok || !body.url) {
+        throw new Error(body.error ?? `Checkout failed with ${response.status}`);
+      }
+
+      window.location.assign(body.url);
+    } catch (error) {
+      console.warn("Unable to start Stripe checkout.", error);
+      showToast(error instanceof Error ? error.message : "Unable to start checkout.");
+    }
+  }
+
+  async function openBillingPortal() {
+    try {
+      const response = await fetch("/api/billing/portal", { method: "POST" });
+      const body = (await response.json()) as { error?: string; url?: string };
+
+      if (!response.ok || !body.url) {
+        throw new Error(body.error ?? `Billing portal failed with ${response.status}`);
+      }
+
+      window.location.assign(body.url);
+    } catch (error) {
+      console.warn("Unable to open Stripe billing portal.", error);
+      showToast(error instanceof Error ? error.message : "Unable to open billing portal.");
+    }
+  }
+
   function downloadImportTemplate() {
     downloadCsv("pokestop-collection-import-template.csv", buildCollectionImportTemplateCsv());
     showToast("Collection import template downloaded.");
@@ -1102,6 +1183,9 @@ export default function Home() {
     createStorageLocation,
     deleteStorageLocation,
     exportCollectionCsv,
+    exportInsuranceReport,
+    startPlusCheckout,
+    openBillingPortal,
     downloadImportTemplate,
     importCollectionCsv,
     setAppState,
@@ -1172,6 +1256,9 @@ type ScreenContext = {
   createStorageLocation: (formData: FormData) => Promise<boolean>;
   deleteStorageLocation: (id: string) => Promise<boolean>;
   exportCollectionCsv: () => void;
+  exportInsuranceReport: () => Promise<void>;
+  startPlusCheckout: (plan: "monthly" | "yearly") => Promise<void>;
+  openBillingPortal: () => Promise<void>;
   downloadImportTemplate: () => void;
   importCollectionCsv: (file: File) => Promise<boolean>;
   setAppState: Dispatch<SetStateAction<AppState>>;
@@ -2783,8 +2870,10 @@ function AlertsScreen({
   setAppState,
 }: ScreenContext) {
   const alerts = intelligence.actionQueue;
+  const priceAlerts = intelligence.priceAlerts;
   const highImpact = alerts.filter((alert) => alert.impact === "High").length;
   const watchCount = alerts.filter((alert) => alert.tone === "watch").length;
+  const targetHits = priceAlerts.filter((alert) => alert.status === "Hit").length;
 
   function openAlert(alert: InsightAction) {
     if (alert.category === "Wishlist") {
@@ -2805,6 +2894,14 @@ function AlertsScreen({
     setAppState((current) => ({ ...current, screen: "collection", collectionFilter: "all" }));
   }
 
+  function openPriceAlert(alert: CollectionIntelligence["priceAlerts"][number]) {
+    setAppState((current) => ({
+      ...current,
+      screen: alert.category === "Wishlist" ? "wishlist" : "collection",
+      collectionFilter: alert.category === "Wishlist" ? current.collectionFilter : "all",
+    }));
+  }
+
   return (
     <section className="page">
       <PageHeader title="Alerts" action={<span className="status-pill"><Bell size={17} />{alerts.length}</span>} />
@@ -2812,8 +2909,39 @@ function AlertsScreen({
         <StatCard label="Open alerts" value={alerts.length.toString()} note="Generated from your live collection" />
         <StatCard label="High impact" value={highImpact.toString()} note="Worth checking first" />
         <StatCard label="Watch items" value={watchCount.toString()} note="Useful but not urgent" />
-        <StatCard label="Health score" value={`${intelligence.healthScore}/100`} note={intelligence.healthLabel} />
+        <StatCard label="Price alerts" value={priceAlerts.length.toString()} note={`${targetHits} target hit${targetHits === 1 ? "" : "s"}`} />
       </div>
+
+      <section className="tool-panel">
+        <div className="panel-title-row">
+          <h2>Price watchlist</h2>
+          <span className="plan-pill"><Sparkles size={17} />Plus</span>
+        </div>
+        {priceAlerts.length ? (
+          <div className="alert-list">
+            {priceAlerts.map((alert) => (
+              <article className="alert-row" key={alert.id}>
+                <div className="alert-main">
+                  <div className="tag-row">
+                    <span className={`tag ${priceAlertTagClass(alert.status)}`}>{alert.status}</span>
+                    <span className="tag">{alert.category}</span>
+                  </div>
+                  <strong>{alert.itemName}</strong>
+                  <p className="muted">
+                    {alert.detail} Current {formatMoney(alert.currentValueMinor)}
+                    {alert.targetValueMinor === undefined ? "" : ` | Target ${formatMoney(alert.targetValueMinor)}`}
+                  </p>
+                </div>
+                <button className="button" onClick={() => openPriceAlert(alert)}>
+                  {alert.actionLabel}
+                </button>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p className="muted">No target-price or weak-confidence price alerts right now.</p>
+        )}
+      </section>
 
       <section className="tool-panel">
         <div className="panel-title-row">
@@ -2998,6 +3126,9 @@ function SettingsScreen({
   createStorageLocation,
   deleteStorageLocation,
   exportCollectionCsv,
+  exportInsuranceReport,
+  openBillingPortal,
+  startPlusCheckout,
   downloadImportTemplate,
   importCollectionCsv,
 }: ScreenContext) {
@@ -3021,6 +3152,11 @@ function SettingsScreen({
             ["Billing", appState.plus ? "Active sample state" : "Not connected"],
           ]}
         />
+        <BillingPanel
+          plus={appState.plus}
+          onOpenBillingPortal={openBillingPortal}
+          onStartCheckout={startPlusCheckout}
+        />
         <MetricPanel
           title="Data source"
           rows={[
@@ -3029,7 +3165,9 @@ function SettingsScreen({
           ]}
         />
         <DataPanel
+          plus={appState.plus}
           onExportCollection={exportCollectionCsv}
+          onExportInsuranceReport={exportInsuranceReport}
           onDownloadTemplate={downloadImportTemplate}
           onImportCollection={importCollectionCsv}
           onResetSampleData={resetSampleData}
@@ -3201,13 +3339,57 @@ function WishlistOpportunities({
   );
 }
 
+function BillingPanel({
+  plus,
+  onOpenBillingPortal,
+  onStartCheckout,
+}: {
+  plus: boolean;
+  onOpenBillingPortal: () => Promise<void>;
+  onStartCheckout: (plan: "monthly" | "yearly") => Promise<void>;
+}) {
+  return (
+    <section className="tool-panel">
+      <div className="panel-title-row">
+        <h2>Billing</h2>
+        {plus ? <span className="plan-pill"><Sparkles size={17} />Plus</span> : <span className="plan-pill"><Lock size={17} />Free</span>}
+      </div>
+      <MetricList
+        rows={[
+          ["Monthly", "GBP 2.49"],
+          ["Yearly", "Discounted"],
+          ["Provider", "Stripe Checkout"],
+        ]}
+      />
+      <div className="actions">
+        <button className="button primary" onClick={() => void onStartCheckout("monthly")}>
+          <Sparkles size={17} />
+          Start monthly
+        </button>
+        <button className="button" onClick={() => void onStartCheckout("yearly")}>
+          <Sparkles size={17} />
+          Start yearly
+        </button>
+        <button className="button" onClick={() => void onOpenBillingPortal()}>
+          <Settings size={17} />
+          Billing portal
+        </button>
+      </div>
+    </section>
+  );
+}
+
 function DataPanel({
+  plus,
   onExportCollection,
+  onExportInsuranceReport,
   onDownloadTemplate,
   onImportCollection,
   onResetSampleData,
 }: {
+  plus: boolean;
   onExportCollection: () => void;
+  onExportInsuranceReport: () => Promise<void>;
   onDownloadTemplate: () => void;
   onImportCollection: (file: File) => Promise<boolean>;
   onResetSampleData: () => void;
@@ -3234,6 +3416,10 @@ function DataPanel({
         <button className="button" onClick={onExportCollection}>
           <Download size={17} />
           Export CSV
+        </button>
+        <button className={plus ? "button" : "button danger"} onClick={() => void onExportInsuranceReport()}>
+          {plus ? <Download size={17} /> : <Lock size={17} />}
+          Insurance report
         </button>
         <label className="button file-button">
           <Upload size={17} />
@@ -3715,6 +3901,18 @@ function impactTagClass(impact: InsightAction["impact"]) {
   return "green";
 }
 
+function priceAlertTagClass(status: CollectionIntelligence["priceAlerts"][number]["status"]) {
+  if (status === "Hit") {
+    return "green";
+  }
+
+  if (status === "Refresh") {
+    return "blue";
+  }
+
+  return "amber";
+}
+
 function compareNullableNumbers(
   left: number | null,
   right: number | null,
@@ -3836,6 +4034,11 @@ function wishlistDeltaText(deltaMinor: number) {
 
 function downloadCsv(filename: string, csv: string) {
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+
+  downloadBlob(filename, blob);
+}
+
+function downloadBlob(filename: string, blob: Blob) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
 

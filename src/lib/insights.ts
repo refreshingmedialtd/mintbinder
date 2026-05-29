@@ -34,6 +34,17 @@ export type WishlistOpportunity = {
   savingMinor: number;
 };
 
+export type PriceAlertInsight = {
+  id: string;
+  itemName: string;
+  category: "Wishlist" | "Price confidence";
+  status: "Hit" | "Watch" | "Refresh";
+  detail: string;
+  currentValueMinor: number;
+  targetValueMinor?: number;
+  actionLabel: string;
+};
+
 export type SaleInsight = {
   id: string;
   itemName: string;
@@ -67,6 +78,7 @@ export type CollectionIntelligence = {
     count: number;
     valueMinor: number;
   };
+  priceAlerts: PriceAlertInsight[];
   storageConcentration?: {
     name: string;
     share: number;
@@ -160,6 +172,11 @@ export function buildCollectionIntelligence({
       }),
       { count: 0, valueMinor: 0 },
     );
+  const priceAlerts = priceAlertInsights({
+    holdings,
+    wishlist,
+    catalogueById,
+  });
   const storageConcentration = storageInsight(storageLocations, totalValue);
   const setFocus = setFocusInsight(sets);
   const activity = activityInsight(events);
@@ -193,6 +210,7 @@ export function buildCollectionIntelligence({
     duplicates,
     wishlistOpportunities,
     weakConfidence,
+    priceAlerts,
     storageConcentration,
     setFocus,
     activity,
@@ -278,6 +296,71 @@ function wishlistDealInsights(
     .filter((item): item is WishlistOpportunity => Boolean(item))
     .sort((left, right) => right.savingMinor - left.savingMinor)
     .slice(0, 4);
+}
+
+function priceAlertInsights({
+  catalogueById,
+  holdings,
+  wishlist,
+}: {
+  catalogueById: Map<string, CatalogueItem>;
+  holdings: HoldingInsight[];
+  wishlist: WishlistItem[];
+}): PriceAlertInsight[] {
+  const wishlistAlerts = wishlist
+    .map<PriceAlertInsight | undefined>((item) => {
+      const catalogueItem = catalogueById.get(item.catalogueId);
+      const targetValueMinor = item.targetPriceMinor;
+
+      if (!catalogueItem || targetValueMinor === undefined) {
+        return undefined;
+      }
+
+      const deltaMinor = catalogueItem.valueMinor - targetValueMinor;
+      const withinWatchBand = catalogueItem.valueMinor <= Math.round(targetValueMinor * 1.1);
+
+      if (deltaMinor > 0 && !withinWatchBand) {
+        return undefined;
+      }
+
+      return {
+        id: `wishlist-${item.id}`,
+        itemName: catalogueItem.name,
+        category: "Wishlist" as const,
+        status: deltaMinor <= 0 ? "Hit" as const : "Watch" as const,
+        detail:
+          deltaMinor <= 0
+            ? `${catalogueItem.name} is at or below your target.`
+            : `${catalogueItem.name} is within 10% of your target.`,
+        currentValueMinor: catalogueItem.valueMinor,
+        targetValueMinor,
+        actionLabel: "Open wishlist",
+      };
+    })
+    .filter(isPriceAlertInsight);
+  const confidenceAlerts = holdings
+    .filter((holding) => holding.confidence === "Weak")
+    .map((holding) => ({
+      id: `confidence-${holding.id}`,
+      itemName: holding.name,
+      category: "Price confidence" as const,
+      status: "Refresh" as const,
+      detail: `${holding.name} is using weak price confidence.`,
+      currentValueMinor: holding.valueMinor,
+      actionLabel: "Review value",
+    }));
+
+  return [...wishlistAlerts, ...confidenceAlerts]
+    .sort((left, right) => {
+      const statusRank = { Hit: 0, Watch: 1, Refresh: 2 };
+
+      return statusRank[left.status] - statusRank[right.status] || right.currentValueMinor - left.currentValueMinor;
+    })
+    .slice(0, 8);
+}
+
+function isPriceAlertInsight(value: PriceAlertInsight | undefined): value is PriceAlertInsight {
+  return Boolean(value);
 }
 
 function storageInsight(locations: StorageLocation[], totalValue: number) {

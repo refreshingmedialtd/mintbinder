@@ -63,6 +63,10 @@ Use this local development connection string:
 ```env
 DATABASE_URL="postgresql://postgres:postgres@localhost:5432/pokestop?schema=public"
 AUTH_SECRET="replace-with-a-random-32-byte-secret"
+NEXT_PUBLIC_APP_URL="http://127.0.0.1:3000"
+STRIPE_SECRET_KEY=""
+STRIPE_PLUS_MONTHLY_PRICE_ID=""
+STRIPE_PLUS_YEARLY_PRICE_ID=""
 ```
 
 Useful commands:
@@ -89,8 +93,13 @@ Creating an account from the sign-in screen creates a new collector profile with
 - `POST /api/collection-items`: creates a collection item and matching collection event for the signed-in user.
 - `PATCH /api/collection-items/:id`: updates owned item details and records an edit event for the signed-in user.
 - `DELETE /api/collection-items/:id`: archives an owned item and records a remove event for the signed-in user.
+- `POST /api/collection-items/:id/sale`: records a sale and removes the lot from active collection.
 - `POST /api/wishlist-items`: creates or returns a wishlist item for the signed-in user.
 - `DELETE /api/wishlist-items?id=...`: removes a wishlist item for the signed-in user.
+- `GET /api/alerts/price`: returns Plus-gated price alert insights.
+- `GET /api/reports/insurance`: exports a Plus-gated insurance-style HTML report.
+- `POST /api/billing/checkout`: creates a Stripe subscription Checkout session when Stripe env vars are configured.
+- `POST /api/billing/portal`: creates a Stripe billing portal session for users with a Stripe customer.
 
 ## Static Prototype
 
