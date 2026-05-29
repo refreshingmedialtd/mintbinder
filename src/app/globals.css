@@ -741,6 +741,72 @@ h3 {
   text-align: right;
 }
 
+.storage-list,
+.event-list {
+  display: grid;
+  gap: 10px;
+}
+
+.storage-row,
+.event-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+
+.storage-row:first-child,
+.event-row:first-child {
+  border-top: 0;
+}
+
+.storage-main,
+.storage-actions,
+.event-copy {
+  display: grid;
+  gap: 5px;
+}
+
+.storage-main {
+  min-width: 0;
+}
+
+.storage-main > span,
+.event-copy span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.storage-main p {
+  margin: 0;
+}
+
+.storage-actions {
+  justify-items: end;
+  text-align: right;
+}
+
+.event-row {
+  justify-content: flex-start;
+}
+
+.event-marker {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: #f8fafc;
+  color: var(--accent-dark);
+  font-size: 12px;
+  font-weight: 900;
+}
+
 .mini-chart {
   display: grid;
   grid-template-columns: repeat(7, 1fr);

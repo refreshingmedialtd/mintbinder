@@ -1,4 +1,12 @@
-import type { AppData, CatalogueItem, CollectionItem, SetProgress, WishlistItem } from "./types";
+import type {
+  AppData,
+  CatalogueItem,
+  CollectionEvent,
+  CollectionItem,
+  SetProgress,
+  StorageLocation,
+  WishlistItem,
+} from "./types";
 
 export const catalogue: CatalogueItem[] = [
   {
@@ -148,11 +156,74 @@ export const setProgress: SetProgress[] = [
   },
 ];
 
+export const storageLocations: StorageLocation[] = [
+  {
+    id: "storage-blue-binder",
+    name: "Blue Binder",
+    type: "Binder",
+    itemCount: 2,
+    totalQuantity: 2,
+    valueMinor: 85800,
+  },
+  {
+    id: "storage-sealed-box-1",
+    name: "Sealed Box 1",
+    type: "Box",
+    itemCount: 1,
+    totalQuantity: 2,
+    valueMinor: 6400,
+  },
+  {
+    id: "storage-safe",
+    name: "Safe",
+    type: "Safe",
+    notes: "Reserved for graded slabs and higher value sealed items.",
+    itemCount: 0,
+    totalQuantity: 0,
+    valueMinor: 0,
+  },
+];
+
+export const collectionEvents: CollectionEvent[] = [
+  {
+    id: "event-charizard-added",
+    type: "Added",
+    itemId: "owned-charizard",
+    catalogueId: "card-charizard-151",
+    itemName: "Charizard ex",
+    quantity: 1,
+    occurredAt: "2026-05-01",
+    notes: "Bought at card show.",
+  },
+  {
+    id: "event-bundle-added",
+    type: "Added",
+    itemId: "owned-bundle",
+    catalogueId: "sealed-151-bundle",
+    itemName: "151 Booster Bundle",
+    quantity: 2,
+    occurredAt: "2025-08-18",
+    notes: "Keep sealed.",
+  },
+  {
+    id: "event-umbreon-added",
+    type: "Added",
+    itemId: "owned-umbreon",
+    catalogueId: "card-umbreon-vmax",
+    itemName: "Umbreon VMAX",
+    quantity: 1,
+    occurredAt: "2024-11-12",
+    notes: "Long-term hold.",
+  },
+];
+
 export const sampleAppData: AppData = {
   catalogue,
   collection: initialCollection,
   wishlist: initialWishlist,
   sets: setProgress,
+  storageLocations,
+  events: collectionEvents,
   source: "sample",
   notice: "Using sample data because no database connection is active.",
 };

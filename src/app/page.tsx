@@ -8,10 +8,12 @@ import {
   Download,
   GalleryVerticalEnd,
   Heart,
+  History,
   Layers3,
   LayoutDashboard,
   LogIn,
   LogOut,
+  MapPin,
   Lock,
   PackagePlus,
   Plus,
@@ -26,17 +28,19 @@ import {
 import Image from "next/image";
 import { signIn, signOut, useSession } from "next-auth/react";
 import type { Dispatch, FormEvent, ReactNode, SetStateAction } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { completionPercent, formatMoney } from "@/lib/format";
 import { sampleAppData } from "@/lib/sample-data";
 import type {
   AppData,
   AppDataSource,
   CatalogueItem,
+  CollectionEvent,
   CollectionItem,
   ItemType,
   Screen,
   SetProgress,
+  StorageLocation,
   WishlistItem,
 } from "@/lib/types";
 
@@ -69,6 +73,8 @@ const initialState: AppState = {
   plus: false,
 };
 
+const storageTypes: StorageLocation["type"][] = ["Binder", "Box", "Display", "Safe", "Other"];
+
 export default function Home() {
   const { data: session, status } = useSession();
   const [appState, setAppState] = useState(initialState);
@@ -76,6 +82,8 @@ export default function Home() {
   const [collection, setCollection] = useState<CollectionItem[]>(sampleAppData.collection);
   const [wishlist, setWishlist] = useState<WishlistItem[]>(sampleAppData.wishlist);
   const [sets, setSets] = useState<SetProgress[]>(sampleAppData.sets);
+  const [storageLocations, setStorageLocations] = useState<StorageLocation[]>(sampleAppData.storageLocations);
+  const [collectionEvents, setCollectionEvents] = useState<CollectionEvent[]>(sampleAppData.events);
   const [dataSource, setDataSource] = useState<AppDataSource>(sampleAppData.source);
   const [dataNotice, setDataNotice] = useState(sampleAppData.notice ?? "");
   const [isLoadingData, setIsLoadingData] = useState(true);
@@ -99,16 +107,37 @@ export default function Home() {
     email: session?.user?.email || "",
   };
 
-  useEffect(() => {
-    if (status !== "authenticated" || !session?.user?.id) {
-      setIsLoadingData(status === "loading");
-      return;
-    }
+  const applyAppData = useCallback((data: AppData) => {
+    setCatalogueItems(data.catalogue);
+    setCollection(data.collection);
+    setWishlist(data.wishlist);
+    setSets(data.sets);
+    setStorageLocations(data.storageLocations);
+    setCollectionEvents(data.events);
+    setDataSource(data.source);
+    setDataNotice(data.notice ?? "");
+    setAppState((current) => ({
+      ...current,
+      selectedItemId: data.collection.some((item) => item.id === current.selectedItemId)
+        ? current.selectedItemId
+        : data.collection[0]?.id ?? current.selectedItemId,
+      selectedCatalogueId: data.catalogue.some((item) => item.id === current.selectedCatalogueId)
+        ? current.selectedCatalogueId
+        : data.catalogue.find((item) => item.type === current.addType)?.id ??
+          data.catalogue[0]?.id ??
+          current.selectedCatalogueId,
+      selectedSetId: data.sets.some((set) => set.id === current.selectedSetId)
+        ? current.selectedSetId
+        : data.sets[0]?.id ?? current.selectedSetId,
+    }));
+  }, []);
 
-    let cancelled = false;
-    setIsLoadingData(true);
+  const refreshAppData = useCallback(
+    async (options?: { quiet?: boolean; isCancelled?: () => boolean }) => {
+      if (!options?.quiet && !options?.isCancelled?.()) {
+        setIsLoadingData(true);
+      }
 
-    async function loadAppData() {
       try {
         const response = await fetch("/api/app-data", { cache: "no-store" });
 
@@ -118,55 +147,43 @@ export default function Home() {
 
         const data = (await response.json()) as AppData;
 
-        if (cancelled) {
-          return;
+        if (options?.isCancelled?.()) {
+          return false;
         }
 
         applyAppData(data);
+        return true;
       } catch (error) {
         console.warn("Using sample app data after API load failed.", error);
-        if (!cancelled) {
+        if (!options?.isCancelled?.()) {
           applyAppData({
             ...sampleAppData,
             notice: "Using sample data because the app data API could not be reached.",
           });
         }
+        return false;
       } finally {
-        if (!cancelled) {
+        if (!options?.quiet && !options?.isCancelled?.()) {
           setIsLoadingData(false);
         }
       }
+    },
+    [applyAppData],
+  );
+
+  useEffect(() => {
+    if (status !== "authenticated" || !session?.user?.id) {
+      setIsLoadingData(status === "loading");
+      return;
     }
 
-    function applyAppData(data: AppData) {
-      setCatalogueItems(data.catalogue);
-      setCollection(data.collection);
-      setWishlist(data.wishlist);
-      setSets(data.sets);
-      setDataSource(data.source);
-      setDataNotice(data.notice ?? "");
-      setAppState((current) => ({
-        ...current,
-        selectedItemId: data.collection.some((item) => item.id === current.selectedItemId)
-          ? current.selectedItemId
-          : data.collection[0]?.id ?? current.selectedItemId,
-        selectedCatalogueId: data.catalogue.some((item) => item.id === current.selectedCatalogueId)
-          ? current.selectedCatalogueId
-          : data.catalogue.find((item) => item.type === current.addType)?.id ??
-            data.catalogue[0]?.id ??
-            current.selectedCatalogueId,
-        selectedSetId: data.sets.some((set) => set.id === current.selectedSetId)
-          ? current.selectedSetId
-          : data.sets[0]?.id ?? current.selectedSetId,
-      }));
-    }
-
-    void loadAppData();
+    let cancelled = false;
+    void refreshAppData({ isCancelled: () => cancelled });
 
     return () => {
       cancelled = true;
     };
-  }, [session?.user?.id, status]);
+  }, [refreshAppData, session?.user?.id, status]);
 
   const summary = useMemo(() => {
     return collection.reduce(
@@ -269,6 +286,7 @@ export default function Home() {
           screen: "item",
           selectedItemId: result.item.id,
         }));
+        void refreshAppData({ quiet: true });
         showToast(`${catalogueItem.name} added to collection.`);
         return;
       } catch (error) {
@@ -367,6 +385,7 @@ export default function Home() {
         const result = (await response.json()) as { item: CollectionItem };
         setCollection((items) => [...items, result.item]);
         setAppState((current) => ({ ...current, selectedItemId: result.item.id }));
+        void refreshAppData({ quiet: true });
         showToast(`${catalogueItem?.name ?? "Item"} duplicated.`);
         return;
       } catch (error) {
@@ -418,6 +437,7 @@ export default function Home() {
 
         const result = (await response.json()) as { item: CollectionItem };
         setCollection((items) => items.map((item) => (item.id === itemId ? result.item : item)));
+        void refreshAppData({ quiet: true });
         showToast(`${catalogueItem.name} updated.`);
         return true;
       } catch (error) {
@@ -456,6 +476,8 @@ export default function Home() {
       return false;
     }
 
+    let removedInDatabase = false;
+
     if (dataSource === "database") {
       try {
         const response = await fetch(`/api/collection-items/${encodeURIComponent(itemId)}`, {
@@ -465,6 +487,8 @@ export default function Home() {
         if (!response.ok) {
           throw new Error(`Remove collection item failed with ${response.status}`);
         }
+
+        removedInDatabase = true;
       } catch (error) {
         console.warn("Falling back to local collection removal.", error);
         showToast("Database remove failed, so this change is local for now.");
@@ -497,6 +521,10 @@ export default function Home() {
       }
     }
 
+    if (removedInDatabase) {
+      void refreshAppData({ quiet: true });
+    }
+
     showToast(`${catalogueItem?.name ?? "Item"} removed from collection.`);
     return true;
   }
@@ -506,6 +534,8 @@ export default function Home() {
     setCollection(sampleAppData.collection);
     setWishlist(sampleAppData.wishlist);
     setSets(sampleAppData.sets);
+    setStorageLocations(sampleAppData.storageLocations);
+    setCollectionEvents(sampleAppData.events);
     setDataSource(sampleAppData.source);
     setDataNotice(sampleAppData.notice ?? "");
     setAppState(initialState);
@@ -535,6 +565,102 @@ export default function Home() {
     if (!options?.quiet) {
       showToast("Wishlist item removed.");
     }
+  }
+
+  async function createStorageLocation(formData: FormData) {
+    const payload = {
+      name: String(formData.get("name") ?? "").trim(),
+      type: String(formData.get("type") ?? "Other"),
+      notes: String(formData.get("notes") ?? "").trim(),
+    };
+
+    if (!payload.name) {
+      showToast("Storage location needs a name.");
+      return false;
+    }
+
+    if (dataSource === "database") {
+      try {
+        const response = await fetch("/api/storage-locations", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Create storage location failed with ${response.status}`);
+        }
+
+        const result = (await response.json()) as { location: StorageLocation };
+        setStorageLocations((locations) => mergeStorageLocation(locations, result.location));
+        void refreshAppData({ quiet: true });
+        showToast(`${result.location.name} added to storage.`);
+        return true;
+      } catch (error) {
+        console.warn("Falling back to local storage location update.", error);
+        showToast("Database save failed, so this storage location is local for now.");
+      }
+    }
+
+    const existing = storageLocations.find(
+      (location) => location.name.toLowerCase() === payload.name.toLowerCase(),
+    );
+    const location: StorageLocation = {
+      id: existing?.id ?? `storage-${Date.now()}`,
+      name: payload.name,
+      type: storageTypes.includes(payload.type as StorageLocation["type"])
+        ? (payload.type as StorageLocation["type"])
+        : "Other",
+      notes: payload.notes || undefined,
+      itemCount: existing?.itemCount ?? 0,
+      totalQuantity: existing?.totalQuantity ?? 0,
+      valueMinor: existing?.valueMinor ?? 0,
+    };
+
+    setStorageLocations((locations) => mergeStorageLocation(locations, location));
+    showToast(`${location.name} added to storage.`);
+    return true;
+  }
+
+  async function deleteStorageLocation(id: string) {
+    const location = storageLocations.find((item) => item.id === id);
+
+    if (!location) {
+      return false;
+    }
+
+    let deletedInDatabase = false;
+
+    if (dataSource === "database") {
+      try {
+        const response = await fetch(`/api/storage-locations/${encodeURIComponent(id)}`, {
+          method: "DELETE",
+        });
+
+        if (!response.ok) {
+          throw new Error(`Delete storage location failed with ${response.status}`);
+        }
+
+        deletedInDatabase = true;
+      } catch (error) {
+        console.warn("Falling back to local storage location deletion.", error);
+        showToast("Database delete failed, so this storage change is local for now.");
+      }
+    }
+
+    setStorageLocations((locations) => locations.filter((item) => item.id !== id));
+    setCollection((items) =>
+      items.map((item) =>
+        item.location === location.name ? { ...item, location: "Unassigned" } : item,
+      ),
+    );
+
+    if (deletedInDatabase) {
+      void refreshAppData({ quiet: true });
+    }
+
+    showToast(`${location.name} removed from storage.`);
+    return true;
   }
 
   async function handleSignIn(event: FormEvent<HTMLFormElement>) {
@@ -592,6 +718,8 @@ export default function Home() {
     catalogueItems,
     catalogueById,
     collection,
+    storageLocations,
+    collectionEvents,
     sets,
     dataSource,
     dataNotice,
@@ -613,6 +741,8 @@ export default function Home() {
     addToWishlist,
     duplicateItem,
     removeWishlistItem,
+    createStorageLocation,
+    deleteStorageLocation,
     setAppState,
     showToast,
     resetSampleData,
@@ -643,6 +773,8 @@ type ScreenContext = {
   catalogueItems: CatalogueItem[];
   catalogueById: Map<string, CatalogueItem>;
   collection: CollectionItem[];
+  storageLocations: StorageLocation[];
+  collectionEvents: CollectionEvent[];
   sets: SetProgress[];
   dataSource: AppDataSource;
   dataNotice: string;
@@ -671,6 +803,8 @@ type ScreenContext = {
   addToWishlist: (catalogueId: string) => Promise<void>;
   duplicateItem: (itemId: string) => Promise<void>;
   removeWishlistItem: (id: string, options?: { quiet?: boolean }) => Promise<void>;
+  createStorageLocation: (formData: FormData) => Promise<boolean>;
+  deleteStorageLocation: (id: string) => Promise<boolean>;
   setAppState: Dispatch<SetStateAction<AppState>>;
   showToast: (message: string) => void;
   resetSampleData: () => void;
@@ -937,6 +1071,7 @@ function MobileNavButton({
 
 function DashboardScreen({
   collection,
+  collectionEvents,
   catalogueById,
   sets,
   dataSource,
@@ -1013,6 +1148,14 @@ function DashboardScreen({
               </button>
             </div>
             {dataNotice ? <p className="muted">{dataNotice}</p> : null}
+          </section>
+
+          <section className="tool-panel">
+            <div className="panel-title-row">
+              <h2>Recent history</h2>
+              <History size={18} />
+            </div>
+            <EventList events={collectionEvents.slice(0, 4)} />
           </section>
 
           <section className="section-block">
@@ -1156,6 +1299,7 @@ function CollectionScreen({
 function AddScreen({
   appState,
   catalogueItems,
+  storageLocations,
   addSearch,
   setAddSearch,
   setAppState,
@@ -1171,6 +1315,10 @@ function AddScreen({
   const selected =
     catalogueItems.find((item) => item.id === appState.selectedCatalogueId && item.type === appState.addType) ??
     results[0];
+  const locationOptions = storageOptionNames(
+    storageLocations,
+    selected ? defaultStorageLocation(storageLocations, selected.type) : undefined,
+  );
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1270,11 +1418,13 @@ function AddScreen({
                 <input name="paid" inputMode="decimal" placeholder="GBP 0.00" />
               </Field>
               <Field label="Location">
-                <select name="location" defaultValue={selected?.type === "sealed" ? "Sealed Box 1" : "Blue Binder"}>
-                  <option>Blue Binder</option>
-                  <option>Sealed Box 1</option>
-                  <option>Safe</option>
-                  <option>Unassigned</option>
+                <select
+                  name="location"
+                  defaultValue={selected ? defaultStorageLocation(storageLocations, selected.type) : "Unassigned"}
+                >
+                  {locationOptions.map((location) => (
+                    <option key={location}>{location}</option>
+                  ))}
                 </select>
               </Field>
               <Field label="Variant">
@@ -1306,8 +1456,10 @@ function ItemDetailScreen({
   archiveCollectionItem,
   catalogueById,
   collection,
+  collectionEvents,
   duplicateItem,
   navigate,
+  storageLocations,
   updateCollectionItem,
 }: ScreenContext) {
   const [isEditing, setIsEditing] = useState(false);
@@ -1329,7 +1481,8 @@ function ItemDetailScreen({
   const cost = owned.purchasePriceMinor ?? null;
   const gain = value !== null && cost !== null ? value - cost : null;
   const itemName = item.name;
-  const locationOptions = uniqueValues(["Blue Binder", "Sealed Box 1", "Safe", "Unassigned", owned.location]);
+  const locationOptions = storageOptionNames(storageLocations, owned.location);
+  const itemEvents = collectionEvents.filter((event) => event.itemId === owned.id).slice(0, 6);
 
   async function handleUpdate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1470,6 +1623,13 @@ function ItemDetailScreen({
           <section className="tool-panel">
             <h2>Notes</h2>
             <p className="muted">{owned.notes || "No notes yet."}</p>
+          </section>
+          <section className="tool-panel">
+            <div className="panel-title-row">
+              <h2>History</h2>
+              <History size={18} />
+            </div>
+            <EventList events={itemEvents} />
           </section>
         </div>
       </div>
@@ -1697,8 +1857,29 @@ function WishlistScreen({
   );
 }
 
-function AnalyticsScreen({ appState, summary, wishlistTotal, setAppState }: ScreenContext) {
+function AnalyticsScreen({
+  appState,
+  catalogueById,
+  collection,
+  collectionEvents,
+  storageLocations,
+  summary,
+  wishlistTotal,
+  setAppState,
+}: ScreenContext) {
   const gain = summary.value - summary.cost;
+  const catalogueCounts = collection.reduce<Record<string, number>>((counts, item) => {
+    counts[item.catalogueId] = (counts[item.catalogueId] ?? 0) + item.quantity;
+    return counts;
+  }, {});
+  const duplicateItems = collection.filter((item) => (catalogueCounts[item.catalogueId] ?? 0) > 1);
+  const duplicateValue = duplicateItems.reduce((total, item) => {
+    return total + (getOwnedValue(item, catalogueById.get(item.catalogueId)) ?? 0);
+  }, 0);
+  const activeLocations = storageLocations.filter((location) => location.totalQuantity > 0).length;
+  const recentActivity = collectionEvents.length
+    ? `${collectionEvents[0].type} ${collectionEvents[0].itemName}`
+    : "No activity yet";
 
   if (!appState.plus) {
     return (
@@ -1742,7 +1923,7 @@ function AnalyticsScreen({ appState, summary, wishlistTotal, setAppState }: Scre
         <StatCard label="Current value" value={formatMoney(summary.value)} note={`${summary.items} tracked items`} />
         <StatCard label="Cost basis" value={formatMoney(summary.cost)} note="Known purchase prices" />
         <StatCard label="Gain/loss" value={formatMoney(gain)} note="Against known cost" positive={gain >= 0} />
-        <StatCard label="Duplicates" value="8" note="Worth reviewing" />
+        <StatCard label="Duplicates" value={duplicateItems.length.toString()} note={`${formatMoney(duplicateValue)} across duplicate lots`} />
       </div>
       <div className="dashboard-grid">
         <section className="tool-panel">
@@ -1752,12 +1933,19 @@ function AnalyticsScreen({ appState, summary, wishlistTotal, setAppState }: Scre
         <MetricPanel
           title="Opportunities"
           rows={[
-            ["Best performer", "Umbreon VMAX"],
-            ["Duplicate value", "GBP 128.00"],
-            ["Grading candidate", "Charizard ex"],
+            ["Recent activity", recentActivity],
+            ["Storage locations", `${activeLocations} active`],
+            ["Duplicate value", formatMoney(duplicateValue)],
             ["Wishlist gap", formatMoney(wishlistTotal)],
           ]}
         />
+        <section className="tool-panel">
+          <div className="panel-title-row">
+            <h2>Activity feed</h2>
+            <History size={18} />
+          </div>
+          <EventList events={collectionEvents.slice(0, 6)} />
+        </section>
       </div>
     </section>
   );
@@ -1771,6 +1959,9 @@ function SettingsScreen({
   isLoadingData,
   resetSampleData,
   showToast,
+  storageLocations,
+  createStorageLocation,
+  deleteStorageLocation,
 }: ScreenContext) {
   return (
     <section className="page">
@@ -1815,16 +2006,129 @@ function SettingsScreen({
             </button>
           </div>
         </section>
-        <section className="tool-panel">
-          <h2>Storage</h2>
-          <div className="tag-row">
-            <span className="tag">Blue Binder</span>
-            <span className="tag">Sealed Box 1</span>
-            <span className="tag">Safe</span>
-          </div>
-        </section>
+        <StoragePanel
+          locations={storageLocations}
+          onCreate={createStorageLocation}
+          onDelete={deleteStorageLocation}
+        />
       </div>
     </section>
+  );
+}
+
+function StoragePanel({
+  locations,
+  onCreate,
+  onDelete,
+}: {
+  locations: StorageLocation[];
+  onCreate: (formData: FormData) => Promise<boolean>;
+  onDelete: (id: string) => Promise<boolean>;
+}) {
+  const [isSaving, setIsSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState("");
+
+  async function handleCreate(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setIsSaving(true);
+    const created = await onCreate(new FormData(event.currentTarget));
+    setIsSaving(false);
+
+    if (created) {
+      event.currentTarget.reset();
+    }
+  }
+
+  async function handleDelete(location: StorageLocation) {
+    if (!window.confirm(`Delete ${location.name}? Items in this location will move to Unassigned.`)) {
+      return;
+    }
+
+    setDeletingId(location.id);
+    await onDelete(location.id);
+    setDeletingId("");
+  }
+
+  return (
+    <section className="tool-panel">
+      <div className="panel-title-row">
+        <h2>Storage</h2>
+        <MapPin size={18} />
+      </div>
+      <form className="form-stack" onSubmit={handleCreate}>
+        <div className="field-grid">
+          <Field label="Name">
+            <input name="name" placeholder="Trade binder" required />
+          </Field>
+          <Field label="Type">
+            <select name="type" defaultValue="Binder">
+              {storageTypes.map((type) => (
+                <option key={type}>{type}</option>
+              ))}
+            </select>
+          </Field>
+        </div>
+        <Field label="Notes">
+          <textarea name="notes" placeholder="Optional" />
+        </Field>
+        <button className="button primary" type="submit" disabled={isSaving}>
+          <Plus size={17} />
+          {isSaving ? "Adding" : "Add location"}
+        </button>
+      </form>
+      <div className="storage-list">
+        {locations.length ? (
+          locations.map((location) => (
+            <article className="storage-row" key={location.id}>
+              <div className="storage-main">
+                <strong>{location.name}</strong>
+                <span>
+                  {location.type} | {location.itemCount} lots | Qty {location.totalQuantity}
+                </span>
+                {location.notes ? <p className="muted">{location.notes}</p> : null}
+              </div>
+              <div className="storage-actions">
+                <strong>{formatMoney(location.valueMinor)}</strong>
+                <button
+                  className="button small danger"
+                  type="button"
+                  aria-label={`Delete ${location.name}`}
+                  disabled={deletingId === location.id}
+                  onClick={() => void handleDelete(location)}
+                >
+                  <Trash2 size={16} />
+                  {deletingId === location.id ? "Deleting" : "Delete"}
+                </button>
+              </div>
+            </article>
+          ))
+        ) : (
+          <p className="muted">No storage locations yet.</p>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function EventList({ events }: { events: CollectionEvent[] }) {
+  if (!events.length) {
+    return <p className="muted">No collection history yet.</p>;
+  }
+
+  return (
+    <div className="event-list">
+      {events.map((event) => (
+        <article className="event-row" key={event.id}>
+          <span className="event-marker">{event.type.slice(0, 1)}</span>
+          <div className="event-copy">
+            <strong>
+              {event.type} {event.itemName}
+            </strong>
+            <span>{eventSummary(event)}</span>
+          </div>
+        </article>
+      ))}
+    </div>
   );
 }
 
@@ -2099,6 +2403,50 @@ function getOwnedValue(item: CollectionItem, catalogueItem?: CatalogueItem) {
   }
 
   return item.overrideValueMinor ?? catalogueItem.valueMinor * item.quantity;
+}
+
+function storageOptionNames(locations: StorageLocation[], current?: string) {
+  return uniqueValues([...locations.map((location) => location.name), current ?? "", "Unassigned"]);
+}
+
+function defaultStorageLocation(locations: StorageLocation[], itemType: ItemType) {
+  const preferredType: StorageLocation["type"] = itemType === "sealed" ? "Box" : "Binder";
+  const preferred = locations.find((location) => location.type === preferredType);
+
+  return preferred?.name ?? locations[0]?.name ?? "Unassigned";
+}
+
+function mergeStorageLocation(locations: StorageLocation[], nextLocation: StorageLocation) {
+  const merged = [
+    nextLocation,
+    ...locations.filter((location) => location.id !== nextLocation.id),
+  ];
+
+  return merged.sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function eventSummary(event: CollectionEvent) {
+  const parts = [
+    event.quantity ? `Qty ${event.quantity}` : "",
+    event.amountMinor ? formatMoney(event.amountMinor) : "",
+    formatEventDate(event.occurredAt),
+  ].filter(Boolean);
+
+  return parts.join(" | ");
+}
+
+function formatEventDate(value: string) {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }).format(date);
 }
 
 function payloadFromCollectionItem(item: CollectionItem) {

@@ -6,7 +6,16 @@ import {
   WishlistPriority,
 } from "@prisma/client";
 import { sampleAppData } from "@/lib/sample-data";
-import type { AppData, CatalogueItem, CollectionItem, ItemType, SetProgress, WishlistItem } from "@/lib/types";
+import type {
+  AppData,
+  CatalogueItem,
+  CollectionEvent as ClientCollectionEvent,
+  CollectionItem,
+  ItemType,
+  SetProgress,
+  StorageLocation,
+  WishlistItem,
+} from "@/lib/types";
 import { prisma } from "./prisma";
 
 type PriceLike = {
@@ -27,6 +36,14 @@ export type CreateCollectionItemInput = {
 
 export type UpdateCollectionItemInput = Omit<CreateCollectionItemInput, "catalogueId">;
 
+export type CreateStorageLocationInput = {
+  name?: string;
+  type?: string;
+  notes?: string;
+};
+
+export type UpdateStorageLocationInput = CreateStorageLocationInput;
+
 export function sampleDataFallback(notice: string): AppData {
   return {
     ...sampleAppData,
@@ -40,7 +57,15 @@ export async function getAppData(userId: string): Promise<AppData> {
   }
 
   try {
-    const [cardPrintings, sealedProducts, collectionItems, wishlistItems, cardSets] =
+    const [
+      cardPrintings,
+      sealedProducts,
+      collectionItems,
+      wishlistItems,
+      cardSets,
+      storageLocations,
+      collectionEvents,
+    ] =
       await Promise.all([
         prisma.cardPrinting.findMany({
           include: {
@@ -67,27 +92,7 @@ export async function getAppData(userId: string): Promise<AppData> {
             userId,
             archivedAt: null,
           },
-          include: {
-            cardPrinting: {
-              include: {
-                cardSet: true,
-                priceSnapshots: {
-                  orderBy: { observedAt: "desc" },
-                  take: 1,
-                },
-              },
-            },
-            sealedProduct: {
-              include: {
-                relatedCardSet: true,
-                priceSnapshots: {
-                  orderBy: { observedAt: "desc" },
-                  take: 1,
-                },
-              },
-            },
-            storageLocation: true,
-          },
+          include: collectionItemInclude,
           orderBy: { createdAt: "asc" },
         }),
         prisma.wishlistItem.findMany({
@@ -131,6 +136,16 @@ export async function getAppData(userId: string): Promise<AppData> {
           },
           orderBy: { releaseDate: "desc" },
         }),
+        prisma.storageLocation.findMany({
+          where: { userId },
+          orderBy: { name: "asc" },
+        }),
+        prisma.collectionEvent.findMany({
+          where: { userId },
+          include: collectionEventInclude,
+          orderBy: { occurredAt: "desc" },
+          take: 12,
+        }),
       ]);
 
     const catalogue: CatalogueItem[] = [
@@ -147,6 +162,8 @@ export async function getAppData(userId: string): Promise<AppData> {
       collection: collectionItems.map(mapCollectionItem),
       wishlist: wishlistItems.map(mapWishlistItem),
       sets: cardSets.map(mapSetProgress),
+      storageLocations: mapStorageLocations(storageLocations, collectionItems),
+      events: collectionEvents.map(mapCollectionEvent),
       source: "database",
     };
   } catch (error) {
@@ -321,6 +338,79 @@ export async function archiveCollectionItem(userId: string, id: string) {
           metadata: { source: "app_api" },
         },
       },
+    },
+  });
+}
+
+export async function createStorageLocation(
+  userId: string,
+  input: CreateStorageLocationInput,
+): Promise<StorageLocation> {
+  assertDatabaseConfigured();
+
+  const name = normalizeStorageName(input.name);
+  const notes = normalizeOptionalText(input.notes);
+  const type = storageLocationTypeToEnum(input.type);
+
+  const location = await prisma.storageLocation.upsert({
+    where: {
+      userId_name: {
+        userId,
+        name,
+      },
+    },
+    update: {
+      type,
+      notes: notes ?? null,
+    },
+    create: {
+      userId,
+      name,
+      type,
+      notes,
+    },
+  });
+
+  return mapStorageLocation(location, []);
+}
+
+export async function updateStorageLocation(
+  userId: string,
+  id: string,
+  input: UpdateStorageLocationInput,
+): Promise<StorageLocation> {
+  assertDatabaseConfigured();
+
+  const existing = await prisma.storageLocation.findFirst({
+    where: {
+      id,
+      userId,
+    },
+  });
+
+  if (!existing) {
+    throw new Error("Storage location not found.");
+  }
+
+  const location = await prisma.storageLocation.update({
+    where: { id: existing.id },
+    data: {
+      name: input.name === undefined ? undefined : normalizeStorageName(input.name),
+      type: input.type === undefined ? undefined : storageLocationTypeToEnum(input.type),
+      notes: input.notes === undefined ? undefined : normalizeOptionalText(input.notes) ?? null,
+    },
+  });
+
+  return mapStorageLocation(location, []);
+}
+
+export async function deleteStorageLocation(userId: string, id: string) {
+  assertDatabaseConfigured();
+
+  await prisma.storageLocation.deleteMany({
+    where: {
+      id,
+      userId,
     },
   });
 }
@@ -530,6 +620,93 @@ function mapSetProgress(set: {
   };
 }
 
+function mapStorageLocations(
+  locations: Array<{ id: string; name: string; type: string; notes: string | null }>,
+  collectionItems: Array<{
+    storageLocationId: string | null;
+    quantity: number;
+    currentValueOverrideMinor: number | null;
+    cardPrinting: { priceSnapshots: PriceLike[] } | null;
+    sealedProduct: { priceSnapshots: PriceLike[] } | null;
+  }>,
+): StorageLocation[] {
+  return locations.map((location) => {
+    const locationItems = collectionItems.filter((item) => item.storageLocationId === location.id);
+    return mapStorageLocation(location, locationItems);
+  });
+}
+
+function mapStorageLocation(
+  location: { id: string; name: string; type: string; notes: string | null },
+  items: Array<{
+    quantity: number;
+    currentValueOverrideMinor: number | null;
+    cardPrinting: { priceSnapshots: PriceLike[] } | null;
+    sealedProduct: { priceSnapshots: PriceLike[] } | null;
+  }>,
+): StorageLocation {
+  return {
+    id: location.id,
+    name: location.name,
+    type: storageLocationTypeLabel(location.type),
+    notes: location.notes ?? undefined,
+    itemCount: items.length,
+    totalQuantity: items.reduce((total, item) => total + item.quantity, 0),
+    valueMinor: items.reduce((total, item) => total + collectionItemValueMinor(item), 0),
+  };
+}
+
+function mapCollectionEvent(event: {
+  id: string;
+  eventType: string;
+  quantity: number | null;
+  amountMinor: number | null;
+  currency: string | null;
+  occurredAt: Date;
+  notes: string | null;
+  collectionItem: {
+    id: string;
+    cardPrintingId: string | null;
+    sealedProductId: string | null;
+    cardPrinting: { name: string } | null;
+    sealedProduct: { name: string } | null;
+  };
+}): ClientCollectionEvent {
+  return {
+    id: event.id,
+    type: enumLabel(event.eventType) as ClientCollectionEvent["type"],
+    itemId: event.collectionItem.id,
+    catalogueId: event.collectionItem.cardPrintingId ?? event.collectionItem.sealedProductId ?? "",
+    itemName:
+      event.collectionItem.cardPrinting?.name ??
+      event.collectionItem.sealedProduct?.name ??
+      "Collection item",
+    quantity: event.quantity ?? undefined,
+    amountMinor: event.amountMinor ?? undefined,
+    currency: event.currency ?? undefined,
+    occurredAt: event.occurredAt.toISOString(),
+    notes: event.notes ?? undefined,
+  };
+}
+
+function collectionItemValueMinor(item: {
+  quantity: number;
+  currentValueOverrideMinor: number | null;
+  cardPrinting: { priceSnapshots: PriceLike[] } | null;
+  sealedProduct: { priceSnapshots: PriceLike[] } | null;
+}) {
+  if (item.currentValueOverrideMinor !== null) {
+    return item.currentValueOverrideMinor;
+  }
+
+  const unitValue =
+    item.cardPrinting?.priceSnapshots[0]?.priceMinor ??
+    item.sealedProduct?.priceSnapshots[0]?.priceMinor ??
+    0;
+
+  return unitValue * item.quantity;
+}
+
 const collectionItemInclude = {
   cardPrinting: {
     include: {
@@ -544,6 +721,23 @@ const collectionItemInclude = {
     },
   },
   storageLocation: true,
+} as const;
+
+const collectionEventInclude = {
+  collectionItem: {
+    include: {
+      cardPrinting: {
+        include: {
+          cardSet: true,
+        },
+      },
+      sealedProduct: {
+        include: {
+          relatedCardSet: true,
+        },
+      },
+    },
+  },
 } as const;
 
 function itemTypeToClient(value: string): ItemType {
@@ -619,6 +813,23 @@ function defaultVariant(itemType: PrismaItemType) {
   return itemType === PrismaItemType.SEALED_PRODUCT ? "Factory sealed" : "Standard";
 }
 
+function storageLocationTypeLabel(value: string) {
+  return enumLabel(value) as StorageLocation["type"];
+}
+
+function storageLocationTypeToEnum(value?: string) {
+  const normalized = value?.trim().toLowerCase().replace(/\s+/g, "_") ?? "";
+  const map: Record<string, StorageLocationType> = {
+    binder: StorageLocationType.BINDER,
+    box: StorageLocationType.BOX,
+    display: StorageLocationType.DISPLAY,
+    safe: StorageLocationType.SAFE,
+    other: StorageLocationType.OTHER,
+  };
+
+  return map[normalized] ?? StorageLocationType.OTHER;
+}
+
 function gradeLabel(item: { itemType: string; gradedCompany: string | null; gradedScore: unknown }) {
   if (item.itemType === PrismaItemType.SEALED_PRODUCT) {
     return "N/A";
@@ -642,6 +853,22 @@ function parseMoneyToMinor(value?: string) {
   }
 
   return Math.round(amount * 100);
+}
+
+function normalizeStorageName(value?: string) {
+  const name = value?.trim();
+
+  if (!name) {
+    throw new Error("Storage location name is required.");
+  }
+
+  return name;
+}
+
+function normalizeOptionalText(value?: string) {
+  const text = value?.trim();
+
+  return text || undefined;
 }
 
 function dateOnly(value?: Date | null) {

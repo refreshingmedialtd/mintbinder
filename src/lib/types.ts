@@ -42,6 +42,29 @@ export type SetProgress = {
   total: number;
 };
 
+export type StorageLocation = {
+  id: string;
+  name: string;
+  type: "Binder" | "Box" | "Display" | "Safe" | "Other";
+  notes?: string;
+  itemCount: number;
+  totalQuantity: number;
+  valueMinor: number;
+};
+
+export type CollectionEvent = {
+  id: string;
+  type: "Added" | "Edited" | "Sold" | "Removed" | "Graded" | "Moved" | "Imported";
+  itemId: string;
+  catalogueId: string;
+  itemName: string;
+  quantity?: number;
+  amountMinor?: number;
+  currency?: string;
+  occurredAt: string;
+  notes?: string;
+};
+
 export type AppDataSource = "database" | "sample";
 
 export type AppData = {
@@ -49,6 +72,8 @@ export type AppData = {
   collection: CollectionItem[];
   wishlist: WishlistItem[];
   sets: SetProgress[];
+  storageLocations: StorageLocation[];
+  events: CollectionEvent[];
   source: AppDataSource;
   notice?: string;
 };
