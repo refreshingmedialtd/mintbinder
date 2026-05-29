@@ -659,6 +659,92 @@ export default function Home() {
     return true;
   }
 
+  async function recordCollectionSale(itemId: string, formData: FormData) {
+    const source = collection.find((item) => item.id === itemId);
+    const catalogueItem = source ? catalogueById.get(source.catalogueId) : undefined;
+
+    if (!source) {
+      return false;
+    }
+
+    const soldDate = String(formData.get("occurredAt") ?? dateStamp());
+    const amount = String(formData.get("amount") ?? "");
+    const notes = String(formData.get("notes") ?? "").trim();
+    const saleAmountMinor = moneyInputToMinor(amount);
+    let recordedInDatabase = false;
+
+    if (dataSource === "database") {
+      try {
+        const response = await fetch(`/api/collection-items/${encodeURIComponent(itemId)}/sale`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            amount,
+            notes,
+            occurredAt: soldDate,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Record sale failed with ${response.status}`);
+        }
+
+        recordedInDatabase = true;
+      } catch (error) {
+        console.warn("Falling back to local sale recording.", error);
+        showToast("Database sale save failed, so this sale is local for now.");
+      }
+    }
+
+    setCollection((items) => {
+      const nextItems = items.filter((item) => item.id !== itemId);
+      setAppState((current) => ({
+        ...current,
+        screen: "collection",
+        selectedItemId: nextItems[0]?.id ?? "",
+      }));
+      return nextItems;
+    });
+    setCollectionEvents((events) => [
+      {
+        id: `event-sale-${Date.now()}`,
+        type: "Sold",
+        itemId: source.id,
+        catalogueId: source.catalogueId,
+        itemName: catalogueItem?.name ?? "Collection item",
+        quantity: source.quantity,
+        amountMinor: saleAmountMinor,
+        currency: saleAmountMinor === undefined ? undefined : "GBP",
+        occurredAt: soldDate,
+        notes: notes || undefined,
+      },
+      ...events,
+    ]);
+
+    if (catalogueItem?.type === "card") {
+      const stillOwned = collection.some(
+        (item) => item.id !== source.id && item.catalogueId === source.catalogueId,
+      );
+
+      if (!stillOwned) {
+        setSets((current) =>
+          current.map((set) =>
+            set.name === catalogueItem.set
+              ? { ...set, owned: Math.max(0, set.owned - 1) }
+              : set,
+          ),
+        );
+      }
+    }
+
+    if (recordedInDatabase) {
+      void refreshAppData({ quiet: true });
+    }
+
+    showToast(`${catalogueItem?.name ?? "Item"} sale recorded.`);
+    return true;
+  }
+
   function resetSampleData() {
     setCatalogueItems(sampleAppData.catalogue);
     setCollection(sampleAppData.collection);
@@ -1007,6 +1093,7 @@ export default function Home() {
     createManualSealedProduct,
     updateCollectionItem,
     archiveCollectionItem,
+    recordCollectionSale,
     addToWishlist,
     duplicateItem,
     removeWishlistItem,
@@ -1076,6 +1163,7 @@ type ScreenContext = {
   createManualSealedProduct: (formData: FormData) => Promise<boolean>;
   updateCollectionItem: (itemId: string, formData: FormData) => Promise<boolean>;
   archiveCollectionItem: (itemId: string) => Promise<boolean>;
+  recordCollectionSale: (itemId: string, formData: FormData) => Promise<boolean>;
   addToWishlist: (catalogueId: string) => Promise<void>;
   duplicateItem: (itemId: string) => Promise<void>;
   removeWishlistItem: (id: string, options?: { quiet?: boolean }) => Promise<void>;
@@ -2129,12 +2217,15 @@ function ItemDetailScreen({
   collectionEvents,
   duplicateItem,
   navigate,
+  recordCollectionSale,
   storageLocations,
   updateCollectionItem,
 }: ScreenContext) {
   const [isEditing, setIsEditing] = useState(false);
+  const [isSelling, setIsSelling] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isRemoving, setIsRemoving] = useState(false);
+  const [isRecordingSale, setIsRecordingSale] = useState(false);
   const owned = collection.find((item) => item.id === appState.selectedItemId) ?? collection[0];
 
   if (!owned) {
@@ -2176,6 +2267,17 @@ function ItemDetailScreen({
     setIsRemoving(false);
   }
 
+  async function handleSale(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setIsRecordingSale(true);
+    const recorded = await recordCollectionSale(owned.id, new FormData(event.currentTarget));
+    setIsRecordingSale(false);
+
+    if (recorded) {
+      setIsSelling(false);
+    }
+  }
+
   return (
     <section className="page">
       <PageHeader
@@ -2186,9 +2288,25 @@ function ItemDetailScreen({
               <ArrowLeft size={17} />
               Collection
             </button>
-            <button className="button" onClick={() => setIsEditing((current) => !current)}>
+            <button
+              className="button"
+              onClick={() => {
+                setIsSelling(false);
+                setIsEditing((current) => !current);
+              }}
+            >
               {isEditing ? <X size={17} /> : <Settings size={17} />}
               {isEditing ? "Cancel edit" : "Edit"}
+            </button>
+            <button
+              className="button"
+              onClick={() => {
+                setIsEditing(false);
+                setIsSelling((current) => !current);
+              }}
+            >
+              {isSelling ? <X size={17} /> : <History size={17} />}
+              {isSelling ? "Cancel sale" : "Record sale"}
             </button>
             <button className="button primary" onClick={() => void duplicateItem(owned.id)}>
               <Plus size={17} />
@@ -2325,6 +2443,39 @@ function ItemDetailScreen({
               ["Source", owned.overrideValueMinor ? "Manual override" : "Sample price snapshot"],
             ]}
           />
+          {isSelling ? (
+            <section className="tool-panel">
+              <h2>Record sale</h2>
+              <form className="form-stack" onSubmit={handleSale}>
+                <div className="field-grid">
+                  <Field label="Sale amount">
+                    <input
+                      name="amount"
+                      inputMode="decimal"
+                      defaultValue={moneyInputValue(value ?? undefined)}
+                      placeholder="GBP 0.00"
+                    />
+                  </Field>
+                  <Field label="Sale date">
+                    <input name="occurredAt" type="date" defaultValue={dateStamp()} />
+                  </Field>
+                </div>
+                <Field label="Notes">
+                  <textarea name="notes" placeholder="Optional" />
+                </Field>
+                <div className="actions">
+                  <button className="button primary" type="submit" disabled={isRecordingSale}>
+                    <Check size={17} />
+                    {isRecordingSale ? "Recording" : "Record sale"}
+                  </button>
+                  <button className="button" type="button" onClick={() => setIsSelling(false)}>
+                    <X size={17} />
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            </section>
+          ) : null}
           <section className="tool-panel">
             <h2>Notes</h2>
             <p className="muted">{owned.notes || "No notes yet."}</p>
@@ -2707,6 +2858,7 @@ function AlertsScreen({
             ["Last 30 days", `${intelligence.activity.last30Days} events`],
             ["Added", intelligence.activity.added],
             ["Edited", intelligence.activity.edited],
+            ["Sold", intelligence.activity.sold],
             ["Removed", intelligence.activity.removed],
           ]}
         />

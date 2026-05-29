@@ -76,6 +76,7 @@ export type CollectionIntelligence = {
     added: number;
     edited: number;
     removed: number;
+    sold: number;
   };
   portfolioMix: Array<{
     label: string;
@@ -304,13 +305,15 @@ function activityInsight(events: CollectionEvent[]) {
         total.added += 1;
       } else if (event.type === "Edited" || event.type === "Moved" || event.type === "Graded") {
         total.edited += 1;
-      } else if (event.type === "Removed" || event.type === "Sold") {
+      } else if (event.type === "Removed") {
         total.removed += 1;
+      } else if (event.type === "Sold") {
+        total.sold += 1;
       }
 
       return total;
     },
-    { last30Days: 0, added: 0, edited: 0, removed: 0 },
+    { last30Days: 0, added: 0, edited: 0, removed: 0, sold: 0 },
   );
 }
 

@@ -43,6 +43,12 @@ export type UpdateCollectionItemInput = Omit<CreateCollectionItemInput, "catalog
   overrideValue?: string;
 };
 
+export type SellCollectionItemInput = {
+  amount?: string;
+  occurredAt?: string;
+  notes?: string;
+};
+
 export type CreateStorageLocationInput = {
   name?: string;
   type?: string;
@@ -402,6 +408,53 @@ export async function archiveCollectionItem(userId: string, id: string) {
           quantity: existing.quantity,
           occurredAt: new Date(),
           notes: "Archived from app API.",
+          metadata: { source: "app_api" },
+        },
+      },
+    },
+  });
+}
+
+export async function sellCollectionItem(
+  userId: string,
+  id: string,
+  input: SellCollectionItemInput,
+) {
+  assertDatabaseConfigured();
+
+  const existing = await prisma.collectionItem.findFirst({
+    where: {
+      id,
+      userId,
+      archivedAt: null,
+    },
+    select: {
+      id: true,
+      quantity: true,
+    },
+  });
+
+  if (!existing) {
+    throw new Error("Collection item not found.");
+  }
+
+  const amountMinor = parseMoneyToMinor(input.amount);
+  const occurredAt = parseDateInput(input.occurredAt) ?? new Date();
+
+  await prisma.collectionItem.update({
+    where: { id: existing.id },
+    data: {
+      soldAt: occurredAt,
+      archivedAt: new Date(),
+      events: {
+        create: {
+          userId,
+          eventType: CollectionEventType.SOLD,
+          quantity: existing.quantity,
+          amountMinor,
+          currency: amountMinor === undefined ? undefined : "GBP",
+          occurredAt,
+          notes: normalizeOptionalText(input.notes) ?? "Sold from app API.",
           metadata: { source: "app_api" },
         },
       },
@@ -1088,6 +1141,18 @@ function parseMoneyToMinor(value?: string) {
   }
 
   return Math.round(amount * 100);
+}
+
+function parseDateInput(value?: string) {
+  const normalized = value?.trim();
+
+  if (!normalized) {
+    return undefined;
+  }
+
+  const date = new Date(`${normalized}T12:00:00`);
+
+  return Number.isNaN(date.getTime()) ? undefined : date;
 }
 
 function normalizeStorageName(value?: string) {
