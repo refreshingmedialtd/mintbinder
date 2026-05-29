@@ -107,4 +107,5 @@ export type Screen =
   | "wishlist"
   | "alerts"
   | "analytics"
+  | "ops"
   | "settings";

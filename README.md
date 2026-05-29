@@ -22,7 +22,7 @@ PokeStop is a working title for a Pokemon card and sealed product collection tra
 
 ## Next.js App
 
-The real app foundation lives in [src/](src/). The UI hydrates through local API routes, writes collection and wishlist changes through Prisma-backed handlers when a database is configured, and falls back to typed sample data when no database connection is active.
+The real app foundation lives in [src/](src/). The UI hydrates through local API routes, writes collection and wishlist changes through Prisma-backed handlers when a database is configured, and falls back to typed sample data when no database connection is active. The Operations screen can run controlled catalogue/pricing import jobs when you provide `JOB_SECRET`.
 
 Run it locally:
 
@@ -126,6 +126,8 @@ https://your-domain.example/api/billing/webhook
 ```
 
 Job routes accept either `Authorization: Bearer <JOB_SECRET>` or `x-job-secret: <JOB_SECRET>`. Each successful authenticated job request creates a `job_runs` record with input, result, status, timing, and errors. Pricing refreshes convert Pokemon TCG API USD prices into GBP snapshots with `POKEMON_TCG_USD_TO_GBP_RATE`; keep that value current before running the job.
+
+For a first controlled card import, open Operations, enter `JOB_SECRET`, keep the default query `set.id:sv3pt5`, and run Catalogue with a small page size. Review the job result and recent run before increasing the page or switching to Pricing.
 
 ## Static Prototype
 

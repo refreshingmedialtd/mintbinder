@@ -8,6 +8,7 @@ import {
   Boxes,
   Check,
   CreditCard,
+  Database,
   Download,
   GalleryVerticalEnd,
   Grid2X2,
@@ -29,6 +30,7 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
+  TerminalSquare,
   Trash2,
   Upload,
   UserRound,
@@ -92,6 +94,20 @@ type Viewer = {
 };
 
 type AuthMode = "sign-in" | "register";
+type JobType = "price_alerts" | "catalogue_refresh" | "pricing_refresh";
+type JobStatus = "running" | "succeeded" | "failed";
+
+type JobRunRecord = {
+  id: string;
+  jobType: JobType;
+  status: JobStatus;
+  requestPayload: unknown;
+  resultPayload: unknown;
+  errorMessage?: string;
+  startedAt: string;
+  finishedAt?: string;
+  durationMs?: number;
+};
 
 const initialState: AppState = {
   screen: "dashboard",
@@ -1264,6 +1280,7 @@ export default function Home() {
     setAppState,
     showToast,
     resetSampleData,
+    refreshAppData,
   };
 
   return (
@@ -1339,6 +1356,7 @@ type ScreenContext = {
   setAppState: Dispatch<SetStateAction<AppState>>;
   showToast: (message: string) => void;
   resetSampleData: () => void;
+  refreshAppData: (options?: { quiet?: boolean }) => Promise<boolean>;
 };
 
 function renderScreen(context: ScreenContext) {
@@ -1359,6 +1377,8 @@ function renderScreen(context: ScreenContext) {
       return <AlertsScreen {...context} />;
     case "analytics":
       return <AnalyticsScreen {...context} />;
+    case "ops":
+      return <OperationsScreen {...context} />;
     case "settings":
       return <SettingsScreen {...context} />;
     case "dashboard":
@@ -1549,6 +1569,7 @@ function Sidebar({
       <NavButton active={active === "wishlist"} icon={<Heart />} label="Wishlist" onClick={() => onNavigate("wishlist")} />
       <NavButton active={active === "alerts"} icon={<Bell />} label={`Alerts (${alertCount})`} onClick={() => onNavigate("alerts")} />
       <NavButton active={active === "analytics"} icon={<BarChart3 />} label="Analytics" onClick={() => onNavigate("analytics")} />
+      <NavButton active={active === "ops"} icon={<TerminalSquare />} label="Operations" onClick={() => onNavigate("ops")} />
       <span className="nav-divider" />
       <NavButton active={active === "settings"} icon={<Settings />} label="Settings" onClick={() => onNavigate("settings")} />
     </aside>
@@ -3190,6 +3211,215 @@ function AnalyticsScreen({
   );
 }
 
+function OperationsScreen({
+  refreshAppData,
+  showToast,
+}: ScreenContext) {
+  const [jobSecret, setJobSecret] = useState("");
+  const [query, setQuery] = useState("set.id:sv3pt5");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+  const [jobRuns, setJobRuns] = useState<JobRunRecord[]>([]);
+  const [lastResult, setLastResult] = useState<unknown>(null);
+  const [isBusy, setIsBusy] = useState("");
+
+  async function loadJobRuns() {
+    if (!jobSecret.trim()) {
+      showToast("Job secret required.");
+      return false;
+    }
+
+    setIsBusy("runs");
+    try {
+      const response = await fetch("/api/jobs/runs?limit=10", {
+        headers: jobHeaders(jobSecret),
+      });
+      const body = (await response.json()) as { error?: string; runs?: JobRunRecord[] };
+
+      if (!response.ok) {
+        throw new Error(body.error ?? `Job runs failed with ${response.status}`);
+      }
+
+      setJobRuns(body.runs ?? []);
+      showToast("Job runs loaded.");
+      return true;
+    } catch (error) {
+      console.warn("Unable to load job runs.", error);
+      showToast(error instanceof Error ? error.message : "Unable to load job runs.");
+      return false;
+    } finally {
+      setIsBusy("");
+    }
+  }
+
+  async function runJob(kind: "catalogue" | "pricing" | "alerts") {
+    if (!jobSecret.trim()) {
+      showToast("Job secret required.");
+      return;
+    }
+
+    const path =
+      kind === "catalogue"
+        ? "/api/jobs/catalogue-refresh"
+        : kind === "pricing"
+          ? "/api/jobs/pricing-refresh"
+          : "/api/jobs/price-alerts";
+    const body =
+      kind === "alerts"
+        ? { dryRun: true }
+        : {
+            page,
+            pageSize,
+            q: query.trim() || undefined,
+          };
+
+    setIsBusy(kind);
+    try {
+      const response = await fetch(path, {
+        method: "POST",
+        headers: {
+          ...jobHeaders(jobSecret),
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+      const result = (await response.json()) as { error?: string; jobRun?: JobRunRecord };
+
+      if (!response.ok) {
+        setLastResult(result);
+        setJobRuns((current) => (result.jobRun ? [result.jobRun, ...current].slice(0, 10) : current));
+        throw new Error(result.error ?? `Job failed with ${response.status}`);
+      }
+
+      setLastResult(result);
+      setJobRuns((current) => (result.jobRun ? [result.jobRun, ...current].slice(0, 10) : current));
+      showToast("Job completed.");
+
+      if (kind !== "alerts") {
+        await refreshAppData({ quiet: true });
+      }
+    } catch (error) {
+      console.warn("Unable to run job.", error);
+      showToast(error instanceof Error ? error.message : "Unable to run job.");
+      if (error instanceof Error) {
+        setLastResult({ error: error.message });
+      }
+    } finally {
+      setIsBusy("");
+    }
+  }
+
+  return (
+    <section className="page">
+      <PageHeader title="Operations" action={<span className="status-pill"><TerminalSquare size={17} />Jobs</span>} />
+      <div className="stats-grid compact">
+        <StatCard label="Import query" value={query || "All"} note="Pokemon TCG API filter" />
+        <StatCard label="Page" value={page.toString()} note={`${pageSize} records per page`} />
+        <StatCard label="Recent runs" value={jobRuns.length.toString()} note="Loaded from job history" />
+        <StatCard label="Access" value={jobSecret ? "Ready" : "Locked"} note="Requires JOB_SECRET" />
+      </div>
+
+      <div className="dashboard-grid">
+        <section className="tool-panel">
+          <div className="panel-title-row">
+            <h2>Import controls</h2>
+            <Database size={18} />
+          </div>
+          <div className="field-grid">
+            <Field label="Job secret">
+              <input
+                type="password"
+                value={jobSecret}
+                onChange={(event) => setJobSecret(event.currentTarget.value)}
+                placeholder="JOB_SECRET"
+              />
+            </Field>
+            <Field label="Pokemon query">
+              <input
+                value={query}
+                onChange={(event) => setQuery(event.currentTarget.value)}
+                placeholder="set.id:sv3pt5"
+              />
+            </Field>
+            <Field label="Page">
+              <input
+                min={1}
+                type="number"
+                value={page}
+                onChange={(event) => setPage(Math.max(1, Number(event.currentTarget.value) || 1))}
+              />
+            </Field>
+            <Field label="Page size">
+              <input
+                max={250}
+                min={1}
+                type="number"
+                value={pageSize}
+                onChange={(event) => setPageSize(Math.min(250, Math.max(1, Number(event.currentTarget.value) || 1)))}
+              />
+            </Field>
+          </div>
+          <div className="actions">
+            <button className="button primary" disabled={Boolean(isBusy)} onClick={() => void runJob("catalogue")}>
+              <Database size={17} />
+              {isBusy === "catalogue" ? "Running" : "Catalogue"}
+            </button>
+            <button className="button" disabled={Boolean(isBusy)} onClick={() => void runJob("pricing")}>
+              <RefreshCw size={17} />
+              {isBusy === "pricing" ? "Running" : "Pricing"}
+            </button>
+            <button className="button" disabled={Boolean(isBusy)} onClick={() => void runJob("alerts")}>
+              <Mail size={17} />
+              {isBusy === "alerts" ? "Running" : "Alert dry run"}
+            </button>
+            <button className="button" disabled={Boolean(isBusy)} onClick={() => void loadJobRuns()}>
+              <History size={17} />
+              {isBusy === "runs" ? "Loading" : "Load runs"}
+            </button>
+          </div>
+        </section>
+
+        <section className="tool-panel">
+          <div className="panel-title-row">
+            <h2>Latest result</h2>
+            <span className="tag blue">JSON</span>
+          </div>
+          <pre className="json-preview">{formatJsonPreview(lastResult ?? { status: "No job run yet." })}</pre>
+        </section>
+      </div>
+
+      <section className="tool-panel">
+        <div className="panel-title-row">
+          <h2>Job runs</h2>
+          <History size={18} />
+        </div>
+        {jobRuns.length ? (
+          <div className="job-run-list">
+            {jobRuns.map((run) => (
+              <article className="job-run-row" key={run.id}>
+                <div>
+                  <div className="tag-row">
+                    <span className={`tag ${jobStatusClass(run.status)}`}>{run.status}</span>
+                    <span className="tag">{jobTypeLabel(run.jobType)}</span>
+                  </div>
+                  <strong>{formatEventDate(run.startedAt)}</strong>
+                  <p className="muted">
+                    {run.durationMs === undefined ? "In progress" : `${run.durationMs}ms`}
+                    {run.errorMessage ? ` | ${run.errorMessage}` : ""}
+                  </p>
+                </div>
+                <code>{run.id.slice(0, 8)}</code>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p className="muted">No job runs loaded.</p>
+        )}
+      </section>
+    </section>
+  );
+}
+
 function SettingsScreen({
   appState,
   viewer,
@@ -3208,6 +3438,7 @@ function SettingsScreen({
   updateNotificationPreferences,
   downloadImportTemplate,
   importCollectionCsv,
+  navigate,
 }: ScreenContext) {
   return (
     <section className="page">
@@ -3238,6 +3469,7 @@ function SettingsScreen({
           preferences={notificationPreferences}
           onUpdate={updateNotificationPreferences}
         />
+        <OperationsEntryPanel onOpen={() => navigate("ops")} />
         <MetricPanel
           title="Data source"
           rows={[
@@ -3490,6 +3722,28 @@ function NotificationPreferencesPanel({
           {isSaving ? "Saving" : "Save preferences"}
         </button>
       </form>
+    </section>
+  );
+}
+
+function OperationsEntryPanel({ onOpen }: { onOpen: () => void }) {
+  return (
+    <section className="tool-panel">
+      <div className="panel-title-row">
+        <h2>Operations</h2>
+        <TerminalSquare size={18} />
+      </div>
+      <MetricList
+        rows={[
+          ["Import mode", "Controlled pages"],
+          ["Job history", "Tracked"],
+          ["Access", "JOB_SECRET"],
+        ]}
+      />
+      <button className="button" onClick={onOpen}>
+        <Database size={17} />
+        Open operations
+      </button>
     </section>
   );
 }
@@ -4110,6 +4364,40 @@ function priceAlertTagClass(status: CollectionIntelligence["priceAlerts"][number
   }
 
   return "amber";
+}
+
+function jobHeaders(secret: string) {
+  return {
+    authorization: `Bearer ${secret.trim()}`,
+  };
+}
+
+function jobStatusClass(status: JobStatus) {
+  if (status === "succeeded") {
+    return "green";
+  }
+
+  if (status === "failed") {
+    return "red";
+  }
+
+  return "blue";
+}
+
+function jobTypeLabel(type: JobType) {
+  if (type === "catalogue_refresh") {
+    return "Catalogue";
+  }
+
+  if (type === "pricing_refresh") {
+    return "Pricing";
+  }
+
+  return "Price alerts";
+}
+
+function formatJsonPreview(value: unknown) {
+  return JSON.stringify(value, null, 2);
 }
 
 function compareNullableNumbers(
