@@ -106,6 +106,17 @@ const initialState: AppState = {
 };
 
 const storageTypes: StorageLocation["type"][] = ["Binder", "Box", "Display", "Safe", "Other"];
+const sealedProductTypes = [
+  "Booster box",
+  "Booster pack",
+  "Elite trainer box",
+  "Collection box",
+  "Tin",
+  "Blister",
+  "Deck",
+  "Case",
+  "Other",
+];
 
 export default function Home() {
   const { data: session, status } = useSession();
@@ -359,6 +370,77 @@ export default function Home() {
     setWishlist((items) => items.filter((item) => item.catalogueId !== catalogueId));
     setAppState((current) => ({ ...current, screen: "item", selectedItemId: nextItem.id }));
     showToast(`${catalogueItem.name} added to collection.`);
+  }
+
+  async function createManualSealedProduct(formData: FormData) {
+    const name = String(formData.get("name") ?? "").trim();
+    const productType = String(formData.get("productType") ?? "Other");
+    const relatedSetId = String(formData.get("relatedSetId") ?? "none");
+    const estimatedValue = String(formData.get("estimatedValue") ?? "");
+    const notes = String(formData.get("notes") ?? "").trim();
+
+    if (!name) {
+      showToast("Sealed product name is required.");
+      return false;
+    }
+
+    if (dataSource === "database") {
+      try {
+        const response = await fetch("/api/sealed-products", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            estimatedValue,
+            name,
+            notes,
+            productType,
+            relatedSetId,
+          }),
+        });
+        const result = (await response.json()) as { item?: CatalogueItem; error?: string };
+
+        if (!response.ok || !result.item) {
+          throw new Error(result.error ?? `Create sealed product failed with ${response.status}`);
+        }
+
+        setCatalogueItems((items) => upsertCatalogueItem(items, result.item!));
+        setAppState((current) => ({
+          ...current,
+          addType: "sealed",
+          selectedCatalogueId: result.item!.id,
+        }));
+        setAddSearch(result.item.name);
+        void refreshAppData({ quiet: true });
+        showToast(`${result.item.name} created.`);
+        return true;
+      } catch (error) {
+        console.warn("Unable to create sealed product.", error);
+        showToast("Sealed product could not be created.");
+        return false;
+      }
+    }
+
+    const relatedSet = sets.find((set) => set.id === relatedSetId);
+    const nextItem: CatalogueItem = {
+      id: `manual-sealed-${Date.now()}`,
+      type: "sealed",
+      name,
+      set: relatedSet?.name ?? "Sealed product",
+      number: "Sealed",
+      rarity: productType,
+      valueMinor: moneyInputToMinor(estimatedValue) ?? 0,
+      confidence: "Weak",
+    };
+
+    setCatalogueItems((items) => upsertCatalogueItem(items, nextItem));
+    setAppState((current) => ({
+      ...current,
+      addType: "sealed",
+      selectedCatalogueId: nextItem.id,
+    }));
+    setAddSearch(nextItem.name);
+    showToast(`${nextItem.name} created.`);
+    return true;
   }
 
   async function addToWishlist(catalogueId: string) {
@@ -922,6 +1004,7 @@ export default function Home() {
     wishlist,
     wishlistTotal,
     addToCollection,
+    createManualSealedProduct,
     updateCollectionItem,
     archiveCollectionItem,
     addToWishlist,
@@ -990,6 +1073,7 @@ type ScreenContext = {
   wishlist: WishlistItem[];
   wishlistTotal: number;
   addToCollection: (catalogueId: string, formData?: FormData) => Promise<void>;
+  createManualSealedProduct: (formData: FormData) => Promise<boolean>;
   updateCollectionItem: (itemId: string, formData: FormData) => Promise<boolean>;
   archiveCollectionItem: (itemId: string) => Promise<boolean>;
   addToWishlist: (catalogueId: string) => Promise<void>;
@@ -1805,11 +1889,13 @@ function CollectionScreen({
 function AddScreen({
   appState,
   catalogueItems,
+  sets,
   storageLocations,
   addSearch,
   setAddSearch,
   setAppState,
   addToCollection,
+  createManualSealedProduct,
   addToWishlist,
   navigate,
 }: ScreenContext) {
@@ -1880,6 +1966,10 @@ function AddScreen({
             <Search size={18} />
             <input value={addSearch} onChange={(event) => setAddSearch(event.target.value)} placeholder="Search catalogue" />
           </label>
+
+          {appState.addType === "sealed" ? (
+            <ManualSealedProductPanel sets={sets} onCreate={createManualSealedProduct} />
+          ) : null}
 
           <div className="item-list">
             {filteredResults.map((item) => (
@@ -1954,6 +2044,80 @@ function AddScreen({
         </section>
       </div>
     </section>
+  );
+}
+
+function ManualSealedProductPanel({
+  sets,
+  onCreate,
+}: {
+  sets: SetProgress[];
+  onCreate: (formData: FormData) => Promise<boolean>;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setIsSaving(true);
+    const created = await onCreate(new FormData(event.currentTarget));
+    setIsSaving(false);
+
+    if (created) {
+      event.currentTarget.reset();
+      setIsOpen(false);
+    }
+  }
+
+  return (
+    <div className="manual-product-panel">
+      <button className="button full" type="button" onClick={() => setIsOpen((open) => !open)}>
+        <PackagePlus size={17} />
+        Manual sealed product
+      </button>
+      {isOpen ? (
+        <form className="form-stack" onSubmit={handleSubmit}>
+          <div className="field-grid">
+            <Field label="Product name">
+              <input name="name" placeholder="Ultra Premium Collection" required />
+            </Field>
+            <Field label="Product type">
+              <select name="productType" defaultValue="Other">
+                {sealedProductTypes.map((type) => (
+                  <option key={type}>{type}</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Related set">
+              <select name="relatedSetId" defaultValue="none">
+                <option value="none">No set</option>
+                {sets.map((set) => (
+                  <option key={set.id} value={set.id}>
+                    {set.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Estimated value">
+              <input name="estimatedValue" inputMode="decimal" placeholder="GBP 0.00" />
+            </Field>
+          </div>
+          <Field label="Notes">
+            <textarea name="notes" placeholder="Optional" />
+          </Field>
+          <div className="actions">
+            <button className="button primary" type="submit" disabled={isSaving}>
+              <Check size={17} />
+              {isSaving ? "Creating" : "Create product"}
+            </button>
+            <button className="button" type="button" onClick={() => setIsOpen(false)}>
+              <X size={17} />
+              Cancel
+            </button>
+          </div>
+        </form>
+      ) : null}
+    </div>
   );
 }
 
@@ -3365,6 +3529,13 @@ function importPayload(row: CollectionImportRow) {
 
 function storageOptionNames(locations: StorageLocation[], current?: string) {
   return uniqueValues([...locations.map((location) => location.name), current ?? "", "Unassigned"]);
+}
+
+function upsertCatalogueItem(items: CatalogueItem[], nextItem: CatalogueItem) {
+  return [
+    nextItem,
+    ...items.filter((item) => item.id !== nextItem.id),
+  ];
 }
 
 function defaultStorageLocation(locations: StorageLocation[], itemType: ItemType) {

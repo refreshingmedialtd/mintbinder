@@ -1,8 +1,10 @@
 import {
+  CatalogueVisibility,
   CollectionEventType,
   GradingCompany,
   ItemCondition,
   ItemType as PrismaItemType,
+  SealedProductType,
   StorageLocationType,
   WishlistPriority,
 } from "@prisma/client";
@@ -49,6 +51,14 @@ export type CreateStorageLocationInput = {
 
 export type UpdateStorageLocationInput = CreateStorageLocationInput;
 
+export type CreateSealedProductInput = {
+  name?: string;
+  productType?: string;
+  relatedSetId?: string;
+  estimatedValue?: string;
+  notes?: string;
+};
+
 export type UpdateWishlistItemInput = {
   priority?: string;
   targetPrice?: string;
@@ -89,6 +99,12 @@ export async function getAppData(userId: string): Promise<AppData> {
           orderBy: [{ cardSet: { releaseDate: "desc" } }, { number: "asc" }],
         }),
         prisma.sealedProduct.findMany({
+          where: {
+            OR: [
+              { visibility: CatalogueVisibility.GLOBAL },
+              { createdByUserId: userId },
+            ],
+          },
           include: {
             relatedCardSet: true,
             priceSnapshots: {
@@ -464,6 +480,58 @@ export async function deleteStorageLocation(userId: string, id: string) {
       userId,
     },
   });
+}
+
+export async function createSealedProduct(
+  userId: string,
+  input: CreateSealedProductInput,
+): Promise<CatalogueItem> {
+  assertDatabaseConfigured();
+
+  const name = normalizeSealedProductName(input.name);
+  const productType = sealedProductTypeToEnum(input.productType);
+  const relatedCardSet = await resolveCardSet(input.relatedSetId);
+  const estimatedValueMinor = parseMoneyToMinor(input.estimatedValue);
+
+  const product = await prisma.sealedProduct.create({
+    data: {
+      createdByUserId: userId,
+      relatedCardSetId: relatedCardSet?.id,
+      name,
+      productType,
+      notes: normalizeOptionalText(input.notes),
+      visibility: CatalogueVisibility.PRIVATE,
+      metadata: {
+        source: "manual",
+      },
+      priceSnapshots:
+        estimatedValueMinor === undefined
+          ? undefined
+          : {
+              create: {
+                itemType: PrismaItemType.SEALED_PRODUCT,
+                source: "manual",
+                sourceRef: "manual_sealed_product",
+                priceMinor: estimatedValueMinor,
+                currency: "GBP",
+                confidenceScore: 45,
+                observedAt: new Date(),
+                metadata: {
+                  source: "manual",
+                },
+              },
+            },
+    },
+    include: {
+      relatedCardSet: true,
+      priceSnapshots: {
+        orderBy: { observedAt: "desc" },
+        take: 1,
+      },
+    },
+  });
+
+  return mapSealedProductToCatalogueItem(product, product.priceSnapshots[0]);
 }
 
 export async function createWishlistItem(userId: string, catalogueId: string): Promise<WishlistItem> {
@@ -953,6 +1021,37 @@ function storageLocationTypeToEnum(value?: string) {
   return map[normalized] ?? StorageLocationType.OTHER;
 }
 
+function sealedProductTypeToEnum(value?: string) {
+  const normalized = value?.trim().toLowerCase().replace(/[\s-]+/g, "_") ?? "";
+  const map: Record<string, SealedProductType> = {
+    booster_box: SealedProductType.BOOSTER_BOX,
+    booster_pack: SealedProductType.BOOSTER_PACK,
+    elite_trainer_box: SealedProductType.ELITE_TRAINER_BOX,
+    etb: SealedProductType.ELITE_TRAINER_BOX,
+    collection_box: SealedProductType.COLLECTION_BOX,
+    tin: SealedProductType.TIN,
+    blister: SealedProductType.BLISTER,
+    deck: SealedProductType.DECK,
+    case: SealedProductType.CASE,
+    other: SealedProductType.OTHER,
+  };
+
+  return map[normalized] ?? SealedProductType.OTHER;
+}
+
+async function resolveCardSet(id?: string) {
+  const relatedSetId = id?.trim();
+
+  if (!relatedSetId || relatedSetId === "none") {
+    return null;
+  }
+
+  return prisma.cardSet.findUnique({
+    where: { id: relatedSetId },
+    select: { id: true },
+  });
+}
+
 function gradeLabel(item: { itemType: string; gradedCompany: string | null; gradedScore: unknown }) {
   if (item.itemType === PrismaItemType.SEALED_PRODUCT) {
     return "N/A";
@@ -996,6 +1095,16 @@ function normalizeStorageName(value?: string) {
 
   if (!name) {
     throw new Error("Storage location name is required.");
+  }
+
+  return name;
+}
+
+function normalizeSealedProductName(value?: string) {
+  const name = value?.trim();
+
+  if (!name) {
+    throw new Error("Sealed product name is required.");
   }
 
   return name;
