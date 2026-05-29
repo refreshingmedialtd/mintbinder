@@ -35,9 +35,13 @@ export type WishlistOpportunity = {
 };
 
 export type InsightAction = {
+  id: string;
+  category: "Wishlist" | "Valuation" | "Grading" | "Storage" | "Duplicates" | "Momentum";
   title: string;
   detail: string;
   tone: "good" | "watch" | "action";
+  impact: "High" | "Medium" | "Low";
+  actionLabel: string;
 };
 
 export type CollectionIntelligence = {
@@ -356,52 +360,76 @@ function buildActionQueue({
 
   if (gradingCandidates.length) {
     actions.push({
+      id: "grading-candidates",
+      category: "Grading",
       title: "Review grading candidates",
       detail:
         gradingCandidates.length === 1
           ? `${gradingCandidates[0].name} is raw and high value.`
           : `${gradingCandidates[0].name} and ${gradingCandidates.length - 1} more raw high-value item${gradingCandidates.length === 2 ? "" : "s"}.`,
       tone: "action",
+      impact: "High",
+      actionLabel: "Open collection",
     });
   }
 
   if (duplicates.length) {
     actions.push({
+      id: "duplicate-lots",
+      category: "Duplicates",
       title: "Check duplicate lots",
       detail: `${duplicates[0].name} has ${duplicates[0].quantity} tracked copies across ${duplicates[0].lots} lot${duplicates[0].lots === 1 ? "" : "s"}.`,
       tone: "watch",
+      impact: duplicates[0].valueMinor >= 10000 ? "High" : "Medium",
+      actionLabel: "Review lots",
     });
   }
 
   if (weakConfidence.count) {
     actions.push({
+      id: "weak-price-confidence",
+      category: "Valuation",
       title: "Refresh weak prices",
       detail: `${weakConfidence.count} holding${weakConfidence.count === 1 ? "" : "s"} rely on weak price confidence.`,
       tone: "watch",
+      impact: weakConfidence.valueMinor >= 10000 ? "High" : "Medium",
+      actionLabel: "Check values",
     });
   }
 
   if (storageConcentration && storageConcentration.share >= 60) {
     actions.push({
+      id: "storage-concentration",
+      category: "Storage",
       title: "Storage concentration",
       detail: `${storageConcentration.name} holds ${storageConcentration.share}% of tracked value.`,
       tone: "watch",
+      impact: storageConcentration.share >= 80 ? "High" : "Medium",
+      actionLabel: "Open storage",
     });
   }
 
   if (wishlistOpportunities.length) {
     actions.push({
+      id: "wishlist-target-hit",
+      category: "Wishlist",
       title: "Wishlist target hit",
       detail: `${wishlistOpportunities[0].name} is at or below target.`,
       tone: "action",
+      impact: "High",
+      actionLabel: "Open wishlist",
     });
   }
 
   if (!actions.length && bestPerformer) {
     actions.push({
+      id: "collection-tidy",
+      category: "Momentum",
       title: "Collection is tidy",
       detail: `${bestPerformer.name} is currently your strongest performer.`,
       tone: "good",
+      impact: "Low",
+      actionLabel: "View analytics",
     });
   }
 

@@ -3,6 +3,7 @@
 import {
   ArrowLeft,
   BarChart3,
+  Bell,
   Boxes,
   Check,
   Download,
@@ -922,6 +923,7 @@ export default function Home() {
   return (
     <div className="app-shell">
       <Header
+        alertCount={intelligence.actionQueue.length}
         plus={appState.plus}
         userEmail={viewer.email}
         userName={viewer.name}
@@ -929,7 +931,7 @@ export default function Home() {
         onSignOut={() => void signOut({ redirect: false })}
       />
       <div className="app-body">
-        <Sidebar active={appState.screen} onNavigate={navigate} />
+        <Sidebar active={appState.screen} alertCount={intelligence.actionQueue.length} onNavigate={navigate} />
         <main className="main">{renderScreen(context)}</main>
       </div>
       <BottomNav active={appState.screen} onNavigate={navigate} />
@@ -1000,6 +1002,8 @@ function renderScreen(context: ScreenContext) {
       return <SetDetailScreen {...context} />;
     case "wishlist":
       return <WishlistScreen {...context} />;
+    case "alerts":
+      return <AlertsScreen {...context} />;
     case "analytics":
       return <AnalyticsScreen {...context} />;
     case "settings":
@@ -1125,12 +1129,14 @@ function AuthBrand() {
 }
 
 function Header({
+  alertCount,
   plus,
   userEmail,
   userName,
   onNavigate,
   onSignOut,
 }: {
+  alertCount: number;
   plus: boolean;
   userEmail: string;
   userName: string;
@@ -1150,6 +1156,15 @@ function Header({
           {plus ? <Sparkles size={17} /> : <Lock size={17} />}
           {plus ? "Plus" : "Free"}
         </button>
+        <button
+          className="status-pill alert-pill"
+          onClick={() => onNavigate("alerts")}
+          aria-label={`${alertCount} alerts`}
+          title={`${alertCount} alerts`}
+        >
+          <Bell size={17} />
+          {alertCount}
+        </button>
         <button className="user-pill" onClick={() => onNavigate("settings")} title={userEmail}>
           <UserRound size={17} />
           {userName}
@@ -1165,9 +1180,11 @@ function Header({
 
 function Sidebar({
   active,
+  alertCount,
   onNavigate,
 }: {
   active: Screen;
+  alertCount: number;
   onNavigate: (screen: Screen) => void;
 }) {
   return (
@@ -1177,6 +1194,7 @@ function Sidebar({
       <NavButton active={active === "add"} icon={<Plus />} label="Add item" onClick={() => onNavigate("add")} />
       <NavButton active={active === "sets" || active === "setDetail"} icon={<GalleryVerticalEnd />} label="Sets" onClick={() => onNavigate("sets")} />
       <NavButton active={active === "wishlist"} icon={<Heart />} label="Wishlist" onClick={() => onNavigate("wishlist")} />
+      <NavButton active={active === "alerts"} icon={<Bell />} label={`Alerts (${alertCount})`} onClick={() => onNavigate("alerts")} />
       <NavButton active={active === "analytics"} icon={<BarChart3 />} label="Analytics" onClick={() => onNavigate("analytics")} />
       <span className="nav-divider" />
       <NavButton active={active === "settings"} icon={<Settings />} label="Settings" onClick={() => onNavigate("settings")} />
@@ -1321,6 +1339,10 @@ function DashboardScreen({
               <button className="button" onClick={() => navigate("wishlist")}>
                 <Heart size={17} />
                 Wishlist
+              </button>
+              <button className="button" onClick={() => navigate("alerts")}>
+                <Bell size={17} />
+                Alerts
               </button>
             </div>
             {dataNotice ? <p className="muted">{dataNotice}</p> : null}
@@ -2140,6 +2162,95 @@ function WishlistScreen({
   );
 }
 
+function AlertsScreen({
+  intelligence,
+  setAppState,
+}: ScreenContext) {
+  const alerts = intelligence.actionQueue;
+  const highImpact = alerts.filter((alert) => alert.impact === "High").length;
+  const watchCount = alerts.filter((alert) => alert.tone === "watch").length;
+
+  function openAlert(alert: InsightAction) {
+    if (alert.category === "Wishlist") {
+      setAppState((current) => ({ ...current, screen: "wishlist" }));
+      return;
+    }
+
+    if (alert.category === "Storage") {
+      setAppState((current) => ({ ...current, screen: "settings" }));
+      return;
+    }
+
+    if (alert.category === "Momentum") {
+      setAppState((current) => ({ ...current, screen: "analytics", plus: true }));
+      return;
+    }
+
+    setAppState((current) => ({ ...current, screen: "collection", collectionFilter: "all" }));
+  }
+
+  return (
+    <section className="page">
+      <PageHeader title="Alerts" action={<span className="status-pill"><Bell size={17} />{alerts.length}</span>} />
+      <div className="stats-grid compact">
+        <StatCard label="Open alerts" value={alerts.length.toString()} note="Generated from your live collection" />
+        <StatCard label="High impact" value={highImpact.toString()} note="Worth checking first" />
+        <StatCard label="Watch items" value={watchCount.toString()} note="Useful but not urgent" />
+        <StatCard label="Health score" value={`${intelligence.healthScore}/100`} note={intelligence.healthLabel} />
+      </div>
+
+      <section className="tool-panel">
+        <div className="panel-title-row">
+          <h2>Review center</h2>
+          <Sparkles size={18} />
+        </div>
+        {alerts.length ? (
+          <div className="alert-list">
+            {alerts.map((alert) => (
+              <article className="alert-row" key={alert.id}>
+                <div className="alert-main">
+                  <div className="tag-row">
+                    <span className={`tag ${actionTagClass(alert.tone)}`}>{alert.category}</span>
+                    <span className={`tag ${impactTagClass(alert.impact)}`}>{alert.impact}</span>
+                  </div>
+                  <strong>{alert.title}</strong>
+                  <p className="muted">{alert.detail}</p>
+                </div>
+                <button className="button" onClick={() => openAlert(alert)}>
+                  {alert.actionLabel}
+                </button>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <EmptyState title="No alerts right now" />
+        )}
+      </section>
+
+      <div className="dashboard-grid">
+        <MetricPanel
+          title="Signal summary"
+          rows={[
+            ["Wishlist hits", intelligence.wishlistOpportunities.length],
+            ["Grading candidates", intelligence.gradingCandidates.length],
+            ["Duplicate reviews", intelligence.duplicates.length],
+            ["Weak prices", intelligence.weakConfidence.count],
+          ]}
+        />
+        <MetricPanel
+          title="Activity"
+          rows={[
+            ["Last 30 days", `${intelligence.activity.last30Days} events`],
+            ["Added", intelligence.activity.added],
+            ["Edited", intelligence.activity.edited],
+            ["Removed", intelligence.activity.removed],
+          ]}
+        />
+      </div>
+    </section>
+  );
+}
+
 function AnalyticsScreen({
   appState,
   collectionEvents,
@@ -2915,6 +3026,18 @@ function actionTagClass(tone: InsightAction["tone"]) {
   }
 
   return "amber";
+}
+
+function impactTagClass(impact: InsightAction["impact"]) {
+  if (impact === "High") {
+    return "red";
+  }
+
+  if (impact === "Medium") {
+    return "amber";
+  }
+
+  return "green";
 }
 
 function importPayload(row: CollectionImportRow) {

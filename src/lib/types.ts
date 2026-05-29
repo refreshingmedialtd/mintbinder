@@ -86,5 +86,6 @@ export type Screen =
   | "sets"
   | "setDetail"
   | "wishlist"
+  | "alerts"
   | "analytics"
   | "settings";
