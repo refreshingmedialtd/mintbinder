@@ -443,6 +443,9 @@ export default function Home() {
       language: String(formData.get("language") ?? source.language),
       variant: String(formData.get("variant") ?? source.variant),
       paid: String(formData.get("paid") ?? ""),
+      gradeCompany: String(formData.get("gradeCompany") ?? gradeCompanyFromLabel(source.grade)),
+      gradeScore: String(formData.get("gradeScore") ?? gradeScoreFromLabel(source.grade)),
+      overrideValue: String(formData.get("overrideValue") ?? moneyInputValue(source.overrideValueMinor)),
       location: String(formData.get("location") ?? source.location),
       notes: String(formData.get("notes") ?? ""),
     };
@@ -483,6 +486,8 @@ export default function Home() {
       purchaseDate: paidValue !== undefined && Number.isFinite(paidValue)
         ? new Date().toISOString().slice(0, 10)
         : undefined,
+      grade: gradeLabelFromForm(payload.gradeCompany, payload.gradeScore, catalogueItem.type),
+      overrideValueMinor: moneyInputToMinor(payload.overrideValue),
       location: payload.location,
       notes: payload.notes || undefined,
     };
@@ -1746,6 +1751,41 @@ function ItemDetailScreen({
                       placeholder="GBP 0.00"
                     />
                   </Field>
+                  <Field label="Manual value">
+                    <input
+                      name="overrideValue"
+                      inputMode="decimal"
+                      defaultValue={moneyInputValue(owned.overrideValueMinor)}
+                      placeholder="GBP 0.00"
+                    />
+                  </Field>
+                  {item.type === "card" ? (
+                    <>
+                      <Field label="Grade company">
+                        <select name="gradeCompany" defaultValue={gradeCompanyFromLabel(owned.grade)}>
+                          <option>Raw</option>
+                          <option>PSA</option>
+                          <option>BGS</option>
+                          <option>CGC</option>
+                          <option>ACE</option>
+                          <option>SGC</option>
+                          <option>Other</option>
+                        </select>
+                      </Field>
+                      <Field label="Grade score">
+                        <input
+                          name="gradeScore"
+                          inputMode="decimal"
+                          min={1}
+                          max={10}
+                          step={0.5}
+                          type="number"
+                          defaultValue={gradeScoreFromLabel(owned.grade)}
+                          placeholder="10"
+                        />
+                      </Field>
+                    </>
+                  ) : null}
                   <Field label="Location">
                     <select name="location" defaultValue={owned.location}>
                       {locationOptions.map((location) => (
@@ -2824,6 +2864,35 @@ function getOwnedValue(item: CollectionItem, catalogueItem?: CatalogueItem) {
   }
 
   return item.overrideValueMinor ?? catalogueItem.valueMinor * item.quantity;
+}
+
+function gradeCompanyFromLabel(grade: string) {
+  if (!grade || grade === "N/A" || grade === "Raw") {
+    return "Raw";
+  }
+
+  return grade.split(" ")[0] ?? "Raw";
+}
+
+function gradeScoreFromLabel(grade: string) {
+  const score = grade.match(/\d+(?:\.\d+)?/)?.[0];
+
+  return score ?? "";
+}
+
+function gradeLabelFromForm(gradeCompany: string, gradeScore: string, itemType: ItemType) {
+  if (itemType === "sealed") {
+    return "N/A";
+  }
+
+  const company = gradeCompany.trim();
+  const score = gradeScore.trim();
+
+  if (!company || company === "Raw") {
+    return "Raw";
+  }
+
+  return score ? `${company} ${score}` : company;
 }
 
 function gainLabel(holding: HoldingInsight) {

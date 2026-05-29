@@ -1,5 +1,6 @@
 import {
   CollectionEventType,
+  GradingCompany,
   ItemCondition,
   ItemType as PrismaItemType,
   StorageLocationType,
@@ -34,7 +35,11 @@ export type CreateCollectionItemInput = {
   notes?: string;
 };
 
-export type UpdateCollectionItemInput = Omit<CreateCollectionItemInput, "catalogueId">;
+export type UpdateCollectionItemInput = Omit<CreateCollectionItemInput, "catalogueId"> & {
+  gradeCompany?: string;
+  gradeScore?: string;
+  overrideValue?: string;
+};
 
 export type CreateStorageLocationInput = {
   name?: string;
@@ -271,6 +276,9 @@ export async function updateCollectionItem(
     select: {
       id: true,
       itemType: true,
+      gradedCompany: true,
+      gradedScore: true,
+      currentValueOverrideMinor: true,
     },
   });
 
@@ -280,7 +288,32 @@ export async function updateCollectionItem(
 
   const storageLocationId = await resolveStorageLocationId(userId, input.location);
   const paidMinor = parseMoneyToMinor(input.paid);
+  const overrideMinor = parseMoneyToMinor(input.overrideValue);
   const quantity = Math.max(1, Number(input.quantity ?? 1));
+  const gradedCompany =
+    input.gradeCompany === undefined
+      ? undefined
+      : existing.itemType === PrismaItemType.CARD
+        ? gradingCompanyToEnum(input.gradeCompany)
+        : null;
+  const gradedScore =
+    input.gradeCompany === undefined
+      ? undefined
+      : gradedCompany
+        ? parseGradingScore(input.gradeScore)
+        : null;
+  const existingGradeScore =
+    existing.gradedScore === null || existing.gradedScore === undefined
+      ? null
+      : Number(existing.gradedScore);
+  const nextGradeScore = gradedScore === null || gradedScore === undefined ? null : Number(gradedScore);
+  const gradingChanged =
+    input.gradeCompany !== undefined &&
+    (existing.gradedCompany !== gradedCompany ||
+      existingGradeScore !== nextGradeScore);
+  const overrideChanged =
+    input.overrideValue !== undefined &&
+    (existing.currentValueOverrideMinor ?? null) !== (overrideMinor ?? null);
 
   const updated = await prisma.collectionItem.update({
     where: { id: existing.id },
@@ -292,16 +325,28 @@ export async function updateCollectionItem(
       purchasePriceMinor: paidMinor ?? null,
       purchaseCurrency: paidMinor === undefined ? null : "GBP",
       purchaseDate: paidMinor === undefined ? null : new Date(),
+      gradedCompany,
+      gradedScore,
+      currentValueOverrideMinor: input.overrideValue === undefined ? undefined : overrideMinor ?? null,
+      currentValueOverrideCurrency:
+        input.overrideValue === undefined ? undefined : overrideMinor === undefined ? null : "GBP",
       storageLocationId: storageLocationId ?? null,
       notes: input.notes || null,
       events: {
         create: {
           userId,
-          eventType: CollectionEventType.EDITED,
+          eventType: gradingChanged ? CollectionEventType.GRADED : CollectionEventType.EDITED,
           quantity,
+          amountMinor: overrideChanged ? overrideMinor : undefined,
+          currency: overrideChanged && overrideMinor !== undefined ? "GBP" : undefined,
           occurredAt: new Date(),
-          notes: "Updated from app API.",
-          metadata: { source: "app_api" },
+          notes: gradingChanged ? "Grading details updated from app API." : "Updated from app API.",
+          metadata: {
+            source: "app_api",
+            ...(gradedCompany ? { grade_company: gradedCompany } : {}),
+            ...(gradedScore ? { grade_score: gradedScore } : {}),
+            value_override_changed: overrideChanged,
+          },
         },
       },
     },
@@ -860,6 +905,33 @@ function priorityToEnum(value?: string) {
   return map[normalized] ?? WishlistPriority.MEDIUM;
 }
 
+function gradingCompanyToEnum(value?: string) {
+  const normalized = value?.trim().toLowerCase() ?? "";
+  const map: Record<string, GradingCompany | null> = {
+    raw: null,
+    none: null,
+    ungraded: null,
+    psa: GradingCompany.PSA,
+    bgs: GradingCompany.BGS,
+    cgc: GradingCompany.CGC,
+    ace: GradingCompany.ACE,
+    sgc: GradingCompany.SGC,
+    other: GradingCompany.OTHER,
+  };
+
+  return map[normalized] ?? null;
+}
+
+function parseGradingScore(value?: string) {
+  const score = Number(String(value ?? "").replace(/[^0-9.]/g, ""));
+
+  if (!Number.isFinite(score) || score <= 0) {
+    return null;
+  }
+
+  return Math.min(10, Math.max(1, score)).toFixed(1);
+}
+
 function defaultVariant(itemType: PrismaItemType) {
   return itemType === PrismaItemType.SEALED_PRODUCT ? "Factory sealed" : "Standard";
 }
@@ -892,7 +964,20 @@ function gradeLabel(item: { itemType: string; gradedCompany: string | null; grad
 
   const score = item.gradedScore === null || item.gradedScore === undefined ? "" : ` ${item.gradedScore}`;
 
-  return `${enumLabel(item.gradedCompany)}${score}`;
+  return `${gradeCompanyLabel(item.gradedCompany)}${score}`;
+}
+
+function gradeCompanyLabel(value: string) {
+  const labels: Record<string, string> = {
+    PSA: "PSA",
+    BGS: "BGS",
+    CGC: "CGC",
+    ACE: "ACE",
+    SGC: "SGC",
+    OTHER: "Other",
+  };
+
+  return labels[value] ?? enumLabel(value);
 }
 
 function parseMoneyToMinor(value?: string) {
