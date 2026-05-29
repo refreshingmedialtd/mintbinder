@@ -42,6 +42,7 @@ Useful checks:
 npm run typecheck
 npm run lint
 npm run test:billing
+npm run test:jobs
 npm run test:notifications
 npm run build
 npm audit --audit-level=moderate
@@ -114,6 +115,7 @@ Creating an account from the sign-in screen creates a new collector profile with
 - `POST /api/jobs/price-alerts`: sends or dry-runs Plus price alert email digests behind `JOB_SECRET`.
 - `POST /api/jobs/catalogue-refresh`: imports card catalogue pages from the Pokemon TCG API behind `JOB_SECRET`.
 - `POST /api/jobs/pricing-refresh`: imports Pokemon TCG API prices as GBP snapshots behind `JOB_SECRET`.
+- `GET /api/jobs/runs`: returns recent job run records behind `JOB_SECRET`.
 
 ## Jobs and Integrations
 
@@ -123,7 +125,7 @@ Stripe webhook fulfillment expects events for `checkout.session.completed`, `cus
 https://your-domain.example/api/billing/webhook
 ```
 
-Job routes accept either `Authorization: Bearer <JOB_SECRET>` or `x-job-secret: <JOB_SECRET>`. Pricing refreshes convert Pokemon TCG API USD prices into GBP snapshots with `POKEMON_TCG_USD_TO_GBP_RATE`; keep that value current before running the job.
+Job routes accept either `Authorization: Bearer <JOB_SECRET>` or `x-job-secret: <JOB_SECRET>`. Each successful authenticated job request creates a `job_runs` record with input, result, status, timing, and errors. Pricing refreshes convert Pokemon TCG API USD prices into GBP snapshots with `POKEMON_TCG_USD_TO_GBP_RATE`; keep that value current before running the job.
 
 ## Static Prototype
 
@@ -143,4 +145,4 @@ http://127.0.0.1:8095/
 
 ## Next Step
 
-The next logical step is to add user-controlled notification preferences and a real admin console for monitoring catalogue/pricing job runs.
+The next logical step is a real admin console for monitoring catalogue/pricing job runs and running controlled imports.

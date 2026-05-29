@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { jobErrorStatus, requireJobSecret } from "@/lib/jobs/auth";
+import { JobRunExecutionError, runTrackedJob } from "@/lib/jobs/runs";
 import {
   PricingProviderConfigError,
   syncPokemonTcgCards,
@@ -17,18 +18,25 @@ export async function POST(request: Request) {
       pageSize?: number;
       q?: string;
     };
-    const result = await syncPokemonTcgCards({
-      page: body.page,
-      pageSize: body.pageSize,
-      q: body.q,
-      writePrices: true,
+    const { jobRun, result } = await runTrackedJob({
+      input: body,
+      type: "pricing_refresh",
+      task: () =>
+        syncPokemonTcgCards({
+          page: body.page,
+          pageSize: body.pageSize,
+          q: body.q,
+          writePrices: true,
+        }),
     });
 
-    return NextResponse.json(result);
+    return NextResponse.json({ ...result, jobRun });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unable to refresh pricing.";
-    const status = error instanceof PricingProviderConfigError ? 501 : jobErrorStatus(error);
+    const originalError = error instanceof JobRunExecutionError ? error.originalError : error;
+    const message = originalError instanceof Error ? originalError.message : "Unable to refresh pricing.";
+    const status = originalError instanceof PricingProviderConfigError ? 501 : jobErrorStatus(originalError);
+    const jobRun = error instanceof JobRunExecutionError ? error.jobRun : undefined;
 
-    return NextResponse.json({ error: message }, { status });
+    return NextResponse.json({ error: message, jobRun }, { status });
   }
 }

@@ -126,6 +126,22 @@ enum NotificationDigestFrequency {
   @@map("notification_digest_frequency")
 }
 
+enum JobRunType {
+  PRICE_ALERTS      @map("price_alerts")
+  CATALOGUE_REFRESH @map("catalogue_refresh")
+  PRICING_REFRESH   @map("pricing_refresh")
+
+  @@map("job_run_type")
+}
+
+enum JobRunStatus {
+  RUNNING   @map("running")
+  SUCCEEDED @map("succeeded")
+  FAILED    @map("failed")
+
+  @@map("job_run_status")
+}
+
 model User {
   id                     String                  @id @default(uuid()) @db.Uuid
   email                  String                  @unique
@@ -159,6 +175,23 @@ model NotificationPreference {
   user                        User                        @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("notification_preferences")
+}
+
+model JobRun {
+  id             String       @id @default(uuid()) @db.Uuid
+  jobType        JobRunType   @map("job_type")
+  status         JobRunStatus @default(RUNNING)
+  requestPayload Json         @default("{}") @map("request_payload")
+  resultPayload  Json         @default("{}") @map("result_payload")
+  errorMessage   String?      @map("error_message")
+  startedAt      DateTime     @default(now()) @map("started_at")
+  finishedAt     DateTime?    @map("finished_at")
+  durationMs     Int?         @map("duration_ms")
+  createdAt      DateTime     @default(now()) @map("created_at")
+
+  @@index([jobType, startedAt])
+  @@index([status, startedAt])
+  @@map("job_runs")
 }
 
 model Subscription {

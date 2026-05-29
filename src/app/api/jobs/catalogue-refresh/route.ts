@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { jobErrorStatus, requireJobSecret } from "@/lib/jobs/auth";
+import { JobRunExecutionError, runTrackedJob } from "@/lib/jobs/runs";
 import { syncPokemonTcgCards } from "@/lib/pricing/pokemon-tcg-api";
 
 export const dynamic = "force-dynamic";
@@ -14,17 +15,24 @@ export async function POST(request: Request) {
       pageSize?: number;
       q?: string;
     };
-    const result = await syncPokemonTcgCards({
-      page: body.page,
-      pageSize: body.pageSize,
-      q: body.q,
-      writePrices: false,
+    const { jobRun, result } = await runTrackedJob({
+      input: body,
+      type: "catalogue_refresh",
+      task: () =>
+        syncPokemonTcgCards({
+          page: body.page,
+          pageSize: body.pageSize,
+          q: body.q,
+          writePrices: false,
+        }),
     });
 
-    return NextResponse.json(result);
+    return NextResponse.json({ ...result, jobRun });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unable to refresh catalogue.";
+    const originalError = error instanceof JobRunExecutionError ? error.originalError : error;
+    const message = originalError instanceof Error ? originalError.message : "Unable to refresh catalogue.";
+    const jobRun = error instanceof JobRunExecutionError ? error.jobRun : undefined;
 
-    return NextResponse.json({ error: message }, { status: jobErrorStatus(error) });
+    return NextResponse.json({ error: message, jobRun }, { status: jobErrorStatus(originalError) });
   }
 }
