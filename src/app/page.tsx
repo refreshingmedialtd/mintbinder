@@ -27,8 +27,14 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import { signIn, signOut, useSession } from "next-auth/react";
-import type { Dispatch, FormEvent, ReactNode, SetStateAction } from "react";
+import type { ChangeEvent, Dispatch, FormEvent, ReactNode, SetStateAction } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  buildCollectionCsv,
+  buildCollectionImportTemplateCsv,
+  parseCollectionImportCsv,
+  type CollectionImportRow,
+} from "@/lib/csv";
 import { completionPercent, formatMoney } from "@/lib/format";
 import { sampleAppData } from "@/lib/sample-data";
 import type {
@@ -663,6 +669,91 @@ export default function Home() {
     return true;
   }
 
+  function exportCollectionCsv() {
+    const csv = buildCollectionCsv({
+      catalogueById,
+      collection,
+      exportedAt: new Date(),
+    });
+
+    downloadCsv(`pokestop-collection-${dateStamp()}.csv`, csv);
+    showToast(`${collection.length} collection rows exported.`);
+  }
+
+  function downloadImportTemplate() {
+    downloadCsv("pokestop-collection-import-template.csv", buildCollectionImportTemplateCsv());
+    showToast("Collection import template downloaded.");
+  }
+
+  async function importCollectionCsv(file: File) {
+    try {
+      const rows = parseCollectionImportCsv(await file.text());
+      const importableRows = rows.filter((row) => catalogueById.has(row.catalogueId));
+      const skipped = rows.length - importableRows.length;
+
+      if (!rows.length) {
+        showToast("No import rows found in that CSV.");
+        return false;
+      }
+
+      if (!importableRows.length) {
+        showToast("No rows matched the current catalogue.");
+        return false;
+      }
+
+      if (dataSource === "database") {
+        const importedItems: CollectionItem[] = [];
+
+        for (const row of importableRows) {
+          const response = await fetch("/api/collection-items", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(importPayload(row)),
+          });
+
+          if (!response.ok) {
+            throw new Error(`Import row failed with ${response.status}`);
+          }
+
+          const result = (await response.json()) as { item: CollectionItem };
+          importedItems.push(result.item);
+        }
+
+        setCollection((items) => [...items, ...importedItems]);
+        void refreshAppData({ quiet: true });
+      } else {
+        const importedAt = Date.now();
+        const importedItems = importableRows.map((row, index) => {
+          const catalogueItem = catalogueById.get(row.catalogueId);
+          const paidValue = moneyInputToMinor(row.paid);
+
+          return {
+            id: `owned-import-${importedAt}-${index}-${row.catalogueId}`,
+            catalogueId: row.catalogueId,
+            quantity: row.quantity,
+            condition: row.condition,
+            language: row.language,
+            variant: row.variant,
+            grade: catalogueItem?.type === "sealed" ? "N/A" : "Raw",
+            purchasePriceMinor: paidValue,
+            purchaseDate: paidValue === undefined ? undefined : new Date().toISOString().slice(0, 10),
+            location: row.location,
+            notes: row.notes || undefined,
+          };
+        });
+
+        setCollection((items) => [...items, ...importedItems]);
+      }
+
+      showToast(`${importableRows.length} rows imported${skipped ? `, ${skipped} skipped` : ""}.`);
+      return true;
+    } catch (error) {
+      console.warn("Collection CSV import failed.", error);
+      showToast("Could not import that CSV.");
+      return false;
+    }
+  }
+
   async function handleSignIn(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setIsSigningIn(true);
@@ -743,6 +834,9 @@ export default function Home() {
     removeWishlistItem,
     createStorageLocation,
     deleteStorageLocation,
+    exportCollectionCsv,
+    downloadImportTemplate,
+    importCollectionCsv,
     setAppState,
     showToast,
     resetSampleData,
@@ -805,6 +899,9 @@ type ScreenContext = {
   removeWishlistItem: (id: string, options?: { quiet?: boolean }) => Promise<void>;
   createStorageLocation: (formData: FormData) => Promise<boolean>;
   deleteStorageLocation: (id: string) => Promise<boolean>;
+  exportCollectionCsv: () => void;
+  downloadImportTemplate: () => void;
+  importCollectionCsv: (file: File) => Promise<boolean>;
   setAppState: Dispatch<SetStateAction<AppState>>;
   showToast: (message: string) => void;
   resetSampleData: () => void;
@@ -1958,10 +2055,12 @@ function SettingsScreen({
   dataNotice,
   isLoadingData,
   resetSampleData,
-  showToast,
   storageLocations,
   createStorageLocation,
   deleteStorageLocation,
+  exportCollectionCsv,
+  downloadImportTemplate,
+  importCollectionCsv,
 }: ScreenContext) {
   return (
     <section className="page">
@@ -1990,27 +2089,73 @@ function SettingsScreen({
             ["Status", dataNotice || "Connected"],
           ]}
         />
-        <section className="tool-panel">
-          <h2>Data</h2>
-          <div className="actions">
-            <button className="button" onClick={() => showToast("CSV export will connect to backend data later.")}>
-              <Download size={17} />
-              Export CSV
-            </button>
-            <button className="button" onClick={() => showToast("CSV import is planned after collection CRUD.")}>
-              <Upload size={17} />
-              Import CSV
-            </button>
-            <button className="button" onClick={resetSampleData}>
-              Reset sample
-            </button>
-          </div>
-        </section>
+        <DataPanel
+          onExportCollection={exportCollectionCsv}
+          onDownloadTemplate={downloadImportTemplate}
+          onImportCollection={importCollectionCsv}
+          onResetSampleData={resetSampleData}
+        />
         <StoragePanel
           locations={storageLocations}
           onCreate={createStorageLocation}
           onDelete={deleteStorageLocation}
         />
+      </div>
+    </section>
+  );
+}
+
+function DataPanel({
+  onExportCollection,
+  onDownloadTemplate,
+  onImportCollection,
+  onResetSampleData,
+}: {
+  onExportCollection: () => void;
+  onDownloadTemplate: () => void;
+  onImportCollection: (file: File) => Promise<boolean>;
+  onResetSampleData: () => void;
+}) {
+  const [isImporting, setIsImporting] = useState(false);
+
+  async function handleImportChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0];
+
+    if (!file) {
+      return;
+    }
+
+    setIsImporting(true);
+    await onImportCollection(file);
+    setIsImporting(false);
+    event.currentTarget.value = "";
+  }
+
+  return (
+    <section className="tool-panel">
+      <h2>Data</h2>
+      <div className="actions">
+        <button className="button" onClick={onExportCollection}>
+          <Download size={17} />
+          Export CSV
+        </button>
+        <label className="button file-button">
+          <Upload size={17} />
+          {isImporting ? "Importing" : "Import CSV"}
+          <input
+            type="file"
+            accept=".csv,text/csv"
+            disabled={isImporting}
+            onChange={handleImportChange}
+          />
+        </label>
+        <button className="button" onClick={onDownloadTemplate}>
+          <Download size={17} />
+          Template CSV
+        </button>
+        <button className="button" onClick={onResetSampleData}>
+          Reset sample
+        </button>
       </div>
     </section>
   );
@@ -2405,6 +2550,19 @@ function getOwnedValue(item: CollectionItem, catalogueItem?: CatalogueItem) {
   return item.overrideValueMinor ?? catalogueItem.valueMinor * item.quantity;
 }
 
+function importPayload(row: CollectionImportRow) {
+  return {
+    catalogueId: row.catalogueId,
+    quantity: row.quantity,
+    condition: row.condition,
+    language: row.language,
+    variant: row.variant,
+    paid: row.paid,
+    location: row.location,
+    notes: row.notes,
+  };
+}
+
 function storageOptionNames(locations: StorageLocation[], current?: string) {
   return uniqueValues([...locations.map((location) => location.name), current ?? "", "Unassigned"]);
 }
@@ -2464,6 +2622,35 @@ function payloadFromCollectionItem(item: CollectionItem) {
 
 function moneyInputValue(value?: number) {
   return value === undefined ? "" : (value / 100).toFixed(2);
+}
+
+function moneyInputToMinor(value?: string) {
+  const normalized = String(value ?? "").replace(/[^0-9.]/g, "");
+  const amount = Number(normalized);
+
+  if (!normalized || !Number.isFinite(amount)) {
+    return undefined;
+  }
+
+  return Math.round(amount * 100);
+}
+
+function downloadCsv(filename: string, csv: string) {
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+
+  link.href = url;
+  link.download = filename;
+  link.rel = "noopener";
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function dateStamp(date = new Date()) {
+  return date.toISOString().slice(0, 10);
 }
 
 function uniqueValues(values: string[]) {
