@@ -4,17 +4,27 @@ import { prisma } from "@/lib/db/prisma";
 import { formatMoney } from "@/lib/format";
 import { buildCollectionIntelligence, type PriceAlertInsight } from "@/lib/insights";
 import { isEmailConfigured, sendEmail } from "@/lib/notifications/email";
+import {
+  filterPriceAlertsForPreferences,
+  shouldSendDigestForFrequency,
+} from "@/lib/notifications/preference-filter";
 
 type PriceAlertDigestResult = {
   alerts: number;
   emailId?: string;
   email: string;
-  status: "sent" | "dry_run" | "skipped" | "failed";
+  status: "sent" | "dry_run" | "skipped" | "failed" | "filtered" | "not_scheduled" | "preferences_off";
   userId: string;
   error?: string;
 };
 
-export async function sendPriceAlertDigests({ dryRun = false }: { dryRun?: boolean } = {}) {
+export async function sendPriceAlertDigests({
+  dryRun = false,
+  now = new Date(),
+}: {
+  dryRun?: boolean;
+  now?: Date;
+} = {}) {
   const users = await prisma.user.findMany({
     where: {
       email: { not: "" },
@@ -45,13 +55,36 @@ export async function sendPriceAlertDigests({ dryRun = false }: { dryRun?: boole
       storageLocations: data.storageLocations,
       wishlist: data.wishlist,
     });
-    const alerts = intelligence.priceAlerts;
+    const alerts = filterPriceAlertsForPreferences(
+      intelligence.priceAlerts,
+      data.notificationPreferences,
+    );
 
-    if (!alerts.length) {
+    if (data.notificationPreferences.digestFrequency === "Off") {
       results.push({
         alerts: 0,
         email: user.email,
-        status: "skipped",
+        status: "preferences_off",
+        userId: user.id,
+      });
+      continue;
+    }
+
+    if (!shouldSendDigestForFrequency(data.notificationPreferences.digestFrequency, now)) {
+      results.push({
+        alerts: alerts.length,
+        email: user.email,
+        status: "not_scheduled",
+        userId: user.id,
+      });
+      continue;
+    }
+
+    if (!alerts.length) {
+      results.push({
+        alerts: intelligence.priceAlerts.length,
+        email: user.email,
+        status: intelligence.priceAlerts.length ? "filtered" : "skipped",
         userId: user.id,
       });
       continue;

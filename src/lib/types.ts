@@ -77,6 +77,13 @@ export type AppSubscription = {
   };
 };
 
+export type NotificationPreferences = {
+  priceAlertsEnabled: boolean;
+  wishlistTargetAlertsEnabled: boolean;
+  weakPriceAlertsEnabled: boolean;
+  digestFrequency: "Off" | "Daily" | "Weekly";
+};
+
 export type AppData = {
   catalogue: CatalogueItem[];
   collection: CollectionItem[];
@@ -86,6 +93,7 @@ export type AppData = {
   events: CollectionEvent[];
   source: AppDataSource;
   subscription: AppSubscription;
+  notificationPreferences: NotificationPreferences;
   notice?: string;
 };
 

@@ -19,6 +19,7 @@ const demoPassword = "PokeStop2026!";
 const ids = {
   user: "11111111-1111-4111-8111-111111111111",
   subscription: "11111111-1111-4111-8111-111111111112",
+  notificationPreference: "11111111-1111-4111-8111-111111111113",
   sets: {
     sv151: "22222222-2222-4222-8222-222222222221",
     evolvingSkies: "22222222-2222-4222-8222-222222222222",
@@ -87,6 +88,33 @@ async function main() {
       status: SubscriptionStatus.ACTIVE,
     },
   });
+
+  await prisma.$executeRaw`
+    INSERT INTO notification_preferences (
+      id,
+      user_id,
+      price_alerts_enabled,
+      wishlist_target_alerts_enabled,
+      weak_price_alerts_enabled,
+      digest_frequency,
+      updated_at
+    )
+    VALUES (
+      ${ids.notificationPreference}::uuid,
+      ${ids.user}::uuid,
+      true,
+      true,
+      true,
+      'daily'::notification_digest_frequency,
+      NOW()
+    )
+    ON CONFLICT (user_id) DO UPDATE SET
+      price_alerts_enabled = true,
+      wishlist_target_alerts_enabled = true,
+      weak_price_alerts_enabled = true,
+      digest_frequency = 'daily'::notification_digest_frequency,
+      updated_at = NOW()
+  `;
 
   await seedCardSets();
   await seedCards();

@@ -246,5 +246,11 @@ export const sampleAppData: AppData = {
       "pricing.alerts": false,
     },
   },
+  notificationPreferences: {
+    priceAlertsEnabled: true,
+    wishlistTargetAlertsEnabled: true,
+    weakPriceAlertsEnabled: true,
+    digestFrequency: "Daily",
+  },
   notice: "Using sample data because no database connection is active.",
 };

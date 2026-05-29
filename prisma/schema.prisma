@@ -118,24 +118,47 @@ enum CatalogueVisibility {
   @@map("catalogue_visibility")
 }
 
+enum NotificationDigestFrequency {
+  OFF    @map("off")
+  DAILY  @map("daily")
+  WEEKLY @map("weekly")
+
+  @@map("notification_digest_frequency")
+}
+
 model User {
-  id                String            @id @default(uuid()) @db.Uuid
-  email             String            @unique
-  displayName       String?           @map("display_name")
-  passwordHash      String?           @map("password_hash")
-  preferredCurrency String            @default("GBP") @map("preferred_currency")
-  preferredRegion   String?           @map("preferred_region")
-  role              UserRole          @default(USER)
-  createdAt         DateTime          @default(now()) @map("created_at")
-  updatedAt         DateTime          @updatedAt @map("updated_at")
-  subscriptions     Subscription[]
-  createdSealed     SealedProduct[]   @relation("CreatedSealedProducts")
-  storageLocations  StorageLocation[]
-  collectionItems   CollectionItem[]
-  wishlistItems     WishlistItem[]
-  collectionEvents  CollectionEvent[]
+  id                     String                  @id @default(uuid()) @db.Uuid
+  email                  String                  @unique
+  displayName            String?                 @map("display_name")
+  passwordHash           String?                 @map("password_hash")
+  preferredCurrency      String                  @default("GBP") @map("preferred_currency")
+  preferredRegion        String?                 @map("preferred_region")
+  role                   UserRole                @default(USER)
+  createdAt              DateTime                @default(now()) @map("created_at")
+  updatedAt              DateTime                @updatedAt @map("updated_at")
+  subscriptions          Subscription[]
+  createdSealed          SealedProduct[]         @relation("CreatedSealedProducts")
+  storageLocations       StorageLocation[]
+  collectionItems        CollectionItem[]
+  wishlistItems          WishlistItem[]
+  collectionEvents       CollectionEvent[]
+  notificationPreference NotificationPreference?
 
   @@map("users")
+}
+
+model NotificationPreference {
+  id                          String                      @id @default(uuid()) @db.Uuid
+  userId                      String                      @unique @map("user_id") @db.Uuid
+  priceAlertsEnabled          Boolean                     @default(true) @map("price_alerts_enabled")
+  wishlistTargetAlertsEnabled Boolean                     @default(true) @map("wishlist_target_alerts_enabled")
+  weakPriceAlertsEnabled      Boolean                     @default(true) @map("weak_price_alerts_enabled")
+  digestFrequency             NotificationDigestFrequency @default(DAILY) @map("digest_frequency")
+  createdAt                   DateTime                    @default(now()) @map("created_at")
+  updatedAt                   DateTime                    @updatedAt @map("updated_at")
+  user                        User                        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notification_preferences")
 }
 
 model Subscription {

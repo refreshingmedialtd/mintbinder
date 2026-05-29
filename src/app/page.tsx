@@ -61,6 +61,7 @@ import type {
   CollectionEvent,
   CollectionItem,
   ItemType,
+  NotificationPreferences,
   Screen,
   SetProgress,
   StorageLocation,
@@ -132,6 +133,7 @@ export default function Home() {
   const [sets, setSets] = useState<SetProgress[]>(sampleAppData.sets);
   const [storageLocations, setStorageLocations] = useState<StorageLocation[]>(sampleAppData.storageLocations);
   const [collectionEvents, setCollectionEvents] = useState<CollectionEvent[]>(sampleAppData.events);
+  const [notificationPreferences, setNotificationPreferences] = useState<NotificationPreferences>(sampleAppData.notificationPreferences);
   const [dataSource, setDataSource] = useState<AppDataSource>(sampleAppData.source);
   const [dataNotice, setDataNotice] = useState(sampleAppData.notice ?? "");
   const [isLoadingData, setIsLoadingData] = useState(true);
@@ -167,6 +169,7 @@ export default function Home() {
     setSets(data.sets);
     setStorageLocations(data.storageLocations);
     setCollectionEvents(data.events);
+    setNotificationPreferences(data.notificationPreferences);
     setDataSource(data.source);
     setDataNotice(data.notice ?? "");
     setAppState((current) => ({
@@ -783,6 +786,7 @@ export default function Home() {
     setSets(sampleAppData.sets);
     setStorageLocations(sampleAppData.storageLocations);
     setCollectionEvents(sampleAppData.events);
+    setNotificationPreferences(sampleAppData.notificationPreferences);
     setDataSource(sampleAppData.source);
     setDataNotice(sampleAppData.notice ?? "");
     setAppState(initialState);
@@ -1015,6 +1019,7 @@ export default function Home() {
             "pricing.alerts": appState.plus,
           },
         },
+        notificationPreferences,
         wishlist,
       },
       ownerEmail: viewer.email,
@@ -1059,6 +1064,35 @@ export default function Home() {
       console.warn("Unable to open Stripe billing portal.", error);
       showToast(error instanceof Error ? error.message : "Unable to open billing portal.");
     }
+  }
+
+  async function updateNotificationPreferences(nextPreferences: NotificationPreferences) {
+    if (dataSource === "database") {
+      try {
+        const response = await fetch("/api/notification-preferences", {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(nextPreferences),
+        });
+        const body = (await response.json()) as NotificationPreferences & { error?: string };
+
+        if (!response.ok) {
+          throw new Error(body.error ?? `Preferences update failed with ${response.status}`);
+        }
+
+        setNotificationPreferences(body);
+        showToast("Notification preferences saved.");
+        return true;
+      } catch (error) {
+        console.warn("Unable to update notification preferences.", error);
+        showToast(error instanceof Error ? error.message : "Unable to update notification preferences.");
+        return false;
+      }
+    }
+
+    setNotificationPreferences(nextPreferences);
+    showToast("Notification preferences saved locally.");
+    return true;
   }
 
   function downloadImportTemplate() {
@@ -1192,6 +1226,7 @@ export default function Home() {
     collection,
     storageLocations,
     collectionEvents,
+    notificationPreferences,
     sets,
     dataSource,
     dataNotice,
@@ -1223,6 +1258,7 @@ export default function Home() {
     exportInsuranceReport,
     startPlusCheckout,
     openBillingPortal,
+    updateNotificationPreferences,
     downloadImportTemplate,
     importCollectionCsv,
     setAppState,
@@ -1258,6 +1294,7 @@ type ScreenContext = {
   collection: CollectionItem[];
   storageLocations: StorageLocation[];
   collectionEvents: CollectionEvent[];
+  notificationPreferences: NotificationPreferences;
   sets: SetProgress[];
   dataSource: AppDataSource;
   dataNotice: string;
@@ -1296,6 +1333,7 @@ type ScreenContext = {
   exportInsuranceReport: () => Promise<void>;
   startPlusCheckout: (plan: "monthly" | "yearly") => Promise<void>;
   openBillingPortal: () => Promise<void>;
+  updateNotificationPreferences: (preferences: NotificationPreferences) => Promise<boolean>;
   downloadImportTemplate: () => void;
   importCollectionCsv: (file: File) => Promise<boolean>;
   setAppState: Dispatch<SetStateAction<AppState>>;
@@ -3158,6 +3196,7 @@ function SettingsScreen({
   dataSource,
   dataNotice,
   isLoadingData,
+  notificationPreferences,
   resetSampleData,
   storageLocations,
   createStorageLocation,
@@ -3166,6 +3205,7 @@ function SettingsScreen({
   exportInsuranceReport,
   openBillingPortal,
   startPlusCheckout,
+  updateNotificationPreferences,
   downloadImportTemplate,
   importCollectionCsv,
 }: ScreenContext) {
@@ -3193,6 +3233,10 @@ function SettingsScreen({
           plus={appState.plus}
           onOpenBillingPortal={openBillingPortal}
           onStartCheckout={startPlusCheckout}
+        />
+        <NotificationPreferencesPanel
+          preferences={notificationPreferences}
+          onUpdate={updateNotificationPreferences}
         />
         <MetricPanel
           title="Data source"
@@ -3373,6 +3417,106 @@ function WishlistOpportunities({
         <p className="muted">No wishlist items are at target right now.</p>
       )}
     </section>
+  );
+}
+
+function NotificationPreferencesPanel({
+  onUpdate,
+  preferences,
+}: {
+  onUpdate: (preferences: NotificationPreferences) => Promise<boolean>;
+  preferences: NotificationPreferences;
+}) {
+  const [draft, setDraft] = useState(preferences);
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    setDraft(preferences);
+  }, [preferences]);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setIsSaving(true);
+    await onUpdate(draft);
+    setIsSaving(false);
+  }
+
+  function updateDraft(next: Partial<NotificationPreferences>) {
+    setDraft((current) => ({ ...current, ...next }));
+  }
+
+  return (
+    <section className="tool-panel">
+      <div className="panel-title-row">
+        <h2>Notifications</h2>
+        <span className="plan-pill"><Mail size={17} />Email</span>
+      </div>
+      <form className="form-stack" onSubmit={handleSubmit}>
+        <label className="field">
+          Digest frequency
+          <select
+            value={draft.digestFrequency}
+            onChange={(event) =>
+              updateDraft({ digestFrequency: event.currentTarget.value as NotificationPreferences["digestFrequency"] })
+            }
+          >
+            <option value="Daily">Daily</option>
+            <option value="Weekly">Weekly</option>
+            <option value="Off">Off</option>
+          </select>
+        </label>
+        <div className="preference-list">
+          <PreferenceToggle
+            checked={draft.priceAlertsEnabled}
+            label="Send price alert digests"
+            note="All price-watch email digests."
+            onChange={(checked) => updateDraft({ priceAlertsEnabled: checked })}
+          />
+          <PreferenceToggle
+            checked={draft.wishlistTargetAlertsEnabled}
+            label="Wishlist target hits"
+            note="Cards and sealed products at target."
+            onChange={(checked) => updateDraft({ wishlistTargetAlertsEnabled: checked })}
+          />
+          <PreferenceToggle
+            checked={draft.weakPriceAlertsEnabled}
+            label="Weak price confidence"
+            note="Owned items with low confidence values."
+            onChange={(checked) => updateDraft({ weakPriceAlertsEnabled: checked })}
+          />
+        </div>
+        <button className="button primary" type="submit" disabled={isSaving}>
+          <Check size={17} />
+          {isSaving ? "Saving" : "Save preferences"}
+        </button>
+      </form>
+    </section>
+  );
+}
+
+function PreferenceToggle({
+  checked,
+  label,
+  note,
+  onChange,
+}: {
+  checked: boolean;
+  label: string;
+  note: string;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className="preference-row">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(event) => onChange(event.currentTarget.checked)}
+      />
+      <span>
+        <strong>{label}</strong>
+        <small>{note}</small>
+      </span>
+    </label>
   );
 }
 

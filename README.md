@@ -42,6 +42,7 @@ Useful checks:
 npm run typecheck
 npm run lint
 npm run test:billing
+npm run test:notifications
 npm run build
 npm audit --audit-level=moderate
 ```
@@ -104,6 +105,7 @@ Creating an account from the sign-in screen creates a new collector profile with
 - `POST /api/collection-items/:id/sale`: records a sale and removes the lot from active collection.
 - `POST /api/wishlist-items`: creates or returns a wishlist item for the signed-in user.
 - `DELETE /api/wishlist-items?id=...`: removes a wishlist item for the signed-in user.
+- `GET/PATCH /api/notification-preferences`: reads or updates user email alert preferences.
 - `GET /api/alerts/price`: returns Plus-gated price alert insights.
 - `GET /api/reports/insurance`: exports a Plus-gated insurance-style HTML report.
 - `POST /api/billing/checkout`: creates a Stripe subscription Checkout session when Stripe env vars are configured.
