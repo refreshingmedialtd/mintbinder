@@ -873,6 +873,7 @@ function mapCollectionEvent(event: {
     id: string;
     cardPrintingId: string | null;
     sealedProductId: string | null;
+    purchasePriceMinor: number | null;
     cardPrinting: { name: string } | null;
     sealedProduct: { name: string } | null;
   };
@@ -888,6 +889,10 @@ function mapCollectionEvent(event: {
       "Collection item",
     quantity: event.quantity ?? undefined,
     amountMinor: event.amountMinor ?? undefined,
+    basisMinor:
+      event.eventType === CollectionEventType.SOLD
+        ? event.collectionItem.purchasePriceMinor ?? undefined
+        : undefined,
     currency: event.currency ?? undefined,
     occurredAt: event.occurredAt.toISOString(),
     notes: event.notes ?? undefined,

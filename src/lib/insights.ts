@@ -34,6 +34,16 @@ export type WishlistOpportunity = {
   savingMinor: number;
 };
 
+export type SaleInsight = {
+  id: string;
+  itemName: string;
+  quantity?: number;
+  amountMinor?: number;
+  basisMinor?: number;
+  gainMinor: number | null;
+  occurredAt: string;
+};
+
 export type InsightAction = {
   id: string;
   category: "Wishlist" | "Valuation" | "Grading" | "Storage" | "Duplicates" | "Momentum";
@@ -83,6 +93,14 @@ export type CollectionIntelligence = {
     valueMinor: number;
     share: number;
   }>;
+  realizedSales: {
+    count: number;
+    proceedsMinor: number;
+    basisMinor: number;
+    gainMinor: number;
+    knownBasisCount: number;
+    sales: SaleInsight[];
+  };
   actionQueue: InsightAction[];
 };
 
@@ -146,6 +164,7 @@ export function buildCollectionIntelligence({
   const setFocus = setFocusInsight(sets);
   const activity = activityInsight(events);
   const portfolioMix = portfolioMixInsights(collection, catalogueById, totalValue);
+  const realizedSales = realizedSalesInsight(events);
   const actionQueue = buildActionQueue({
     bestPerformer,
     duplicates,
@@ -178,6 +197,7 @@ export function buildCollectionIntelligence({
     setFocus,
     activity,
     portfolioMix,
+    realizedSales,
     actionQueue,
   };
 }
@@ -342,6 +362,41 @@ function portfolioMixInsights(
     { label: "Cards", valueMinor: mix.cards, share: share(mix.cards, totalValue) },
     { label: "Sealed", valueMinor: mix.sealed, share: share(mix.sealed, totalValue) },
   ].filter((item) => item.valueMinor > 0);
+}
+
+function realizedSalesInsight(events: CollectionEvent[]) {
+  const sales = events
+    .filter((event) => event.type === "Sold")
+    .map((event) => {
+      const gainMinor =
+        event.amountMinor === undefined || event.basisMinor === undefined
+          ? null
+          : event.amountMinor - event.basisMinor;
+
+      return {
+        id: event.id,
+        itemName: event.itemName,
+        quantity: event.quantity,
+        amountMinor: event.amountMinor,
+        basisMinor: event.basisMinor,
+        gainMinor,
+        occurredAt: event.occurredAt,
+      };
+    })
+    .sort((left, right) => new Date(right.occurredAt).getTime() - new Date(left.occurredAt).getTime());
+  const proceedsMinor = sales.reduce((total, sale) => total + (sale.amountMinor ?? 0), 0);
+  const knownBasisSales = sales.filter((sale) => sale.basisMinor !== undefined);
+  const basisMinor = knownBasisSales.reduce((total, sale) => total + (sale.basisMinor ?? 0), 0);
+  const gainMinor = knownBasisSales.reduce((total, sale) => total + (sale.gainMinor ?? 0), 0);
+
+  return {
+    count: sales.length,
+    proceedsMinor,
+    basisMinor,
+    gainMinor,
+    knownBasisCount: knownBasisSales.length,
+    sales: sales.slice(0, 6),
+  };
 }
 
 function buildActionQueue({

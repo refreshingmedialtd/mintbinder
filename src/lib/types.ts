@@ -60,6 +60,7 @@ export type CollectionEvent = {
   itemName: string;
   quantity?: number;
   amountMinor?: number;
+  basisMinor?: number;
   currency?: string;
   occurredAt: string;
   notes?: string;

@@ -714,6 +714,7 @@ export default function Home() {
         itemName: catalogueItem?.name ?? "Collection item",
         quantity: source.quantity,
         amountMinor: saleAmountMinor,
+        basisMinor: source.purchasePriceMinor,
         currency: saleAmountMinor === undefined ? undefined : "GBP",
         occurredAt: soldDate,
         notes: notes || undefined,
@@ -2878,6 +2879,7 @@ function AnalyticsScreen({
   const gain = summary.value - summary.cost;
   const duplicateValue = intelligence.duplicates.reduce((total, item) => total + item.valueMinor, 0);
   const leadAction = intelligence.actionQueue[0];
+  const realizedSales = intelligence.realizedSales;
 
   if (!appState.plus) {
     return (
@@ -2899,6 +2901,7 @@ function AnalyticsScreen({
               rows={[
                 ["Top holding", intelligence.topHoldings[0]?.name ?? "Add more items"],
                 ["Best performer", intelligence.bestPerformer ? gainLabel(intelligence.bestPerformer) : "Add purchase prices"],
+                ["Sales recorded", realizedSales.count],
                 ["Next action", leadAction?.title ?? "Collection looks tidy"],
                 ["Recent activity", `${intelligence.activity.last30Days} events this month`],
               ]}
@@ -2907,7 +2910,7 @@ function AnalyticsScreen({
           <section className="section-block">
             <SectionHeader title="Plus unlocks" />
             <div className="locked-list">
-              {["Value path", "Action queue", "Portfolio mix", "Wishlist targets"].map((label) => (
+              {["Value path", "Realised sales", "Action queue", "Portfolio mix", "Wishlist targets"].map((label) => (
                 <div className="locked-tile" key={label}>
                   <strong>{label}</strong>
                   <span className="tag red">Locked</span>
@@ -2941,6 +2944,12 @@ function AnalyticsScreen({
         <StatCard label="Health score" value={`${intelligence.healthScore}/100`} note={intelligence.healthLabel} />
         <StatCard label="Current value" value={formatMoney(summary.value)} note={`${summary.items} tracked items`} />
         <StatCard label="Gain/loss" value={formatMoney(gain)} note="Against known cost" positive={gain >= 0} />
+        <StatCard
+          label="Sales"
+          value={formatMoney(realizedSales.proceedsMinor)}
+          note={`${realizedSales.count} recorded sale${realizedSales.count === 1 ? "" : "s"}`}
+          positive={realizedSales.gainMinor >= 0}
+        />
         <StatCard label="Duplicates" value={intelligence.duplicates.length.toString()} note={`${formatMoney(duplicateValue)} across duplicate lots`} />
         <StatCard label="Wishlist hits" value={intelligence.wishlistOpportunities.length.toString()} note="At or below target" />
       </div>
@@ -2955,6 +2964,7 @@ function AnalyticsScreen({
         <ActionQueue actions={intelligence.actionQueue} />
         <TopHoldings holdings={intelligence.topHoldings} />
         <PortfolioMix rows={intelligence.portfolioMix} />
+        <SalesLedger realizedSales={realizedSales} />
         <MetricPanel
           title="Collection review"
           rows={[
@@ -3110,6 +3120,55 @@ function PortfolioMix({
         </div>
       ) : (
         <p className="muted">No portfolio mix yet.</p>
+      )}
+    </section>
+  );
+}
+
+function SalesLedger({
+  realizedSales,
+}: {
+  realizedSales: CollectionIntelligence["realizedSales"];
+}) {
+  return (
+    <section className="tool-panel">
+      <div className="panel-title-row">
+        <h2>Realised sales</h2>
+        <History size={18} />
+      </div>
+      <MetricList
+        rows={[
+          ["Proceeds", formatMoney(realizedSales.proceedsMinor)],
+          [
+            "Known basis",
+            `${formatMoney(realizedSales.basisMinor)} (${realizedSales.knownBasisCount}/${realizedSales.count})`,
+          ],
+          [
+            "Realised gain",
+            formatMoney(realizedSales.gainMinor),
+            realizedSales.gainMinor >= 0 ? "positive" : "",
+          ],
+        ]}
+      />
+      {realizedSales.sales.length ? (
+        <div className="insight-list">
+          {realizedSales.sales.map((sale) => (
+            <article className="insight-row" key={sale.id}>
+              <span className={`tag ${sale.gainMinor === null ? "amber" : sale.gainMinor >= 0 ? "green" : "red"}`}>
+                {sale.gainMinor === null ? "Basis" : sale.gainMinor >= 0 ? "Gain" : "Loss"}
+              </span>
+              <div>
+                <strong>{sale.itemName}</strong>
+                <p className="muted">
+                  {formatMoney(sale.amountMinor)} | {sale.quantity ? `Qty ${sale.quantity} | ` : ""}
+                  {sale.gainMinor === null ? "No basis" : formatMoney(sale.gainMinor)} | {formatEventDate(sale.occurredAt)}
+                </p>
+              </div>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <p className="muted">Record a sale from an item detail page to build realised performance history.</p>
       )}
     </section>
   );

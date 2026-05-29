@@ -186,6 +186,19 @@ export const storageLocations: StorageLocation[] = [
 
 export const collectionEvents: CollectionEvent[] = [
   {
+    id: "event-pikachu-sold",
+    type: "Sold",
+    itemId: "owned-pikachu-sold",
+    catalogueId: "card-pikachu",
+    itemName: "Pikachu",
+    quantity: 1,
+    amountMinor: 2600,
+    basisMinor: 1450,
+    currency: "GBP",
+    occurredAt: "2026-04-18",
+    notes: "Sold duplicate copy.",
+  },
+  {
     id: "event-charizard-added",
     type: "Added",
     itemId: "owned-charizard",
