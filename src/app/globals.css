@@ -480,6 +480,7 @@ h3 {
 
 .collection-toolbar-head,
 .collection-sort-row,
+.catalogue-controls,
 .toolbar-actions,
 .filter-panel-footer {
   display: flex;
@@ -506,6 +507,45 @@ h3 {
 
 .collection-sort-row .muted {
   margin: 0;
+}
+
+.catalogue-toolbar {
+  display: grid;
+  gap: 10px;
+}
+
+.catalogue-toolbar .search-box {
+  width: 100%;
+}
+
+.catalogue-controls {
+  align-items: stretch;
+}
+
+.catalogue-controls .sort-control {
+  flex: 1 1 160px;
+}
+
+.result-meta,
+.set-stat-row {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.set-stat-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.set-stat-row span {
+  min-height: 28px;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #ffffff;
 }
 
 .search-box {

@@ -94,6 +94,8 @@ type Viewer = {
 };
 
 type AuthMode = "sign-in" | "register";
+type CatalogueSort = "set-number" | "value-desc" | "name" | "rarity";
+type SetDetailSort = "number" | "value-desc" | "name" | "rarity";
 type JobType = "price_alerts" | "catalogue_refresh" | "pricing_refresh";
 type JobStatus = "running" | "succeeded" | "failed";
 
@@ -2171,14 +2173,32 @@ function AddScreen({
   addToWishlist,
   navigate,
 }: ScreenContext) {
+  const [catalogueSetFilter, setCatalogueSetFilter] = useState("all");
+  const [catalogueRarityFilter, setCatalogueRarityFilter] = useState("all");
+  const [catalogueSort, setCatalogueSort] = useState<CatalogueSort>("set-number");
+
+  useEffect(() => {
+    setCatalogueSetFilter("all");
+    setCatalogueRarityFilter("all");
+  }, [appState.addType]);
+
   const results = catalogueItems.filter((item) => item.type === appState.addType);
   const normalizedSearch = addSearch.trim().toLowerCase();
-  const filteredResults = results.filter((item) =>
-    `${item.name} ${item.set} ${item.number}`.toLowerCase().includes(normalizedSearch),
+  const setOptions = uniqueValues(results.map((item) => item.set)).sort((left, right) => left.localeCompare(right));
+  const rarityOptions = uniqueValues(results.map((item) => item.rarity)).sort((left, right) =>
+    left.localeCompare(right),
   );
+  const filteredResults = results.filter((item) => {
+    const matchesSearch = `${item.name} ${item.set} ${item.number} ${item.rarity}`.toLowerCase().includes(normalizedSearch);
+    const matchesSet = catalogueSetFilter === "all" || item.set === catalogueSetFilter;
+    const matchesRarity = catalogueRarityFilter === "all" || item.rarity === catalogueRarityFilter;
+
+    return matchesSearch && matchesSet && matchesRarity;
+  }).sort((left, right) => sortCatalogueItems(left, right, catalogueSort));
+  const visibleResults = filteredResults.slice(0, 120);
   const selected =
-    catalogueItems.find((item) => item.id === appState.selectedCatalogueId && item.type === appState.addType) ??
-    results[0];
+    filteredResults.find((item) => item.id === appState.selectedCatalogueId && item.type === appState.addType) ??
+    filteredResults[0];
   const locationOptions = storageOptionNames(
     storageLocations,
     selected ? defaultStorageLocation(storageLocations, selected.type) : undefined,
@@ -2239,25 +2259,60 @@ function AddScreen({
             <input value={addSearch} onChange={(event) => setAddSearch(event.target.value)} placeholder="Search catalogue" />
           </label>
 
+          <div className="catalogue-controls">
+            <label className="sort-control">
+              Set
+              <select value={catalogueSetFilter} onChange={(event) => setCatalogueSetFilter(event.target.value)}>
+                <option value="all">All</option>
+                {setOptions.map((setName) => (
+                  <option key={setName} value={setName}>{setName}</option>
+                ))}
+              </select>
+            </label>
+            <label className="sort-control">
+              Rarity
+              <select value={catalogueRarityFilter} onChange={(event) => setCatalogueRarityFilter(event.target.value)}>
+                <option value="all">All</option>
+                {rarityOptions.map((rarity) => (
+                  <option key={rarity} value={rarity}>{rarity}</option>
+                ))}
+              </select>
+            </label>
+            <label className="sort-control">
+              Sort
+              <select value={catalogueSort} onChange={(event) => setCatalogueSort(event.target.value as CatalogueSort)}>
+                <option value="set-number">Set number</option>
+                <option value="value-desc">Value</option>
+                <option value="name">Name</option>
+                <option value="rarity">Rarity</option>
+              </select>
+            </label>
+          </div>
+
           {appState.addType === "sealed" ? (
             <ManualSealedProductPanel sets={sets} onCreate={createManualSealedProduct} />
           ) : null}
 
+          <p className="result-meta">
+            Showing {visibleResults.length} of {filteredResults.length} {appState.addType === "sealed" ? "products" : "cards"}
+          </p>
           <div className="item-list">
-            {filteredResults.map((item) => (
+            {visibleResults.length ? visibleResults.map((item) => (
               <CatalogueResult
                 key={item.id}
                 item={item}
                 selected={item.id === selected?.id}
                 onClick={() => setAppState((current) => ({ ...current, selectedCatalogueId: item.id }))}
               />
-            ))}
+            )) : (
+              <EmptyState title="No matching catalogue items" />
+            )}
           </div>
         </section>
 
         <section className="tool-panel">
           <h2>Owned details</h2>
-          {selected ? <CataloguePreview item={selected} /> : null}
+          {selected ? <CataloguePreview item={selected} /> : <EmptyState title="No item selected" />}
           <form className="form-stack" onSubmit={handleSubmit}>
             <div className="field-grid">
               <Field label="Condition">
@@ -2303,11 +2358,11 @@ function AddScreen({
               <textarea name="notes" placeholder="Optional" />
             </Field>
             <div className="actions">
-              <button className="button primary" type="submit">
+              <button className="button primary" type="submit" disabled={!selected}>
                 <Check size={17} />
                 Save to collection
               </button>
-              <button className="button" type="button" onClick={() => selected && void addToWishlist(selected.id)}>
+              <button className="button" type="button" disabled={!selected} onClick={() => selected && void addToWishlist(selected.id)}>
                 <Heart size={17} />
                 Add to wishlist
               </button>
@@ -2716,6 +2771,9 @@ function SetDetailScreen({
   addToWishlist,
   navigate,
 }: ScreenContext) {
+  const [cardSearch, setCardSearch] = useState("");
+  const [rarityFilter, setRarityFilter] = useState("all");
+  const [sort, setSort] = useState<SetDetailSort>("number");
   const set = sets.find((item) => item.id === appState.selectedSetId) ?? sets[0];
 
   if (!set) {
@@ -2724,6 +2782,12 @@ function SetDetailScreen({
 
   const setCards = catalogueItems.filter((item) => item.type === "card" && item.set === set.name);
   const done = completionPercent(set.owned, set.total);
+  const normalizedCardSearch = cardSearch.trim().toLowerCase();
+  const rarityOptions = uniqueValues(setCards.map((item) => item.rarity)).sort((left, right) =>
+    left.localeCompare(right),
+  );
+  const setMarketValue = setCards.reduce((total, item) => total + item.valueMinor, 0);
+  const wantedCount = setCards.filter((item) => wishlist.some((entry) => entry.catalogueId === item.id)).length;
 
   const visibleCards = setCards.filter((item) => {
     const owned = collection.some((entry) => entry.catalogueId === item.id);
@@ -2742,7 +2806,12 @@ function SetDetailScreen({
     }
 
     return true;
-  });
+  }).filter((item) => {
+    const matchesSearch = `${item.name} ${item.number} ${item.rarity}`.toLowerCase().includes(normalizedCardSearch);
+    const matchesRarity = rarityFilter === "all" || item.rarity === rarityFilter;
+
+    return matchesSearch && matchesRarity;
+  }).sort((left, right) => sortCatalogueItems(left, right, sort));
 
   return (
     <section className="page">
@@ -2761,6 +2830,11 @@ function SetDetailScreen({
           <strong>{done}%</strong>
         </div>
         <ProgressBar value={done} />
+        <div className="set-stat-row">
+          <span>{visibleCards.length} shown</span>
+          <span>{wantedCount} wanted</span>
+          <span>{formatMoney(setMarketValue)} market</span>
+        </div>
         <div className="segmented">
           {(["all", "owned", "missing", "want"] as const).map((filter) => (
             <button
@@ -2774,8 +2848,35 @@ function SetDetailScreen({
         </div>
       </section>
 
+      <section className="catalogue-toolbar">
+        <label className="search-box">
+          <Search size={18} />
+          <input value={cardSearch} onChange={(event) => setCardSearch(event.target.value)} placeholder="Search this set" />
+        </label>
+        <div className="catalogue-controls">
+          <label className="sort-control">
+            Rarity
+            <select value={rarityFilter} onChange={(event) => setRarityFilter(event.target.value)}>
+              <option value="all">All</option>
+              {rarityOptions.map((rarity) => (
+                <option key={rarity} value={rarity}>{rarity}</option>
+              ))}
+            </select>
+          </label>
+          <label className="sort-control">
+            Sort
+            <select value={sort} onChange={(event) => setSort(event.target.value as SetDetailSort)}>
+              <option value="number">Number</option>
+              <option value="value-desc">Value</option>
+              <option value="name">Name</option>
+              <option value="rarity">Rarity</option>
+            </select>
+          </label>
+        </div>
+      </section>
+
       <div className="item-list">
-        {visibleCards.map((item) => {
+        {visibleCards.length ? visibleCards.map((item) => {
           const owned = collection.find((entry) => entry.catalogueId === item.id);
           const wanted = wishlist.some((entry) => entry.catalogueId === item.id);
 
@@ -2789,6 +2890,10 @@ function SetDetailScreen({
                     <p className="muted">{item.set} | {item.number}</p>
                   </div>
                   <span className={owned ? "tag green" : wanted ? "tag amber" : "tag"}>{owned ? "Owned" : wanted ? "Want" : "Missing"}</span>
+                </div>
+                <div className="tag-row">
+                  <span className="tag blue">{item.rarity}</span>
+                  <span className="tag">{formatMoney(item.valueMinor)}</span>
                 </div>
                 <div className="actions">
                   {owned ? (
@@ -2813,15 +2918,17 @@ function SetDetailScreen({
                       Add
                     </button>
                   )}
-                  <button className="button" onClick={() => void addToWishlist(item.id)}>
+                  <button className="button" disabled={wanted} onClick={() => void addToWishlist(item.id)}>
                     <Heart size={17} />
-                    Want
+                    {wanted ? "Wanted" : "Want"}
                   </button>
                 </div>
               </div>
             </article>
           );
-        })}
+        }) : (
+          <EmptyState title="No matching cards" />
+        )}
       </div>
     </section>
   );
@@ -4408,6 +4515,51 @@ function compareNullableNumbers(
   const emptyValue = direction === "asc" ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY;
 
   return (left ?? emptyValue) - (right ?? emptyValue);
+}
+
+function sortCatalogueItems(
+  left: CatalogueItem,
+  right: CatalogueItem,
+  sort: CatalogueSort | SetDetailSort,
+) {
+  if (sort === "value-desc") {
+    return right.valueMinor - left.valueMinor || compareCatalogueNumbers(left.number, right.number);
+  }
+
+  if (sort === "name") {
+    return left.name.localeCompare(right.name, undefined, { sensitivity: "base" }) ||
+      left.set.localeCompare(right.set, undefined, { sensitivity: "base" }) ||
+      compareCatalogueNumbers(left.number, right.number);
+  }
+
+  if (sort === "rarity") {
+    return left.rarity.localeCompare(right.rarity, undefined, { sensitivity: "base" }) ||
+      compareCatalogueNumbers(left.number, right.number);
+  }
+
+  if (sort === "set-number") {
+    return left.set.localeCompare(right.set, undefined, { sensitivity: "base" }) ||
+      compareCatalogueNumbers(left.number, right.number);
+  }
+
+  return compareCatalogueNumbers(left.number, right.number);
+}
+
+function compareCatalogueNumbers(left: string, right: string) {
+  const leftParsed = parseCatalogueNumber(left);
+  const rightParsed = parseCatalogueNumber(right);
+
+  if (leftParsed !== rightParsed) {
+    return leftParsed - rightParsed;
+  }
+
+  return left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" });
+}
+
+function parseCatalogueNumber(value: string) {
+  const match = value.match(/\d+/);
+
+  return match ? Number(match[0]) : Number.POSITIVE_INFINITY;
 }
 
 function importPayload(row: CollectionImportRow) {
