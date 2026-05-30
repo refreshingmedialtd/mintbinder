@@ -1,4 +1,4 @@
-import { randomBytes, scryptSync } from "node:crypto";
+import { createHash, randomBytes, scryptSync } from "node:crypto";
 import {
   CatalogueVisibility,
   CollectionEventType,
@@ -21,15 +21,15 @@ const ids = {
   subscription: "11111111-1111-4111-8111-111111111112",
   notificationPreference: "11111111-1111-4111-8111-111111111113",
   sets: {
-    sv151: "22222222-2222-4222-8222-222222222221",
-    evolvingSkies: "22222222-2222-4222-8222-222222222222",
-    crownZenith: "22222222-2222-4222-8222-222222222223",
+    sv151: pokemonTcgSetId("sv3pt5"),
+    evolvingSkies: pokemonTcgSetId("swsh7"),
+    crownZenith: pokemonTcgSetId("swsh12pt5"),
   },
   cards: {
-    charizard151: "33333333-3333-4333-8333-333333333331",
-    umbreonVmax: "33333333-3333-4333-8333-333333333332",
-    mew151: "33333333-3333-4333-8333-333333333333",
-    pikachuCrownZenith: "33333333-3333-4333-8333-333333333334",
+    charizard151: pokemonTcgCardId("sv3pt5-199"),
+    umbreonVmax: pokemonTcgCardId("swsh7-215"),
+    mew151: pokemonTcgCardId("sv3pt5-193"),
+    pikachuCrownZenith: pokemonTcgCardId("swsh12pt5-160"),
   },
   sealed: {
     bundle151: "44444444-4444-4444-8444-444444444441",
@@ -131,7 +131,7 @@ async function seedCardSets() {
     {
       id: ids.sets.sv151,
       providerIds: { pokemon_tcg_api: "sv3pt5" },
-      name: "Scarlet & Violet 151",
+      name: "151",
       series: "Scarlet & Violet",
       releaseDate: new Date("2023-09-22T00:00:00.000Z"),
       printedTotal: 165,
@@ -160,7 +160,7 @@ async function seedCardSets() {
   for (const set of sets) {
     await prisma.cardSet.upsert({
       where: { id: set.id },
-      update: set,
+      update: {},
       create: set,
     });
   }
@@ -173,22 +173,22 @@ async function seedCards() {
       cardSetId: ids.sets.sv151,
       providerIds: { pokemon_tcg_api: "sv3pt5-199" },
       name: "Charizard ex",
-      number: "199/165",
+      number: "199",
       rarity: "Special Illustration Rare",
       supertype: "Pokemon",
       subtypes: ["Stage 2", "ex"],
-      artist: "Akira Egawa",
+      artist: "miki kudo",
       imageSmallUrl: "https://images.pokemontcg.io/sv3pt5/199.png",
       imageLargeUrl: "https://images.pokemontcg.io/sv3pt5/199_hires.png",
       variantMetadata: { finish: "holofoil", showcase: "special_illustration" },
-      searchText: "charizard ex scarlet violet 151 199/165 special illustration rare",
+      searchText: "charizard ex 151 199 special illustration rare pokemon stage 2 ex",
     },
     {
       id: ids.cards.umbreonVmax,
       cardSetId: ids.sets.evolvingSkies,
       providerIds: { pokemon_tcg_api: "swsh7-215" },
       name: "Umbreon VMAX",
-      number: "215/203",
+      number: "215",
       rarity: "Secret Rare",
       supertype: "Pokemon",
       subtypes: ["VMAX"],
@@ -203,22 +203,22 @@ async function seedCards() {
       cardSetId: ids.sets.sv151,
       providerIds: { pokemon_tcg_api: "sv3pt5-193" },
       name: "Mew ex",
-      number: "193/165",
-      rarity: "Special Illustration Rare",
+      number: "193",
+      rarity: "Ultra Rare",
       supertype: "Pokemon",
       subtypes: ["Basic", "ex"],
-      artist: "USGMEN",
+      artist: "aky CG Works",
       imageSmallUrl: "https://images.pokemontcg.io/sv3pt5/193.png",
       imageLargeUrl: "https://images.pokemontcg.io/sv3pt5/193_hires.png",
-      variantMetadata: { finish: "holofoil", showcase: "special_illustration" },
-      searchText: "mew ex scarlet violet 151 193/165 special illustration rare",
+      variantMetadata: { finish: "holofoil", showcase: "ultra_rare" },
+      searchText: "mew ex 151 193 ultra rare pokemon basic ex",
     },
     {
       id: ids.cards.pikachuCrownZenith,
       cardSetId: ids.sets.crownZenith,
       providerIds: { pokemon_tcg_api: "swsh12pt5-160" },
       name: "Pikachu",
-      number: "160/159",
+      number: "160",
       rarity: "Secret Rare",
       supertype: "Pokemon",
       subtypes: ["Basic"],
@@ -233,7 +233,7 @@ async function seedCards() {
   for (const card of cards) {
     await prisma.cardPrinting.upsert({
       where: { id: card.id },
-      update: card,
+      update: {},
       create: card,
     });
   }
@@ -550,4 +550,24 @@ function hashPassword(password) {
   }).toString("base64url");
 
   return `scrypt$16384$8$1$${salt}$${hash}`;
+}
+
+function pokemonTcgSetId(providerId) {
+  return uuidFromString(`pokemon-tcg-set:${providerId}`);
+}
+
+function pokemonTcgCardId(providerId) {
+  return uuidFromString(`pokemon-tcg-card:${providerId}`);
+}
+
+function uuidFromString(value) {
+  const bytes = createHash("sha1").update(value).digest().subarray(0, 16);
+
+  bytes[6] = (bytes[6] & 0x0f) | 0x50;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+
+  return [...bytes]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("")
+    .replace(/^(.{8})(.{4})(.{4})(.{4})(.{12})$/, "$1-$2-$3-$4-$5");
 }
