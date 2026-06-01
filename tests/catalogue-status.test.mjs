@@ -47,6 +47,7 @@ test("summarizes catalogue status coverage and resume page", () => {
       pricingSnapshotsCreated: 70,
       totalCount: 70,
     },
+    pricedCardCount: 1234,
     priceSnapshotCount: 690,
     sealedProductCount: 2,
     setCount: 23,
@@ -54,7 +55,9 @@ test("summarizes catalogue status coverage and resume page", () => {
 
   assert.equal(status.coveragePercent, 20.5);
   assert.equal(status.nextCataloguePage, 16);
+  assert.equal(status.pricingCoveragePercent, 29.5);
   assert.equal(status.providerTotalCount, 20359);
+  assert.equal(status.pricedCardCount, 1234);
   assert.equal(status.latestPricingResult?.pricingSnapshotsCreated, 70);
 });
 
@@ -67,6 +70,7 @@ test("treats complete catalogue runs as having no resume page", () => {
       nextPage: 2,
       totalCount: 207,
     },
+    pricedCardCount: 0,
     priceSnapshotCount: 0,
     sealedProductCount: 0,
     setCount: 1,

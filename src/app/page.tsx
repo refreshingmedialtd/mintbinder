@@ -145,6 +145,8 @@ type CatalogueStatusRecord = {
   latestPricingResult: JobApiResult | null;
   nextCataloguePage: number | null;
   priceSnapshotCount: number;
+  pricedCardCount: number;
+  pricingCoveragePercent: number | null;
   providerTotalCount: number | null;
   sealedProductCount: number;
   setCount: number;
@@ -3768,6 +3770,7 @@ function OperationsScreen({
               ["Coverage", formatPercent(catalogueStatus?.coveragePercent)],
               ["Sets", formatCount(catalogueStatus?.setCount)],
               ["Prices", formatCount(catalogueStatus?.priceSnapshotCount)],
+              ["Priced cards", catalogueStatus ? `${formatCount(catalogueStatus.pricedCardCount)} (${formatPercent(catalogueStatus.pricingCoveragePercent)})` : "-"],
               ["Sealed products", formatCount(catalogueStatus?.sealedProductCount)],
               ["Duplicate IDs", formatCount(catalogueStatus?.duplicateProviderIdCount)],
             ]}

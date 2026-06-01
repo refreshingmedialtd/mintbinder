@@ -21,6 +21,8 @@ export type CatalogueStatus = {
   latestPricingResult: CatalogueJobResult | null;
   nextCataloguePage: number | null;
   priceSnapshotCount: number;
+  pricedCardCount: number;
+  pricingCoveragePercent: number | null;
   providerTotalCount: number | null;
   sealedProductCount: number;
   setCount: number;
@@ -31,6 +33,7 @@ export function summarizeCatalogueStatus({
   duplicateProviderIdCount,
   latestCatalogueResult,
   latestPricingResult,
+  pricedCardCount,
   priceSnapshotCount,
   sealedProductCount,
   setCount,
@@ -39,6 +42,7 @@ export function summarizeCatalogueStatus({
   duplicateProviderIdCount: number;
   latestCatalogueResult?: unknown;
   latestPricingResult?: unknown;
+  pricedCardCount: number;
   priceSnapshotCount: number;
   sealedProductCount: number;
   setCount: number;
@@ -58,6 +62,8 @@ export function summarizeCatalogueStatus({
     latestPricingResult: pricingResult,
     nextCataloguePage: catalogueResult?.complete ? null : positiveNumber(catalogueResult?.nextPage) ?? null,
     priceSnapshotCount,
+    pricedCardCount,
+    pricingCoveragePercent: cardCount > 0 ? Math.min(100, Math.round((pricedCardCount / cardCount) * 1000) / 10) : null,
     providerTotalCount,
     sealedProductCount,
     setCount,
