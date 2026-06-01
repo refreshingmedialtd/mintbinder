@@ -118,6 +118,30 @@ type JobRunRecord = {
   durationMs?: number;
 };
 
+type JobApiResult = {
+  cardsFetched?: number;
+  cardsUpserted?: number;
+  complete?: boolean;
+  error?: string;
+  jobRun?: JobRunRecord;
+  maxPages?: number;
+  nextPage?: number | null;
+  page?: number;
+  pageSize?: number;
+  pagesProcessed?: number;
+  pricingSnapshotsCreated?: number;
+  query?: string;
+  setsUpserted?: number;
+  totalCount?: number;
+};
+
+type ResumeJob = {
+  kind: "catalogue" | "pricing";
+  nextPage: number;
+  pageSize: number;
+  query?: string;
+};
+
 const initialState: AppState = {
   screen: "dashboard",
   addType: "card",
@@ -3369,6 +3393,8 @@ function OperationsScreen({
   const [jobRuns, setJobRuns] = useState<JobRunRecord[]>([]);
   const [lastResult, setLastResult] = useState<unknown>(null);
   const [isBusy, setIsBusy] = useState("");
+  const latestJobResult = parseJobApiResult(lastResult);
+  const resumableJob = getResumeJob(latestJobResult);
   const presetRows = importPresets.map((preset) => ({
     ...preset,
     importedCount: catalogueItems.filter((item) => item.type === "card" && preset.setNames.includes(item.set)).length,
@@ -3418,6 +3444,22 @@ function OperationsScreen({
       page: 1,
       pageSize: Math.min(250, preset.expectedTotal),
       q: preset.query,
+    });
+  }
+
+  async function resumeLatestJob() {
+    if (!resumableJob) {
+      return;
+    }
+
+    setQuery(resumableJob.query ?? "");
+    setPage(resumableJob.nextPage);
+    setPageSize(resumableJob.pageSize);
+    await runJob(resumableJob.kind, {
+      maxPages,
+      page: resumableJob.nextPage,
+      pageSize: resumableJob.pageSize,
+      q: resumableJob.query,
     });
   }
 
@@ -3613,6 +3655,24 @@ function OperationsScreen({
             <h2>Latest result</h2>
             <span className="tag blue">JSON</span>
           </div>
+          {latestJobResult ? (
+            <div className="job-result-summary">
+              <div className="set-stat-row">
+                <span>{latestJobResult.pagesProcessed ?? 1} page{(latestJobResult.pagesProcessed ?? 1) === 1 ? "" : "s"}</span>
+                <span>{latestJobResult.cardsUpserted ?? 0} cards</span>
+                <span>{latestJobResult.pricingSnapshotsCreated ?? 0} prices</span>
+                {latestJobResult.complete !== undefined ? (
+                  <span>{latestJobResult.complete ? "Complete" : `Next page ${latestJobResult.nextPage ?? "-"}`}</span>
+                ) : null}
+              </div>
+              {resumableJob ? (
+                <button className="button primary" disabled={Boolean(isBusy)} onClick={() => void resumeLatestJob()}>
+                  <RefreshCw size={17} />
+                  Resume page {resumableJob.nextPage}
+                </button>
+              ) : null}
+            </div>
+          ) : null}
           <pre className="json-preview">{formatJsonPreview(lastResult ?? { status: "No job run yet." })}</pre>
         </section>
       </div>
@@ -4627,6 +4687,40 @@ function jobTypeLabel(type: JobType) {
 
 function formatJsonPreview(value: unknown) {
   return JSON.stringify(value, null, 2);
+}
+
+function parseJobApiResult(value: unknown): JobApiResult | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  return value as JobApiResult;
+}
+
+function getResumeJob(result: JobApiResult | null): ResumeJob | null {
+  if (!result?.jobRun || result.complete || !result.nextPage || !result.pageSize) {
+    return null;
+  }
+
+  if (result.jobRun.jobType === "catalogue_refresh") {
+    return {
+      kind: "catalogue",
+      nextPage: result.nextPage,
+      pageSize: result.pageSize,
+      query: result.query,
+    };
+  }
+
+  if (result.jobRun.jobType === "pricing_refresh") {
+    return {
+      kind: "pricing",
+      nextPage: result.nextPage,
+      pageSize: result.pageSize,
+      query: result.query,
+    };
+  }
+
+  return null;
 }
 
 function compareNullableNumbers(
