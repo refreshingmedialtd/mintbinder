@@ -2,12 +2,18 @@ import NextAuth, { type DefaultSession } from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import { SubscriptionPlan, SubscriptionStatus } from "@prisma/client";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
+import { normalizeAppRole, type AppUserRole } from "@/lib/auth/roles";
 import { prisma } from "@/lib/db/prisma";
 
 declare module "next-auth" {
+  interface User {
+    role?: AppUserRole;
+  }
+
   interface Session {
     user: {
       id: string;
+      role: AppUserRole;
     } & DefaultSession["user"];
   }
 }
@@ -41,6 +47,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             email: true,
             displayName: true,
             passwordHash: true,
+            role: true,
           },
         });
 
@@ -55,7 +62,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             ? await prisma.user.update({
                 where: { email },
                 data: { displayName, passwordHash },
-                select: { id: true, email: true, displayName: true },
+                select: { id: true, email: true, displayName: true, role: true },
               })
             : await prisma.user.create({
                 data: {
@@ -72,13 +79,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
                     },
                   },
                 },
-                select: { id: true, email: true, displayName: true },
+                select: { id: true, email: true, displayName: true, role: true },
               });
 
           return {
             id: user.id,
             email: user.email,
             name: user.displayName ?? defaultNameFromEmail(user.email),
+            role: normalizeAppRole(user.role),
           };
         }
 
@@ -90,14 +98,23 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           id: existingUser.id,
           email: existingUser.email,
           name: existingUser.displayName ?? defaultNameFromEmail(existingUser.email),
+          role: normalizeAppRole(existingUser.role),
         };
       },
     }),
   ],
   callbacks: {
+    jwt({ token, user }) {
+      if (user) {
+        (token as { role?: AppUserRole }).role = normalizeAppRole(user.role);
+      }
+
+      return token;
+    },
     session({ session, token }) {
       if (session.user && token.sub) {
         session.user.id = token.sub;
+        session.user.role = normalizeAppRole((token as { role?: AppUserRole }).role);
       }
 
       return session;

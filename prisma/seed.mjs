@@ -10,6 +10,7 @@ import {
   StorageLocationType,
   SubscriptionPlan,
   SubscriptionStatus,
+  UserRole,
   WishlistPriority,
 } from "@prisma/client";
 
@@ -63,6 +64,7 @@ async function main() {
       passwordHash: demoPasswordHash,
       preferredCurrency: "GBP",
       preferredRegion: "GB",
+      role: UserRole.ADMIN,
     },
     create: {
       id: ids.user,
@@ -71,6 +73,7 @@ async function main() {
       passwordHash: demoPasswordHash,
       preferredCurrency: "GBP",
       preferredRegion: "GB",
+      role: UserRole.ADMIN,
     },
   });
 

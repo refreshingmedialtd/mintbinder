@@ -7,6 +7,7 @@
     "dev": "next dev --hostname 127.0.0.1",
     "build": "next build",
     "start": "next start --hostname 127.0.0.1",
+    "test:auth": "node --experimental-strip-types --test tests/auth-roles.test.mjs",
     "test:billing": "node --experimental-strip-types --test tests/billing-webhook.test.mjs",
     "test:jobs": "node --experimental-strip-types --test tests/job-runs.test.mjs",
     "test:notifications": "node --experimental-strip-types --test tests/notification-preferences.test.mjs",
@@ -16,7 +17,8 @@
     "db:validate": "prisma validate",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
-    "db:seed": "prisma db seed"
+    "db:seed": "prisma db seed",
+    "job:catalogue-batch": "node scripts/run-catalogue-batch.mjs"
   },
   "dependencies": {
     "@prisma/client": "6.19.3",

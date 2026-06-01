@@ -40,6 +40,7 @@ import Image from "next/image";
 import { signIn, signOut, useSession } from "next-auth/react";
 import type { ChangeEvent, Dispatch, FormEvent, ReactNode, SetStateAction } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { canUseOperations, normalizeAppRole, type AppUserRole } from "@/lib/auth/roles";
 import {
   buildCollectionCsv,
   buildCollectionImportTemplateCsv,
@@ -91,6 +92,7 @@ type AppState = {
 type Viewer = {
   name: string;
   email: string;
+  role: AppUserRole;
 };
 
 type AuthMode = "sign-in" | "register";
@@ -240,7 +242,9 @@ export default function Home() {
   const viewer: Viewer = {
     name: session?.user?.name || "Collector",
     email: session?.user?.email || "",
+    role: normalizeAppRole(session?.user?.role),
   };
+  const operationsEnabled = canUseOperations(viewer.role);
 
   const applyAppData = useCallback((data: AppData) => {
     setCatalogueItems(data.catalogue);
@@ -1358,7 +1362,12 @@ export default function Home() {
         onSignOut={() => void signOut({ redirect: false })}
       />
       <div className="app-body">
-        <Sidebar active={appState.screen} alertCount={intelligence.actionQueue.length} onNavigate={navigate} />
+        <Sidebar
+          active={appState.screen}
+          alertCount={intelligence.actionQueue.length}
+          canUseOperations={operationsEnabled}
+          onNavigate={navigate}
+        />
         <main className="main">{renderScreen(context)}</main>
       </div>
       <BottomNav active={appState.screen} onNavigate={navigate} />
@@ -1442,7 +1451,7 @@ function renderScreen(context: ScreenContext) {
     case "analytics":
       return <AnalyticsScreen {...context} />;
     case "ops":
-      return <OperationsScreen {...context} />;
+      return canUseOperations(context.viewer.role) ? <OperationsScreen {...context} /> : <OperationsLockedScreen />;
     case "settings":
       return <SettingsScreen {...context} />;
     case "dashboard":
@@ -1618,10 +1627,12 @@ function Header({
 function Sidebar({
   active,
   alertCount,
+  canUseOperations,
   onNavigate,
 }: {
   active: Screen;
   alertCount: number;
+  canUseOperations: boolean;
   onNavigate: (screen: Screen) => void;
 }) {
   return (
@@ -1633,7 +1644,9 @@ function Sidebar({
       <NavButton active={active === "wishlist"} icon={<Heart />} label="Wishlist" onClick={() => onNavigate("wishlist")} />
       <NavButton active={active === "alerts"} icon={<Bell />} label={`Alerts (${alertCount})`} onClick={() => onNavigate("alerts")} />
       <NavButton active={active === "analytics"} icon={<BarChart3 />} label="Analytics" onClick={() => onNavigate("analytics")} />
-      <NavButton active={active === "ops"} icon={<TerminalSquare />} label="Operations" onClick={() => onNavigate("ops")} />
+      {canUseOperations ? (
+        <NavButton active={active === "ops"} icon={<TerminalSquare />} label="Operations" onClick={() => onNavigate("ops")} />
+      ) : null}
       <span className="nav-divider" />
       <NavButton active={active === "settings"} icon={<Settings />} label="Settings" onClick={() => onNavigate("settings")} />
     </aside>
@@ -3380,6 +3393,15 @@ function AnalyticsScreen({
   );
 }
 
+function OperationsLockedScreen() {
+  return (
+    <section className="page">
+      <PageHeader title="Operations" action={<span className="status-pill"><ShieldCheck size={17} />Admin</span>} />
+      <EmptyState title="Admin access required." />
+    </section>
+  );
+}
+
 function OperationsScreen({
   catalogueItems,
   refreshAppData,
@@ -3738,6 +3760,7 @@ function SettingsScreen({
           rows={[
             ["Name", viewer.name],
             ["Email", viewer.email],
+            ["Role", viewer.role === "ADMIN" ? "Admin" : "User"],
             ["Currency", "GBP"],
             ["Region", "United Kingdom"],
           ]}
@@ -3758,7 +3781,7 @@ function SettingsScreen({
           preferences={notificationPreferences}
           onUpdate={updateNotificationPreferences}
         />
-        <OperationsEntryPanel onOpen={() => navigate("ops")} />
+        {canUseOperations(viewer.role) ? <OperationsEntryPanel onOpen={() => navigate("ops")} /> : null}
         <MetricPanel
           title="Data source"
           rows={[
