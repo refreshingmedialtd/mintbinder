@@ -785,6 +785,33 @@ h3 {
   resize: vertical;
 }
 
+.ops-subsection {
+  display: grid;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.check-row {
+  display: flex;
+  min-height: 42px;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: #ffffff;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.check-row input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+}
+
 .sort-control {
   display: inline-flex;
   min-height: 40px;
@@ -981,6 +1008,7 @@ h3 {
 .bar-list,
 .alert-list,
 .preset-grid,
+.gap-list,
 .job-run-list {
   display: grid;
   gap: 10px;
@@ -1117,6 +1145,53 @@ h3 {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: #ffffff;
+}
+
+.operations-breakdowns {
+  display: grid;
+  gap: 18px;
+}
+
+.gap-row {
+  display: grid;
+  gap: 10px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+
+.gap-row:first-child {
+  border-top: 0;
+}
+
+.gap-copy,
+.gap-meter,
+.gap-metrics {
+  display: grid;
+  gap: 5px;
+}
+
+.gap-copy {
+  min-width: 0;
+}
+
+.gap-copy strong {
+  overflow-wrap: anywhere;
+}
+
+.gap-copy span,
+.gap-meter span,
+.gap-metrics span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.gap-meter {
+  min-width: 180px;
+}
+
+.gap-metrics {
+  justify-items: start;
 }
 
 .bar-row {
@@ -1278,6 +1353,21 @@ h3 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .operations-breakdowns {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+
+  .gap-row {
+    grid-template-columns: minmax(0, 1fr) minmax(180px, 0.85fr);
+    align-items: center;
+  }
+
+  .gap-metrics {
+    justify-items: end;
+    text-align: right;
+  }
+
   .collection-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1348,6 +1438,10 @@ h3 {
 @media (min-width: 1080px) {
   .dashboard-grid {
     grid-template-columns: minmax(0, 1fr) 380px;
+  }
+
+  .operations-breakdowns {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .collection-grid {

@@ -7,6 +7,10 @@ import {
   matchTcgcsvGroupsToSets,
   sealedProductType,
 } from "../scripts/tcgcsv-sealed-products.mjs";
+import {
+  sealedImportOptionsFromEnv,
+  syncTcgcsvSealedProducts,
+} from "../scripts/tcgcsv-sealed-importer.mjs";
 
 test("detects sealed products while excluding cards and code cards", () => {
   assert.equal(isSealedProduct({
@@ -52,6 +56,111 @@ test("selects the strongest usable TCGCSV sealed price", () => {
       confidenceScore: 66,
       subTypeName: "Normal",
       usd: 12,
+    },
+  );
+});
+
+test("imports sealed products and GBP price snapshots from TCGCSV payloads", async () => {
+  const upserts = [];
+  const snapshots = [];
+  const prisma = {
+    cardSet: {
+      findMany: async () => [{ id: "set-1", name: "Silver Tempest" }],
+    },
+    priceSnapshot: {
+      create: async ({ data }) => {
+        snapshots.push(data);
+        return { id: "snapshot-1", ...data };
+      },
+      findFirst: async () => null,
+    },
+    sealedProduct: {
+      findFirst: async () => null,
+      upsert: async ({ create }) => {
+        upserts.push(create);
+        return { id: create.id };
+      },
+    },
+  };
+  const fetchImpl = async (url) => ({
+    ok: true,
+    json: async () => {
+      if (url.endsWith("/groups")) {
+        return {
+          success: true,
+          results: [{ groupId: 3170, name: "SWSH12: Silver Tempest" }],
+        };
+      }
+
+      if (url.endsWith("/3170/products")) {
+        return {
+          success: true,
+          results: [
+            {
+              extendedData: [{ name: "UPC", value: "123" }],
+              imageUrl: "https://images.example/product_200w.jpg",
+              modifiedOn: "2026-01-02T00:00:00.000Z",
+              name: "Silver Tempest Booster Box",
+              presaleInfo: { releasedOn: "2022-11-11T00:00:00.000Z" },
+              productId: 100,
+              url: "https://example.com/product/100",
+            },
+            {
+              extendedData: [{ name: "Number", value: "139/195" }],
+              name: "Lugia VSTAR",
+              productId: 101,
+            },
+          ],
+        };
+      }
+
+      return {
+        success: true,
+        results: [
+          {
+            marketPrice: 100,
+            productId: 100,
+            subTypeName: "Normal",
+          },
+        ],
+      };
+    },
+  });
+
+  const summary = await syncTcgcsvSealedProducts({
+    fetchImpl,
+    prisma,
+    usdToGbpRate: 0.8,
+    waitMs: 0,
+  });
+
+  assert.equal(summary.groupsMatched, 1);
+  assert.equal(summary.groupsProcessed, 1);
+  assert.equal(summary.productsFetched, 2);
+  assert.equal(summary.sealedProductsSkipped, 1);
+  assert.equal(summary.sealedProductsUpserted, 1);
+  assert.equal(summary.pricingSnapshotsCreated, 1);
+  assert.equal(upserts[0].productType, "BOOSTER_BOX");
+  assert.equal(upserts[0].metadata.upc, "123");
+  assert.equal(snapshots[0].priceMinor, 8000);
+  assert.equal(snapshots[0].currency, "GBP");
+});
+
+test("reads sealed import options from env", () => {
+  assert.deepEqual(
+    sealedImportOptionsFromEnv({
+      TCGCSV_SEALED_GROUP_IDS: "3170, 6052",
+      TCGCSV_SEALED_GROUP_LIMIT: "2",
+      TCGCSV_SEALED_PRICE_ONLY_UNPRICED: "false",
+      TCGCSV_SEALED_WRITE_PRICES: "true",
+      TCGCSV_USD_TO_GBP_RATE: "0.8",
+    }),
+    {
+      groupIds: ["3170", "6052"],
+      groupLimit: 2,
+      priceOnlyUnpriced: false,
+      usdToGbpRate: 0.8,
+      writePrices: true,
     },
   );
 });

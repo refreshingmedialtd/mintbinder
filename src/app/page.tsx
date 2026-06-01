@@ -98,7 +98,7 @@ type Viewer = {
 type AuthMode = "sign-in" | "register";
 type CatalogueSort = "set-number" | "value-desc" | "name" | "rarity";
 type SetDetailSort = "number" | "value-desc" | "name" | "rarity";
-type JobType = "price_alerts" | "catalogue_refresh" | "pricing_refresh";
+type JobType = "price_alerts" | "catalogue_refresh" | "pricing_refresh" | "sealed_pricing_refresh";
 type JobStatus = "running" | "succeeded" | "failed";
 type ImportPreset = {
   expectedTotal: number;
@@ -125,16 +125,48 @@ type JobApiResult = {
   cardsUpserted?: number;
   complete?: boolean;
   error?: string;
+  groupsAvailable?: number;
+  groupsMatched?: number;
+  groupsProcessed?: number;
   jobRun?: JobRunRecord;
   maxPages?: number;
   nextPage?: number | null;
   page?: number;
   pageSize?: number;
+  priceOnlyUnpriced?: boolean;
   pagesProcessed?: number;
   pricingSnapshotsCreated?: number;
+  productsFetched?: number;
   query?: string;
+  sealedProductsSkipped?: number;
+  sealedProductsUpserted?: number;
   setsUpserted?: number;
   totalCount?: number;
+  writePrices?: boolean;
+};
+
+type PricingBySeriesGap = {
+  cardCount: number;
+  pricedCardCount: number;
+  pricingCoveragePercent: number | null;
+  series: string;
+  unpricedCardCount: number;
+};
+
+type PricingBySourceSummary = {
+  itemType: string;
+  pricedItemCount: number;
+  priceSnapshotCount: number;
+  source: string;
+};
+
+type SealedPricingByProductTypeGap = {
+  pricedSealedProductCount: number;
+  productType: string;
+  sealedPriceSnapshotCount: number;
+  sealedPricingCoveragePercent: number | null;
+  sealedProductCount: number;
+  unpricedSealedProductCount: number;
 };
 
 type CatalogueStatusRecord = {
@@ -143,12 +175,16 @@ type CatalogueStatusRecord = {
   duplicateProviderIdCount: number;
   latestCatalogueResult: JobApiResult | null;
   latestPricingResult: JobApiResult | null;
+  latestSealedPricingResult: JobApiResult | null;
   nextCataloguePage: number | null;
   priceSnapshotCount: number;
   pricedCardCount: number;
   pricedSealedProductCount: number;
+  pricingBySeries: PricingBySeriesGap[];
+  pricingBySource: PricingBySourceSummary[];
   pricingCoveragePercent: number | null;
   providerTotalCount: number | null;
+  sealedPricingByProductType: SealedPricingByProductTypeGap[];
   sealedPriceSnapshotCount: number;
   sealedPricingCoveragePercent: number | null;
   sealedProductCount: number;
@@ -159,6 +195,7 @@ type CatalogueStatusApiResult = {
   error?: string;
   latestCatalogueRun?: JobRunRecord | null;
   latestPricingRun?: JobRunRecord | null;
+  latestSealedPricingRun?: JobRunRecord | null;
   status?: CatalogueStatusRecord;
 };
 
@@ -3437,6 +3474,10 @@ function OperationsScreen({
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
   const [maxPages, setMaxPages] = useState(1);
+  const [sealedGroupIds, setSealedGroupIds] = useState("");
+  const [sealedGroupLimit, setSealedGroupLimit] = useState(10);
+  const [sealedPriceOnlyUnpriced, setSealedPriceOnlyUnpriced] = useState(true);
+  const [sealedUsdToGbpRate, setSealedUsdToGbpRate] = useState("");
   const [jobRuns, setJobRuns] = useState<JobRunRecord[]>([]);
   const [catalogueStatus, setCatalogueStatus] = useState<CatalogueStatusRecord | null>(null);
   const [lastResult, setLastResult] = useState<unknown>(null);
@@ -3505,6 +3546,7 @@ function OperationsScreen({
         [
           body.latestCatalogueRun,
           body.latestPricingRun,
+          body.latestSealedPricingRun,
           ...current,
         ]
           .filter((run): run is JobRunRecord => Boolean(run))
@@ -3564,7 +3606,7 @@ function OperationsScreen({
   }
 
   async function runJob(
-    kind: "catalogue" | "pricing" | "alerts",
+    kind: "catalogue" | "pricing" | "alerts" | "sealed",
     override?: { maxPages?: number; page?: number; pageSize?: number; q?: string },
   ) {
     if (!jobSecret.trim()) {
@@ -3577,11 +3619,15 @@ function OperationsScreen({
         ? "/api/jobs/catalogue-refresh"
         : kind === "pricing"
           ? "/api/jobs/pricing-refresh"
-          : "/api/jobs/price-alerts";
+          : kind === "sealed"
+            ? "/api/jobs/sealed-pricing-refresh"
+            : "/api/jobs/price-alerts";
     const body =
       kind === "alerts"
         ? { dryRun: true }
-        : {
+        : kind === "sealed"
+          ? sealedJobBody()
+          : {
             maxPages: override?.maxPages ?? maxPages,
             page: override?.page ?? page,
             pageSize: override?.pageSize ?? pageSize,
@@ -3625,6 +3671,18 @@ function OperationsScreen({
     } finally {
       setIsBusy("");
     }
+  }
+
+  function sealedJobBody() {
+    const rate = Number(sealedUsdToGbpRate);
+
+    return {
+      groupIds: sealedGroupIds.trim() || undefined,
+      groupLimit: sealedGroupLimit,
+      priceOnlyUnpriced: sealedPriceOnlyUnpriced,
+      usdToGbpRate: Number.isFinite(rate) && rate > 0 ? rate : undefined,
+      writePrices: true,
+    };
   }
 
   return (
@@ -3739,6 +3797,45 @@ function OperationsScreen({
               />
             </Field>
           </div>
+          <div className="ops-subsection">
+            <div className="panel-title-row">
+              <h3>Sealed pricing</h3>
+              <PackagePlus size={17} />
+            </div>
+            <div className="field-grid">
+              <Field label="TCGCSV groups">
+                <input
+                  value={sealedGroupIds}
+                  onChange={(event) => setSealedGroupIds(event.currentTarget.value)}
+                  placeholder="Optional IDs"
+                />
+              </Field>
+              <Field label="Group limit">
+                <input
+                  min={1}
+                  type="number"
+                  value={sealedGroupLimit}
+                  onChange={(event) => setSealedGroupLimit(Math.max(1, Number(event.currentTarget.value) || 1))}
+                />
+              </Field>
+              <Field label="USD to GBP">
+                <input
+                  inputMode="decimal"
+                  value={sealedUsdToGbpRate}
+                  onChange={(event) => setSealedUsdToGbpRate(event.currentTarget.value)}
+                  placeholder="Env fallback"
+                />
+              </Field>
+              <label className="check-row">
+                <input
+                  checked={sealedPriceOnlyUnpriced}
+                  type="checkbox"
+                  onChange={(event) => setSealedPriceOnlyUnpriced(event.currentTarget.checked)}
+                />
+                <span>Only unpriced</span>
+              </label>
+            </div>
+          </div>
           <div className="actions">
             <button className="button primary" disabled={Boolean(isBusy)} onClick={() => void runJob("catalogue")}>
               <Database size={17} />
@@ -3747,6 +3844,10 @@ function OperationsScreen({
             <button className="button" disabled={Boolean(isBusy)} onClick={() => void runJob("pricing")}>
               <RefreshCw size={17} />
               {isBusy === "pricing" ? "Running" : "Pricing"}
+            </button>
+            <button className="button" disabled={Boolean(isBusy)} onClick={() => void runJob("sealed")}>
+              <PackagePlus size={17} />
+              {isBusy === "sealed" ? "Running" : "Sealed pricing"}
             </button>
             <button className="button" disabled={Boolean(isBusy)} onClick={() => void runJob("alerts")}>
               <Mail size={17} />
@@ -3793,8 +3894,18 @@ function OperationsScreen({
           {latestJobResult ? (
             <div className="job-result-summary">
               <div className="set-stat-row">
-                <span>{latestJobResult.pagesProcessed ?? 1} page{(latestJobResult.pagesProcessed ?? 1) === 1 ? "" : "s"}</span>
-                <span>{latestJobResult.cardsUpserted ?? 0} cards</span>
+                {latestJobResult.groupsProcessed !== undefined ? (
+                  <>
+                    <span>{latestJobResult.groupsProcessed} groups</span>
+                    <span>{latestJobResult.sealedProductsUpserted ?? 0} sealed</span>
+                    <span>{latestJobResult.productsFetched ?? 0} products</span>
+                  </>
+                ) : (
+                  <>
+                    <span>{latestJobResult.pagesProcessed ?? 1} page{(latestJobResult.pagesProcessed ?? 1) === 1 ? "" : "s"}</span>
+                    <span>{latestJobResult.cardsUpserted ?? 0} cards</span>
+                  </>
+                )}
                 <span>{latestJobResult.pricingSnapshotsCreated ?? 0} prices</span>
                 {latestJobResult.complete !== undefined ? (
                   <span>{latestJobResult.complete ? "Complete" : `Next page ${latestJobResult.nextPage ?? "-"}`}</span>
@@ -3810,6 +3921,12 @@ function OperationsScreen({
           ) : null}
           <pre className="json-preview">{formatJsonPreview(lastResult ?? { status: "No job run yet." })}</pre>
         </section>
+      </div>
+
+      <div className="operations-breakdowns">
+        <PricingSeriesGapPanel rows={catalogueStatus?.pricingBySeries ?? []} />
+        <SealedPricingGapPanel rows={catalogueStatus?.sealedPricingByProductType ?? []} />
+        <PricingSourcePanel rows={catalogueStatus?.pricingBySource ?? []} />
       </div>
 
       <section className="tool-panel">
@@ -3841,6 +3958,122 @@ function OperationsScreen({
         )}
       </section>
     </section>
+  );
+}
+
+function PricingSeriesGapPanel({ rows }: { rows: PricingBySeriesGap[] }) {
+  const visibleRows = rows.filter((row) => row.unpricedCardCount > 0).slice(0, 8);
+
+  return (
+    <section className="tool-panel">
+      <div className="panel-title-row">
+        <h2>Card pricing gaps</h2>
+        <BarChart3 size={18} />
+      </div>
+      {visibleRows.length ? (
+        <div className="gap-list">
+          {visibleRows.map((row) => (
+            <CoverageGapRow
+              key={row.series}
+              coverage={row.pricingCoveragePercent}
+              label={row.series}
+              priced={row.pricedCardCount}
+              total={row.cardCount}
+              unpriced={row.unpricedCardCount}
+            />
+          ))}
+        </div>
+      ) : (
+        <p className="muted">No card pricing gaps loaded.</p>
+      )}
+    </section>
+  );
+}
+
+function SealedPricingGapPanel({ rows }: { rows: SealedPricingByProductTypeGap[] }) {
+  const visibleRows = rows.filter((row) => row.unpricedSealedProductCount > 0).slice(0, 8);
+
+  return (
+    <section className="tool-panel">
+      <div className="panel-title-row">
+        <h2>Sealed gaps</h2>
+        <PackagePlus size={18} />
+      </div>
+      {visibleRows.length ? (
+        <div className="gap-list">
+          {visibleRows.map((row) => (
+            <CoverageGapRow
+              key={row.productType}
+              coverage={row.sealedPricingCoveragePercent}
+              label={productTypeLabel(row.productType)}
+              priced={row.pricedSealedProductCount}
+              total={row.sealedProductCount}
+              unpriced={row.unpricedSealedProductCount}
+            />
+          ))}
+        </div>
+      ) : (
+        <p className="muted">No sealed pricing gaps loaded.</p>
+      )}
+    </section>
+  );
+}
+
+function PricingSourcePanel({ rows }: { rows: PricingBySourceSummary[] }) {
+  return (
+    <section className="tool-panel">
+      <div className="panel-title-row">
+        <h2>Price sources</h2>
+        <Database size={18} />
+      </div>
+      {rows.length ? (
+        <div className="gap-list">
+          {rows.slice(0, 8).map((row) => (
+            <article className="gap-row" key={`${row.source}-${row.itemType}`}>
+              <div className="gap-copy">
+                <strong>{priceSourceLabel(row.source)}</strong>
+                <span>{itemTypeLabel(row.itemType)}</span>
+              </div>
+              <div className="gap-metrics">
+                <span>{formatCount(row.priceSnapshotCount)} snapshots</span>
+                <span>{formatCount(row.pricedItemCount)} items</span>
+              </div>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <p className="muted">No price source rows loaded.</p>
+      )}
+    </section>
+  );
+}
+
+function CoverageGapRow({
+  coverage,
+  label,
+  priced,
+  total,
+  unpriced,
+}: {
+  coverage: number | null;
+  label: string;
+  priced: number;
+  total: number;
+  unpriced: number;
+}) {
+  return (
+    <article className="gap-row">
+      <div className="gap-copy">
+        <strong>{label}</strong>
+        <span>{formatCount(unpriced)} unpriced</span>
+      </div>
+      <div className="gap-meter">
+        <ProgressBar value={coverage ?? 0} />
+        <span>
+          {formatPercent(coverage)} | {formatCount(priced)} / {formatCount(total)}
+        </span>
+      </div>
+    </article>
   );
 }
 
@@ -4818,7 +5051,49 @@ function jobTypeLabel(type: JobType) {
     return "Pricing";
   }
 
+  if (type === "sealed_pricing_refresh") {
+    return "Sealed pricing";
+  }
+
   return "Price alerts";
+}
+
+function itemTypeLabel(type: string) {
+  if (type === "sealed_product") {
+    return "Sealed";
+  }
+
+  if (type === "card") {
+    return "Cards";
+  }
+
+  return startCase(type);
+}
+
+function priceSourceLabel(source: string) {
+  if (source === "pokemon-tcg-api") {
+    return "Pokemon TCG API";
+  }
+
+  if (source === "pokemon-tcg-api-cardmarket") {
+    return "Cardmarket";
+  }
+
+  if (source === "tcgcsv") {
+    return "TCGCSV";
+  }
+
+  return startCase(source);
+}
+
+function productTypeLabel(type: string) {
+  return startCase(type);
+}
+
+function startCase(value: string) {
+  return value
+    .replace(/[-_]+/g, " ")
+    .replace(/\w\S*/g, (word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase());
 }
 
 function formatJsonPreview(value: unknown) {

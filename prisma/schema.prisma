@@ -127,9 +127,10 @@ enum NotificationDigestFrequency {
 }
 
 enum JobRunType {
-  PRICE_ALERTS      @map("price_alerts")
-  CATALOGUE_REFRESH @map("catalogue_refresh")
-  PRICING_REFRESH   @map("pricing_refresh")
+  PRICE_ALERTS           @map("price_alerts")
+  CATALOGUE_REFRESH      @map("catalogue_refresh")
+  PRICING_REFRESH        @map("pricing_refresh")
+  SEALED_PRICING_REFRESH @map("sealed_pricing_refresh")
 
   @@map("job_run_type")
 }
