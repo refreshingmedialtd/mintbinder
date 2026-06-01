@@ -10,6 +10,11 @@ type PricingCoverageRow = {
   pricedCardCount: number;
 };
 
+type SealedPricingCoverageRow = {
+  pricedSealedProductCount: number;
+  sealedPriceSnapshotCount: number;
+};
+
 export async function catalogueStatus() {
   const [counts, catalogueRuns, pricingRuns] = await Promise.all([
     catalogueCounts(),
@@ -35,6 +40,7 @@ async function catalogueCounts() {
     cardRows,
     duplicateRows,
     pricingCoverageRows,
+    sealedPricingCoverageRows,
     priceSnapshotCount,
     sealedProductCount,
     setCount,
@@ -59,6 +65,13 @@ async function catalogueCounts() {
       FROM price_snapshots
       WHERE card_printing_id IS NOT NULL
     `,
+    prisma.$queryRaw<SealedPricingCoverageRow[]>`
+      SELECT
+        COUNT(DISTINCT sealed_product_id)::int AS "pricedSealedProductCount",
+        COUNT(id)::int AS "sealedPriceSnapshotCount"
+      FROM price_snapshots
+      WHERE sealed_product_id IS NOT NULL
+    `,
     prisma.priceSnapshot.count(),
     prisma.sealedProduct.count(),
     prisma.cardSet.count(),
@@ -69,6 +82,8 @@ async function catalogueCounts() {
     duplicateProviderIdCount: duplicateRows[0]?.count ?? 0,
     priceSnapshotCount,
     pricedCardCount: pricingCoverageRows[0]?.pricedCardCount ?? 0,
+    pricedSealedProductCount: sealedPricingCoverageRows[0]?.pricedSealedProductCount ?? 0,
+    sealedPriceSnapshotCount: sealedPricingCoverageRows[0]?.sealedPriceSnapshotCount ?? 0,
     sealedProductCount,
     setCount,
   };

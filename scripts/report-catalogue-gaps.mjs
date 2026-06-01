@@ -12,6 +12,8 @@ try {
     sealedPricingCoverage,
     duplicateProviderIds,
     pricingBySeries,
+    pricingBySource,
+    sealedPricingByProductType,
     setDeficits,
     pricingCoverage,
   ] = await Promise.all([
@@ -48,6 +50,29 @@ try {
       LEFT JOIN price_snapshots ps ON ps.card_printing_id = cp.id
       GROUP BY COALESCE(cs.series, 'Unknown')
       ORDER BY "cardCount" DESC, series
+    `,
+    prisma.$queryRaw`
+      SELECT
+        source,
+        item_type AS "itemType",
+        COUNT(id)::int AS "priceSnapshotCount",
+        COUNT(DISTINCT COALESCE(card_printing_id::text, sealed_product_id::text))::int AS "pricedItemCount"
+      FROM price_snapshots
+      GROUP BY source, item_type
+      ORDER BY "priceSnapshotCount" DESC, source
+    `,
+    prisma.$queryRaw`
+      SELECT
+        sp.product_type AS "productType",
+        COUNT(DISTINCT sp.id)::int AS "sealedProductCount",
+        COUNT(DISTINCT ps.sealed_product_id)::int AS "pricedSealedProductCount",
+        COUNT(ps.id)::int AS "sealedPriceSnapshotCount"
+      FROM sealed_products sp
+      LEFT JOIN price_snapshots ps
+        ON ps.sealed_product_id = sp.id
+        AND ps.item_type = 'sealed_product'
+      GROUP BY sp.product_type
+      ORDER BY "sealedProductCount" DESC, sp.product_type
     `,
     prisma.$queryRaw`
       SELECT
@@ -88,9 +113,16 @@ try {
     pricingCoveragePercent: percent(coverage.pricedCards, coverage.totalCards),
     pricingBySeries: pricingBySeries.map((row) => ({
       ...row,
+      unpricedCardCount: row.cardCount - row.pricedCardCount,
       pricingCoveragePercent: percent(row.pricedCardCount, row.cardCount),
     })),
+    pricingBySource,
     pricedSealedProductCount: sealedCoverage.pricedSealedProductCount,
+    sealedPricingByProductType: sealedPricingByProductType.map((row) => ({
+      ...row,
+      sealedPricingCoveragePercent: percent(row.pricedSealedProductCount, row.sealedProductCount),
+      unpricedSealedProductCount: row.sealedProductCount - row.pricedSealedProductCount,
+    })),
     sealedPriceSnapshotCount: sealedCoverage.sealedPriceSnapshotCount,
     sealedPricingCoveragePercent: percent(sealedCoverage.pricedSealedProductCount, sealedCoverage.sealedProductCount),
     sealedProductCount,

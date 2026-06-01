@@ -22,8 +22,11 @@ export type CatalogueStatus = {
   nextCataloguePage: number | null;
   priceSnapshotCount: number;
   pricedCardCount: number;
+  pricedSealedProductCount: number;
   pricingCoveragePercent: number | null;
   providerTotalCount: number | null;
+  sealedPriceSnapshotCount: number;
+  sealedPricingCoveragePercent: number | null;
   sealedProductCount: number;
   setCount: number;
 };
@@ -34,7 +37,9 @@ export function summarizeCatalogueStatus({
   latestCatalogueResult,
   latestPricingResult,
   pricedCardCount,
+  pricedSealedProductCount,
   priceSnapshotCount,
+  sealedPriceSnapshotCount,
   sealedProductCount,
   setCount,
 }: {
@@ -43,7 +48,9 @@ export function summarizeCatalogueStatus({
   latestCatalogueResult?: unknown;
   latestPricingResult?: unknown;
   pricedCardCount: number;
+  pricedSealedProductCount: number;
   priceSnapshotCount: number;
+  sealedPriceSnapshotCount: number;
   sealedProductCount: number;
   setCount: number;
 }): CatalogueStatus {
@@ -63,8 +70,13 @@ export function summarizeCatalogueStatus({
     nextCataloguePage: catalogueResult?.complete ? null : positiveNumber(catalogueResult?.nextPage) ?? null,
     priceSnapshotCount,
     pricedCardCount,
+    pricedSealedProductCount,
     pricingCoveragePercent: cardCount > 0 ? Math.min(100, Math.round((pricedCardCount / cardCount) * 1000) / 10) : null,
     providerTotalCount,
+    sealedPriceSnapshotCount,
+    sealedPricingCoveragePercent: sealedProductCount > 0
+      ? Math.min(100, Math.round((pricedSealedProductCount / sealedProductCount) * 1000) / 10)
+      : null,
     sealedProductCount,
     setCount,
   };

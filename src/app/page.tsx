@@ -146,8 +146,11 @@ type CatalogueStatusRecord = {
   nextCataloguePage: number | null;
   priceSnapshotCount: number;
   pricedCardCount: number;
+  pricedSealedProductCount: number;
   pricingCoveragePercent: number | null;
   providerTotalCount: number | null;
+  sealedPriceSnapshotCount: number;
+  sealedPricingCoveragePercent: number | null;
   sealedProductCount: number;
   setCount: number;
 };
@@ -3772,6 +3775,7 @@ function OperationsScreen({
               ["Prices", formatCount(catalogueStatus?.priceSnapshotCount)],
               ["Priced cards", catalogueStatus ? `${formatCount(catalogueStatus.pricedCardCount)} (${formatPercent(catalogueStatus.pricingCoveragePercent)})` : "-"],
               ["Sealed products", formatCount(catalogueStatus?.sealedProductCount)],
+              ["Priced sealed", catalogueStatus ? `${formatCount(catalogueStatus.pricedSealedProductCount)} (${formatPercent(catalogueStatus.sealedPricingCoveragePercent)})` : "-"],
               ["Duplicate IDs", formatCount(catalogueStatus?.duplicateProviderIdCount)],
             ]}
           />
