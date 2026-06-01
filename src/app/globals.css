@@ -980,6 +980,7 @@ h3 {
 .insight-list,
 .bar-list,
 .alert-list,
+.preset-grid,
 .job-run-list {
   display: grid;
   gap: 10px;
@@ -989,6 +990,7 @@ h3 {
 .event-row,
 .insight-row,
 .alert-row,
+.preset-card,
 .job-run-row {
   display: flex;
   align-items: flex-start;
@@ -1002,8 +1004,41 @@ h3 {
 .event-row:first-child,
 .insight-row:first-child,
 .alert-row:first-child,
+.preset-card:first-child,
 .job-run-row:first-child {
   border-top: 0;
+}
+
+.preset-grid {
+  gap: 12px;
+}
+
+.preset-card {
+  display: grid;
+  gap: 10px;
+}
+
+.preset-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.preset-card-header strong,
+.preset-card-header span {
+  display: block;
+}
+
+.preset-card-header span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.preset-card-header .tag {
+  flex: 0 0 auto;
+  margin-top: 0;
 }
 
 .storage-main,

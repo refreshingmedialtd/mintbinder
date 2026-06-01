@@ -66,6 +66,8 @@ Use this local development connection string:
 ```env
 DATABASE_URL="postgresql://postgres:postgres@localhost:5432/pokestop?schema=public"
 AUTH_SECRET="replace-with-a-random-32-byte-secret"
+AUTH_URL="http://127.0.0.1:3000"
+AUTH_TRUST_HOST="true"
 NEXT_PUBLIC_APP_URL="http://127.0.0.1:3000"
 STRIPE_SECRET_KEY=""
 STRIPE_PLUS_MONTHLY_PRICE_ID=""

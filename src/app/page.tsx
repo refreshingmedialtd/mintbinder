@@ -98,6 +98,13 @@ type CatalogueSort = "set-number" | "value-desc" | "name" | "rarity";
 type SetDetailSort = "number" | "value-desc" | "name" | "rarity";
 type JobType = "price_alerts" | "catalogue_refresh" | "pricing_refresh";
 type JobStatus = "running" | "succeeded" | "failed";
+type ImportPreset = {
+  expectedTotal: number;
+  label: string;
+  note: string;
+  query: string;
+  setNames: string[];
+};
 
 type JobRunRecord = {
   id: string;
@@ -140,6 +147,37 @@ const sealedProductTypes = [
   "Deck",
   "Case",
   "Other",
+];
+
+const importPresets: ImportPreset[] = [
+  {
+    expectedTotal: 207,
+    label: "151",
+    note: "Scarlet & Violet special set",
+    query: "set.id:sv3pt5",
+    setNames: ["151"],
+  },
+  {
+    expectedTotal: 237,
+    label: "Evolving Skies",
+    note: "Sword & Shield chase set",
+    query: "set.id:swsh7",
+    setNames: ["Evolving Skies"],
+  },
+  {
+    expectedTotal: 160,
+    label: "Crown Zenith",
+    note: "Main Crown Zenith set",
+    query: "set.id:swsh12pt5",
+    setNames: ["Crown Zenith"],
+  },
+  {
+    expectedTotal: 70,
+    label: "Crown Zenith GG",
+    note: "Galarian Gallery subset",
+    query: "set.id:swsh12pt5gg",
+    setNames: ["Crown Zenith Galarian Gallery"],
+  },
 ];
 
 export default function Home() {
@@ -3319,6 +3357,7 @@ function AnalyticsScreen({
 }
 
 function OperationsScreen({
+  catalogueItems,
   refreshAppData,
   showToast,
 }: ScreenContext) {
@@ -3329,6 +3368,11 @@ function OperationsScreen({
   const [jobRuns, setJobRuns] = useState<JobRunRecord[]>([]);
   const [lastResult, setLastResult] = useState<unknown>(null);
   const [isBusy, setIsBusy] = useState("");
+  const presetRows = importPresets.map((preset) => ({
+    ...preset,
+    importedCount: catalogueItems.filter((item) => item.type === "card" && preset.setNames.includes(item.set)).length,
+    pageSize: Math.min(250, preset.expectedTotal),
+  }));
 
   async function loadJobRuns() {
     if (!jobSecret.trim()) {
@@ -3359,10 +3403,28 @@ function OperationsScreen({
     }
   }
 
-  async function runJob(kind: "catalogue" | "pricing" | "alerts") {
+  function applyPreset(preset: ImportPreset) {
+    setQuery(preset.query);
+    setPage(1);
+    setPageSize(Math.min(250, preset.expectedTotal));
+  }
+
+  async function runPresetJob(preset: ImportPreset, kind: "catalogue" | "pricing") {
+    applyPreset(preset);
+    await runJob(kind, {
+      page: 1,
+      pageSize: Math.min(250, preset.expectedTotal),
+      q: preset.query,
+    });
+  }
+
+  async function runJob(
+    kind: "catalogue" | "pricing" | "alerts",
+    override?: { page?: number; pageSize?: number; q?: string },
+  ) {
     if (!jobSecret.trim()) {
       showToast("Job secret required.");
-      return;
+      return false;
     }
 
     const path =
@@ -3375,9 +3437,9 @@ function OperationsScreen({
       kind === "alerts"
         ? { dryRun: true }
         : {
-            page,
-            pageSize,
-            q: query.trim() || undefined,
+            page: override?.page ?? page,
+            pageSize: override?.pageSize ?? pageSize,
+            q: override?.q?.trim() || query.trim() || undefined,
           };
 
     setIsBusy(kind);
@@ -3405,12 +3467,14 @@ function OperationsScreen({
       if (kind !== "alerts") {
         await refreshAppData({ quiet: true });
       }
+      return true;
     } catch (error) {
       console.warn("Unable to run job.", error);
       showToast(error instanceof Error ? error.message : "Unable to run job.");
       if (error instanceof Error) {
         setLastResult({ error: error.message });
       }
+      return false;
     } finally {
       setIsBusy("");
     }
@@ -3427,6 +3491,50 @@ function OperationsScreen({
       </div>
 
       <div className="dashboard-grid">
+        <section className="tool-panel">
+          <div className="panel-title-row">
+            <h2>Import presets</h2>
+            <Layers3 size={18} />
+          </div>
+          <div className="preset-grid">
+            {presetRows.map((preset) => {
+              const done = completionPercent(preset.importedCount, preset.expectedTotal);
+              const complete = preset.importedCount >= preset.expectedTotal;
+
+              return (
+                <article className="preset-card" key={preset.query}>
+                  <div className="preset-card-header">
+                    <div>
+                      <strong>{preset.label}</strong>
+                      <span>{preset.note}</span>
+                    </div>
+                    <span className={complete ? "tag green" : "tag amber"}>{complete ? "Complete" : "Partial"}</span>
+                  </div>
+                  <ProgressBar value={done} />
+                  <div className="set-stat-row">
+                    <span>{preset.importedCount} / {preset.expectedTotal}</span>
+                    <span>{preset.query}</span>
+                  </div>
+                  <div className="actions">
+                    <button className="button small" disabled={Boolean(isBusy)} onClick={() => applyPreset(preset)}>
+                      <Check size={15} />
+                      Use
+                    </button>
+                    <button className="button small primary" disabled={Boolean(isBusy)} onClick={() => void runPresetJob(preset, "catalogue")}>
+                      <Database size={15} />
+                      Catalogue
+                    </button>
+                    <button className="button small" disabled={Boolean(isBusy)} onClick={() => void runPresetJob(preset, "pricing")}>
+                      <RefreshCw size={15} />
+                      Pricing
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </section>
+
         <section className="tool-panel">
           <div className="panel-title-row">
             <h2>Import controls</h2>
