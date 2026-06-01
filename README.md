@@ -131,6 +131,8 @@ Job routes accept either `Authorization: Bearer <JOB_SECRET>` or `x-job-secret: 
 
 For a first controlled card import, open Operations, enter `JOB_SECRET`, choose a preset or keep the default query `set.id:sv3pt5`, and run Catalogue with a small page size. Review the job result and recent run before increasing page count or switching to Pricing.
 
+For broader catalogue backfills, leave the query blank or use a broad Pokemon TCG API filter, set `pageSize` to `250`, and run small `maxPages` batches. If the result returns `nextPage`, set Page to that value or use the Operations resume control before continuing.
+
 ## Static Prototype
 
 The first static clickable prototype lives in [prototype/](prototype/). It is retained as a reference artifact.
