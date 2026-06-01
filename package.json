@@ -9,6 +9,7 @@
     "start": "next start --hostname 127.0.0.1",
     "test:auth": "node --experimental-strip-types --test tests/auth-roles.test.mjs",
     "test:billing": "node --experimental-strip-types --test tests/billing-webhook.test.mjs",
+    "test:catalogue": "node --experimental-strip-types --test tests/catalogue-status.test.mjs",
     "test:jobs": "node --experimental-strip-types --test tests/job-runs.test.mjs",
     "test:notifications": "node --experimental-strip-types --test tests/notification-preferences.test.mjs",
     "test:pricing": "node --experimental-strip-types --test tests/pokemon-tcg-pagination.test.mjs",

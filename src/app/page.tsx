@@ -137,6 +137,26 @@ type JobApiResult = {
   totalCount?: number;
 };
 
+type CatalogueStatusRecord = {
+  cardCount: number;
+  coveragePercent: number | null;
+  duplicateProviderIdCount: number;
+  latestCatalogueResult: JobApiResult | null;
+  latestPricingResult: JobApiResult | null;
+  nextCataloguePage: number | null;
+  priceSnapshotCount: number;
+  providerTotalCount: number | null;
+  sealedProductCount: number;
+  setCount: number;
+};
+
+type CatalogueStatusApiResult = {
+  error?: string;
+  latestCatalogueRun?: JobRunRecord | null;
+  latestPricingRun?: JobRunRecord | null;
+  status?: CatalogueStatusRecord;
+};
+
 type ResumeJob = {
   kind: "catalogue" | "pricing";
   nextPage: number;
@@ -3413,10 +3433,12 @@ function OperationsScreen({
   const [pageSize, setPageSize] = useState(25);
   const [maxPages, setMaxPages] = useState(1);
   const [jobRuns, setJobRuns] = useState<JobRunRecord[]>([]);
+  const [catalogueStatus, setCatalogueStatus] = useState<CatalogueStatusRecord | null>(null);
   const [lastResult, setLastResult] = useState<unknown>(null);
   const [isBusy, setIsBusy] = useState("");
   const latestJobResult = parseJobApiResult(lastResult);
   const resumableJob = getResumeJob(latestJobResult);
+  const localCardCount = catalogueItems.filter((item) => item.type === "card").length;
   const presetRows = importPresets.map((preset) => ({
     ...preset,
     importedCount: catalogueItems.filter((item) => item.type === "card" && preset.setNames.includes(item.set)).length,
@@ -3441,6 +3463,7 @@ function OperationsScreen({
       }
 
       setJobRuns(body.runs ?? []);
+      void loadCatalogueStatus({ quiet: true });
       showToast("Job runs loaded.");
       return true;
     } catch (error) {
@@ -3449,6 +3472,56 @@ function OperationsScreen({
       return false;
     } finally {
       setIsBusy("");
+    }
+  }
+
+  async function loadCatalogueStatus(options?: { quiet?: boolean }) {
+    if (!jobSecret.trim()) {
+      showToast("Job secret required.");
+      return false;
+    }
+
+    if (!options?.quiet) {
+      setIsBusy("status");
+    }
+
+    try {
+      const response = await fetch("/api/jobs/catalogue-status", {
+        headers: jobHeaders(jobSecret),
+      });
+      const body = (await response.json()) as CatalogueStatusApiResult;
+
+      if (!response.ok || !body.status) {
+        throw new Error(body.error ?? `Catalogue status failed with ${response.status}`);
+      }
+
+      setCatalogueStatus(body.status);
+      setJobRuns((current) =>
+        [
+          body.latestCatalogueRun,
+          body.latestPricingRun,
+          ...current,
+        ]
+          .filter((run): run is JobRunRecord => Boolean(run))
+          .filter((run, index, runs) => runs.findIndex((entry) => entry.id === run.id) === index)
+          .slice(0, 10),
+      );
+
+      if (!options?.quiet) {
+        showToast("Catalogue status loaded.");
+      }
+
+      return true;
+    } catch (error) {
+      console.warn("Unable to load catalogue status.", error);
+      if (!options?.quiet) {
+        showToast(error instanceof Error ? error.message : "Unable to load catalogue status.");
+      }
+      return false;
+    } finally {
+      if (!options?.quiet) {
+        setIsBusy("");
+      }
     }
   }
 
@@ -3534,6 +3607,7 @@ function OperationsScreen({
 
       if (kind !== "alerts") {
         await refreshAppData({ quiet: true });
+        void loadCatalogueStatus({ quiet: true });
       }
       return true;
     } catch (error) {
@@ -3552,10 +3626,18 @@ function OperationsScreen({
     <section className="page">
       <PageHeader title="Operations" action={<span className="status-pill"><TerminalSquare size={17} />Jobs</span>} />
       <div className="stats-grid compact">
-        <StatCard label="Import query" value={query || "All"} note="Pokemon TCG API filter" />
-        <StatCard label="Page" value={page.toString()} note={`${pageSize} records per page`} />
+        <StatCard
+          label="Catalogue cards"
+          value={formatCount(catalogueStatus?.cardCount ?? localCardCount)}
+          note={
+            catalogueStatus?.providerTotalCount
+              ? `${formatPercent(catalogueStatus.coveragePercent)} of provider`
+              : "Loaded in app"
+          }
+        />
+        <StatCard label="Provider total" value={formatCount(catalogueStatus?.providerTotalCount)} note="Pokemon TCG API" />
+        <StatCard label="Next page" value={catalogueStatus?.nextCataloguePage?.toString() ?? "-"} note="Broad import resume point" />
         <StatCard label="Pages/job" value={maxPages.toString()} note="Capped at 20 for safety" />
-        <StatCard label="Recent runs" value={jobRuns.length.toString()} note="Loaded from job history" />
         <StatCard label="Access" value={jobSecret ? "Ready" : "Locked"} note="Requires JOB_SECRET" />
       </div>
 
@@ -3670,6 +3752,30 @@ function OperationsScreen({
               {isBusy === "runs" ? "Loading" : "Load runs"}
             </button>
           </div>
+        </section>
+
+        <section className="tool-panel">
+          <div className="panel-title-row">
+            <h2>Catalogue status</h2>
+            <Database size={18} />
+          </div>
+          {catalogueStatus?.coveragePercent !== null && catalogueStatus?.coveragePercent !== undefined ? (
+            <ProgressBar value={catalogueStatus.coveragePercent} />
+          ) : null}
+          <MetricList
+            rows={[
+              ["Cards", catalogueStatus ? `${formatCount(catalogueStatus.cardCount)} / ${formatCount(catalogueStatus.providerTotalCount)}` : formatCount(localCardCount)],
+              ["Coverage", formatPercent(catalogueStatus?.coveragePercent)],
+              ["Sets", formatCount(catalogueStatus?.setCount)],
+              ["Prices", formatCount(catalogueStatus?.priceSnapshotCount)],
+              ["Sealed products", formatCount(catalogueStatus?.sealedProductCount)],
+              ["Duplicate IDs", formatCount(catalogueStatus?.duplicateProviderIdCount)],
+            ]}
+          />
+          <button className="button" disabled={Boolean(isBusy)} onClick={() => void loadCatalogueStatus()}>
+            <RefreshCw size={17} />
+            {isBusy === "status" ? "Loading" : "Load status"}
+          </button>
         </section>
 
         <section className="tool-panel">
@@ -4710,6 +4816,18 @@ function jobTypeLabel(type: JobType) {
 
 function formatJsonPreview(value: unknown) {
   return JSON.stringify(value, null, 2);
+}
+
+function formatCount(value?: number | null) {
+  return typeof value === "number" ? new Intl.NumberFormat("en-GB").format(value) : "-";
+}
+
+function formatPercent(value?: number | null) {
+  if (typeof value !== "number") {
+    return "Unknown";
+  }
+
+  return `${Number.isInteger(value) ? value.toFixed(0) : value.toFixed(1)}%`;
 }
 
 function parseJobApiResult(value: unknown): JobApiResult | null {

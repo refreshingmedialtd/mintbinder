@@ -117,6 +117,7 @@ Creating an account from the sign-in screen creates a new collector profile with
 - `POST /api/jobs/price-alerts`: sends or dry-runs Plus price alert email digests behind `JOB_SECRET`.
 - `POST /api/jobs/catalogue-refresh`: imports card catalogue pages from the Pokemon TCG API behind `JOB_SECRET`.
 - `POST /api/jobs/pricing-refresh`: imports Pokemon TCG API prices as GBP snapshots behind `JOB_SECRET`.
+- `GET /api/jobs/catalogue-status`: reports local catalogue counts, import coverage, duplicate provider ID health, and the next broad-import page behind `JOB_SECRET`.
 - `GET /api/jobs/runs`: returns recent job run records behind `JOB_SECRET`.
 
 ## Jobs and Integrations
