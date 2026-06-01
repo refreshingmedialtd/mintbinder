@@ -20,7 +20,9 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:seed": "prisma db seed",
-    "job:catalogue-batch": "node scripts/run-catalogue-batch.mjs"
+    "job:catalogue-batch": "node scripts/run-catalogue-batch.mjs",
+    "job:pricing-batch": "node scripts/run-pricing-batch.mjs",
+    "report:catalogue-gaps": "node scripts/report-catalogue-gaps.mjs"
   },
   "dependencies": {
     "@prisma/client": "6.19.3",

@@ -3,6 +3,7 @@ import { ItemCondition, ItemType, type Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import {
   normalizePokemonTcgPaging,
+  pokemonTcgCardsOrderBy,
   type PokemonTcgPageResult,
   shouldContinuePokemonTcgPaging,
   summarizePokemonTcgPageResults,
@@ -290,7 +291,7 @@ async function fetchPokemonCards({
 
   url.searchParams.set("page", String(page));
   url.searchParams.set("pageSize", String(pageSize));
-  url.searchParams.set("orderBy", "-set.releaseDate,number");
+  url.searchParams.set("orderBy", pokemonTcgCardsOrderBy);
 
   if (q) {
     url.searchParams.set("q", q);

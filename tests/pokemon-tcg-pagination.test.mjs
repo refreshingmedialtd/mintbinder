@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   normalizePokemonTcgPaging,
+  pokemonTcgCardsOrderBy,
   shouldContinuePokemonTcgPaging,
   summarizePokemonTcgPageResults,
 } from "../src/lib/pricing/pokemon-tcg-pagination.ts";
@@ -24,6 +25,10 @@ test("normalizes Pokemon TCG paging input", () => {
       pageSize: 50,
     },
   );
+});
+
+test("uses a deterministic Pokemon TCG order for paging", () => {
+  assert.equal(pokemonTcgCardsOrderBy, "-set.releaseDate,number,id");
 });
 
 test("summarizes incomplete multi-page Pokemon TCG imports", () => {

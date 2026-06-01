@@ -14,6 +14,8 @@ export type PokemonTcgPageResult = {
   totalCount: number;
 };
 
+export const pokemonTcgCardsOrderBy = "-set.releaseDate,number,id";
+
 export function normalizePokemonTcgPaging({
   maxPages = 1,
   page = 1,

@@ -136,6 +136,8 @@ For broader catalogue backfills, leave the query blank or use a broad Pokemon TC
 
 For local command-line backfills, set `JOB_SECRET`, `POKEMON_TCG_IMPORT_PAGE`, `POKEMON_TCG_IMPORT_PAGE_SIZE`, and `POKEMON_TCG_IMPORT_MAX_PAGES`, then run `npm run job:catalogue-batch`. Use `POKEMON_TCG_IMPORT_PAGE=auto` to resume from the latest matching catalogue-status page. The helper starts the built app, runs one catalogue job, prints the JSON result, and stops the server.
 
+Use `npm run report:catalogue-gaps` to check local catalogue health, set-level count gaps, duplicate Pokemon TCG provider IDs, and pricing coverage. For command-line pricing refreshes, set `JOB_SECRET`, `POKEMON_TCG_USD_TO_GBP_RATE`, `POKEMON_TCG_PRICING_PAGE`, `POKEMON_TCG_PRICING_PAGE_SIZE`, `POKEMON_TCG_PRICING_MAX_PAGES`, and optionally `POKEMON_TCG_PRICING_QUERY`, then run `npm run job:pricing-batch`.
+
 ## Static Prototype
 
 The first static clickable prototype lives in [prototype/](prototype/). It is retained as a reference artifact.
