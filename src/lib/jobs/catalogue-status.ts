@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db/prisma";
 import { recentJobRuns, type JobRunRecord } from "@/lib/jobs/runs";
-import { summarizeCatalogueStatus } from "@/lib/jobs/catalogue-status-summary";
+import { normalizeCatalogueResult, summarizeCatalogueStatus } from "@/lib/jobs/catalogue-status-summary";
 
 type CountRow = {
   count: number;
@@ -12,7 +12,7 @@ export async function catalogueStatus() {
     recentJobRuns({ limit: 25, type: "catalogue_refresh" }),
     recentJobRuns({ limit: 25, type: "pricing_refresh" }),
   ]);
-  const latestCatalogueRun = latestSucceeded(catalogueRuns);
+  const latestCatalogueRun = latestUsefulCatalogueRun(catalogueRuns, "");
   const latestPricingRun = latestSucceeded(pricingRuns);
 
   return {
@@ -65,4 +65,21 @@ async function catalogueCounts() {
 
 function latestSucceeded(runs: JobRunRecord[]) {
   return runs.find((run) => run.status === "succeeded") ?? null;
+}
+
+function latestUsefulCatalogueRun(runs: JobRunRecord[], query: string) {
+  return runs.find((run) => {
+    const result = normalizeCatalogueResult(run.resultPayload);
+
+    return (
+      (run.status === "succeeded" || hasCatalogueProgress(run.resultPayload)) &&
+      (result?.query ?? "") === query
+    );
+  }) ?? null;
+}
+
+function hasCatalogueProgress(payload: unknown) {
+  const result = normalizeCatalogueResult(payload);
+
+  return Boolean(result?.nextPage || result?.totalCount);
 }

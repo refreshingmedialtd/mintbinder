@@ -77,6 +77,35 @@ export class PricingProviderConfigError extends Error {
   }
 }
 
+export class PokemonTcgPartialSyncError extends Error {
+  originalError: unknown;
+  resultPayload: ReturnType<typeof summarizePokemonTcgPageResults> & {
+    error: string;
+    failedPage: number;
+  };
+
+  constructor({
+    failedPage,
+    originalError,
+    resultPayload,
+  }: {
+    failedPage: number;
+    originalError: unknown;
+    resultPayload: ReturnType<typeof summarizePokemonTcgPageResults>;
+  }) {
+    super(originalError instanceof Error ? originalError.message : "Pokemon TCG sync failed.");
+    this.name = "PokemonTcgPartialSyncError";
+    this.originalError = originalError;
+    this.resultPayload = {
+      ...resultPayload,
+      complete: false,
+      error: this.message,
+      failedPage,
+      nextPage: failedPage,
+    };
+  }
+}
+
 export async function syncPokemonTcgCardPages({
   maxPages = 1,
   page = 1,
@@ -89,12 +118,26 @@ export async function syncPokemonTcgCardPages({
 
   for (let offset = 0; offset < paging.maxPages; offset += 1) {
     const currentPage = paging.page + offset;
-    const result = await syncPokemonTcgCards({
-      page: currentPage,
-      pageSize: paging.pageSize,
-      q,
-      writePrices,
-    });
+    let result: PokemonTcgPageResult;
+
+    try {
+      result = await syncPokemonTcgCards({
+        page: currentPage,
+        pageSize: paging.pageSize,
+        q,
+        writePrices,
+      });
+    } catch (error) {
+      if (pages.length === 0) {
+        throw error;
+      }
+
+      throw new PokemonTcgPartialSyncError({
+        failedPage: currentPage,
+        originalError: error,
+        resultPayload: summarizePokemonTcgPageResults({ ...paging, pages, query: q }),
+      });
+    }
 
     pages.push(result);
 

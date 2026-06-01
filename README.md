@@ -134,7 +134,7 @@ For a first controlled card import, open Operations, enter `JOB_SECRET`, choose 
 
 For broader catalogue backfills, leave the query blank or use a broad Pokemon TCG API filter, set `pageSize` to `250`, and run small `maxPages` batches. If the result returns `nextPage`, set Page to that value or use the Operations resume control before continuing.
 
-For local command-line backfills, set `JOB_SECRET`, `POKEMON_TCG_IMPORT_PAGE`, `POKEMON_TCG_IMPORT_PAGE_SIZE`, and `POKEMON_TCG_IMPORT_MAX_PAGES`, then run `npm run job:catalogue-batch`. The helper starts the built app, runs one catalogue job, prints the JSON result, and stops the server.
+For local command-line backfills, set `JOB_SECRET`, `POKEMON_TCG_IMPORT_PAGE`, `POKEMON_TCG_IMPORT_PAGE_SIZE`, and `POKEMON_TCG_IMPORT_MAX_PAGES`, then run `npm run job:catalogue-batch`. Use `POKEMON_TCG_IMPORT_PAGE=auto` to resume from the latest matching catalogue-status page. The helper starts the built app, runs one catalogue job, prints the JSON result, and stops the server.
 
 ## Static Prototype
 

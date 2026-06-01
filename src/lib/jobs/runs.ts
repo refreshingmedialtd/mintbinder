@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { prisma } from "@/lib/db/prisma";
+import { jobErrorResultPayload } from "@/lib/jobs/error-payload";
 import type { JobRunStatus, JobRunType } from "@/lib/jobs/types";
 
 export type JobRunRecord = {
@@ -163,10 +164,12 @@ async function completeJobRun(id: string, result: unknown) {
 
 async function failJobRun(id: string, error: unknown) {
   const message = error instanceof Error ? error.message : "Unknown job error.";
+  const resultJson = toJsonString(jobErrorResultPayload(error));
   const rows = await prisma.$queryRaw<DbJobRun[]>`
     UPDATE job_runs
     SET
       status = 'failed'::job_run_status,
+      result_payload = ${resultJson}::jsonb,
       error_message = ${message},
       finished_at = NOW(),
       duration_ms = FLOOR(EXTRACT(EPOCH FROM (NOW() - started_at)) * 1000)::int

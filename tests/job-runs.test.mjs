@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { jobErrorResultPayload } from "../src/lib/jobs/error-payload.ts";
 import { isJobRunType } from "../src/lib/jobs/types.ts";
 
 test("recognizes supported job run types", () => {
@@ -8,4 +9,22 @@ test("recognizes supported job run types", () => {
   assert.equal(isJobRunType("pricing_refresh"), true);
   assert.equal(isJobRunType("unknown"), false);
   assert.equal(isJobRunType(null), false);
+});
+
+test("extracts structured result payloads from job errors", () => {
+  assert.deepEqual(
+    jobErrorResultPayload({
+      resultPayload: {
+        nextPage: 54,
+        pagesProcessed: 18,
+      },
+    }),
+    {
+      nextPage: 54,
+      pagesProcessed: 18,
+    },
+  );
+
+  assert.deepEqual(jobErrorResultPayload(new Error("No payload")), {});
+  assert.deepEqual(jobErrorResultPayload({ resultPayload: "not structured" }), {});
 });

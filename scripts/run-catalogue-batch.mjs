@@ -1,8 +1,9 @@
 import "dotenv/config";
 import { execFileSync, spawn } from "node:child_process";
+import { pageFromStatus, pageSetting, positiveInteger } from "./catalogue-batch-options.mjs";
 
 const port = positiveInteger(process.env.JOB_SERVER_PORT, 3016);
-const page = positiveInteger(process.env.POKEMON_TCG_IMPORT_PAGE, 1);
+const requestedPage = pageSetting(process.env.POKEMON_TCG_IMPORT_PAGE, 1);
 const pageSize = positiveInteger(process.env.POKEMON_TCG_IMPORT_PAGE_SIZE, 250);
 const maxPages = positiveInteger(process.env.POKEMON_TCG_IMPORT_MAX_PAGES, 5);
 const query = process.env.POKEMON_TCG_IMPORT_QUERY?.trim();
@@ -36,6 +37,7 @@ server.stderr.on("data", (chunk) => {
 try {
   await waitForServer(baseUrl);
 
+  const page = requestedPage === "auto" ? await autoPage() : requestedPage;
   const response = await fetch(`${baseUrl}/api/jobs/catalogue-refresh`, {
     method: "POST",
     headers: {
@@ -58,6 +60,21 @@ try {
   }
 } finally {
   stopServer();
+}
+
+async function autoPage() {
+  const response = await fetch(`${baseUrl}/api/jobs/catalogue-status`, {
+    headers: {
+      authorization: `Bearer ${secret}`,
+    },
+  });
+  const result = await response.json();
+
+  if (!response.ok) {
+    throw new Error(result.error ?? `Catalogue status failed with ${response.status}.`);
+  }
+
+  return pageFromStatus(result, query ?? "");
 }
 
 async function waitForServer(url) {
@@ -97,16 +114,6 @@ function stopServer() {
   }
 
   server.kill();
-}
-
-function positiveInteger(value, fallback) {
-  const number = Number(value);
-
-  if (!Number.isFinite(number) || number <= 0) {
-    return fallback;
-  }
-
-  return Math.floor(number);
 }
 
 function cleanChildEnv(overrides) {
