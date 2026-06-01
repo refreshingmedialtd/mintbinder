@@ -1,12 +1,13 @@
 import "dotenv/config";
 import { execFileSync, spawn } from "node:child_process";
-import { pageSetting, positiveInteger } from "./catalogue-batch-options.mjs";
+import { booleanSetting, pageSetting, positiveInteger } from "./catalogue-batch-options.mjs";
 
 const port = positiveInteger(process.env.JOB_SERVER_PORT, 3017);
 const page = pageSetting(process.env.POKEMON_TCG_PRICING_PAGE, 1);
 const pageSize = positiveInteger(process.env.POKEMON_TCG_PRICING_PAGE_SIZE, 250);
 const maxPages = positiveInteger(process.env.POKEMON_TCG_PRICING_MAX_PAGES, 5);
 const query = process.env.POKEMON_TCG_PRICING_QUERY?.trim();
+const priceOnlyUnpriced = booleanSetting(process.env.POKEMON_TCG_PRICE_ONLY_UNPRICED);
 const secret = process.env.JOB_SECRET?.trim();
 
 if (!secret) {
@@ -51,6 +52,7 @@ try {
       maxPages,
       page,
       pageSize,
+      priceOnlyUnpriced,
       q: query || undefined,
     }),
   });

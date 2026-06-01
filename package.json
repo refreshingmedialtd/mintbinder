@@ -13,7 +13,9 @@
     "test:catalogue": "node --experimental-strip-types --test tests/catalogue-status.test.mjs",
     "test:jobs": "node --experimental-strip-types --test tests/job-runs.test.mjs",
     "test:notifications": "node --experimental-strip-types --test tests/notification-preferences.test.mjs",
+    "test:pokemon-pricing": "node --experimental-strip-types --test tests/pokemon-tcg-pricing.test.mjs",
     "test:pricing": "node --experimental-strip-types --test tests/pokemon-tcg-pagination.test.mjs",
+    "test:sealed-import": "node --test tests/tcgcsv-sealed-products.test.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "db:validate": "prisma validate",
@@ -22,6 +24,7 @@
     "db:seed": "prisma db seed",
     "job:catalogue-batch": "node scripts/run-catalogue-batch.mjs",
     "job:pricing-batch": "node scripts/run-pricing-batch.mjs",
+    "job:sealed-tcgcsv": "node scripts/import-tcgcsv-sealed-products.mjs",
     "report:catalogue-gaps": "node scripts/report-catalogue-gaps.mjs"
   },
   "dependencies": {

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  booleanSetting,
   pageFromStatus,
   pageSetting,
   positiveInteger,
@@ -17,6 +18,16 @@ test("recognizes auto page mode", () => {
   assert.equal(pageSetting("auto"), "auto");
   assert.equal(pageSetting(" AUTO "), "auto");
   assert.equal(pageSetting("36"), 36);
+});
+
+test("parses boolean environment values", () => {
+  assert.equal(booleanSetting("true"), true);
+  assert.equal(booleanSetting("1"), true);
+  assert.equal(booleanSetting("yes"), true);
+  assert.equal(booleanSetting("false", true), false);
+  assert.equal(booleanSetting("0", true), false);
+  assert.equal(booleanSetting("", true), true);
+  assert.equal(booleanSetting("maybe", true), true);
 });
 
 test("resolves auto page from matching catalogue status", () => {

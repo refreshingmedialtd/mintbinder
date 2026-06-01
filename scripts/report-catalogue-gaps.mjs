@@ -9,6 +9,7 @@ try {
     setCount,
     priceSnapshotCount,
     sealedProductCount,
+    sealedPricingCoverage,
     duplicateProviderIds,
     pricingBySeries,
     setDeficits,
@@ -18,6 +19,16 @@ try {
     prisma.cardSet.count(),
     prisma.priceSnapshot.count(),
     prisma.sealedProduct.count(),
+    prisma.$queryRaw`
+      SELECT
+        COUNT(DISTINCT ps.sealed_product_id)::int AS "pricedSealedProductCount",
+        COUNT(ps.id)::int AS "sealedPriceSnapshotCount",
+        COUNT(DISTINCT sp.id)::int AS "sealedProductCount"
+      FROM sealed_products sp
+      LEFT JOIN price_snapshots ps
+        ON ps.sealed_product_id = sp.id
+        AND ps.item_type = 'sealed_product'
+    `,
     prisma.$queryRaw`
       SELECT cp.provider_ids->>'pokemon_tcg_api' AS provider_id, COUNT(*)::int AS count
       FROM card_printings cp
@@ -63,6 +74,11 @@ try {
   ]);
 
   const coverage = pricingCoverage[0] ?? { pricedCards: 0, totalCards: cardCount };
+  const sealedCoverage = sealedPricingCoverage[0] ?? {
+    pricedSealedProductCount: 0,
+    sealedPriceSnapshotCount: 0,
+    sealedProductCount,
+  };
 
   console.log(JSON.stringify({
     cardCount,
@@ -74,6 +90,9 @@ try {
       ...row,
       pricingCoveragePercent: percent(row.pricedCardCount, row.cardCount),
     })),
+    pricedSealedProductCount: sealedCoverage.pricedSealedProductCount,
+    sealedPriceSnapshotCount: sealedCoverage.sealedPriceSnapshotCount,
+    sealedPricingCoveragePercent: percent(sealedCoverage.pricedSealedProductCount, sealedCoverage.sealedProductCount),
     sealedProductCount,
     setCount,
     setDeficitCount: setDeficits.length,

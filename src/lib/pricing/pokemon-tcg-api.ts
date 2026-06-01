@@ -8,6 +8,7 @@ import {
   shouldContinuePokemonTcgPaging,
   summarizePokemonTcgPageResults,
 } from "@/lib/pricing/pokemon-tcg-pagination";
+import { bestPokemonTcgCardPrice, type PokemonPricingRates } from "@/lib/pricing/pokemon-tcg-card-prices";
 
 type PokemonTcgSearchResponse = {
   count: number;
@@ -63,6 +64,7 @@ type PokemonTcgCard = {
 type SyncPokemonCardsInput = {
   page?: number;
   pageSize?: number;
+  priceOnlyUnpriced?: boolean;
   q?: string;
   writePrices?: boolean;
 };
@@ -111,6 +113,7 @@ export async function syncPokemonTcgCardPages({
   maxPages = 1,
   page = 1,
   pageSize = 50,
+  priceOnlyUnpriced = false,
   q = process.env.POKEMON_TCG_QUERY ?? "",
   writePrices = true,
 }: SyncPokemonCardPagesInput = {}) {
@@ -125,6 +128,7 @@ export async function syncPokemonTcgCardPages({
       result = await syncPokemonTcgCards({
         page: currentPage,
         pageSize: paging.pageSize,
+        priceOnlyUnpriced,
         q,
         writePrices,
       });
@@ -153,6 +157,7 @@ export async function syncPokemonTcgCardPages({
 export async function syncPokemonTcgCards({
   page = 1,
   pageSize = 50,
+  priceOnlyUnpriced = false,
   q = process.env.POKEMON_TCG_QUERY ?? "",
   writePrices = true,
 }: SyncPokemonCardsInput = {}) {
@@ -162,7 +167,7 @@ export async function syncPokemonTcgCards({
     pageSize: paging.pageSize,
     q,
   });
-  const gbpRate = writePrices ? pokemonUsdToGbpRate() : null;
+  const pricingRates = writePrices ? pokemonPricingRates() : null;
   const setIds = new Set<string>();
   let snapshotsCreated = 0;
 
@@ -234,8 +239,8 @@ export async function syncPokemonTcgCards({
       },
     });
 
-    if (writePrices && gbpRate) {
-      const price = bestTcgPlayerPrice(card);
+    if (writePrices && pricingRates && (!priceOnlyUnpriced || !(await hasCardPriceSnapshot(cardId)))) {
+      const price = bestPokemonTcgCardPrice(card, pricingRates);
 
       if (price) {
         await prisma.priceSnapshot.create({
@@ -247,14 +252,15 @@ export async function syncPokemonTcgCards({
             itemType: ItemType.CARD,
             language: "en",
             metadata: compactJson({
-              originalCurrency: "USD",
-              originalPrice: price.usd,
-              providerUpdatedAt: card.tcgplayer?.updatedAt,
-              usdToGbpRate: gbpRate,
+              originalCurrency: price.originalCurrency,
+              originalPrice: price.originalPrice,
+              providerUpdatedAt: price.providerUpdatedAt,
+              conversionRate: price.conversionRate,
+              priceSource: price.sourceLabel,
             }),
             observedAt: new Date(),
-            priceMinor: Math.round(price.usd * gbpRate * 100),
-            source: "pokemon-tcg-api",
+            priceMinor: Math.round(price.originalPrice * price.conversionRate * 100),
+            source: price.source,
             sourceRef: card.id,
             variantLabel: price.variantLabel,
           },
@@ -317,45 +323,39 @@ async function fetchPokemonCards({
   return data as PokemonTcgSearchResponse;
 }
 
-function bestTcgPlayerPrice(card: PokemonTcgCard) {
-  const prices = card.tcgplayer?.prices;
+function pokemonPricingRates(): PokemonPricingRates {
+  const usdToGbp = requiredConversionRate("POKEMON_TCG_USD_TO_GBP_RATE");
+  const eurToGbp = optionalConversionRate("POKEMON_TCG_EUR_TO_GBP_RATE");
 
-  if (!prices) {
-    return null;
-  }
-
-  const variantOrder = [
-    "holofoil",
-    "reverseHolofoil",
-    "normal",
-    "1stEditionHolofoil",
-    "unlimitedHolofoil",
-  ];
-
-  for (const variant of variantOrder) {
-    const price = prices[variant];
-    const usd = price?.market ?? price?.mid ?? price?.low ?? null;
-
-    if (usd && usd > 0) {
-      return {
-        confidenceScore: price.market ? 78 : price.mid ? 68 : 58,
-        usd,
-        variantLabel: labelFromCamelCase(variant),
-      };
-    }
-  }
-
-  return null;
+  return { eurToGbp, usdToGbp };
 }
 
-function pokemonUsdToGbpRate() {
-  const rate = Number(process.env.POKEMON_TCG_USD_TO_GBP_RATE);
+function requiredConversionRate(envKey: string) {
+  const rate = Number(process.env[envKey]);
 
   if (!Number.isFinite(rate) || rate <= 0) {
-    throw new PricingProviderConfigError("POKEMON_TCG_USD_TO_GBP_RATE must be configured for pricing refreshes.");
+    throw new PricingProviderConfigError(`${envKey} must be configured for pricing refreshes.`);
   }
 
   return rate;
+}
+
+function optionalConversionRate(envKey: string) {
+  const rate = Number(process.env[envKey]);
+
+  return Number.isFinite(rate) && rate > 0 ? rate : undefined;
+}
+
+async function hasCardPriceSnapshot(cardId: string) {
+  const snapshot = await prisma.priceSnapshot.findFirst({
+    select: { id: true },
+    where: {
+      cardPrintingId: cardId,
+      itemType: ItemType.CARD,
+    },
+  });
+
+  return Boolean(snapshot);
 }
 
 function cardSetId(providerId: string) {
@@ -415,8 +415,4 @@ function variantMetadata(card: PokemonTcgCard) {
 
 function compactJson(value: Record<string, Prisma.InputJsonValue | undefined>): Prisma.InputJsonObject {
   return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined)) as Prisma.InputJsonObject;
-}
-
-function labelFromCamelCase(value: string) {
-  return value.replace(/([A-Z])/g, " $1").replace(/^./, (character) => character.toUpperCase());
 }

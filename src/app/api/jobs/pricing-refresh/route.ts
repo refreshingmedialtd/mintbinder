@@ -17,6 +17,7 @@ export async function POST(request: Request) {
       page?: number;
       pageSize?: number;
       maxPages?: number;
+      priceOnlyUnpriced?: boolean;
       q?: string;
     };
     const { jobRun, result } = await runTrackedJob({
@@ -27,6 +28,7 @@ export async function POST(request: Request) {
           maxPages: body.maxPages,
           page: body.page,
           pageSize: body.pageSize,
+          priceOnlyUnpriced: body.priceOnlyUnpriced,
           q: body.q,
           writePrices: true,
         }),
