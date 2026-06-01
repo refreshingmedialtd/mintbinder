@@ -10,6 +10,7 @@ try {
     priceSnapshotCount,
     sealedProductCount,
     duplicateProviderIds,
+    pricingBySeries,
     setDeficits,
     pricingCoverage,
   ] = await Promise.all([
@@ -24,6 +25,18 @@ try {
       GROUP BY cp.provider_ids->>'pokemon_tcg_api'
       HAVING COUNT(*) > 1
       ORDER BY count DESC, provider_id
+    `,
+    prisma.$queryRaw`
+      SELECT
+        COALESCE(cs.series, 'Unknown') AS series,
+        COUNT(DISTINCT cp.id)::int AS "cardCount",
+        COUNT(DISTINCT ps.card_printing_id)::int AS "pricedCardCount",
+        COUNT(ps.id)::int AS "priceSnapshotCount"
+      FROM card_printings cp
+      JOIN card_sets cs ON cs.id = cp.card_set_id
+      LEFT JOIN price_snapshots ps ON ps.card_printing_id = cp.id
+      GROUP BY COALESCE(cs.series, 'Unknown')
+      ORDER BY "cardCount" DESC, series
     `,
     prisma.$queryRaw`
       SELECT
@@ -57,6 +70,10 @@ try {
     priceSnapshotCount,
     pricedCardCount: coverage.pricedCards,
     pricingCoveragePercent: percent(coverage.pricedCards, coverage.totalCards),
+    pricingBySeries: pricingBySeries.map((row) => ({
+      ...row,
+      pricingCoveragePercent: percent(row.pricedCardCount, row.cardCount),
+    })),
     sealedProductCount,
     setCount,
     setDeficitCount: setDeficits.length,
