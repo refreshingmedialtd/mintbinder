@@ -3,7 +3,7 @@ import { jobErrorStatus, requireJobSecret } from "@/lib/jobs/auth";
 import { JobRunExecutionError, runTrackedJob } from "@/lib/jobs/runs";
 import {
   PricingProviderConfigError,
-  syncPokemonTcgCards,
+  syncPokemonTcgCardPages,
 } from "@/lib/pricing/pokemon-tcg-api";
 
 export const dynamic = "force-dynamic";
@@ -16,13 +16,15 @@ export async function POST(request: Request) {
     const body = (await request.json().catch(() => ({}))) as {
       page?: number;
       pageSize?: number;
+      maxPages?: number;
       q?: string;
     };
     const { jobRun, result } = await runTrackedJob({
       input: body,
       type: "pricing_refresh",
       task: () =>
-        syncPokemonTcgCards({
+        syncPokemonTcgCardPages({
+          maxPages: body.maxPages,
           page: body.page,
           pageSize: body.pageSize,
           q: body.q,

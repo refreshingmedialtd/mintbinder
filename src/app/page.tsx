@@ -3365,6 +3365,7 @@ function OperationsScreen({
   const [query, setQuery] = useState("set.id:sv3pt5");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
+  const [maxPages, setMaxPages] = useState(1);
   const [jobRuns, setJobRuns] = useState<JobRunRecord[]>([]);
   const [lastResult, setLastResult] = useState<unknown>(null);
   const [isBusy, setIsBusy] = useState("");
@@ -3407,11 +3408,13 @@ function OperationsScreen({
     setQuery(preset.query);
     setPage(1);
     setPageSize(Math.min(250, preset.expectedTotal));
+    setMaxPages(1);
   }
 
   async function runPresetJob(preset: ImportPreset, kind: "catalogue" | "pricing") {
     applyPreset(preset);
     await runJob(kind, {
+      maxPages: 1,
       page: 1,
       pageSize: Math.min(250, preset.expectedTotal),
       q: preset.query,
@@ -3420,7 +3423,7 @@ function OperationsScreen({
 
   async function runJob(
     kind: "catalogue" | "pricing" | "alerts",
-    override?: { page?: number; pageSize?: number; q?: string },
+    override?: { maxPages?: number; page?: number; pageSize?: number; q?: string },
   ) {
     if (!jobSecret.trim()) {
       showToast("Job secret required.");
@@ -3437,6 +3440,7 @@ function OperationsScreen({
       kind === "alerts"
         ? { dryRun: true }
         : {
+            maxPages: override?.maxPages ?? maxPages,
             page: override?.page ?? page,
             pageSize: override?.pageSize ?? pageSize,
             q: override?.q?.trim() || query.trim() || undefined,
@@ -3486,6 +3490,7 @@ function OperationsScreen({
       <div className="stats-grid compact">
         <StatCard label="Import query" value={query || "All"} note="Pokemon TCG API filter" />
         <StatCard label="Page" value={page.toString()} note={`${pageSize} records per page`} />
+        <StatCard label="Pages/job" value={maxPages.toString()} note="Capped at 20 for safety" />
         <StatCard label="Recent runs" value={jobRuns.length.toString()} note="Loaded from job history" />
         <StatCard label="Access" value={jobSecret ? "Ready" : "Locked"} note="Requires JOB_SECRET" />
       </div>
@@ -3571,6 +3576,15 @@ function OperationsScreen({
                 type="number"
                 value={pageSize}
                 onChange={(event) => setPageSize(Math.min(250, Math.max(1, Number(event.currentTarget.value) || 1)))}
+              />
+            </Field>
+            <Field label="Max pages">
+              <input
+                max={20}
+                min={1}
+                type="number"
+                value={maxPages}
+                onChange={(event) => setMaxPages(Math.min(20, Math.max(1, Number(event.currentTarget.value) || 1)))}
               />
             </Field>
           </div>

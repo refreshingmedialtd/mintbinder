@@ -60,11 +60,85 @@ type SyncPokemonCardsInput = {
   writePrices?: boolean;
 };
 
+type SyncPokemonCardPagesInput = SyncPokemonCardsInput & {
+  maxPages?: number;
+};
+
 export class PricingProviderConfigError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "PricingProviderConfigError";
   }
+}
+
+export async function syncPokemonTcgCardPages({
+  maxPages = 1,
+  page = 1,
+  pageSize = 50,
+  q = process.env.POKEMON_TCG_QUERY ?? "",
+  writePrices = true,
+}: SyncPokemonCardPagesInput = {}) {
+  const safePage = clampPositiveInteger(page, 1);
+  const safePageSize = clampPageSize(pageSize);
+  const safeMaxPages = clampPositiveInteger(maxPages, 1, 20);
+  const pages = [];
+  const setIds = new Set<string>();
+  let cardsFetched = 0;
+  let cardsUpserted = 0;
+  let pricingSnapshotsCreated = 0;
+  let totalCount = 0;
+
+  for (let offset = 0; offset < safeMaxPages; offset += 1) {
+    const currentPage = safePage + offset;
+    const result = await syncPokemonTcgCards({
+      page: currentPage,
+      pageSize: safePageSize,
+      q,
+      writePrices,
+    });
+
+    pages.push({
+      cardsFetched: result.cardsFetched,
+      cardsUpserted: result.cardsUpserted,
+      page: result.page,
+      pricingSnapshotsCreated: result.pricingSnapshotsCreated,
+      setsUpserted: result.setsUpserted,
+    });
+    cardsFetched += result.cardsFetched;
+    cardsUpserted += result.cardsUpserted;
+    pricingSnapshotsCreated += result.pricingSnapshotsCreated;
+    totalCount = result.totalCount;
+
+    for (const setId of result.setIds) {
+      setIds.add(setId);
+    }
+
+    const recordsSeen = currentPage * safePageSize;
+
+    if (result.cardsFetched === 0 || recordsSeen >= result.totalCount) {
+      break;
+    }
+  }
+
+  const lastPage = pages.at(-1)?.page ?? safePage;
+  const recordsSeen = lastPage * safePageSize;
+  const complete = totalCount > 0 ? recordsSeen >= totalCount : cardsFetched === 0;
+
+  return {
+    cardsFetched,
+    cardsUpserted,
+    complete,
+    maxPages: safeMaxPages,
+    nextPage: complete ? null : lastPage + 1,
+    page: safePage,
+    pageSize: safePageSize,
+    pages,
+    pagesProcessed: pages.length,
+    pricingSnapshotsCreated,
+    query: q,
+    setsUpserted: setIds.size,
+    totalCount,
+  };
 }
 
 export async function syncPokemonTcgCards({
@@ -74,7 +148,7 @@ export async function syncPokemonTcgCards({
   writePrices = true,
 }: SyncPokemonCardsInput = {}) {
   const response = await fetchPokemonCards({
-    page,
+    page: clampPositiveInteger(page, 1),
     pageSize: clampPageSize(pageSize),
     q,
   });
@@ -187,6 +261,7 @@ export async function syncPokemonTcgCards({
     pageSize: response.pageSize,
     pricingSnapshotsCreated: snapshotsCreated,
     query: q,
+    setIds: [...setIds],
     setsUpserted: setIds.size,
     totalCount: response.totalCount,
   };
@@ -274,11 +349,15 @@ function pokemonUsdToGbpRate() {
 }
 
 function clampPageSize(value: number) {
+  return clampPositiveInteger(value, 50, 250);
+}
+
+function clampPositiveInteger(value: number, fallback: number, max = Number.POSITIVE_INFINITY) {
   if (!Number.isFinite(value)) {
-    return 50;
+    return fallback;
   }
 
-  return Math.min(250, Math.max(1, Math.floor(value)));
+  return Math.min(max, Math.max(1, Math.floor(value)));
 }
 
 function cardSetId(providerId: string) {

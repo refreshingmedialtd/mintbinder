@@ -127,9 +127,9 @@ Stripe webhook fulfillment expects events for `checkout.session.completed`, `cus
 https://your-domain.example/api/billing/webhook
 ```
 
-Job routes accept either `Authorization: Bearer <JOB_SECRET>` or `x-job-secret: <JOB_SECRET>`. Each successful authenticated job request creates a `job_runs` record with input, result, status, timing, and errors. Pricing refreshes convert Pokemon TCG API USD prices into GBP snapshots with `POKEMON_TCG_USD_TO_GBP_RATE`; keep that value current before running the job.
+Job routes accept either `Authorization: Bearer <JOB_SECRET>` or `x-job-secret: <JOB_SECRET>`. Each successful authenticated job request creates a `job_runs` record with input, result, status, timing, and errors. Catalogue and pricing refreshes accept `page`, `pageSize`, `q`, and `maxPages`; `maxPages` is capped at 20 per job so broad backfills can be resumed in controlled batches. Pricing refreshes convert Pokemon TCG API USD prices into GBP snapshots with `POKEMON_TCG_USD_TO_GBP_RATE`; keep that value current before running the job.
 
-For a first controlled card import, open Operations, enter `JOB_SECRET`, keep the default query `set.id:sv3pt5`, and run Catalogue with a small page size. Review the job result and recent run before increasing the page or switching to Pricing.
+For a first controlled card import, open Operations, enter `JOB_SECRET`, choose a preset or keep the default query `set.id:sv3pt5`, and run Catalogue with a small page size. Review the job result and recent run before increasing page count or switching to Pricing.
 
 ## Static Prototype
 
