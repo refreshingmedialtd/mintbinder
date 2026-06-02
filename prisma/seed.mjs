@@ -247,10 +247,15 @@ async function seedSealedProducts() {
     {
       id: ids.sealed.bundle151,
       relatedCardSetId: ids.sets.sv151,
-      providerIds: { sample: "sealed-151-booster-bundle" },
+      providerIds: { sample: "sealed-151-booster-bundle", tcgplayer: "502000" },
       name: "151 Booster Bundle",
       productType: SealedProductType.BOOSTER_PACK,
       releaseDate: new Date("2023-09-22T00:00:00.000Z"),
+      imageUrl: "https://tcgplayer-cdn.tcgplayer.com/product/502000_in_1000x1000.jpg",
+      metadata: {
+        provider: "manual_seed",
+        tcgplayerUrl: "https://www.tcgplayer.com/product/502000/pokemon-sv-scarlet-and-violet-151-151-booster-bundle",
+      },
       notes: "Sample sealed product for the MVP prototype.",
       visibility: CatalogueVisibility.GLOBAL,
     },

@@ -16,6 +16,11 @@ try {
     sealedPricingByProductType,
     setDeficits,
     pricingCoverage,
+    mediaAndVariantCoverage,
+    sealedImageCoverage,
+    variantMetadataBySeries,
+    missingSealedImages,
+    pricingBySet,
   ] = await Promise.all([
     prisma.cardPrinting.count(),
     prisma.cardSet.count(),
@@ -96,18 +101,98 @@ try {
       FROM card_printings cp
       LEFT JOIN price_snapshots ps ON ps.card_printing_id = cp.id
     `,
+    prisma.$queryRaw`
+      SELECT
+        COUNT(*)::int AS "cardCount",
+        COUNT(*) FILTER (
+          WHERE image_small_url IS NOT NULL AND image_small_url <> ''
+        )::int AS "cardImageCount",
+        COUNT(*) FILTER (
+          WHERE jsonb_typeof(variant_metadata->'availablePrices') = 'array'
+            AND jsonb_array_length(variant_metadata->'availablePrices') > 0
+        )::int AS "cardVariantMetadataCount"
+      FROM card_printings
+    `,
+    prisma.$queryRaw`
+      SELECT
+        COUNT(*)::int AS "sealedProductCount",
+        COUNT(*) FILTER (
+          WHERE image_url IS NOT NULL AND image_url <> ''
+        )::int AS "sealedImageCount"
+      FROM sealed_products
+    `,
+    prisma.$queryRaw`
+      SELECT
+        COALESCE(cs.series, 'Unknown') AS series,
+        COUNT(cp.id)::int AS "cardCount",
+        COUNT(cp.id) FILTER (
+          WHERE jsonb_typeof(cp.variant_metadata->'availablePrices') = 'array'
+            AND jsonb_array_length(cp.variant_metadata->'availablePrices') > 0
+        )::int AS "cardVariantMetadataCount"
+      FROM card_printings cp
+      JOIN card_sets cs ON cs.id = cp.card_set_id
+      GROUP BY COALESCE(cs.series, 'Unknown')
+      ORDER BY "cardCount" DESC, series
+    `,
+    prisma.$queryRaw`
+      SELECT
+        id,
+        name,
+        product_type AS "productType",
+        metadata->>'groupId' AS "tcgcsvGroupId",
+        COALESCE(provider_ids->>'tcgcsv', provider_ids->>'tcgplayer') AS "tcgcsvProductId"
+      FROM sealed_products
+      WHERE image_url IS NULL OR image_url = ''
+      ORDER BY updated_at ASC
+      LIMIT 10
+    `,
+    prisma.$queryRaw`
+      SELECT
+        cs.name,
+        cs.series,
+        cs.provider_ids->>'pokemon_tcg_api' AS "providerId",
+        COUNT(DISTINCT cp.id)::int AS "cardCount",
+        COUNT(DISTINCT ps.card_printing_id)::int AS "pricedCardCount",
+        (COUNT(DISTINCT cp.id) - COUNT(DISTINCT ps.card_printing_id))::int AS "unpricedCardCount"
+      FROM card_sets cs
+      JOIN card_printings cp ON cp.card_set_id = cs.id
+      LEFT JOIN price_snapshots ps ON ps.card_printing_id = cp.id
+      GROUP BY cs.id
+      HAVING COUNT(DISTINCT cp.id) > COUNT(DISTINCT ps.card_printing_id)
+      ORDER BY "unpricedCardCount" DESC, cs.release_date DESC NULLS LAST, cs.name
+      LIMIT 10
+    `,
   ]);
 
   const coverage = pricingCoverage[0] ?? { pricedCards: 0, totalCards: cardCount };
+  const media = mediaAndVariantCoverage[0] ?? {
+    cardCount,
+    cardImageCount: 0,
+    cardVariantMetadataCount: 0,
+  };
   const sealedCoverage = sealedPricingCoverage[0] ?? {
     pricedSealedProductCount: 0,
     sealedPriceSnapshotCount: 0,
     sealedProductCount,
   };
+  const sealedMedia = sealedImageCoverage[0] ?? {
+    sealedImageCount: 0,
+    sealedProductCount,
+  };
 
   console.log(JSON.stringify({
+    cardImageCount: media.cardImageCount,
+    cardImageCoveragePercent: percent(media.cardImageCount, media.cardCount),
+    cardMissingImageCount: media.cardCount - media.cardImageCount,
     cardCount,
+    cardMissingVariantMetadataCount: media.cardCount - media.cardVariantMetadataCount,
+    cardVariantMetadataCount: media.cardVariantMetadataCount,
+    cardVariantMetadataCoveragePercent: percent(media.cardVariantMetadataCount, media.cardCount),
     duplicateProviderIdCount: duplicateProviderIds.length,
+    missingSealedImages: missingSealedImages.map((product) => ({
+      ...product,
+      repairableFromTcgcsv: Boolean(product.tcgcsvGroupId && product.tcgcsvProductId),
+    })),
     priceSnapshotCount,
     pricedCardCount: coverage.pricedCards,
     pricingCoveragePercent: percent(coverage.pricedCards, coverage.totalCards),
@@ -117,7 +202,14 @@ try {
       pricingCoveragePercent: percent(row.pricedCardCount, row.cardCount),
     })),
     pricingBySource,
+    pricingBySet: pricingBySet.map((row) => ({
+      ...row,
+      pricingCoveragePercent: percent(row.pricedCardCount, row.cardCount),
+    })),
     pricedSealedProductCount: sealedCoverage.pricedSealedProductCount,
+    sealedImageCount: sealedMedia.sealedImageCount,
+    sealedImageCoveragePercent: percent(sealedMedia.sealedImageCount, sealedMedia.sealedProductCount),
+    sealedMissingImageCount: sealedMedia.sealedProductCount - sealedMedia.sealedImageCount,
     sealedPricingByProductType: sealedPricingByProductType.map((row) => ({
       ...row,
       sealedPricingCoveragePercent: percent(row.pricedSealedProductCount, row.sealedProductCount),
@@ -129,6 +221,11 @@ try {
     setCount,
     setDeficitCount: setDeficits.length,
     setDeficits,
+    variantMetadataBySeries: variantMetadataBySeries.map((row) => ({
+      ...row,
+      cardMissingVariantMetadataCount: row.cardCount - row.cardVariantMetadataCount,
+      cardVariantMetadataCoveragePercent: percent(row.cardVariantMetadataCount, row.cardCount),
+    })),
   }, null, 2));
 } finally {
   await prisma.$disconnect();

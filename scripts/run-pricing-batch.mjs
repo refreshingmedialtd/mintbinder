@@ -1,6 +1,6 @@
 import "dotenv/config";
-import { execFileSync, spawn } from "node:child_process";
 import { booleanSetting, pageSetting, positiveInteger } from "./catalogue-batch-options.mjs";
+import { startJobServer, stopServer, waitForServer } from "./job-server-runner.mjs";
 
 const port = positiveInteger(process.env.JOB_SERVER_PORT, 3017);
 const page = pageSetting(process.env.POKEMON_TCG_PRICING_PAGE, 1);
@@ -18,29 +18,10 @@ if (page === "auto") {
   throw new Error("POKEMON_TCG_PRICING_PAGE=auto is not supported yet. Set an explicit pricing page.");
 }
 
-const baseUrl = `http://127.0.0.1:${port}`;
-const server = spawn(serverCommand(), serverArgs(), {
-  cwd: process.cwd(),
-  env: cleanChildEnv({
-    AUTH_TRUST_HOST: "true",
-    AUTH_URL: baseUrl,
-  }),
-  stdio: ["ignore", "pipe", "pipe"],
-  windowsHide: true,
-});
-
-let serverOutput = "";
-
-server.stdout.on("data", (chunk) => {
-  serverOutput += chunk.toString();
-});
-
-server.stderr.on("data", (chunk) => {
-  serverOutput += chunk.toString();
-});
+const { baseUrl, output, server } = startJobServer({ port });
 
 try {
-  await waitForServer(baseUrl);
+  await waitForServer({ server, url: baseUrl, output });
 
   const response = await fetch(`${baseUrl}/api/jobs/pricing-refresh`, {
     method: "POST",
@@ -64,85 +45,5 @@ try {
     throw new Error(result.error ?? `Pricing batch failed with ${response.status}.`);
   }
 } finally {
-  stopServer();
-}
-
-async function waitForServer(url) {
-  for (let attempt = 0; attempt < 90; attempt += 1) {
-    if (server.exitCode !== null) {
-      throw new Error(`Server exited before it was ready.\n${serverOutput}`);
-    }
-
-    try {
-      const response = await fetch(url);
-
-      if (response.status < 500) {
-        return;
-      }
-    } catch {
-      // Server is still starting.
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-  }
-
-  throw new Error(`Timed out waiting for ${url}.\n${serverOutput}`);
-}
-
-function stopServer() {
-  if (!server.pid) {
-    return;
-  }
-
-  if (process.platform === "win32") {
-    try {
-      execFileSync("taskkill", ["/pid", String(server.pid), "/t", "/f"], { stdio: "ignore" });
-      return;
-    } catch {
-      // Fall through to the portable kill as a last attempt.
-    }
-  }
-
-  server.kill();
-}
-
-function cleanChildEnv(overrides) {
-  const env = {};
-  const seen = new Set();
-
-  for (const [key, value] of Object.entries(process.env)) {
-    const normalized = process.platform === "win32" ? key.toLowerCase() : key;
-
-    if (seen.has(normalized)) {
-      continue;
-    }
-
-    seen.add(normalized);
-    env[key] = value;
-  }
-
-  return {
-    ...env,
-    ...overrides,
-  };
-}
-
-function npmExecutable() {
-  if (process.platform !== "win32") {
-    return "npm";
-  }
-
-  return "C:\\Progra~1\\nodejs\\npm.cmd";
-}
-
-function serverCommand() {
-  return process.platform === "win32" ? "cmd.exe" : npmExecutable();
-}
-
-function serverArgs() {
-  if (process.platform !== "win32") {
-    return ["run", "start", "--", "--port", String(port)];
-  }
-
-  return ["/d", "/c", `${npmExecutable()} run start -- --port ${port}`];
+  await stopServer(server);
 }
