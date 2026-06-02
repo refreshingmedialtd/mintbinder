@@ -3,10 +3,24 @@ import type {
   CatalogueItem,
   CollectionEvent,
   CollectionItem,
+  PriceConfidence,
   SetProgress,
   StorageLocation,
   WishlistItem,
 } from "./types";
+
+function samplePriceHistory(
+  source: string,
+  confidence: PriceConfidence,
+  entries: Array<[string, number]>,
+) {
+  return entries.map(([observedAt, valueMinor]) => ({
+    observedAt: `${observedAt}T00:00:00.000Z`,
+    valueMinor,
+    confidence,
+    source,
+  }));
+}
 
 export const catalogue: CatalogueItem[] = [
   {
@@ -19,6 +33,13 @@ export const catalogue: CatalogueItem[] = [
     image: "https://images.pokemontcg.io/sv3pt5/199_hires.png",
     valueMinor: 11800,
     confidence: "Fair",
+    priceSource: "pokemon-tcg-api-cardmarket",
+    priceObservedAt: "2026-06-01T00:00:00.000Z",
+    priceHistory: samplePriceHistory("pokemon-tcg-api-cardmarket", "Fair", [
+      ["2026-04-01", 10800],
+      ["2026-05-01", 11400],
+      ["2026-06-01", 11800],
+    ]),
   },
   {
     id: "card-umbreon-vmax",
@@ -30,6 +51,13 @@ export const catalogue: CatalogueItem[] = [
     image: "https://images.pokemontcg.io/swsh7/215_hires.png",
     valueMinor: 74000,
     confidence: "Strong",
+    priceSource: "pokemon-tcg-api",
+    priceObservedAt: "2026-06-01T00:00:00.000Z",
+    priceHistory: samplePriceHistory("pokemon-tcg-api", "Strong", [
+      ["2026-04-01", 68000],
+      ["2026-05-01", 71500],
+      ["2026-06-01", 74000],
+    ]),
   },
   {
     id: "card-mew-ex",
@@ -41,6 +69,13 @@ export const catalogue: CatalogueItem[] = [
     image: "https://images.pokemontcg.io/sv3pt5/193_hires.png",
     valueMinor: 3500,
     confidence: "Fair",
+    priceSource: "pokemon-tcg-api-cardmarket",
+    priceObservedAt: "2026-06-01T00:00:00.000Z",
+    priceHistory: samplePriceHistory("pokemon-tcg-api-cardmarket", "Fair", [
+      ["2026-04-01", 3100],
+      ["2026-05-01", 3300],
+      ["2026-06-01", 3500],
+    ]),
   },
   {
     id: "card-pikachu",
@@ -52,6 +87,13 @@ export const catalogue: CatalogueItem[] = [
     image: "https://images.pokemontcg.io/swsh12pt5/160_hires.png",
     valueMinor: 1450,
     confidence: "Strong",
+    priceSource: "pokemon-tcg-api",
+    priceObservedAt: "2026-06-01T00:00:00.000Z",
+    priceHistory: samplePriceHistory("pokemon-tcg-api", "Strong", [
+      ["2026-04-01", 1320],
+      ["2026-05-01", 1410],
+      ["2026-06-01", 1450],
+    ]),
   },
   {
     id: "sealed-151-bundle",
@@ -62,6 +104,13 @@ export const catalogue: CatalogueItem[] = [
     rarity: "Booster bundle",
     valueMinor: 3200,
     confidence: "Weak",
+    priceSource: "tcgcsv",
+    priceObservedAt: "2026-06-01T00:00:00.000Z",
+    priceHistory: samplePriceHistory("tcgcsv", "Weak", [
+      ["2026-04-01", 2800],
+      ["2026-05-01", 3000],
+      ["2026-06-01", 3200],
+    ]),
   },
   {
     id: "sealed-evolving-skies-box",
@@ -72,6 +121,13 @@ export const catalogue: CatalogueItem[] = [
     rarity: "Booster box",
     valueMinor: 45000,
     confidence: "Fair",
+    priceSource: "tcgcsv",
+    priceObservedAt: "2026-06-01T00:00:00.000Z",
+    priceHistory: samplePriceHistory("tcgcsv", "Fair", [
+      ["2026-04-01", 42000],
+      ["2026-05-01", 43500],
+      ["2026-06-01", 45000],
+    ]),
   },
 ];
 

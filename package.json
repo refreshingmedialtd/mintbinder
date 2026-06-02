@@ -15,6 +15,7 @@
     "test:jobs": "node --experimental-strip-types --test tests/job-runs.test.mjs",
     "test:notifications": "node --experimental-strip-types --test tests/notification-preferences.test.mjs",
     "test:pokemon-pricing": "node --experimental-strip-types --test tests/pokemon-tcg-pricing.test.mjs",
+    "test:price-history": "node --experimental-strip-types --test tests/price-history.test.mjs",
     "test:pricing": "node --experimental-strip-types --test tests/pokemon-tcg-pagination.test.mjs",
     "test:sealed-import": "node --test tests/tcgcsv-sealed-products.test.mjs",
     "typecheck": "tsc --noEmit",

@@ -22,7 +22,7 @@ PokeStop is a working title for a Pokemon card and sealed product collection tra
 
 ## Next.js App
 
-The real app foundation lives in [src/](src/). The UI hydrates through local API routes, writes collection and wishlist changes through Prisma-backed handlers when a database is configured, and falls back to typed sample data when no database connection is active. The Operations screen can run controlled catalogue/pricing import jobs when you provide `JOB_SECRET`.
+The real app foundation lives in [src/](src/). The UI hydrates through local API routes, writes collection and wishlist changes through Prisma-backed handlers when a database is configured, and falls back to typed sample data when no database connection is active. Item detail views show valuation source, observed date, and recent price history when snapshots are available. The Operations screen can run controlled catalogue/pricing import jobs when you provide `JOB_SECRET`.
 
 Run it locally:
 
@@ -44,6 +44,7 @@ npm run lint
 npm run test:billing
 npm run test:jobs
 npm run test:notifications
+npm run test:price-history
 npm run build
 npm audit --audit-level=moderate
 ```
@@ -165,4 +166,4 @@ http://127.0.0.1:8095/
 
 ## Next Step
 
-The next logical step is a real admin console for monitoring catalogue/pricing job runs and running controlled imports.
+The next logical step is deeper collector-facing valuation UX: portfolio-wide price history, alert explanations, and saved valuation notes for higher-value items.

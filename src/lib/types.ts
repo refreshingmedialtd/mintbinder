@@ -1,4 +1,12 @@
 export type ItemType = "card" | "sealed";
+export type PriceConfidence = "Strong" | "Fair" | "Weak";
+
+export type PricePoint = {
+  observedAt: string;
+  valueMinor: number;
+  confidence: PriceConfidence;
+  source: string;
+};
 
 export type CatalogueItem = {
   id: string;
@@ -9,7 +17,10 @@ export type CatalogueItem = {
   rarity: string;
   image?: string;
   valueMinor: number;
-  confidence: "Strong" | "Fair" | "Weak";
+  confidence: PriceConfidence;
+  priceSource?: string;
+  priceObservedAt?: string;
+  priceHistory?: PricePoint[];
 };
 
 export type CollectionItem = {

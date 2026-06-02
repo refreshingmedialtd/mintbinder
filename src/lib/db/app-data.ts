@@ -11,6 +11,7 @@ import {
 import { sampleAppData } from "@/lib/sample-data";
 import { getEntitlements } from "@/lib/entitlements";
 import { getNotificationPreferences } from "@/lib/notifications/preferences";
+import { buildPriceHistory, latestPricePoint } from "@/lib/pricing/price-history";
 import type {
   AppData,
   CatalogueItem,
@@ -26,7 +27,11 @@ import { prisma } from "./prisma";
 type PriceLike = {
   priceMinor: number;
   confidenceScore: number;
+  source: string;
+  observedAt: Date;
 };
+
+const PRICE_HISTORY_LIMIT = 8;
 
 export type CreateCollectionItemInput = {
   catalogueId: string;
@@ -105,7 +110,7 @@ export async function getAppData(userId: string): Promise<AppData> {
             cardSet: true,
             priceSnapshots: {
               orderBy: { observedAt: "desc" },
-              take: 1,
+              take: PRICE_HISTORY_LIMIT,
             },
           },
           orderBy: [{ cardSet: { releaseDate: "desc" } }, { number: "asc" }],
@@ -121,7 +126,7 @@ export async function getAppData(userId: string): Promise<AppData> {
             relatedCardSet: true,
             priceSnapshots: {
               orderBy: { observedAt: "desc" },
-              take: 1,
+              take: PRICE_HISTORY_LIMIT,
             },
           },
           orderBy: { name: "asc" },
@@ -142,7 +147,7 @@ export async function getAppData(userId: string): Promise<AppData> {
                 cardSet: true,
                 priceSnapshots: {
                   orderBy: { observedAt: "desc" },
-                  take: 1,
+                  take: PRICE_HISTORY_LIMIT,
                 },
               },
             },
@@ -151,7 +156,7 @@ export async function getAppData(userId: string): Promise<AppData> {
                 relatedCardSet: true,
                 priceSnapshots: {
                   orderBy: { observedAt: "desc" },
-                  take: 1,
+                  take: PRICE_HISTORY_LIMIT,
                 },
               },
             },
@@ -189,10 +194,10 @@ export async function getAppData(userId: string): Promise<AppData> {
 
     const catalogue: CatalogueItem[] = [
       ...cardPrintings.map((card) =>
-        mapCardPrintingToCatalogueItem(card, card.priceSnapshots[0]),
+        mapCardPrintingToCatalogueItem(card, card.priceSnapshots),
       ),
       ...sealedProducts.map((product) =>
-        mapSealedProductToCatalogueItem(product, product.priceSnapshots[0]),
+        mapSealedProductToCatalogueItem(product, product.priceSnapshots),
       ),
     ];
 
@@ -587,12 +592,12 @@ export async function createSealedProduct(
       relatedCardSet: true,
       priceSnapshots: {
         orderBy: { observedAt: "desc" },
-        take: 1,
+        take: PRICE_HISTORY_LIMIT,
       },
     },
   });
 
-  return mapSealedProductToCatalogueItem(product, product.priceSnapshots[0]);
+  return mapSealedProductToCatalogueItem(product, product.priceSnapshots);
 }
 
 export async function createWishlistItem(userId: string, catalogueId: string): Promise<WishlistItem> {
@@ -729,8 +734,11 @@ function mapCardPrintingToCatalogueItem(
     imageSmallUrl: string | null;
     cardSet: { name: string };
   },
-  price?: PriceLike,
+  prices: PriceLike[] = [],
 ): CatalogueItem {
+  const priceHistory = buildPriceHistory(prices);
+  const latestPrice = latestPricePoint(priceHistory);
+
   return {
     id: card.id,
     type: "card",
@@ -739,8 +747,11 @@ function mapCardPrintingToCatalogueItem(
     number: card.number,
     rarity: card.rarity ?? "Unknown",
     image: card.imageLargeUrl ?? card.imageSmallUrl ?? undefined,
-    valueMinor: price?.priceMinor ?? 0,
-    confidence: confidenceFromScore(price?.confidenceScore),
+    valueMinor: latestPrice?.valueMinor ?? 0,
+    confidence: latestPrice?.confidence ?? "Weak",
+    priceSource: latestPrice?.source,
+    priceObservedAt: latestPrice?.observedAt,
+    priceHistory: priceHistory.length ? priceHistory : undefined,
   };
 }
 
@@ -752,8 +763,11 @@ function mapSealedProductToCatalogueItem(
     imageUrl: string | null;
     relatedCardSet: { name: string } | null;
   },
-  price?: PriceLike,
+  prices: PriceLike[] = [],
 ): CatalogueItem {
+  const priceHistory = buildPriceHistory(prices);
+  const latestPrice = latestPricePoint(priceHistory);
+
   return {
     id: product.id,
     type: "sealed",
@@ -762,8 +776,11 @@ function mapSealedProductToCatalogueItem(
     number: "Sealed",
     rarity: enumLabel(product.productType),
     image: product.imageUrl ?? undefined,
-    valueMinor: price?.priceMinor ?? 0,
-    confidence: confidenceFromScore(price?.confidenceScore),
+    valueMinor: latestPrice?.valueMinor ?? 0,
+    confidence: latestPrice?.confidence ?? "Weak",
+    priceSource: latestPrice?.source,
+    priceObservedAt: latestPrice?.observedAt,
+    priceHistory: priceHistory.length ? priceHistory : undefined,
   };
 }
 
@@ -960,22 +977,6 @@ const collectionEventInclude = {
 
 function itemTypeToClient(value: string): ItemType {
   return value === PrismaItemType.SEALED_PRODUCT ? "sealed" : "card";
-}
-
-function confidenceFromScore(score?: number) {
-  if (!score) {
-    return "Weak";
-  }
-
-  if (score >= 80) {
-    return "Strong";
-  }
-
-  if (score >= 60) {
-    return "Fair";
-  }
-
-  return "Weak";
 }
 
 function enumLabel(value: string) {

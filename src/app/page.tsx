@@ -52,6 +52,7 @@ import {
   catalogueGapRecommendations,
   type CatalogueGapRecommendation,
 } from "@/lib/jobs/catalogue-gap-report";
+import { priceRangeMinor } from "@/lib/pricing/price-history";
 import { buildInsuranceReportHtml } from "@/lib/reports/insurance";
 import {
   buildCollectionIntelligence,
@@ -2820,9 +2821,11 @@ function ItemDetailScreen({
               ["Cost basis", formatMoney(cost)],
               ["Gain/loss", formatMoney(gain), gain !== null && gain >= 0 ? "positive" : ""],
               ["Confidence", item.confidence],
-              ["Source", owned.overrideValueMinor ? "Manual override" : "Sample price snapshot"],
+              ["Source", owned.overrideValueMinor ? "Manual override" : priceSourceLabel(item.priceSource)],
+              ["Market observed", item.priceObservedAt ? formatEventDate(item.priceObservedAt) : "Unknown"],
             ]}
           />
+          <PriceTrendPanel item={item} overrideValueMinor={owned.overrideValueMinor} />
           {isSelling ? (
             <section className="tool-panel">
               <h2>Record sale</h2>
@@ -5047,6 +5050,52 @@ function MiniChart({ values }: { values?: number[] }) {
   );
 }
 
+function PriceTrendPanel({
+  item,
+  overrideValueMinor,
+}: {
+  item: CatalogueItem;
+  overrideValueMinor?: number;
+}) {
+  const history = item.priceHistory ?? [];
+  const latest = history[history.length - 1];
+  const first = history[0];
+  const range = priceRangeMinor(history);
+  const delta = latest && first ? latest.valueMinor - first.valueMinor : null;
+  const source = latest?.source ?? item.priceSource;
+  const observedAt = latest?.observedAt ?? item.priceObservedAt;
+
+  return (
+    <section className="tool-panel">
+      <div className="panel-title-row">
+        <h2>Price history</h2>
+        <BarChart3 size={18} />
+      </div>
+      {history.length > 1 ? (
+        <MiniChart values={history.map((point) => point.valueMinor)} />
+      ) : (
+        <p className="muted">No price history yet.</p>
+      )}
+      <MetricList
+        rows={[
+          ["Latest market", formatMoney(latest?.valueMinor ?? item.valueMinor)],
+          ["Range", range ? `${formatMoney(range.low)} - ${formatMoney(range.high)}` : "Unknown"],
+          [
+            "Since first",
+            delta === null ? "Unknown" : `${delta >= 0 ? "+" : ""}${formatMoney(delta)}`,
+            delta !== null && delta >= 0 ? "positive" : "",
+          ],
+          ["Observed", observedAt ? formatEventDate(observedAt) : "Unknown"],
+          ["Source", priceSourceLabel(source)],
+          ...(overrideValueMinor === undefined
+            ? []
+            : [["Displayed value", "Manual override"] as [string, ReactNode, string?]]),
+        ]}
+      />
+    </section>
+  );
+}
+
 function ProgressBar({ value }: { value: number }) {
   return (
     <div className="progress">
@@ -5249,7 +5298,11 @@ function itemTypeLabel(type: string) {
   return startCase(type);
 }
 
-function priceSourceLabel(source: string) {
+function priceSourceLabel(source?: string | null) {
+  if (!source) {
+    return "Unknown";
+  }
+
   if (source === "pokemon-tcg-api") {
     return "Pokemon TCG API";
   }
