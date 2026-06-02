@@ -5840,6 +5840,10 @@ function priceSourceLabel(source?: string | null) {
     return "TCGCSV";
   }
 
+  if (source === "tcgcsv-card") {
+    return "TCGCSV card";
+  }
+
   return startCase(source);
 }
 
