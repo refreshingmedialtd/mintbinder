@@ -9,6 +9,7 @@ PokeStop is a working title for a Pokemon card and sealed product collection tra
 - [DATA_MODEL.md](DATA_MODEL.md): database model, relationships, constraints, enums, and valuation rules.
 - [ARCHITECTURE.md](ARCHITECTURE.md): recommended stack, app layers, API surface, entitlements, jobs, and deployment strategy.
 - [UX_WIREFRAMES.md](UX_WIREFRAMES.md): navigation, screen wireframes, user flows, states, and prototype scope.
+- [LAUNCH_READINESS.md](LAUNCH_READINESS.md): current completion estimate, remaining launch tasks, beta gates, and recommended order of work.
 
 ## Current Technical Direction
 
