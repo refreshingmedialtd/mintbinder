@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   cardPricingOptionsFromEnv,
   isCardProduct,
+  matchTcgcsvCardGroupsToSets,
   matchTcgcsvCardProduct,
   syncTcgcsvCardPrices,
 } from "../scripts/tcgcsv-card-pricing.mjs";
@@ -59,6 +60,32 @@ test("matches TCGCSV card products to local cards by number and name", () => {
       cards,
     ),
     cards[3],
+  );
+});
+
+test("matches card-only TCGCSV promo and trainer kit groups to local sets", () => {
+  const sets = [
+    { id: "set-tk2a", name: "EX Trainer Kit 2 Plusle", providerId: "tk2a" },
+    { id: "set-tk2b", name: "EX Trainer Kit 2 Minun", providerId: "tk2b" },
+    { id: "set-xyp", name: "XY Black Star Promos", providerId: "xyp" },
+    { id: "set-swshp", name: "SWSH Black Star Promos", providerId: "swshp" },
+  ];
+
+  assert.deepEqual(
+    matchTcgcsvCardGroupsToSets(
+      [
+        { groupId: 1542, name: "EX Trainer Kit 2: Plusle & Minun" },
+        { groupId: 1451, name: "XY Promos" },
+        { groupId: 2545, name: "SWSH: Sword & Shield Promo Cards", abbreviation: "SWSD" },
+      ],
+      sets,
+    ),
+    [
+      { group: { groupId: 1542, name: "EX Trainer Kit 2: Plusle & Minun" }, set: sets[0] },
+      { group: { groupId: 1542, name: "EX Trainer Kit 2: Plusle & Minun" }, set: sets[1] },
+      { group: { groupId: 1451, name: "XY Promos" }, set: sets[2] },
+      { group: { groupId: 2545, name: "SWSH: Sword & Shield Promo Cards", abbreviation: "SWSD" }, set: sets[3] },
+    ],
   );
 });
 

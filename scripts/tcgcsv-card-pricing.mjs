@@ -12,6 +12,32 @@ import {
   tcgcsvPokemonCategoryId,
 } from "./tcgcsv-sealed-products.mjs";
 
+const cardGroupProviderAliases = new Map([
+  ["1542", ["tk2a", "tk2b"]],
+  ["1543", ["tk1a", "tk1b"]],
+  ["1418", ["basep"]],
+  ["1421", ["dpp"]],
+  ["1423", ["np"]],
+  ["1451", ["xyp"]],
+  ["1453", ["hsp"]],
+  ["1861", ["smp"]],
+  ["2545", ["swshp"]],
+  ["1407", ["bwp"]],
+]);
+
+const cardGroupNameProviderAliases = new Map([
+  ["blackandwhitepromos", ["bwp"]],
+  ["diamondandpearlpromos", ["dpp"]],
+  ["extrainerkit1latiaslatios", ["tk1a", "tk1b"]],
+  ["extrainerkit2plusleminun", ["tk2a", "tk2b"]],
+  ["hgsspromos", ["hsp"]],
+  ["nintendopromos", ["np"]],
+  ["smpromos", ["smp"]],
+  ["swshswordshieldpromocards", ["swshp"]],
+  ["wotcpromo", ["basep"]],
+  ["xypromos", ["xyp"]],
+]);
+
 export function cardPricingOptionsFromEnv(env = process.env) {
   return {
     groupIds: idList(env.TCGCSV_CARD_GROUP_IDS),
@@ -48,7 +74,7 @@ export async function syncTcgcsvCardPrices(options = {}) {
         },
       }),
     ]);
-    const availableMatches = matchTcgcsvGroupsToSets(groups.results ?? [], sets)
+    const availableMatches = matchTcgcsvCardGroupsToSets(groups.results ?? [], sets)
       .filter(({ group }) => groupIds.size === 0 || groupIds.has(String(group.groupId)));
     const matches = availableMatches.slice(0, groupLimit);
     const summary = {
@@ -95,6 +121,40 @@ export async function syncTcgcsvCardPrices(options = {}) {
       await prisma.$disconnect();
     }
   }
+}
+
+export function matchTcgcsvCardGroupsToSets(groups, sets) {
+  const matches = [...matchTcgcsvGroupsToSets(groups, sets)];
+  const setByProviderCode = new Map();
+  const seen = new Set(matches.map(matchKey));
+
+  for (const set of sets) {
+    const providerCode = normalizedProviderCode(setProviderId(set));
+
+    if (providerCode) {
+      setByProviderCode.set(providerCode, set);
+    }
+  }
+
+  for (const group of groups) {
+    for (const providerCode of cardGroupProviderCodes(group)) {
+      const set = setByProviderCode.get(providerCode);
+
+      if (!set) {
+        continue;
+      }
+
+      const match = { group, set };
+      const key = matchKey(match);
+
+      if (!seen.has(key)) {
+        matches.push(match);
+        seen.add(key);
+      }
+    }
+  }
+
+  return matches;
 }
 
 export function matchTcgcsvCardProduct(product, cards) {
@@ -284,6 +344,47 @@ function normalizedCardName(value) {
     .replace(/[^a-z0-9]+/g, " ")
     .trim()
     .replace(/\s+/g, " ");
+}
+
+function cardGroupProviderCodes(group) {
+  const idAliases = cardGroupProviderAliases.get(String(group.groupId));
+  const nameAliases = cardGroupNameProviderAliases.get(normalizedAliasKey(group.name));
+
+  return [...new Set([...(idAliases ?? []), ...(nameAliases ?? [])])]
+    .map(normalizedProviderCode)
+    .filter(Boolean);
+}
+
+function matchKey({ group, set }) {
+  return `${group.groupId}:${set.id}`;
+}
+
+function normalizedAliasKey(value) {
+  return String(value ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/&/g, "")
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+function normalizedProviderCode(value) {
+  return String(value ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "")
+    .replace(/^([a-z]+)0+(?=\d)/, "$1");
+}
+
+function setProviderId(set) {
+  if (typeof set.providerId === "string") {
+    return set.providerId;
+  }
+
+  if (set.providerIds && typeof set.providerIds === "object" && !Array.isArray(set.providerIds)) {
+    return set.providerIds.pokemon_tcg_api;
+  }
+
+  return undefined;
 }
 
 function conversionRate(value) {

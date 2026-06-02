@@ -1,8 +1,8 @@
 import "dotenv/config";
 import { PrismaClient } from "@prisma/client";
 import { positiveInteger } from "./catalogue-batch-options.mjs";
+import { matchTcgcsvCardGroupsToSets } from "./tcgcsv-card-pricing.mjs";
 import {
-  matchTcgcsvGroupsToSets,
   tcgcsvPokemonCategoryId,
 } from "./tcgcsv-sealed-products.mjs";
 
@@ -14,15 +14,15 @@ try {
     fetchTcgcsvGroups(),
     unpricedSetGaps(limit),
   ]);
-  const matches = matchTcgcsvGroupsToSets(groups.results ?? [], gapSets);
+  const matches = matchTcgcsvCardGroupsToSets(groups.results ?? [], gapSets);
   const matchedBySetId = new Map(matches.map((match) => [match.set.id, match.group]));
 
   console.log(JSON.stringify({
     generatedAt: new Date().toISOString(),
-    groupIds: gapSets
+    groupIds: [...new Set(gapSets
       .map((set) => matchedBySetId.get(set.id)?.groupId)
       .filter(Boolean)
-      .map(String),
+      .map(String))],
     targets: gapSets.map((set) => {
       const group = matchedBySetId.get(set.id);
 

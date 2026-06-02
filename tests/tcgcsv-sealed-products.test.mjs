@@ -52,11 +52,13 @@ test("matches TCGCSV group names to local set names", () => {
         { groupId: 1919, name: "SM - Guardians Rising" },
         { groupId: 2364, name: "McDonald's Promos 2018" },
         { abbreviation: "SM01", groupId: 1863, name: "SM Base Set" },
+        { abbreviation: "G1", groupId: 1441, name: "Gym Heroes" },
       ],
       [
         { id: "set-2", name: "Guardians Rising" },
         { id: "set-3", name: "McDonald's Collection 2018" },
         { id: "set-4", name: "Sun & Moon", providerId: "sm1" },
+        { id: "set-5", name: "Generations", providerId: "g1" },
       ],
     ),
     [

@@ -119,7 +119,7 @@ export function matchTcgcsvGroupsToSets(groups, sets) {
 
     const providerCode = normalizedProviderCode(setProviderId(set));
 
-    if (providerCode) {
+    if (isSafeProviderCodeMatch(providerCode)) {
       setByProviderCode.set(providerCode, set);
     }
   }
@@ -131,7 +131,7 @@ export function matchTcgcsvGroupsToSets(groups, sets) {
       const groupProviderCode = normalizedProviderCode(group.abbreviation);
       const set = setByName.get(groupName) ??
         setByName.get(fullGroupName) ??
-        setByProviderCode.get(groupProviderCode);
+        (isSafeProviderCodeMatch(groupProviderCode) ? setByProviderCode.get(groupProviderCode) : undefined);
 
       return set ? { group, set } : null;
     })
@@ -185,6 +185,10 @@ function normalizedProviderCode(value) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "")
     .replace(/^([a-z]+)0+(?=\d)/, "$1");
+}
+
+function isSafeProviderCodeMatch(value) {
+  return String(value ?? "").length >= 3;
 }
 
 function setProviderId(set) {
