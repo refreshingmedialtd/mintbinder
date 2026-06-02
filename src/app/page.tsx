@@ -53,6 +53,11 @@ import {
   catalogueGapRecommendations,
   type CatalogueGapRecommendation,
 } from "@/lib/jobs/catalogue-gap-report";
+import type {
+  DuplicateProviderReview,
+  DuplicateProviderReviewCard,
+  DuplicateProviderReviewGroup,
+} from "@/lib/catalogue/duplicate-provider-review";
 import { priceRangeMinor } from "@/lib/pricing/price-history";
 import { buildInsuranceReportHtml } from "@/lib/reports/insurance";
 import {
@@ -3543,6 +3548,7 @@ function OperationsScreen({
   const [lastResult, setLastResult] = useState<unknown>(null);
   const [isBusy, setIsBusy] = useState("");
   const latestJobResult = parseJobApiResult(lastResult);
+  const duplicateProviderReview = parseDuplicateProviderReview(lastResult);
   const resumableJob = getResumeJob(latestJobResult);
   const gapRecommendations = catalogueStatus ? catalogueGapRecommendations(catalogueStatus) : [];
   const localCardCount = catalogueItems.filter((item) => item.type === "card").length;
@@ -3638,6 +3644,12 @@ function OperationsScreen({
     setPage(1);
     setPageSize(Math.min(250, preset.expectedTotal));
     setMaxPages(1);
+  }
+
+  function prepareDuplicateMerge(primaryCardId: string, duplicateCardId: string) {
+    setMergePrimaryCardId(primaryCardId);
+    setMergeDuplicateCardId(duplicateCardId);
+    showToast("Duplicate merge prepared.");
   }
 
   async function runPresetJob(preset: ImportPreset, kind: "catalogue" | "pricing") {
@@ -4273,6 +4285,13 @@ function OperationsScreen({
         </section>
       </div>
 
+      {duplicateProviderReview ? (
+        <DuplicateProviderReviewPanel
+          report={duplicateProviderReview}
+          onPrepareMerge={prepareDuplicateMerge}
+        />
+      ) : null}
+
       <div className="operations-breakdowns">
         <GapRecommendationsPanel
           disabled={Boolean(isBusy)}
@@ -4359,6 +4378,128 @@ function GapRecommendationsPanel({
         <p className="muted">Load catalogue status to see recommended next actions.</p>
       )}
     </section>
+  );
+}
+
+function DuplicateProviderReviewPanel({
+  onPrepareMerge,
+  report,
+}: {
+  onPrepareMerge: (primaryCardId: string, duplicateCardId: string) => void;
+  report: DuplicateProviderReview;
+}) {
+  return (
+    <section className="tool-panel duplicate-review-panel">
+      <div className="panel-title-row">
+        <h2>Duplicate groups</h2>
+        <span className="status-pill">{report.duplicateGroupCount} groups</span>
+      </div>
+      {report.groups.length ? (
+        <div className="duplicate-group-list">
+          {report.groups.slice(0, 12).map((group) => (
+            <DuplicateProviderGroupReview
+              group={group}
+              key={group.providerId}
+              onPrepareMerge={onPrepareMerge}
+            />
+          ))}
+        </div>
+      ) : (
+        <p className="muted">No duplicate provider IDs in the latest report.</p>
+      )}
+    </section>
+  );
+}
+
+function DuplicateProviderGroupReview({
+  group,
+  onPrepareMerge,
+}: {
+  group: DuplicateProviderReviewGroup;
+  onPrepareMerge: (primaryCardId: string, duplicateCardId: string) => void;
+}) {
+  const primaryCardId = group.suggestedPrimaryCardId || group.cards[0]?.id || "";
+
+  return (
+    <article className="duplicate-group-row">
+      <div className="duplicate-group-header">
+        <div className="gap-copy">
+          <div className="tag-row">
+            <span className={`tag ${duplicateRiskClass(group.riskLevel)}`}>{group.riskLevel}</span>
+            <span className="tag">{group.providerId}</span>
+          </div>
+          <strong>{group.cardCount} matching card rows</strong>
+          <span>{group.collectionCount} collection | {group.wishlistCount} wishlist | {group.priceSnapshotCount} prices</span>
+        </div>
+      </div>
+      <div className="duplicate-card-list">
+        {group.cards.map((card) => (
+          <DuplicateProviderCardReview
+            card={card}
+            isPrimary={card.id === primaryCardId}
+            key={card.id}
+            onPrepareMerge={onPrepareMerge}
+            primaryCardId={primaryCardId}
+          />
+        ))}
+      </div>
+    </article>
+  );
+}
+
+function DuplicateProviderCardReview({
+  card,
+  isPrimary,
+  onPrepareMerge,
+  primaryCardId,
+}: {
+  card: DuplicateProviderReviewCard;
+  isPrimary: boolean;
+  onPrepareMerge: (primaryCardId: string, duplicateCardId: string) => void;
+  primaryCardId: string;
+}) {
+  return (
+    <article className="duplicate-card-row">
+      <div className="duplicate-card-thumb">
+        {card.imageSmallUrl || card.imageLargeUrl ? (
+          <Image
+            src={card.imageSmallUrl ?? card.imageLargeUrl!}
+            alt={card.name}
+            fill
+            sizes="52px"
+          />
+        ) : (
+          <span>{card.name.slice(0, 1)}</span>
+        )}
+      </div>
+      <div className="duplicate-card-copy">
+        <div className="tag-row">
+          {isPrimary ? <span className="tag green">primary</span> : <span className="tag">duplicate</span>}
+          <span className="tag">{card.number}</span>
+          {card.rarity ? <span className="tag blue">{card.rarity}</span> : null}
+        </div>
+        <strong>{card.name}</strong>
+        <span>{card.setName}{card.series ? ` | ${card.series}` : ""}</span>
+        <code>{card.id}</code>
+      </div>
+      <div className="duplicate-card-metrics">
+        <span>{card.collectionCount} collection</span>
+        <span>{card.wishlistCount} wishlist</span>
+        <span>{card.priceSnapshotCount} prices</span>
+      </div>
+      {isPrimary ? (
+        <span className="status-pill">Keep</span>
+      ) : (
+        <button
+          className="button small"
+          disabled={!primaryCardId}
+          onClick={() => onPrepareMerge(primaryCardId, card.id)}
+        >
+          <ArrowDownUp size={15} />
+          Prepare
+        </button>
+      )}
+    </article>
   );
 }
 
@@ -5630,6 +5771,18 @@ function recommendationPriorityClass(priority: CatalogueGapRecommendation["prior
   return "green";
 }
 
+function duplicateRiskClass(risk: DuplicateProviderReviewGroup["riskLevel"]) {
+  if (risk === "high") {
+    return "red";
+  }
+
+  if (risk === "medium") {
+    return "amber";
+  }
+
+  return "green";
+}
+
 function recommendationTypeLabel(type: CatalogueGapRecommendation["type"]) {
   if (type === "card_image_refresh" || type === "sealed_image_refresh") {
     return "Images";
@@ -5722,6 +5875,20 @@ function parseJobApiResult(value: unknown): JobApiResult | null {
   }
 
   return value as JobApiResult;
+}
+
+function parseDuplicateProviderReview(value: unknown): DuplicateProviderReview | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const result = value as Partial<DuplicateProviderReview>;
+
+  if (result.report !== "duplicate_provider_review" || !Array.isArray(result.groups)) {
+    return null;
+  }
+
+  return result as DuplicateProviderReview;
 }
 
 function getResumeJob(result: JobApiResult | null): ResumeJob | null {
