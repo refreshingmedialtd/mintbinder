@@ -39,6 +39,7 @@
     "job:repair-variant-metadata": "node scripts/repair-variant-metadata.mjs",
     "job:tcgcsv-card-pricing": "node scripts/import-tcgcsv-card-prices.mjs",
     "job:sealed-tcgcsv": "node scripts/import-tcgcsv-sealed-products.mjs",
+    "report:tcgcsv-card-targets": "node scripts/report-tcgcsv-card-targets.mjs",
     "report:catalogue-gaps": "node scripts/report-catalogue-gaps.mjs"
   },
   "dependencies": {

@@ -27,6 +27,7 @@ test("matches TCGCSV card products to local cards by number and name", () => {
     { id: "card-1", name: "Lugia VSTAR", number: "139" },
     { id: "card-2", name: "Lugia V", number: "138" },
     { id: "card-3", name: "Poke Pad", number: "81" },
+    { id: "card-4", name: "Alakazam", number: "H1" },
   ];
 
   assert.deepEqual(
@@ -48,6 +49,16 @@ test("matches TCGCSV card products to local cards by number and name", () => {
       cards,
     ),
     cards[2],
+  );
+  assert.deepEqual(
+    matchTcgcsvCardProduct(
+      {
+        extendedData: [{ name: "Number", value: "H01/H32" }],
+        name: "Alakazam (H1)",
+      },
+      cards,
+    ),
+    cards[3],
   );
 });
 

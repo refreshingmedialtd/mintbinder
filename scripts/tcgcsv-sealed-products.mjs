@@ -97,27 +97,41 @@ export function normalizedSetName(value) {
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/&/g, "and")
     .replace(/pokemon/g, "")
+    .replace(/\bpromos?\b/g, "collection")
     .replace(/[^a-z0-9]+/g, " ")
     .trim()
     .replace(/\s+/g, " ");
 }
 
 export function groupDisplayName(groupName) {
-  return String(groupName ?? "").replace(/^.*?:\s*/, "").trim();
+  return String(groupName ?? "")
+    .replace(/^.*?:\s*/, "")
+    .replace(/^[A-Z0-9]+(?:\s+[A-Z0-9]+)?\s+-\s+/, "")
+    .trim();
 }
 
 export function matchTcgcsvGroupsToSets(groups, sets) {
   const setByName = new Map();
+  const setByProviderCode = new Map();
 
   for (const set of sets) {
     setByName.set(normalizedSetName(set.name), set);
+
+    const providerCode = normalizedProviderCode(setProviderId(set));
+
+    if (providerCode) {
+      setByProviderCode.set(providerCode, set);
+    }
   }
 
   return groups
     .map((group) => {
       const groupName = normalizedSetName(groupDisplayName(group.name));
       const fullGroupName = normalizedSetName(group.name);
-      const set = setByName.get(groupName) ?? setByName.get(fullGroupName);
+      const groupProviderCode = normalizedProviderCode(group.abbreviation);
+      const set = setByName.get(groupName) ??
+        setByName.get(fullGroupName) ??
+        setByProviderCode.get(groupProviderCode);
 
       return set ? { group, set } : null;
     })
@@ -164,4 +178,23 @@ function priceScore(price) {
   }
 
   return price.lowPrice ? 1 : 0;
+}
+
+function normalizedProviderCode(value) {
+  return String(value ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "")
+    .replace(/^([a-z]+)0+(?=\d)/, "$1");
+}
+
+function setProviderId(set) {
+  if (typeof set.providerId === "string") {
+    return set.providerId;
+  }
+
+  if (set.providerIds && typeof set.providerIds === "object" && !Array.isArray(set.providerIds)) {
+    return set.providerIds.pokemon_tcg_api;
+  }
+
+  return undefined;
 }

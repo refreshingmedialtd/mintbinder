@@ -44,6 +44,7 @@ export async function syncTcgcsvCardPrices(options = {}) {
         select: {
           id: true,
           name: true,
+          providerIds: true,
         },
       }),
     ]);
@@ -271,6 +272,7 @@ function normalizedCardNumber(value) {
     .split("/")[0]
     .replace(/^#/, "")
     .replace(/[^a-z0-9]+/g, "")
+    .replace(/^([a-z]+)0+(?=\d)/, "$1")
     .replace(/^0+(?=\d)/, "");
 }
 

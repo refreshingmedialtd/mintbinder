@@ -48,6 +48,7 @@ export async function syncTcgcsvSealedProducts(options = {}) {
         select: {
           id: true,
           name: true,
+          providerIds: true,
         },
       }),
     ]);

@@ -44,6 +44,27 @@ test("matches TCGCSV group names to local set names", () => {
   );
 
   assert.equal(groupDisplayName("SWSH12: Silver Tempest"), "Silver Tempest");
+  assert.equal(groupDisplayName("SM - Guardians Rising"), "Guardians Rising");
+
+  assert.deepEqual(
+    matchTcgcsvGroupsToSets(
+      [
+        { groupId: 1919, name: "SM - Guardians Rising" },
+        { groupId: 2364, name: "McDonald's Promos 2018" },
+        { abbreviation: "SM01", groupId: 1863, name: "SM Base Set" },
+      ],
+      [
+        { id: "set-2", name: "Guardians Rising" },
+        { id: "set-3", name: "McDonald's Collection 2018" },
+        { id: "set-4", name: "Sun & Moon", providerId: "sm1" },
+      ],
+    ),
+    [
+      { group: { groupId: 1919, name: "SM - Guardians Rising" }, set: { id: "set-2", name: "Guardians Rising" } },
+      { group: { groupId: 2364, name: "McDonald's Promos 2018" }, set: { id: "set-3", name: "McDonald's Collection 2018" } },
+      { group: { abbreviation: "SM01", groupId: 1863, name: "SM Base Set" }, set: { id: "set-4", name: "Sun & Moon", providerId: "sm1" } },
+    ],
+  );
 });
 
 test("selects the strongest usable TCGCSV sealed price", () => {
