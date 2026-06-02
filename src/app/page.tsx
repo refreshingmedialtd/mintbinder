@@ -48,6 +48,10 @@ import {
   type CollectionImportRow,
 } from "@/lib/csv";
 import { completionPercent, formatMoney } from "@/lib/format";
+import {
+  catalogueGapRecommendations,
+  type CatalogueGapRecommendation,
+} from "@/lib/jobs/catalogue-gap-report";
 import { buildInsuranceReportHtml } from "@/lib/reports/insurance";
 import {
   buildCollectionIntelligence,
@@ -3474,6 +3478,7 @@ function OperationsScreen({
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
   const [maxPages, setMaxPages] = useState(1);
+  const [cardPriceOnlyUnpriced, setCardPriceOnlyUnpriced] = useState(true);
   const [sealedGroupIds, setSealedGroupIds] = useState("");
   const [sealedGroupLimit, setSealedGroupLimit] = useState(10);
   const [sealedPriceOnlyUnpriced, setSealedPriceOnlyUnpriced] = useState(true);
@@ -3484,6 +3489,7 @@ function OperationsScreen({
   const [isBusy, setIsBusy] = useState("");
   const latestJobResult = parseJobApiResult(lastResult);
   const resumableJob = getResumeJob(latestJobResult);
+  const gapRecommendations = catalogueStatus ? catalogueGapRecommendations(catalogueStatus) : [];
   const localCardCount = catalogueItems.filter((item) => item.type === "card").length;
   const presetRows = importPresets.map((preset) => ({
     ...preset,
@@ -3605,6 +3611,38 @@ function OperationsScreen({
     });
   }
 
+  async function runGapRecommendation(recommendation: CatalogueGapRecommendation) {
+    if (recommendation.type === "catalogue_resume" && catalogueStatus?.nextCataloguePage) {
+      setQuery("");
+      setPage(catalogueStatus.nextCataloguePage);
+      setPageSize(250);
+      await runJob("catalogue", {
+        maxPages,
+        page: catalogueStatus.nextCataloguePage,
+        pageSize: 250,
+        q: "",
+      });
+      return;
+    }
+
+    if (recommendation.type === "card_pricing") {
+      setQuery("");
+      setPage(1);
+      setPageSize(250);
+      await runJob("pricing", {
+        maxPages,
+        page: 1,
+        pageSize: 250,
+        q: "",
+      });
+      return;
+    }
+
+    if (recommendation.type === "sealed_pricing") {
+      await runJob("sealed");
+    }
+  }
+
   async function runJob(
     kind: "catalogue" | "pricing" | "alerts" | "sealed",
     override?: { maxPages?: number; page?: number; pageSize?: number; q?: string },
@@ -3631,6 +3669,7 @@ function OperationsScreen({
             maxPages: override?.maxPages ?? maxPages,
             page: override?.page ?? page,
             pageSize: override?.pageSize ?? pageSize,
+            priceOnlyUnpriced: kind === "pricing" ? cardPriceOnlyUnpriced : undefined,
             q: override?.q?.trim() || query.trim() || undefined,
           };
 
@@ -3683,6 +3722,36 @@ function OperationsScreen({
       usdToGbpRate: Number.isFinite(rate) && rate > 0 ? rate : undefined,
       writePrices: true,
     };
+  }
+
+  async function exportCatalogueGaps() {
+    if (!jobSecret.trim()) {
+      showToast("Job secret required.");
+      return false;
+    }
+
+    setIsBusy("gap-export");
+    try {
+      const response = await fetch("/api/jobs/catalogue-gaps", {
+        headers: jobHeaders(jobSecret),
+      });
+
+      if (!response.ok) {
+        const body = (await response.json().catch(() => ({}))) as { error?: string };
+
+        throw new Error(body.error ?? `Catalogue gap export failed with ${response.status}`);
+      }
+
+      downloadBlob(`pokestop-catalogue-gaps-${dateStamp()}.json`, await response.blob());
+      showToast("Catalogue gap report downloaded.");
+      return true;
+    } catch (error) {
+      console.warn("Unable to export catalogue gaps.", error);
+      showToast(error instanceof Error ? error.message : "Unable to export catalogue gaps.");
+      return false;
+    } finally {
+      setIsBusy("");
+    }
   }
 
   return (
@@ -3796,6 +3865,14 @@ function OperationsScreen({
                 onChange={(event) => setMaxPages(Math.min(20, Math.max(1, Number(event.currentTarget.value) || 1)))}
               />
             </Field>
+            <label className="check-row">
+              <input
+                checked={cardPriceOnlyUnpriced}
+                type="checkbox"
+                onChange={(event) => setCardPriceOnlyUnpriced(event.currentTarget.checked)}
+              />
+              <span>Only unpriced cards</span>
+            </label>
           </div>
           <div className="ops-subsection">
             <div className="panel-title-row">
@@ -3884,6 +3961,10 @@ function OperationsScreen({
             <RefreshCw size={17} />
             {isBusy === "status" ? "Loading" : "Load status"}
           </button>
+          <button className="button" disabled={Boolean(isBusy)} onClick={() => void exportCatalogueGaps()}>
+            <Download size={17} />
+            {isBusy === "gap-export" ? "Exporting" : "Export gaps"}
+          </button>
         </section>
 
         <section className="tool-panel">
@@ -3924,6 +4005,11 @@ function OperationsScreen({
       </div>
 
       <div className="operations-breakdowns">
+        <GapRecommendationsPanel
+          disabled={Boolean(isBusy)}
+          recommendations={gapRecommendations}
+          onRun={(recommendation) => void runGapRecommendation(recommendation)}
+        />
         <PricingSeriesGapPanel rows={catalogueStatus?.pricingBySeries ?? []} />
         <SealedPricingGapPanel rows={catalogueStatus?.sealedPricingByProductType ?? []} />
         <PricingSourcePanel rows={catalogueStatus?.pricingBySource ?? []} />
@@ -3957,6 +4043,51 @@ function OperationsScreen({
           <p className="muted">No job runs loaded.</p>
         )}
       </section>
+    </section>
+  );
+}
+
+function GapRecommendationsPanel({
+  disabled,
+  onRun,
+  recommendations,
+}: {
+  disabled: boolean;
+  onRun: (recommendation: CatalogueGapRecommendation) => void;
+  recommendations: CatalogueGapRecommendation[];
+}) {
+  return (
+    <section className="tool-panel">
+      <div className="panel-title-row">
+        <h2>Recommended next</h2>
+        <Sparkles size={18} />
+      </div>
+      {recommendations.length ? (
+        <div className="gap-list">
+          {recommendations.map((recommendation) => (
+            <article className="gap-row recommendation-row" key={recommendation.id}>
+              <div className="gap-copy">
+                <div className="tag-row">
+                  <span className={`tag ${recommendationPriorityClass(recommendation.priority)}`}>
+                    {recommendation.priority}
+                  </span>
+                  <span className="tag">{recommendationTypeLabel(recommendation.type)}</span>
+                </div>
+                <strong>{recommendation.title}</strong>
+                <span>{recommendation.detail}</span>
+              </div>
+              {recommendationActionLabel(recommendation) ? (
+                <button className="button small" disabled={disabled} onClick={() => onRun(recommendation)}>
+                  <RefreshCw size={15} />
+                  {recommendationActionLabel(recommendation)}
+                </button>
+              ) : null}
+            </article>
+          ))}
+        </div>
+      ) : (
+        <p className="muted">Load catalogue status to see recommended next actions.</p>
+      )}
     </section>
   );
 }
@@ -5056,6 +5187,54 @@ function jobTypeLabel(type: JobType) {
   }
 
   return "Price alerts";
+}
+
+function recommendationActionLabel(recommendation: CatalogueGapRecommendation) {
+  if (recommendation.type === "catalogue_resume") {
+    return "Resume";
+  }
+
+  if (recommendation.type === "card_pricing") {
+    return "Run pricing";
+  }
+
+  if (recommendation.type === "sealed_pricing") {
+    return "Run sealed";
+  }
+
+  return "";
+}
+
+function recommendationPriorityClass(priority: CatalogueGapRecommendation["priority"]) {
+  if (priority === "high") {
+    return "red";
+  }
+
+  if (priority === "medium") {
+    return "amber";
+  }
+
+  return "green";
+}
+
+function recommendationTypeLabel(type: CatalogueGapRecommendation["type"]) {
+  if (type === "card_pricing") {
+    return "Cards";
+  }
+
+  if (type === "catalogue_resume") {
+    return "Catalogue";
+  }
+
+  if (type === "sealed_pricing") {
+    return "Sealed";
+  }
+
+  if (type === "duplicate_review") {
+    return "Review";
+  }
+
+  return "Health";
 }
 
 function itemTypeLabel(type: string) {

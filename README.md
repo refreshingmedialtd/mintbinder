@@ -122,7 +122,9 @@ Creating an account from the sign-in screen creates a new collector profile with
 - `POST /api/jobs/price-alerts`: sends or dry-runs Plus price alert email digests behind `JOB_SECRET`.
 - `POST /api/jobs/catalogue-refresh`: imports card catalogue pages from the Pokemon TCG API behind `JOB_SECRET`.
 - `POST /api/jobs/pricing-refresh`: imports Pokemon TCG API prices as GBP snapshots behind `JOB_SECRET`.
+- `POST /api/jobs/sealed-pricing-refresh`: imports TCGCSV sealed products and GBP price snapshots behind `JOB_SECRET`.
 - `GET /api/jobs/catalogue-status`: reports local catalogue counts, import coverage, duplicate provider ID health, and the next broad-import page behind `JOB_SECRET`.
+- `GET /api/jobs/catalogue-gaps`: exports a live JSON catalogue gap report with pricing-source breakdowns and recommended next actions behind `JOB_SECRET`.
 - `GET /api/jobs/runs`: returns recent job run records behind `JOB_SECRET`.
 
 ## Jobs and Integrations
@@ -141,7 +143,7 @@ For broader catalogue backfills, leave the query blank or use a broad Pokemon TC
 
 For local command-line backfills, set `JOB_SECRET`, `POKEMON_TCG_IMPORT_PAGE`, `POKEMON_TCG_IMPORT_PAGE_SIZE`, and `POKEMON_TCG_IMPORT_MAX_PAGES`, then run `npm run job:catalogue-batch`. Use `POKEMON_TCG_IMPORT_PAGE=auto` to resume from the latest matching catalogue-status page. The helper starts the built app, runs one catalogue job, prints the JSON result, and stops the server.
 
-Use `npm run report:catalogue-gaps` to check local catalogue health, set-level count gaps, duplicate Pokemon TCG provider IDs, and pricing coverage. For command-line pricing refreshes, set `JOB_SECRET`, `POKEMON_TCG_USD_TO_GBP_RATE`, `POKEMON_TCG_PRICING_PAGE`, `POKEMON_TCG_PRICING_PAGE_SIZE`, `POKEMON_TCG_PRICING_MAX_PAGES`, and optionally `POKEMON_TCG_PRICING_QUERY`, then run `npm run job:pricing-batch`. Set `POKEMON_TCG_EUR_TO_GBP_RATE` to enable Cardmarket fallback prices and `POKEMON_TCG_PRICE_ONLY_UNPRICED=true` when enriching sparse segments without duplicating existing snapshots.
+Use `npm run report:catalogue-gaps` or the Operations export button to check local catalogue health, set-level count gaps, duplicate Pokemon TCG provider IDs, pricing-source mix, sealed product-type gaps, and recommended next actions. For command-line pricing refreshes, set `JOB_SECRET`, `POKEMON_TCG_USD_TO_GBP_RATE`, `POKEMON_TCG_PRICING_PAGE`, `POKEMON_TCG_PRICING_PAGE_SIZE`, `POKEMON_TCG_PRICING_MAX_PAGES`, and optionally `POKEMON_TCG_PRICING_QUERY`, then run `npm run job:pricing-batch`. Set `POKEMON_TCG_EUR_TO_GBP_RATE` to enable Cardmarket fallback prices and `POKEMON_TCG_PRICE_ONLY_UNPRICED=true` when enriching sparse segments without duplicating existing snapshots.
 
 For sealed product catalogue imports, run `npm run job:sealed-tcgcsv`. The importer reads TCGCSV's cached TCGplayer Pokemon groups/products/prices, matches groups to local card sets, filters sealed products, and writes sealed-product price snapshots. Set `TCGCSV_SEALED_GROUP_IDS` to a comma-separated list of TCGplayer group IDs for a smaller import, `TCGCSV_USD_TO_GBP_RATE` to override the Pokemon USD rate, and `TCGCSV_SEALED_PRICE_ONLY_UNPRICED=true` to enrich only products that do not already have sealed prices.
 
