@@ -1,0 +1,121 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import {
+  buildCatalogueVariantOptions,
+  catalogueValueMinorForVariant,
+  catalogueVariantLabels,
+  displayVariantLabel,
+  pokemonTcgImageUrlFromProviderIds,
+} from "../src/lib/catalogue/variants.ts";
+
+const priceHistory = [
+  {
+    observedAt: "2026-04-01T00:00:00.000Z",
+    valueMinor: 1000,
+    confidence: "Fair",
+    source: "pokemon-tcg-api",
+    variantLabel: "Holofoil",
+  },
+  {
+    observedAt: "2026-05-01T00:00:00.000Z",
+    valueMinor: 1200,
+    confidence: "Strong",
+    source: "pokemon-tcg-api",
+    variantLabel: "Holofoil",
+  },
+  {
+    observedAt: "2026-05-01T00:00:00.000Z",
+    valueMinor: 800,
+    confidence: "Fair",
+    source: "pokemon-tcg-api",
+    variantLabel: "Reverse Holofoil",
+  },
+];
+
+test("builds catalogue variant options from prices and metadata", () => {
+  const options = buildCatalogueVariantOptions({
+    itemType: "card",
+    priceHistory,
+    variantMetadata: {
+      availablePrices: ["reverseHolofoil", "holofoil", "normal"],
+    },
+  });
+
+  assert.deepEqual(
+    options.map((option) => option.label),
+    ["Normal", "Holofoil", "Reverse Holofoil"],
+  );
+  assert.equal(options[1].valueMinor, 1200);
+  assert.equal(options[1].confidence, "Strong");
+  assert.equal(options[2].valueMinor, 800);
+});
+
+test("keeps existing custom variants in selector labels", () => {
+  assert.deepEqual(
+    catalogueVariantLabels(
+      {
+        id: "card-1",
+        type: "card",
+        name: "Test Card",
+        set: "Test Set",
+        number: "1/1",
+        rarity: "Rare",
+        valueMinor: 1200,
+        confidence: "Fair",
+        variantOptions: [{ label: "Holofoil" }],
+      },
+      "Stamped promo",
+    ),
+    ["Holofoil", "Stamped promo"],
+  );
+});
+
+test("does not add generic standard labels when imported variants exist", () => {
+  assert.deepEqual(
+    catalogueVariantLabels({
+      id: "card-1",
+      type: "card",
+      name: "Test Card",
+      set: "Test Set",
+      number: "1/1",
+      rarity: "Rare",
+      valueMinor: 1200,
+      confidence: "Fair",
+      variantOptions: [{ label: "Normal" }, { label: "Reverse Holofoil" }],
+    }),
+    ["Normal", "Reverse Holofoil"],
+  );
+});
+
+test("uses variant price when valuing a catalogue item", () => {
+  assert.equal(
+    catalogueValueMinorForVariant(
+      {
+        id: "card-1",
+        type: "card",
+        name: "Test Card",
+        set: "Test Set",
+        number: "1/1",
+        rarity: "Rare",
+        valueMinor: 1200,
+        confidence: "Fair",
+        priceHistory,
+      },
+      "Reverse Holofoil",
+    ),
+    800,
+  );
+});
+
+test("derives Pokemon TCG image URLs from provider IDs", () => {
+  assert.equal(
+    pokemonTcgImageUrlFromProviderIds({ pokemon_tcg_api: "sv3pt5-199" }),
+    "https://images.pokemontcg.io/sv3pt5/199_hires.png",
+  );
+  assert.equal(pokemonTcgImageUrlFromProviderIds({ pokemon_tcg_api: "bad" }), undefined);
+});
+
+test("formats provider variant keys for display", () => {
+  assert.equal(displayVariantLabel("reverseHolofoil"), "Reverse Holofoil");
+  assert.equal(displayVariantLabel("1stEditionHolofoil"), "1st Edition Holofoil");
+});

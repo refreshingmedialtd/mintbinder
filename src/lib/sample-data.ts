@@ -12,13 +12,14 @@ import type {
 function samplePriceHistory(
   source: string,
   confidence: PriceConfidence,
-  entries: Array<[string, number]>,
+  entries: Array<[string, number, string?]>,
 ) {
-  return entries.map(([observedAt, valueMinor]) => ({
+  return entries.map(([observedAt, valueMinor, variantLabel]) => ({
     observedAt: `${observedAt}T00:00:00.000Z`,
     valueMinor,
     confidence,
     source,
+    variantLabel,
   }));
 }
 
@@ -36,10 +37,14 @@ export const catalogue: CatalogueItem[] = [
     priceSource: "pokemon-tcg-api-cardmarket",
     priceObservedAt: "2026-06-01T00:00:00.000Z",
     priceHistory: samplePriceHistory("pokemon-tcg-api-cardmarket", "Fair", [
-      ["2026-04-01", 10800],
-      ["2026-05-01", 11400],
-      ["2026-06-01", 11800],
+      ["2026-04-01", 10800, "Holofoil"],
+      ["2026-05-01", 11400, "Holofoil"],
+      ["2026-06-01", 11800, "Holofoil"],
     ]),
+    variantOptions: [
+      { label: "Holofoil", valueMinor: 11800, confidence: "Fair", source: "pokemon-tcg-api-cardmarket", observedAt: "2026-06-01T00:00:00.000Z" },
+      { label: "Reverse Holofoil" },
+    ],
   },
   {
     id: "card-umbreon-vmax",
@@ -54,10 +59,13 @@ export const catalogue: CatalogueItem[] = [
     priceSource: "pokemon-tcg-api",
     priceObservedAt: "2026-06-01T00:00:00.000Z",
     priceHistory: samplePriceHistory("pokemon-tcg-api", "Strong", [
-      ["2026-04-01", 68000],
-      ["2026-05-01", 71500],
-      ["2026-06-01", 74000],
+      ["2026-04-01", 68000, "Holofoil"],
+      ["2026-05-01", 71500, "Holofoil"],
+      ["2026-06-01", 74000, "Holofoil"],
     ]),
+    variantOptions: [
+      { label: "Holofoil", valueMinor: 74000, confidence: "Strong", source: "pokemon-tcg-api", observedAt: "2026-06-01T00:00:00.000Z" },
+    ],
   },
   {
     id: "card-mew-ex",
@@ -72,10 +80,14 @@ export const catalogue: CatalogueItem[] = [
     priceSource: "pokemon-tcg-api-cardmarket",
     priceObservedAt: "2026-06-01T00:00:00.000Z",
     priceHistory: samplePriceHistory("pokemon-tcg-api-cardmarket", "Fair", [
-      ["2026-04-01", 3100],
-      ["2026-05-01", 3300],
-      ["2026-06-01", 3500],
+      ["2026-04-01", 3100, "Holofoil"],
+      ["2026-05-01", 3300, "Holofoil"],
+      ["2026-06-01", 3500, "Holofoil"],
     ]),
+    variantOptions: [
+      { label: "Holofoil", valueMinor: 3500, confidence: "Fair", source: "pokemon-tcg-api-cardmarket", observedAt: "2026-06-01T00:00:00.000Z" },
+      { label: "Normal" },
+    ],
   },
   {
     id: "card-pikachu",
@@ -90,10 +102,14 @@ export const catalogue: CatalogueItem[] = [
     priceSource: "pokemon-tcg-api",
     priceObservedAt: "2026-06-01T00:00:00.000Z",
     priceHistory: samplePriceHistory("pokemon-tcg-api", "Strong", [
-      ["2026-04-01", 1320],
-      ["2026-05-01", 1410],
-      ["2026-06-01", 1450],
+      ["2026-04-01", 1320, "Normal"],
+      ["2026-05-01", 1410, "Normal"],
+      ["2026-06-01", 1450, "Normal"],
     ]),
+    variantOptions: [
+      { label: "Normal", valueMinor: 1450, confidence: "Strong", source: "pokemon-tcg-api", observedAt: "2026-06-01T00:00:00.000Z" },
+      { label: "Reverse Holofoil" },
+    ],
   },
   {
     id: "sealed-151-bundle",
@@ -107,10 +123,13 @@ export const catalogue: CatalogueItem[] = [
     priceSource: "tcgcsv",
     priceObservedAt: "2026-06-01T00:00:00.000Z",
     priceHistory: samplePriceHistory("tcgcsv", "Weak", [
-      ["2026-04-01", 2800],
-      ["2026-05-01", 3000],
-      ["2026-06-01", 3200],
+      ["2026-04-01", 2800, "Factory sealed"],
+      ["2026-05-01", 3000, "Factory sealed"],
+      ["2026-06-01", 3200, "Factory sealed"],
     ]),
+    variantOptions: [
+      { label: "Factory sealed", valueMinor: 3200, confidence: "Weak", source: "tcgcsv", observedAt: "2026-06-01T00:00:00.000Z" },
+    ],
   },
   {
     id: "sealed-evolving-skies-box",
@@ -124,10 +143,13 @@ export const catalogue: CatalogueItem[] = [
     priceSource: "tcgcsv",
     priceObservedAt: "2026-06-01T00:00:00.000Z",
     priceHistory: samplePriceHistory("tcgcsv", "Fair", [
-      ["2026-04-01", 42000],
-      ["2026-05-01", 43500],
-      ["2026-06-01", 45000],
+      ["2026-04-01", 42000, "Factory sealed"],
+      ["2026-05-01", 43500, "Factory sealed"],
+      ["2026-06-01", 45000, "Factory sealed"],
     ]),
+    variantOptions: [
+      { label: "Factory sealed", valueMinor: 45000, confidence: "Fair", source: "tcgcsv", observedAt: "2026-06-01T00:00:00.000Z" },
+    ],
   },
 ];
 

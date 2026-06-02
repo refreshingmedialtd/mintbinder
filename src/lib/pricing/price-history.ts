@@ -5,6 +5,7 @@ export type PriceHistoryInput = {
   confidenceScore?: number | null;
   source?: string | null;
   observedAt?: Date | string | null;
+  variantLabel?: string | null;
 };
 
 export function buildPriceHistory(prices: PriceHistoryInput[]): PricePoint[] {
@@ -55,12 +56,20 @@ function normalizePricePoint(price: PriceHistoryInput): PricePoint | null {
     return null;
   }
 
-  return {
+  const point: PricePoint = {
     observedAt,
     valueMinor: Math.round(valueMinor),
     confidence: priceConfidenceFromScore(price.confidenceScore),
     source: price.source?.trim() || "unknown",
   };
+
+  const variantLabel = price.variantLabel?.trim();
+
+  if (variantLabel) {
+    point.variantLabel = variantLabel;
+  }
+
+  return point;
 }
 
 function normalizeObservedAt(value?: Date | string | null) {

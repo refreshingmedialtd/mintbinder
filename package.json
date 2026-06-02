@@ -18,6 +18,7 @@
     "test:price-history": "node --experimental-strip-types --test tests/price-history.test.mjs",
     "test:pricing": "node --experimental-strip-types --test tests/pokemon-tcg-pagination.test.mjs",
     "test:sealed-import": "node --test tests/tcgcsv-sealed-products.test.mjs",
+    "test:variants": "node --experimental-strip-types --test tests/catalogue-variants.test.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "db:validate": "prisma validate",

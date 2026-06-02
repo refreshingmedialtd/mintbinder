@@ -9,6 +9,11 @@ import {
   WishlistPriority,
 } from "@prisma/client";
 import { sampleAppData } from "@/lib/sample-data";
+import {
+  buildCatalogueVariantOptions,
+  latestPricePointForVariant,
+  pokemonTcgImageUrlFromProviderIds,
+} from "@/lib/catalogue/variants";
 import { getEntitlements } from "@/lib/entitlements";
 import { getNotificationPreferences } from "@/lib/notifications/preferences";
 import { buildPriceHistory, latestPricePoint } from "@/lib/pricing/price-history";
@@ -29,6 +34,7 @@ type PriceLike = {
   confidenceScore: number;
   source: string;
   observedAt: Date;
+  variantLabel: string | null;
 };
 
 const PRICE_HISTORY_LIMIT = 8;
@@ -732,12 +738,15 @@ function mapCardPrintingToCatalogueItem(
     rarity: string | null;
     imageLargeUrl: string | null;
     imageSmallUrl: string | null;
+    providerIds: unknown;
+    variantMetadata: unknown;
     cardSet: { name: string };
   },
   prices: PriceLike[] = [],
 ): CatalogueItem {
   const priceHistory = buildPriceHistory(prices);
   const latestPrice = latestPricePoint(priceHistory);
+  const image = card.imageLargeUrl ?? card.imageSmallUrl ?? pokemonTcgImageUrlFromProviderIds(card.providerIds);
 
   return {
     id: card.id,
@@ -746,12 +755,17 @@ function mapCardPrintingToCatalogueItem(
     set: card.cardSet.name,
     number: card.number,
     rarity: card.rarity ?? "Unknown",
-    image: card.imageLargeUrl ?? card.imageSmallUrl ?? undefined,
+    image,
     valueMinor: latestPrice?.valueMinor ?? 0,
     confidence: latestPrice?.confidence ?? "Weak",
     priceSource: latestPrice?.source,
     priceObservedAt: latestPrice?.observedAt,
     priceHistory: priceHistory.length ? priceHistory : undefined,
+    variantOptions: buildCatalogueVariantOptions({
+      itemType: "card",
+      priceHistory,
+      variantMetadata: card.variantMetadata,
+    }),
   };
 }
 
@@ -781,6 +795,10 @@ function mapSealedProductToCatalogueItem(
     priceSource: latestPrice?.source,
     priceObservedAt: latestPrice?.observedAt,
     priceHistory: priceHistory.length ? priceHistory : undefined,
+    variantOptions: buildCatalogueVariantOptions({
+      itemType: "sealed",
+      priceHistory,
+    }),
   };
 }
 
@@ -855,6 +873,7 @@ function mapStorageLocations(
   collectionItems: Array<{
     storageLocationId: string | null;
     quantity: number;
+    variantLabel: string | null;
     currentValueOverrideMinor: number | null;
     cardPrinting: { priceSnapshots: PriceLike[] } | null;
     sealedProduct: { priceSnapshots: PriceLike[] } | null;
@@ -870,6 +889,7 @@ function mapStorageLocation(
   location: { id: string; name: string; type: string; notes: string | null },
   items: Array<{
     quantity: number;
+    variantLabel: string | null;
     currentValueOverrideMinor: number | null;
     cardPrinting: { priceSnapshots: PriceLike[] } | null;
     sealedProduct: { priceSnapshots: PriceLike[] } | null;
@@ -926,6 +946,7 @@ function mapCollectionEvent(event: {
 
 function collectionItemValueMinor(item: {
   quantity: number;
+  variantLabel: string | null;
   currentValueOverrideMinor: number | null;
   cardPrinting: { priceSnapshots: PriceLike[] } | null;
   sealedProduct: { priceSnapshots: PriceLike[] } | null;
@@ -934,9 +955,12 @@ function collectionItemValueMinor(item: {
     return item.currentValueOverrideMinor;
   }
 
+  const priceHistory = buildPriceHistory(
+    item.cardPrinting?.priceSnapshots ?? item.sealedProduct?.priceSnapshots ?? [],
+  );
   const unitValue =
-    item.cardPrinting?.priceSnapshots[0]?.priceMinor ??
-    item.sealedProduct?.priceSnapshots[0]?.priceMinor ??
+    latestPricePointForVariant(priceHistory, item.variantLabel)?.valueMinor ??
+    latestPricePoint(priceHistory)?.valueMinor ??
     0;
 
   return unitValue * item.quantity;
@@ -946,13 +970,13 @@ const collectionItemInclude = {
   cardPrinting: {
     include: {
       cardSet: true,
-      priceSnapshots: { orderBy: { observedAt: "desc" }, take: 1 },
+      priceSnapshots: { orderBy: { observedAt: "desc" }, take: PRICE_HISTORY_LIMIT },
     },
   },
   sealedProduct: {
     include: {
       relatedCardSet: true,
-      priceSnapshots: { orderBy: { observedAt: "desc" }, take: 1 },
+      priceSnapshots: { orderBy: { observedAt: "desc" }, take: PRICE_HISTORY_LIMIT },
     },
   },
   storageLocation: true,

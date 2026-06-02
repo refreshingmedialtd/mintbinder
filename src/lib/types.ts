@@ -6,6 +6,15 @@ export type PricePoint = {
   valueMinor: number;
   confidence: PriceConfidence;
   source: string;
+  variantLabel?: string;
+};
+
+export type CatalogueVariantOption = {
+  label: string;
+  valueMinor?: number;
+  confidence?: PriceConfidence;
+  source?: string;
+  observedAt?: string;
 };
 
 export type CatalogueItem = {
@@ -21,6 +30,7 @@ export type CatalogueItem = {
   priceSource?: string;
   priceObservedAt?: string;
   priceHistory?: PricePoint[];
+  variantOptions?: CatalogueVariantOption[];
 };
 
 export type CollectionItem = {

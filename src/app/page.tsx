@@ -41,6 +41,7 @@ import { signIn, signOut, useSession } from "next-auth/react";
 import type { ChangeEvent, Dispatch, FormEvent, ReactNode, SetStateAction } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { canUseOperations, normalizeAppRole, type AppUserRole } from "@/lib/auth/roles";
+import { catalogueValueMinorForVariant, catalogueVariantLabels } from "@/lib/catalogue/variants";
 import {
   buildCollectionCsv,
   buildCollectionImportTemplateCsv,
@@ -2464,7 +2465,7 @@ function AddScreen({
         <section className="tool-panel">
           <h2>Owned details</h2>
           {selected ? <CataloguePreview item={selected} /> : <EmptyState title="No item selected" />}
-          <form className="form-stack" onSubmit={handleSubmit}>
+          <form className="form-stack" key={selected?.id ?? "no-selection"} onSubmit={handleSubmit}>
             <div className="field-grid">
               <Field label="Condition">
                 <select name="condition" defaultValue={selected?.type === "sealed" ? "Sealed" : "Near mint"}>
@@ -2502,7 +2503,7 @@ function AddScreen({
                 </select>
               </Field>
               <Field label="Variant">
-                <input name="variant" defaultValue={selected?.type === "sealed" ? "Factory sealed" : "Standard"} />
+                {selected ? <VariantSelect item={selected} /> : <input name="variant" disabled />}
               </Field>
             </div>
             <Field label="Notes">
@@ -2788,7 +2789,7 @@ function ItemDetailScreen({
                     </select>
                   </Field>
                   <Field label="Variant">
-                    <input name="variant" defaultValue={owned.variant} />
+                    <VariantSelect item={item} defaultValue={owned.variant} />
                   </Field>
                 </div>
                 <Field label="Notes">
@@ -4974,12 +4975,21 @@ function CatalogueResult({
           <span className={selected ? "tag green" : "tag"}>{selected ? "Selected" : item.rarity}</span>
         </div>
         <p className="item-value">{formatMoney(item.valueMinor)}</p>
+        {item.variantOptions?.length ? (
+          <div className="tag-row">
+            {item.variantOptions.slice(0, 3).map((option) => (
+              <span className="tag" key={option.label}>{option.label}</span>
+            ))}
+          </div>
+        ) : null}
       </div>
     </button>
   );
 }
 
 function CataloguePreview({ item }: { item: CatalogueItem }) {
+  const variants = item.variantOptions ?? [];
+
   return (
     <div className="selected-preview">
       <div className="item-image">{renderItemImage(item)}</div>
@@ -4990,8 +5000,37 @@ function CataloguePreview({ item }: { item: CatalogueItem }) {
           <span className="tag">{item.rarity}</span>
           <span className="tag blue">{item.confidence}</span>
         </div>
+        {variants.length ? (
+          <div className="tag-row">
+            {variants.slice(0, 3).map((option) => (
+              <span className="tag" key={option.label}>
+                {option.valueMinor === undefined ? option.label : `${option.label} ${formatMoney(option.valueMinor)}`}
+              </span>
+            ))}
+          </div>
+        ) : null}
       </div>
     </div>
+  );
+}
+
+function VariantSelect({
+  defaultValue,
+  item,
+  name = "variant",
+}: {
+  defaultValue?: string;
+  item: CatalogueItem;
+  name?: string;
+}) {
+  const options = catalogueVariantLabels(item, defaultValue);
+
+  return (
+    <select name={name} defaultValue={defaultValue ?? options[0]}>
+      {options.map((option) => (
+        <option key={option}>{option}</option>
+      ))}
+    </select>
   );
 }
 
@@ -5182,7 +5221,7 @@ function getOwnedValue(item: CollectionItem, catalogueItem?: CatalogueItem) {
     return null;
   }
 
-  return item.overrideValueMinor ?? catalogueItem.valueMinor * item.quantity;
+  return item.overrideValueMinor ?? catalogueValueMinorForVariant(catalogueItem, item.variant) * item.quantity;
 }
 
 function gradeCompanyFromLabel(grade: string) {
