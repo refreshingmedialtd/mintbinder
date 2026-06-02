@@ -105,7 +105,14 @@ type AuthMode = "sign-in" | "register";
 type CatalogueSort = "set-number" | "value-desc" | "name" | "rarity";
 type SetDetailSort = "number" | "value-desc" | "name" | "rarity";
 type JobType = "price_alerts" | "catalogue_refresh" | "pricing_refresh" | "sealed_pricing_refresh";
-type OperationsJobKind = "catalogue" | "pricing" | "alerts" | "sealed" | "card-image-repair" | "sealed-image-repair";
+type OperationsJobKind =
+  | "alerts"
+  | "card-image-repair"
+  | "catalogue"
+  | "pricing"
+  | "sealed"
+  | "sealed-image-repair"
+  | "variant-metadata-repair";
 type JobStatus = "running" | "succeeded" | "failed";
 type ImportPreset = {
   expectedTotal: number;
@@ -159,6 +166,7 @@ type JobApiResult = {
   setsUpserted?: number;
   tcgcsvProductsFetched?: number;
   totalCount?: number;
+  pokemonTcgCardsFetched?: number;
   writePrices?: boolean;
 };
 
@@ -3674,6 +3682,11 @@ function OperationsScreen({
 
     if (recommendation.type === "sealed_image_refresh") {
       await runJob("sealed-image-repair");
+      return;
+    }
+
+    if (recommendation.type === "variant_metadata_refresh") {
+      await runJob("variant-metadata-repair");
     }
   }
 
@@ -3697,7 +3710,9 @@ function OperationsScreen({
               ? "/api/jobs/card-image-repair"
               : kind === "sealed-image-repair"
                 ? "/api/jobs/sealed-image-repair"
-                : "/api/jobs/price-alerts";
+                : kind === "variant-metadata-repair"
+                  ? "/api/jobs/variant-metadata-repair"
+                  : "/api/jobs/price-alerts";
     const body =
       kind === "alerts"
         ? { dryRun: true }
@@ -3707,13 +3722,15 @@ function OperationsScreen({
             ? { dryRun: false, limit: 500 }
             : kind === "sealed-image-repair"
               ? { dryRun: false, limit: 500, waitMs: 120 }
-            : {
-              maxPages: override?.maxPages ?? maxPages,
-              page: override?.page ?? page,
-              pageSize: override?.pageSize ?? pageSize,
-              priceOnlyUnpriced: kind === "pricing" ? cardPriceOnlyUnpriced : undefined,
-              q: override?.q?.trim() || query.trim() || undefined,
-            };
+              : kind === "variant-metadata-repair"
+                ? { dryRun: false, limit: 500, waitMs: 120 }
+                : {
+                  maxPages: override?.maxPages ?? maxPages,
+                  page: override?.page ?? page,
+                  pageSize: override?.pageSize ?? pageSize,
+                  priceOnlyUnpriced: kind === "pricing" ? cardPriceOnlyUnpriced : undefined,
+                  q: override?.q?.trim() || query.trim() || undefined,
+                };
 
     setIsBusy(kind);
     try {
@@ -3976,6 +3993,10 @@ function OperationsScreen({
               <GalleryVerticalEnd size={17} />
               {isBusy === "sealed-image-repair" ? "Running" : "Repair sealed images"}
             </button>
+            <button className="button" disabled={Boolean(isBusy)} onClick={() => void runJob("variant-metadata-repair")}>
+              <Layers3 size={17} />
+              {isBusy === "variant-metadata-repair" ? "Running" : "Repair variants"}
+            </button>
             <button className="button" disabled={Boolean(isBusy)} onClick={() => void runJob("alerts")}>
               <Mail size={17} />
               {isBusy === "alerts" ? "Running" : "Alert dry run"}
@@ -4040,6 +4061,12 @@ function OperationsScreen({
                     <span>{latestJobResult.sealedProductsUpdated ?? 0} sealed</span>
                     <span>{latestJobResult.groupsFetched ?? 0} groups</span>
                   </>
+                ) : latestJobResult.job === "variant_metadata_repair" ? (
+                  <>
+                    <span>{latestJobResult.candidatesChecked ?? 0} checked</span>
+                    <span>{latestJobResult.cardsUpdated ?? 0} cards</span>
+                    <span>{latestJobResult.pokemonTcgCardsFetched ?? 0} fetched</span>
+                  </>
                 ) : latestJobResult.groupsProcessed !== undefined ? (
                   <>
                     <span>{latestJobResult.groupsProcessed} groups</span>
@@ -4056,6 +4083,8 @@ function OperationsScreen({
                   <span>{latestJobResult.repairableCards ?? 0} repairable</span>
                 ) : latestJobResult.job === "sealed_image_repair" ? (
                   <span>{latestJobResult.repairableProducts ?? 0} repairable</span>
+                ) : latestJobResult.job === "variant_metadata_repair" ? (
+                  <span>{latestJobResult.repairableCards ?? 0} repairable</span>
                 ) : (
                   <span>{latestJobResult.pricingSnapshotsCreated ?? 0} prices</span>
                 )}
@@ -5407,6 +5436,10 @@ function recommendationActionLabel(recommendation: CatalogueGapRecommendation) {
 
   if (recommendation.type === "sealed_image_refresh") {
     return "Repair sealed";
+  }
+
+  if (recommendation.type === "variant_metadata_refresh") {
+    return "Repair variants";
   }
 
   return "";

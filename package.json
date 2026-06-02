@@ -20,6 +20,7 @@
     "test:pricing": "node --experimental-strip-types --test tests/pokemon-tcg-pagination.test.mjs",
     "test:sealed-import": "node --test tests/tcgcsv-sealed-products.test.mjs",
     "test:sealed-images": "node --experimental-strip-types --test tests/sealed-image-repair.test.mjs",
+    "test:variant-metadata": "node --experimental-strip-types --test tests/variant-metadata-repair.test.mjs",
     "test:variants": "node --experimental-strip-types --test tests/catalogue-variants.test.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
@@ -31,6 +32,7 @@
     "job:pricing-batch": "node scripts/run-pricing-batch.mjs",
     "job:repair-card-images": "node scripts/repair-card-images.mjs",
     "job:repair-sealed-images": "node scripts/repair-sealed-images.mjs",
+    "job:repair-variant-metadata": "node scripts/repair-variant-metadata.mjs",
     "job:sealed-tcgcsv": "node scripts/import-tcgcsv-sealed-products.mjs",
     "report:catalogue-gaps": "node scripts/report-catalogue-gaps.mjs"
   },
