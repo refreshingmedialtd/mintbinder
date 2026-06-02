@@ -157,6 +157,11 @@ export function normalizeCatalogueResult(value: unknown): CatalogueJobResult | n
   }
 
   const source = value as Record<string, unknown>;
+
+  if (typeof source.job === "string" && source.job.endsWith("_repair")) {
+    return null;
+  }
+
   const result = {
     cardsFetched: nonNegativeNumber(source.cardsFetched),
     cardsUpserted: nonNegativeNumber(source.cardsUpserted),

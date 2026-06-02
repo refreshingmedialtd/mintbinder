@@ -105,6 +105,7 @@ type AuthMode = "sign-in" | "register";
 type CatalogueSort = "set-number" | "value-desc" | "name" | "rarity";
 type SetDetailSort = "number" | "value-desc" | "name" | "rarity";
 type JobType = "price_alerts" | "catalogue_refresh" | "pricing_refresh" | "sealed_pricing_refresh";
+type OperationsJobKind = "catalogue" | "pricing" | "alerts" | "sealed" | "card-image-repair" | "sealed-image-repair";
 type JobStatus = "running" | "succeeded" | "failed";
 type ImportPreset = {
   expectedTotal: number;
@@ -137,6 +138,7 @@ type JobApiResult = {
   groupsAvailable?: number;
   groupsMatched?: number;
   groupsProcessed?: number;
+  groupsFetched?: number;
   imageFieldsUpdated?: number;
   job?: string;
   jobRun?: JobRunRecord;
@@ -150,9 +152,12 @@ type JobApiResult = {
   productsFetched?: number;
   query?: string;
   repairableCards?: number;
+  repairableProducts?: number;
   sealedProductsSkipped?: number;
+  sealedProductsUpdated?: number;
   sealedProductsUpserted?: number;
   setsUpserted?: number;
+  tcgcsvProductsFetched?: number;
   totalCount?: number;
   writePrices?: boolean;
 };
@@ -3663,12 +3668,17 @@ function OperationsScreen({
     }
 
     if (recommendation.type === "card_image_refresh") {
-      await runJob("image-repair");
+      await runJob("card-image-repair");
+      return;
+    }
+
+    if (recommendation.type === "sealed_image_refresh") {
+      await runJob("sealed-image-repair");
     }
   }
 
   async function runJob(
-    kind: "catalogue" | "pricing" | "alerts" | "sealed" | "image-repair",
+    kind: OperationsJobKind,
     override?: { maxPages?: number; page?: number; pageSize?: number; q?: string },
   ) {
     if (!jobSecret.trim()) {
@@ -3683,16 +3693,20 @@ function OperationsScreen({
           ? "/api/jobs/pricing-refresh"
           : kind === "sealed"
             ? "/api/jobs/sealed-pricing-refresh"
-            : kind === "image-repair"
+            : kind === "card-image-repair"
               ? "/api/jobs/card-image-repair"
-              : "/api/jobs/price-alerts";
+              : kind === "sealed-image-repair"
+                ? "/api/jobs/sealed-image-repair"
+                : "/api/jobs/price-alerts";
     const body =
       kind === "alerts"
         ? { dryRun: true }
         : kind === "sealed"
           ? sealedJobBody()
-          : kind === "image-repair"
+          : kind === "card-image-repair"
             ? { dryRun: false, limit: 500 }
+            : kind === "sealed-image-repair"
+              ? { dryRun: false, limit: 500, waitMs: 120 }
             : {
               maxPages: override?.maxPages ?? maxPages,
               page: override?.page ?? page,
@@ -3954,9 +3968,13 @@ function OperationsScreen({
               <PackagePlus size={17} />
               {isBusy === "sealed" ? "Running" : "Sealed pricing"}
             </button>
-            <button className="button" disabled={Boolean(isBusy)} onClick={() => void runJob("image-repair")}>
+            <button className="button" disabled={Boolean(isBusy)} onClick={() => void runJob("card-image-repair")}>
               <GalleryVerticalEnd size={17} />
-              {isBusy === "image-repair" ? "Running" : "Repair images"}
+              {isBusy === "card-image-repair" ? "Running" : "Repair card images"}
+            </button>
+            <button className="button" disabled={Boolean(isBusy)} onClick={() => void runJob("sealed-image-repair")}>
+              <GalleryVerticalEnd size={17} />
+              {isBusy === "sealed-image-repair" ? "Running" : "Repair sealed images"}
             </button>
             <button className="button" disabled={Boolean(isBusy)} onClick={() => void runJob("alerts")}>
               <Mail size={17} />
@@ -4016,6 +4034,12 @@ function OperationsScreen({
                     <span>{latestJobResult.cardsUpdated ?? 0} cards</span>
                     <span>{latestJobResult.imageFieldsUpdated ?? 0} fields</span>
                   </>
+                ) : latestJobResult.job === "sealed_image_repair" ? (
+                  <>
+                    <span>{latestJobResult.candidatesChecked ?? 0} checked</span>
+                    <span>{latestJobResult.sealedProductsUpdated ?? 0} sealed</span>
+                    <span>{latestJobResult.groupsFetched ?? 0} groups</span>
+                  </>
                 ) : latestJobResult.groupsProcessed !== undefined ? (
                   <>
                     <span>{latestJobResult.groupsProcessed} groups</span>
@@ -4030,6 +4054,8 @@ function OperationsScreen({
                 )}
                 {latestJobResult.job === "card_image_repair" ? (
                   <span>{latestJobResult.repairableCards ?? 0} repairable</span>
+                ) : latestJobResult.job === "sealed_image_repair" ? (
+                  <span>{latestJobResult.repairableProducts ?? 0} repairable</span>
                 ) : (
                   <span>{latestJobResult.pricingSnapshotsCreated ?? 0} prices</span>
                 )}
@@ -5376,7 +5402,11 @@ function recommendationActionLabel(recommendation: CatalogueGapRecommendation) {
   }
 
   if (recommendation.type === "card_image_refresh") {
-    return "Repair images";
+    return "Repair cards";
+  }
+
+  if (recommendation.type === "sealed_image_refresh") {
+    return "Repair sealed";
   }
 
   return "";
