@@ -11,9 +11,15 @@ const requiredEnv = [
   "NEXT_PUBLIC_APP_URL",
   "JOB_SECRET",
 ];
+const conversionRateEnv = [
+  "POKEMON_TCG_USD_TO_GBP_RATE",
+  "POKEMON_TCG_EUR_TO_GBP_RATE",
+  "TCGCSV_USD_TO_GBP_RATE",
+];
 
 try {
   const env = envStatus(requiredEnv);
+  const conversionRates = conversionRateStatus(conversionRateEnv);
   const [
     adminUser,
     counts,
@@ -52,6 +58,7 @@ try {
   ];
   const warnings = [
     ...countWarnings(counts),
+    ...conversionRateWarnings(conversionRates),
     ...(duplicateGroups > 0
       ? [`${duplicateGroups} duplicate Pokemon TCG provider ID group${duplicateGroups === 1 ? "" : "s"} need review.`]
       : []),
@@ -68,6 +75,7 @@ try {
         }
       : null,
     counts,
+    conversionRates,
     duplicateProviderGroups: duplicateGroups,
     env,
     generatedAt: new Date().toISOString(),
@@ -100,6 +108,19 @@ function envStatus(keys) {
     key,
     present: Boolean(process.env[key]?.trim()),
   }));
+}
+
+function conversionRateStatus(keys) {
+  return keys.map((key) => {
+    const value = process.env[key]?.trim();
+    const number = Number(value);
+
+    return {
+      key,
+      present: Boolean(value),
+      valid: Number.isFinite(number) && number > 0,
+    };
+  });
 }
 
 async function databaseCounts() {
@@ -188,5 +209,20 @@ function countWarnings(counts) {
     ...(counts.collectionItems < 1 ? ["No collection items exist."] : []),
     ...(counts.wishlistItems < 1 ? ["No wishlist items exist."] : []),
     ...(counts.jobRuns < 1 ? ["No job runs have been recorded yet. Run an Operations job to verify job history."] : []),
+  ];
+}
+
+function conversionRateWarnings(conversionRates) {
+  const byKey = new Map(conversionRates.map((entry) => [entry.key, entry]));
+  const pokemonUsd = byKey.get("POKEMON_TCG_USD_TO_GBP_RATE");
+  const pokemonEur = byKey.get("POKEMON_TCG_EUR_TO_GBP_RATE");
+  const tcgcsvUsd = byKey.get("TCGCSV_USD_TO_GBP_RATE");
+
+  return [
+    ...(!pokemonUsd?.valid ? ["POKEMON_TCG_USD_TO_GBP_RATE is not configured with a positive number; Pokemon card pricing jobs will fail."] : []),
+    ...(!pokemonEur?.valid ? ["POKEMON_TCG_EUR_TO_GBP_RATE is not configured with a positive number; Cardmarket fallback pricing is disabled."] : []),
+    ...(!tcgcsvUsd?.valid && !pokemonUsd?.valid
+      ? ["TCGCSV_USD_TO_GBP_RATE is not configured and no Pokemon USD fallback is available; sealed pricing jobs will fail."]
+      : []),
   ];
 }
