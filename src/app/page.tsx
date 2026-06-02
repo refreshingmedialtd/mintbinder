@@ -139,11 +139,18 @@ type JobApiResult = {
   cardsUpdated?: number;
   candidatesChecked?: number;
   cardsUpserted?: number;
+  canMerge?: boolean;
+  collectionItemsMoved?: number;
+  collectionItemsToMove?: number;
   complete?: boolean;
+  duplicateCardDeleted?: boolean;
   dryRun?: boolean;
   duplicateCardCount?: number;
+  duplicateCardId?: string;
   duplicateGroupCount?: number;
+  duplicateCardWillBeDeleted?: boolean;
   error?: string;
+  errors?: string[];
   groupsAvailable?: number;
   groupsMatched?: number;
   groupsProcessed?: number;
@@ -156,6 +163,9 @@ type JobApiResult = {
   page?: number;
   pageSize?: number;
   priceOnlyUnpriced?: boolean;
+  priceSnapshotsMoved?: number;
+  priceSnapshotsToMove?: number;
+  primaryCardId?: string;
   highRiskGroupCount?: number;
   lowRiskGroupCount?: number;
   pagesProcessed?: number;
@@ -163,6 +173,7 @@ type JobApiResult = {
   productsFetched?: number;
   query?: string;
   mediumRiskGroupCount?: number;
+  mode?: string;
   report?: string;
   repairableCards?: number;
   repairableProducts?: number;
@@ -173,6 +184,10 @@ type JobApiResult = {
   tcgcsvProductsFetched?: number;
   totalCount?: number;
   pokemonTcgCardsFetched?: number;
+  wishlistConflictsMerged?: number;
+  wishlistConflictsToMerge?: number;
+  wishlistItemsMoved?: number;
+  wishlistItemsToMove?: number;
   writePrices?: boolean;
 };
 
@@ -3521,6 +3536,8 @@ function OperationsScreen({
   const [sealedGroupLimit, setSealedGroupLimit] = useState(10);
   const [sealedPriceOnlyUnpriced, setSealedPriceOnlyUnpriced] = useState(true);
   const [sealedUsdToGbpRate, setSealedUsdToGbpRate] = useState("");
+  const [mergePrimaryCardId, setMergePrimaryCardId] = useState("");
+  const [mergeDuplicateCardId, setMergeDuplicateCardId] = useState("");
   const [jobRuns, setJobRuns] = useState<JobRunRecord[]>([]);
   const [catalogueStatus, setCatalogueStatus] = useState<CatalogueStatusRecord | null>(null);
   const [lastResult, setLastResult] = useState<unknown>(null);
@@ -3856,6 +3873,58 @@ function OperationsScreen({
     }
   }
 
+  async function runDuplicateCardMerge(execute: boolean) {
+    if (!jobSecret.trim()) {
+      showToast("Job secret required.");
+      return false;
+    }
+
+    if (!mergePrimaryCardId.trim() || !mergeDuplicateCardId.trim()) {
+      showToast("Both card IDs are required.");
+      return false;
+    }
+
+    setIsBusy(execute ? "duplicate-merge" : "duplicate-merge-dry-run");
+    try {
+      const response = await fetch("/api/jobs/duplicate-card-merge", {
+        body: JSON.stringify({
+          duplicateCardId: mergeDuplicateCardId.trim(),
+          execute,
+          primaryCardId: mergePrimaryCardId.trim(),
+        }),
+        headers: {
+          ...jobHeaders(jobSecret),
+          "content-type": "application/json",
+        },
+        method: "POST",
+      });
+      const result = (await response.json()) as JobApiResult & { error?: string };
+
+      if (!response.ok) {
+        throw new Error(result.error ?? `Duplicate merge failed with ${response.status}`);
+      }
+
+      setLastResult(result);
+      showToast(execute ? "Duplicate card merged." : "Duplicate merge dry run ready.");
+
+      if (execute) {
+        void loadCatalogueStatus({ quiet: true });
+        void refreshAppData();
+      }
+
+      return true;
+    } catch (error) {
+      console.warn("Unable to merge duplicate card.", error);
+      showToast(error instanceof Error ? error.message : "Unable to merge duplicate card.");
+      if (error instanceof Error) {
+        setLastResult({ error: error.message });
+      }
+      return false;
+    } finally {
+      setIsBusy("");
+    }
+  }
+
   return (
     <section className="page">
       <PageHeader title="Operations" action={<span className="status-pill"><TerminalSquare size={17} />Jobs</span>} />
@@ -4090,6 +4159,39 @@ function OperationsScreen({
 
         <section className="tool-panel">
           <div className="panel-title-row">
+            <h2>Merge duplicate</h2>
+            <ArrowDownUp size={18} />
+          </div>
+          <div className="field-grid">
+            <Field label="Primary card ID">
+              <input
+                value={mergePrimaryCardId}
+                onChange={(event) => setMergePrimaryCardId(event.currentTarget.value)}
+                placeholder="Keep this card"
+              />
+            </Field>
+            <Field label="Duplicate card ID">
+              <input
+                value={mergeDuplicateCardId}
+                onChange={(event) => setMergeDuplicateCardId(event.currentTarget.value)}
+                placeholder="Merge and delete this card"
+              />
+            </Field>
+          </div>
+          <div className="actions">
+            <button className="button" disabled={Boolean(isBusy)} onClick={() => void runDuplicateCardMerge(false)}>
+              <Search size={17} />
+              {isBusy === "duplicate-merge-dry-run" ? "Checking" : "Dry run"}
+            </button>
+            <button className="button danger" disabled={Boolean(isBusy)} onClick={() => void runDuplicateCardMerge(true)}>
+              <Check size={17} />
+              {isBusy === "duplicate-merge" ? "Merging" : "Execute merge"}
+            </button>
+          </div>
+        </section>
+
+        <section className="tool-panel">
+          <div className="panel-title-row">
             <h2>Latest result</h2>
             <span className="tag blue">JSON</span>
           </div>
@@ -4101,6 +4203,12 @@ function OperationsScreen({
                     <span>{latestJobResult.duplicateGroupCount ?? 0} groups</span>
                     <span>{latestJobResult.duplicateCardCount ?? 0} cards</span>
                     <span>{latestJobResult.highRiskGroupCount ?? 0} high risk</span>
+                  </>
+                ) : latestJobResult.report === "duplicate_card_merge" ? (
+                  <>
+                    <span>{latestJobResult.canMerge ? "Mergeable" : "Blocked"}</span>
+                    <span>{latestJobResult.collectionItemsToMove ?? latestJobResult.collectionItemsMoved ?? 0} collection</span>
+                    <span>{latestJobResult.priceSnapshotsToMove ?? latestJobResult.priceSnapshotsMoved ?? 0} prices</span>
                   </>
                 ) : latestJobResult.job === "card_image_repair" ? (
                   <>
@@ -4134,6 +4242,12 @@ function OperationsScreen({
                 )}
                 {latestJobResult.report === "duplicate_provider_review" ? (
                   <span>{latestJobResult.mediumRiskGroupCount ?? 0} medium</span>
+                ) : latestJobResult.report === "duplicate_card_merge" ? (
+                  <>
+                    <span>{latestJobResult.wishlistItemsToMove ?? latestJobResult.wishlistItemsMoved ?? 0} wishlist</span>
+                    <span>{latestJobResult.wishlistConflictsToMerge ?? latestJobResult.wishlistConflictsMerged ?? 0} conflicts</span>
+                    <span>{latestJobResult.mode ?? "dry_run"}</span>
+                  </>
                 ) : latestJobResult.job === "card_image_repair" ? (
                   <span>{latestJobResult.repairableCards ?? 0} repairable</span>
                 ) : latestJobResult.job === "sealed_image_repair" ? (
