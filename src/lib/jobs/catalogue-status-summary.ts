@@ -47,6 +47,12 @@ export type SealedPricingByProductTypeGap = {
 
 export type CatalogueStatus = {
   cardCount: number;
+  cardImageCount: number;
+  cardImageCoveragePercent: number | null;
+  cardMissingImageCount: number;
+  cardMissingVariantMetadataCount: number;
+  cardVariantMetadataCount: number;
+  cardVariantMetadataCoveragePercent: number | null;
   coveragePercent: number | null;
   duplicateProviderIdCount: number;
   latestCatalogueResult: CatalogueJobResult | null;
@@ -62,6 +68,9 @@ export type CatalogueStatus = {
   providerTotalCount: number | null;
   sealedPricingByProductType: SealedPricingByProductTypeGap[];
   sealedPriceSnapshotCount: number;
+  sealedImageCount: number;
+  sealedImageCoveragePercent: number | null;
+  sealedMissingImageCount: number;
   sealedPricingCoveragePercent: number | null;
   sealedProductCount: number;
   setCount: number;
@@ -69,6 +78,8 @@ export type CatalogueStatus = {
 
 export function summarizeCatalogueStatus({
   cardCount,
+  cardImageCount = 0,
+  cardVariantMetadataCount = 0,
   duplicateProviderIdCount,
   latestCatalogueResult,
   latestPricingResult,
@@ -78,12 +89,15 @@ export function summarizeCatalogueStatus({
   pricingBySeries = [],
   pricingBySource = [],
   priceSnapshotCount,
+  sealedImageCount = 0,
   sealedPricingByProductType = [],
   sealedPriceSnapshotCount,
   sealedProductCount,
   setCount,
 }: {
   cardCount: number;
+  cardImageCount?: number;
+  cardVariantMetadataCount?: number;
   duplicateProviderIdCount: number;
   latestCatalogueResult?: unknown;
   latestPricingResult?: unknown;
@@ -93,6 +107,7 @@ export function summarizeCatalogueStatus({
   pricingBySeries?: PricingBySeriesGap[];
   pricingBySource?: PricingBySourceSummary[];
   priceSnapshotCount: number;
+  sealedImageCount?: number;
   sealedPricingByProductType?: SealedPricingByProductTypeGap[];
   sealedPriceSnapshotCount: number;
   sealedProductCount: number;
@@ -106,6 +121,12 @@ export function summarizeCatalogueStatus({
 
   return {
     cardCount,
+    cardImageCount,
+    cardImageCoveragePercent: percent(cardImageCount, cardCount),
+    cardMissingImageCount: Math.max(0, cardCount - cardImageCount),
+    cardMissingVariantMetadataCount: Math.max(0, cardCount - cardVariantMetadataCount),
+    cardVariantMetadataCount,
+    cardVariantMetadataCoveragePercent: percent(cardVariantMetadataCount, cardCount),
     coveragePercent,
     duplicateProviderIdCount,
     latestCatalogueResult: catalogueResult,
@@ -121,6 +142,9 @@ export function summarizeCatalogueStatus({
     providerTotalCount,
     sealedPricingByProductType,
     sealedPriceSnapshotCount,
+    sealedImageCount,
+    sealedImageCoveragePercent: percent(sealedImageCount, sealedProductCount),
+    sealedMissingImageCount: Math.max(0, sealedProductCount - sealedImageCount),
     sealedPricingCoveragePercent: percent(pricedSealedProductCount, sealedProductCount),
     sealedProductCount,
     setCount,

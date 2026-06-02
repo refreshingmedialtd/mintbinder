@@ -176,6 +176,12 @@ type SealedPricingByProductTypeGap = {
 
 type CatalogueStatusRecord = {
   cardCount: number;
+  cardImageCount: number;
+  cardImageCoveragePercent: number | null;
+  cardMissingImageCount: number;
+  cardMissingVariantMetadataCount: number;
+  cardVariantMetadataCount: number;
+  cardVariantMetadataCoveragePercent: number | null;
   coveragePercent: number | null;
   duplicateProviderIdCount: number;
   latestCatalogueResult: JobApiResult | null;
@@ -191,6 +197,9 @@ type CatalogueStatusRecord = {
   providerTotalCount: number | null;
   sealedPricingByProductType: SealedPricingByProductTypeGap[];
   sealedPriceSnapshotCount: number;
+  sealedImageCount: number;
+  sealedImageCoveragePercent: number | null;
+  sealedMissingImageCount: number;
   sealedPricingCoveragePercent: number | null;
   sealedProductCount: number;
   setCount: number;
@@ -3955,8 +3964,11 @@ function OperationsScreen({
               ["Sets", formatCount(catalogueStatus?.setCount)],
               ["Prices", formatCount(catalogueStatus?.priceSnapshotCount)],
               ["Priced cards", catalogueStatus ? `${formatCount(catalogueStatus.pricedCardCount)} (${formatPercent(catalogueStatus.pricingCoveragePercent)})` : "-"],
+              ["Card images", catalogueStatus ? `${formatCount(catalogueStatus.cardImageCount)} (${formatPercent(catalogueStatus.cardImageCoveragePercent)})` : "-"],
+              ["Variant metadata", catalogueStatus ? `${formatCount(catalogueStatus.cardVariantMetadataCount)} (${formatPercent(catalogueStatus.cardVariantMetadataCoveragePercent)})` : "-"],
               ["Sealed products", formatCount(catalogueStatus?.sealedProductCount)],
               ["Priced sealed", catalogueStatus ? `${formatCount(catalogueStatus.pricedSealedProductCount)} (${formatPercent(catalogueStatus.sealedPricingCoveragePercent)})` : "-"],
+              ["Sealed images", catalogueStatus ? `${formatCount(catalogueStatus.sealedImageCount)} (${formatPercent(catalogueStatus.sealedImageCoveragePercent)})` : "-"],
               ["Duplicate IDs", formatCount(catalogueStatus?.duplicateProviderIdCount)],
             ]}
           />
@@ -4015,6 +4027,7 @@ function OperationsScreen({
         />
         <PricingSeriesGapPanel rows={catalogueStatus?.pricingBySeries ?? []} />
         <SealedPricingGapPanel rows={catalogueStatus?.sealedPricingByProductType ?? []} />
+        <CatalogueMediaGapPanel status={catalogueStatus} />
         <PricingSourcePanel rows={catalogueStatus?.pricingBySource ?? []} />
       </div>
 
@@ -4153,6 +4166,47 @@ function SealedPricingGapPanel({ rows }: { rows: SealedPricingByProductTypeGap[]
   );
 }
 
+function CatalogueMediaGapPanel({ status }: { status?: CatalogueStatusRecord | null }) {
+  return (
+    <section className="tool-panel">
+      <div className="panel-title-row">
+        <h2>Media & variants</h2>
+        <GalleryVerticalEnd size={18} />
+      </div>
+      {status ? (
+        <div className="gap-list">
+          <CoverageGapRow
+            coverage={status.cardImageCoveragePercent}
+            gapLabel="missing images"
+            label="Card images"
+            priced={status.cardImageCount}
+            total={status.cardCount}
+            unpriced={status.cardMissingImageCount}
+          />
+          <CoverageGapRow
+            coverage={status.sealedImageCoveragePercent}
+            gapLabel="missing images"
+            label="Sealed images"
+            priced={status.sealedImageCount}
+            total={status.sealedProductCount}
+            unpriced={status.sealedMissingImageCount}
+          />
+          <CoverageGapRow
+            coverage={status.cardVariantMetadataCoveragePercent}
+            gapLabel="without metadata"
+            label="Variant metadata"
+            priced={status.cardVariantMetadataCount}
+            total={status.cardCount}
+            unpriced={status.cardMissingVariantMetadataCount}
+          />
+        </div>
+      ) : (
+        <p className="muted">No media coverage rows loaded.</p>
+      )}
+    </section>
+  );
+}
+
 function PricingSourcePanel({ rows }: { rows: PricingBySourceSummary[] }) {
   return (
     <section className="tool-panel">
@@ -4184,12 +4238,14 @@ function PricingSourcePanel({ rows }: { rows: PricingBySourceSummary[] }) {
 
 function CoverageGapRow({
   coverage,
+  gapLabel = "unpriced",
   label,
   priced,
   total,
   unpriced,
 }: {
   coverage: number | null;
+  gapLabel?: string;
   label: string;
   priced: number;
   total: number;
@@ -4199,7 +4255,7 @@ function CoverageGapRow({
     <article className="gap-row">
       <div className="gap-copy">
         <strong>{label}</strong>
-        <span>{formatCount(unpriced)} unpriced</span>
+        <span>{formatCount(unpriced)} {gapLabel}</span>
       </div>
       <div className="gap-meter">
         <ProgressBar value={coverage ?? 0} />
@@ -5267,6 +5323,10 @@ function recommendationPriorityClass(priority: CatalogueGapRecommendation["prior
 }
 
 function recommendationTypeLabel(type: CatalogueGapRecommendation["type"]) {
+  if (type === "card_image_refresh" || type === "sealed_image_refresh") {
+    return "Images";
+  }
+
   if (type === "card_pricing") {
     return "Cards";
   }
@@ -5277,6 +5337,10 @@ function recommendationTypeLabel(type: CatalogueGapRecommendation["type"]) {
 
   if (type === "sealed_pricing") {
     return "Sealed";
+  }
+
+  if (type === "variant_metadata_refresh") {
+    return "Variants";
   }
 
   if (type === "duplicate_review") {

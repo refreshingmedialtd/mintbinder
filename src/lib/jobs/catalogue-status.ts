@@ -21,6 +21,12 @@ type SealedPricingCoverageRow = {
   sealedPriceSnapshotCount: number;
 };
 
+type MediaCoverageRow = {
+  cardImageCount: number;
+  cardVariantMetadataCount: number;
+  sealedImageCount: number;
+};
+
 type PricingBySeriesRow = {
   series: string | null;
   cardCount: number;
@@ -69,6 +75,7 @@ async function catalogueCounts() {
   const [
     cardRows,
     duplicateRows,
+    mediaCoverageRows,
     pricingCoverageRows,
     pricingBySeriesRows,
     pricingBySourceRows,
@@ -92,6 +99,27 @@ async function catalogueCounts() {
         GROUP BY 1
         HAVING COUNT(*) > 1
       ) duplicates
+    `,
+    prisma.$queryRaw<MediaCoverageRow[]>`
+      SELECT
+        (
+          SELECT COUNT(*)::int
+          FROM card_printings
+          WHERE provider_ids ? 'pokemon_tcg_api'
+            AND NULLIF(BTRIM(COALESCE(image_large_url, image_small_url, '')), '') IS NOT NULL
+        ) AS "cardImageCount",
+        (
+          SELECT COUNT(*)::int
+          FROM card_printings
+          WHERE provider_ids ? 'pokemon_tcg_api'
+            AND jsonb_typeof(variant_metadata->'availablePrices') = 'array'
+            AND jsonb_array_length(variant_metadata->'availablePrices') > 0
+        ) AS "cardVariantMetadataCount",
+        (
+          SELECT COUNT(*)::int
+          FROM sealed_products
+          WHERE NULLIF(BTRIM(COALESCE(image_url, '')), '') IS NOT NULL
+        ) AS "sealedImageCount"
     `,
     prisma.$queryRaw<PricingCoverageRow[]>`
       SELECT COUNT(DISTINCT card_printing_id)::int AS "pricedCardCount"
@@ -148,6 +176,8 @@ async function catalogueCounts() {
 
   return {
     cardCount: cardRows[0]?.count ?? 0,
+    cardImageCount: mediaCoverageRows[0]?.cardImageCount ?? 0,
+    cardVariantMetadataCount: mediaCoverageRows[0]?.cardVariantMetadataCount ?? 0,
     duplicateProviderIdCount: duplicateRows[0]?.count ?? 0,
     priceSnapshotCount,
     pricedCardCount: pricingCoverageRows[0]?.pricedCardCount ?? 0,
@@ -155,6 +185,7 @@ async function catalogueCounts() {
     pricingBySeries: pricingBySeriesRows.map(mapPricingBySeries),
     pricingBySource: pricingBySourceRows,
     sealedPricingByProductType: sealedPricingByProductTypeRows.map(mapSealedPricingByProductType),
+    sealedImageCount: mediaCoverageRows[0]?.sealedImageCount ?? 0,
     sealedPriceSnapshotCount: sealedPricingCoverageRows[0]?.sealedPriceSnapshotCount ?? 0,
     sealedProductCount,
     setCount,

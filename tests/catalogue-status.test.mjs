@@ -46,6 +46,8 @@ test("normalizes catalogue job result payloads", () => {
 test("summarizes catalogue status coverage and resume page", () => {
   const status = summarizeCatalogueStatus({
     cardCount: 4180,
+    cardImageCount: 4000,
+    cardVariantMetadataCount: 3650,
     duplicateProviderIdCount: 0,
     latestCatalogueResult: {
       complete: false,
@@ -81,6 +83,7 @@ test("summarizes catalogue status coverage and resume page", () => {
       },
     ],
     priceSnapshotCount: 690,
+    sealedImageCount: 10,
     sealedPricingByProductType: [
       {
         pricedSealedProductCount: 12,
@@ -97,12 +100,18 @@ test("summarizes catalogue status coverage and resume page", () => {
   });
 
   assert.equal(status.coveragePercent, 20.5);
+  assert.equal(status.cardImageCoveragePercent, 95.7);
+  assert.equal(status.cardMissingImageCount, 180);
+  assert.equal(status.cardVariantMetadataCoveragePercent, 87.3);
+  assert.equal(status.cardMissingVariantMetadataCount, 530);
   assert.equal(status.nextCataloguePage, 16);
   assert.equal(status.pricingCoveragePercent, 29.5);
   assert.equal(status.providerTotalCount, 20359);
   assert.equal(status.pricedCardCount, 1234);
   assert.equal(status.pricedSealedProductCount, 12);
   assert.equal(status.sealedPriceSnapshotCount, 14);
+  assert.equal(status.sealedImageCoveragePercent, 100);
+  assert.equal(status.sealedMissingImageCount, 0);
   assert.equal(status.sealedPricingCoveragePercent, 100);
   assert.equal(status.latestPricingResult?.pricingSnapshotsCreated, 70);
   assert.equal(status.latestSealedPricingResult?.pricingSnapshotsCreated, 0);

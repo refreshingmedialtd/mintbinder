@@ -1,10 +1,13 @@
 import type { CatalogueStatus } from "@/lib/jobs/catalogue-status-summary";
 
 export type CatalogueGapRecommendationType =
+  | "card_image_refresh"
   | "card_pricing"
   | "catalogue_resume"
   | "duplicate_review"
   | "sealed_pricing"
+  | "sealed_image_refresh"
+  | "variant_metadata_refresh"
   | "healthy";
 
 export type CatalogueGapRecommendation = {
@@ -52,6 +55,36 @@ export function catalogueGapRecommendations(status: CatalogueStatus): CatalogueG
     });
   }
 
+  if (status.cardMissingImageCount > 0) {
+    recommendations.push({
+      detail: `${status.cardMissingImageCount} Pokemon TCG card${status.cardMissingImageCount === 1 ? "" : "s"} are missing image URLs, with ${formatPercent(status.cardImageCoveragePercent)} image coverage.`,
+      id: "card-image-gaps",
+      priority: status.cardMissingImageCount >= 100 || (status.cardImageCoveragePercent ?? 100) < 90 ? "high" : "medium",
+      title: "Fill card image gaps",
+      type: "card_image_refresh",
+    });
+  }
+
+  if (status.sealedMissingImageCount > 0) {
+    recommendations.push({
+      detail: `${status.sealedMissingImageCount} sealed product${status.sealedMissingImageCount === 1 ? "" : "s"} are missing image URLs, with ${formatPercent(status.sealedImageCoveragePercent)} image coverage.`,
+      id: "sealed-image-gaps",
+      priority: status.sealedMissingImageCount >= 25 || (status.sealedImageCoveragePercent ?? 100) < 70 ? "medium" : "low",
+      title: "Fill sealed image gaps",
+      type: "sealed_image_refresh",
+    });
+  }
+
+  if (status.cardMissingVariantMetadataCount > 0) {
+    recommendations.push({
+      detail: `${status.cardMissingVariantMetadataCount} card${status.cardMissingVariantMetadataCount === 1 ? "" : "s"} have no detected TCGPlayer variant metadata, with ${formatPercent(status.cardVariantMetadataCoveragePercent)} variant metadata coverage.`,
+      id: "card-variant-metadata-gaps",
+      priority: status.cardMissingVariantMetadataCount >= 500 || (status.cardVariantMetadataCoveragePercent ?? 100) < 60 ? "medium" : "low",
+      title: "Backfill variant metadata",
+      type: "variant_metadata_refresh",
+    });
+  }
+
   const cardGap = status.pricingBySeries.find((row) => row.unpricedCardCount > 0);
 
   if (cardGap) {
@@ -86,7 +119,7 @@ export function catalogueGapRecommendations(status: CatalogueStatus): CatalogueG
     });
   }
 
-  return recommendations.slice(0, 4);
+  return recommendations.slice(0, 5);
 }
 
 function formatPercent(value: number | null) {
