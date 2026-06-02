@@ -157,8 +157,7 @@ export function normalizeCatalogueResult(value: unknown): CatalogueJobResult | n
   }
 
   const source = value as Record<string, unknown>;
-
-  return {
+  const result = {
     cardsFetched: nonNegativeNumber(source.cardsFetched),
     cardsUpserted: nonNegativeNumber(source.cardsUpserted),
     complete: typeof source.complete === "boolean" ? source.complete : undefined,
@@ -180,6 +179,8 @@ export function normalizeCatalogueResult(value: unknown): CatalogueJobResult | n
     totalCount: nonNegativeNumber(source.totalCount),
     writePrices: typeof source.writePrices === "boolean" ? source.writePrices : undefined,
   };
+
+  return Object.values(result).some((entry) => entry !== undefined) ? result : null;
 }
 
 export function percent(value: number, total: number) {

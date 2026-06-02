@@ -222,6 +222,7 @@ function latestUsefulCatalogueRun(runs: JobRunRecord[], query: string) {
     const result = normalizeCatalogueResult(run.resultPayload);
 
     return (
+      Boolean(result) &&
       (run.status === "succeeded" || hasCatalogueProgress(run.resultPayload)) &&
       (result?.query ?? "") === query
     );

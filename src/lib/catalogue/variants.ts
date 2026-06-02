@@ -83,7 +83,7 @@ export function latestPricePointForVariant(history: PricePoint[], variant?: stri
     .find((point) => normalizeVariantLabel(point.variantLabel) === normalizedVariant);
 }
 
-export function pokemonTcgImageUrlFromProviderIds(providerIds: unknown) {
+export function pokemonTcgImageUrlsFromProviderIds(providerIds: unknown) {
   const providerId = providerIdValue(providerIds, "pokemon_tcg_api");
 
   if (!providerId) {
@@ -99,7 +99,15 @@ export function pokemonTcgImageUrlFromProviderIds(providerIds: unknown) {
   const setId = providerId.slice(0, separatorIndex);
   const cardNumber = providerId.slice(separatorIndex + 1);
 
-  return `https://images.pokemontcg.io/${setId}/${cardNumber}_hires.png`;
+  return {
+    large: `https://images.pokemontcg.io/${setId}/${cardNumber}_hires.png`,
+    providerId,
+    small: `https://images.pokemontcg.io/${setId}/${cardNumber}.png`,
+  };
+}
+
+export function pokemonTcgImageUrlFromProviderIds(providerIds: unknown) {
+  return pokemonTcgImageUrlsFromProviderIds(providerIds)?.large;
 }
 
 export function displayVariantLabel(value: string) {

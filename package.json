@@ -10,6 +10,7 @@
     "test:auth": "node --experimental-strip-types --test tests/auth-roles.test.mjs",
     "test:batch": "node --test tests/catalogue-batch-options.test.mjs",
     "test:billing": "node --experimental-strip-types --test tests/billing-webhook.test.mjs",
+    "test:card-images": "node --experimental-strip-types --test tests/card-image-repair.test.mjs",
     "test:catalogue": "node --experimental-strip-types --test tests/catalogue-status.test.mjs",
     "test:catalogue-gaps": "node --experimental-strip-types --test tests/catalogue-gap-report.test.mjs",
     "test:jobs": "node --experimental-strip-types --test tests/job-runs.test.mjs",
@@ -27,6 +28,7 @@
     "db:seed": "prisma db seed",
     "job:catalogue-batch": "node scripts/run-catalogue-batch.mjs",
     "job:pricing-batch": "node scripts/run-pricing-batch.mjs",
+    "job:repair-card-images": "node scripts/repair-card-images.mjs",
     "job:sealed-tcgcsv": "node scripts/import-tcgcsv-sealed-products.mjs",
     "report:catalogue-gaps": "node scripts/report-catalogue-gaps.mjs"
   },

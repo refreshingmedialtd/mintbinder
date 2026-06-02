@@ -22,7 +22,7 @@ PokeStop is a working title for a Pokemon card and sealed product collection tra
 
 ## Next.js App
 
-The real app foundation lives in [src/](src/). The UI hydrates through local API routes, writes collection and wishlist changes through Prisma-backed handlers when a database is configured, and falls back to typed sample data when no database connection is active. Item detail views show valuation source, observed date, and recent price history when snapshots are available. Add/edit flows offer guided variant choices from imported Pokemon TCG metadata and variant-labelled price snapshots. The Operations screen can run controlled catalogue/pricing import jobs when you provide `JOB_SECRET`.
+The real app foundation lives in [src/](src/). The UI hydrates through local API routes, writes collection and wishlist changes through Prisma-backed handlers when a database is configured, and falls back to typed sample data when no database connection is active. Item detail views show valuation source, observed date, and recent price history when snapshots are available. Add/edit flows offer guided variant choices from imported Pokemon TCG metadata and variant-labelled price snapshots. The Operations screen can run controlled catalogue/pricing import jobs and card image repairs when you provide `JOB_SECRET`.
 
 Run it locally:
 
@@ -81,6 +81,8 @@ POKEMON_TCG_API_KEY=""
 POKEMON_TCG_QUERY=""
 POKEMON_TCG_USD_TO_GBP_RATE=""
 POKEMON_TCG_EUR_TO_GBP_RATE=""
+CARD_IMAGE_REPAIR_LIMIT="500"
+CARD_IMAGE_REPAIR_DRY_RUN="false"
 TCGCSV_SEALED_GROUP_IDS=""
 TCGCSV_SEALED_GROUP_LIMIT=""
 TCGCSV_USD_TO_GBP_RATE=""
@@ -122,6 +124,7 @@ Creating an account from the sign-in screen creates a new collector profile with
 - `POST /api/billing/webhook`: verifies Stripe webhook signatures and syncs Plus subscription status.
 - `POST /api/jobs/price-alerts`: sends or dry-runs Plus price alert email digests behind `JOB_SECRET`.
 - `POST /api/jobs/catalogue-refresh`: imports card catalogue pages from the Pokemon TCG API behind `JOB_SECRET`.
+- `POST /api/jobs/card-image-repair`: fills missing Pokemon TCG card image URLs from stored provider IDs behind `JOB_SECRET`.
 - `POST /api/jobs/pricing-refresh`: imports Pokemon TCG API prices as GBP snapshots behind `JOB_SECRET`.
 - `POST /api/jobs/sealed-pricing-refresh`: imports TCGCSV sealed products and GBP price snapshots behind `JOB_SECRET`.
 - `GET /api/jobs/catalogue-status`: reports local catalogue counts, import coverage, image/variant metadata coverage, duplicate provider ID health, and the next broad-import page behind `JOB_SECRET`.
@@ -144,7 +147,7 @@ For broader catalogue backfills, leave the query blank or use a broad Pokemon TC
 
 For local command-line backfills, set `JOB_SECRET`, `POKEMON_TCG_IMPORT_PAGE`, `POKEMON_TCG_IMPORT_PAGE_SIZE`, and `POKEMON_TCG_IMPORT_MAX_PAGES`, then run `npm run job:catalogue-batch`. Use `POKEMON_TCG_IMPORT_PAGE=auto` to resume from the latest matching catalogue-status page. The helper starts the built app, runs one catalogue job, prints the JSON result, and stops the server.
 
-Use `npm run report:catalogue-gaps` or the Operations export button to check local catalogue health, set-level count gaps, duplicate Pokemon TCG provider IDs, image coverage, variant metadata coverage, pricing-source mix, sealed product-type gaps, and recommended next actions. Pokemon TCG card image URLs can also be derived from provider IDs when imported image fields are blank. For command-line pricing refreshes, set `JOB_SECRET`, `POKEMON_TCG_USD_TO_GBP_RATE`, `POKEMON_TCG_PRICING_PAGE`, `POKEMON_TCG_PRICING_PAGE_SIZE`, `POKEMON_TCG_PRICING_MAX_PAGES`, and optionally `POKEMON_TCG_PRICING_QUERY`, then run `npm run job:pricing-batch`. Set `POKEMON_TCG_EUR_TO_GBP_RATE` to enable Cardmarket fallback prices and `POKEMON_TCG_PRICE_ONLY_UNPRICED=true` when enriching sparse segments without duplicating existing snapshots.
+Use `npm run report:catalogue-gaps` or the Operations export button to check local catalogue health, set-level count gaps, duplicate Pokemon TCG provider IDs, image coverage, variant metadata coverage, pricing-source mix, sealed product-type gaps, and recommended next actions. Pokemon TCG card image URLs can also be repaired from provider IDs in Operations or from the command line with `npm run job:repair-card-images`; set `CARD_IMAGE_REPAIR_LIMIT` and `CARD_IMAGE_REPAIR_DRY_RUN=true` for a smaller or preview-only run. For command-line pricing refreshes, set `JOB_SECRET`, `POKEMON_TCG_USD_TO_GBP_RATE`, `POKEMON_TCG_PRICING_PAGE`, `POKEMON_TCG_PRICING_PAGE_SIZE`, `POKEMON_TCG_PRICING_MAX_PAGES`, and optionally `POKEMON_TCG_PRICING_QUERY`, then run `npm run job:pricing-batch`. Set `POKEMON_TCG_EUR_TO_GBP_RATE` to enable Cardmarket fallback prices and `POKEMON_TCG_PRICE_ONLY_UNPRICED=true` when enriching sparse segments without duplicating existing snapshots.
 
 For sealed product catalogue imports, run `npm run job:sealed-tcgcsv`. The importer reads TCGCSV's cached TCGplayer Pokemon groups/products/prices, matches groups to local card sets, filters sealed products, and writes sealed-product price snapshots. Set `TCGCSV_SEALED_GROUP_IDS` to a comma-separated list of TCGplayer group IDs for a smaller import, `TCGCSV_USD_TO_GBP_RATE` to override the Pokemon USD rate, and `TCGCSV_SEALED_PRICE_ONLY_UNPRICED=true` to enrich only products that do not already have sealed prices.
 

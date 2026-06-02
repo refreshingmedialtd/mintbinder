@@ -128,12 +128,17 @@ type JobRunRecord = {
 
 type JobApiResult = {
   cardsFetched?: number;
+  cardsUpdated?: number;
+  candidatesChecked?: number;
   cardsUpserted?: number;
   complete?: boolean;
+  dryRun?: boolean;
   error?: string;
   groupsAvailable?: number;
   groupsMatched?: number;
   groupsProcessed?: number;
+  imageFieldsUpdated?: number;
+  job?: string;
   jobRun?: JobRunRecord;
   maxPages?: number;
   nextPage?: number | null;
@@ -144,6 +149,7 @@ type JobApiResult = {
   pricingSnapshotsCreated?: number;
   productsFetched?: number;
   query?: string;
+  repairableCards?: number;
   sealedProductsSkipped?: number;
   sealedProductsUpserted?: number;
   setsUpserted?: number;
@@ -3653,11 +3659,16 @@ function OperationsScreen({
 
     if (recommendation.type === "sealed_pricing") {
       await runJob("sealed");
+      return;
+    }
+
+    if (recommendation.type === "card_image_refresh") {
+      await runJob("image-repair");
     }
   }
 
   async function runJob(
-    kind: "catalogue" | "pricing" | "alerts" | "sealed",
+    kind: "catalogue" | "pricing" | "alerts" | "sealed" | "image-repair",
     override?: { maxPages?: number; page?: number; pageSize?: number; q?: string },
   ) {
     if (!jobSecret.trim()) {
@@ -3672,19 +3683,23 @@ function OperationsScreen({
           ? "/api/jobs/pricing-refresh"
           : kind === "sealed"
             ? "/api/jobs/sealed-pricing-refresh"
-            : "/api/jobs/price-alerts";
+            : kind === "image-repair"
+              ? "/api/jobs/card-image-repair"
+              : "/api/jobs/price-alerts";
     const body =
       kind === "alerts"
         ? { dryRun: true }
         : kind === "sealed"
           ? sealedJobBody()
-          : {
-            maxPages: override?.maxPages ?? maxPages,
-            page: override?.page ?? page,
-            pageSize: override?.pageSize ?? pageSize,
-            priceOnlyUnpriced: kind === "pricing" ? cardPriceOnlyUnpriced : undefined,
-            q: override?.q?.trim() || query.trim() || undefined,
-          };
+          : kind === "image-repair"
+            ? { dryRun: false, limit: 500 }
+            : {
+              maxPages: override?.maxPages ?? maxPages,
+              page: override?.page ?? page,
+              pageSize: override?.pageSize ?? pageSize,
+              priceOnlyUnpriced: kind === "pricing" ? cardPriceOnlyUnpriced : undefined,
+              q: override?.q?.trim() || query.trim() || undefined,
+            };
 
     setIsBusy(kind);
     try {
@@ -3939,6 +3954,10 @@ function OperationsScreen({
               <PackagePlus size={17} />
               {isBusy === "sealed" ? "Running" : "Sealed pricing"}
             </button>
+            <button className="button" disabled={Boolean(isBusy)} onClick={() => void runJob("image-repair")}>
+              <GalleryVerticalEnd size={17} />
+              {isBusy === "image-repair" ? "Running" : "Repair images"}
+            </button>
             <button className="button" disabled={Boolean(isBusy)} onClick={() => void runJob("alerts")}>
               <Mail size={17} />
               {isBusy === "alerts" ? "Running" : "Alert dry run"}
@@ -3991,7 +4010,13 @@ function OperationsScreen({
           {latestJobResult ? (
             <div className="job-result-summary">
               <div className="set-stat-row">
-                {latestJobResult.groupsProcessed !== undefined ? (
+                {latestJobResult.job === "card_image_repair" ? (
+                  <>
+                    <span>{latestJobResult.candidatesChecked ?? 0} checked</span>
+                    <span>{latestJobResult.cardsUpdated ?? 0} cards</span>
+                    <span>{latestJobResult.imageFieldsUpdated ?? 0} fields</span>
+                  </>
+                ) : latestJobResult.groupsProcessed !== undefined ? (
                   <>
                     <span>{latestJobResult.groupsProcessed} groups</span>
                     <span>{latestJobResult.sealedProductsUpserted ?? 0} sealed</span>
@@ -4003,7 +4028,11 @@ function OperationsScreen({
                     <span>{latestJobResult.cardsUpserted ?? 0} cards</span>
                   </>
                 )}
-                <span>{latestJobResult.pricingSnapshotsCreated ?? 0} prices</span>
+                {latestJobResult.job === "card_image_repair" ? (
+                  <span>{latestJobResult.repairableCards ?? 0} repairable</span>
+                ) : (
+                  <span>{latestJobResult.pricingSnapshotsCreated ?? 0} prices</span>
+                )}
                 {latestJobResult.complete !== undefined ? (
                   <span>{latestJobResult.complete ? "Complete" : `Next page ${latestJobResult.nextPage ?? "-"}`}</span>
                 ) : null}
@@ -5344,6 +5373,10 @@ function recommendationActionLabel(recommendation: CatalogueGapRecommendation) {
 
   if (recommendation.type === "sealed_pricing") {
     return "Run sealed";
+  }
+
+  if (recommendation.type === "card_image_refresh") {
+    return "Repair images";
   }
 
   return "";

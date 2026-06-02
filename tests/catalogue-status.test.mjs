@@ -40,6 +40,7 @@ test("normalizes catalogue job result payloads", () => {
 
   assert.equal(normalizeCatalogueResult({ pricingSnapshotsCreated: 0 })?.pricingSnapshotsCreated, 0);
   assert.equal(normalizeCatalogueResult(null), null);
+  assert.equal(normalizeCatalogueResult({ candidatesChecked: 20, job: "card_image_repair" }), null);
   assert.equal(normalizeCatalogueResult({ nextPage: null })?.nextPage, null);
 });
 
