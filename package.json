@@ -22,6 +22,7 @@
     "test:pricing": "node --experimental-strip-types --test tests/pokemon-tcg-pagination.test.mjs",
     "test:sealed-import": "node --test tests/tcgcsv-sealed-products.test.mjs",
     "test:sealed-images": "node --experimental-strip-types --test tests/sealed-image-repair.test.mjs",
+    "test:pricecharting-sealed": "node --test tests/pricecharting-sealed-pricing.test.mjs",
     "test:tcgcsv-card-pricing": "node --test tests/tcgcsv-card-pricing.test.mjs",
     "test:variant-metadata": "node --experimental-strip-types --test tests/variant-metadata-repair.test.mjs",
     "test:variants": "node --experimental-strip-types --test tests/catalogue-variants.test.mjs",
@@ -38,6 +39,7 @@
     "job:repair-sealed-images": "node scripts/repair-sealed-images.mjs",
     "job:repair-variant-metadata": "node scripts/repair-variant-metadata.mjs",
     "job:tcgcsv-card-pricing": "node scripts/import-tcgcsv-card-prices.mjs",
+    "job:pricecharting-sealed": "node scripts/import-pricecharting-sealed-prices.mjs",
     "job:sealed-tcgcsv": "node scripts/import-tcgcsv-sealed-products.mjs",
     "report:tcgcsv-card-targets": "node scripts/report-tcgcsv-card-targets.mjs",
     "report:catalogue-gaps": "node scripts/report-catalogue-gaps.mjs"

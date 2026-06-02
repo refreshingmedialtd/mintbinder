@@ -46,6 +46,7 @@ npm run test:billing
 npm run test:jobs
 npm run test:notifications
 npm run test:price-history
+npm run test:pricecharting-sealed
 npm run test:tcgcsv-card-pricing
 npm run qa:admin
 npm run build
@@ -101,6 +102,13 @@ TCGCSV_CARD_GROUP_IDS=""
 TCGCSV_CARD_GROUP_LIMIT=""
 TCGCSV_CARD_PRICE_ONLY_UNPRICED="true"
 TCGCSV_CARD_WRITE_PRICES="true"
+PRICECHARTING_API_TOKEN=""
+PRICECHARTING_USD_TO_GBP_RATE=""
+PRICECHARTING_SEALED_LIMIT="25"
+PRICECHARTING_SEALED_WAIT_MS="1100"
+PRICECHARTING_SEALED_PRICE_ONLY_UNPRICED="true"
+PRICECHARTING_SEALED_USE_NAME_SEARCH="true"
+PRICECHARTING_SEALED_WRITE_PRICES="true"
 ```
 
 Useful commands:
@@ -171,6 +179,8 @@ Use `npm run report:catalogue-gaps` or the Operations export button to check loc
 For TCGCSV card-pricing enrichment, run `npm run job:tcgcsv-card-pricing`. The importer reads TCGCSV's cached TCGplayer Pokemon groups/products/prices, matches groups to local card sets, matches card products by set/name/number, and writes card price snapshots with source `tcgcsv-card`. Set `TCGCSV_CARD_GROUP_IDS` to a comma-separated list of TCGplayer group IDs for a targeted run, `TCGCSV_USD_TO_GBP_RATE` to override the Pokemon USD rate, and `TCGCSV_CARD_PRICE_ONLY_UNPRICED=true` to enrich only cards without any existing price snapshot.
 
 For sealed product catalogue imports, run `npm run job:sealed-tcgcsv`. The importer reads TCGCSV's cached TCGplayer Pokemon groups/products/prices, matches groups to local card sets, filters sealed products, and writes sealed-product price snapshots. Set `TCGCSV_SEALED_GROUP_IDS` to a comma-separated list of TCGplayer group IDs for a smaller import, `TCGCSV_USD_TO_GBP_RATE` to override the Pokemon USD rate, and `TCGCSV_SEALED_PRICE_ONLY_UNPRICED=true` to enrich only products that do not already have sealed prices.
+
+For PriceCharting sealed-price enrichment, run `npm run job:pricecharting-sealed`. The importer uses the official PriceCharting Prices API, checks unpriced sealed products, searches by UPC first and then by conservative sealed-product name matching, and writes source `pricecharting-sealed` snapshots from the `new-price` field only. Set `PRICECHARTING_API_TOKEN`, keep `PRICECHARTING_SEALED_WAIT_MS=1100` or higher for the API rate limit, and use `PRICECHARTING_SEALED_LIMIT` for small controlled batches.
 
 ## Static Prototype
 

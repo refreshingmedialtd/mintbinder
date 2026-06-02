@@ -5844,6 +5844,10 @@ function priceSourceLabel(source?: string | null) {
     return "TCGCSV card";
   }
 
+  if (source === "pricecharting-sealed") {
+    return "PriceCharting sealed";
+  }
+
   return startCase(source);
 }
 
