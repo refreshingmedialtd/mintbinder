@@ -141,6 +141,8 @@ type JobApiResult = {
   cardsUpserted?: number;
   complete?: boolean;
   dryRun?: boolean;
+  duplicateCardCount?: number;
+  duplicateGroupCount?: number;
   error?: string;
   groupsAvailable?: number;
   groupsMatched?: number;
@@ -154,10 +156,14 @@ type JobApiResult = {
   page?: number;
   pageSize?: number;
   priceOnlyUnpriced?: boolean;
+  highRiskGroupCount?: number;
+  lowRiskGroupCount?: number;
   pagesProcessed?: number;
   pricingSnapshotsCreated?: number;
   productsFetched?: number;
   query?: string;
+  mediumRiskGroupCount?: number;
+  report?: string;
   repairableCards?: number;
   repairableProducts?: number;
   sealedProductsSkipped?: number;
@@ -3675,6 +3681,11 @@ function OperationsScreen({
       return;
     }
 
+    if (recommendation.type === "duplicate_review") {
+      await loadDuplicateProviderReview();
+      return;
+    }
+
     if (recommendation.type === "card_image_refresh") {
       await runJob("card-image-repair");
       return;
@@ -3807,6 +3818,38 @@ function OperationsScreen({
     } catch (error) {
       console.warn("Unable to export catalogue gaps.", error);
       showToast(error instanceof Error ? error.message : "Unable to export catalogue gaps.");
+      return false;
+    } finally {
+      setIsBusy("");
+    }
+  }
+
+  async function loadDuplicateProviderReview() {
+    if (!jobSecret.trim()) {
+      showToast("Job secret required.");
+      return false;
+    }
+
+    setIsBusy("duplicate-review");
+    try {
+      const response = await fetch("/api/jobs/duplicate-provider-review?limit=50", {
+        headers: jobHeaders(jobSecret),
+      });
+      const result = (await response.json()) as JobApiResult & { error?: string };
+
+      if (!response.ok) {
+        throw new Error(result.error ?? `Duplicate review failed with ${response.status}`);
+      }
+
+      setLastResult(result);
+      showToast("Duplicate provider review loaded.");
+      return true;
+    } catch (error) {
+      console.warn("Unable to review duplicate provider IDs.", error);
+      showToast(error instanceof Error ? error.message : "Unable to review duplicate provider IDs.");
+      if (error instanceof Error) {
+        setLastResult({ error: error.message });
+      }
       return false;
     } finally {
       setIsBusy("");
@@ -4039,6 +4082,10 @@ function OperationsScreen({
             <Download size={17} />
             {isBusy === "gap-export" ? "Exporting" : "Export gaps"}
           </button>
+          <button className="button" disabled={Boolean(isBusy)} onClick={() => void loadDuplicateProviderReview()}>
+            <Search size={17} />
+            {isBusy === "duplicate-review" ? "Loading" : "Review duplicates"}
+          </button>
         </section>
 
         <section className="tool-panel">
@@ -4049,7 +4096,13 @@ function OperationsScreen({
           {latestJobResult ? (
             <div className="job-result-summary">
               <div className="set-stat-row">
-                {latestJobResult.job === "card_image_repair" ? (
+                {latestJobResult.report === "duplicate_provider_review" ? (
+                  <>
+                    <span>{latestJobResult.duplicateGroupCount ?? 0} groups</span>
+                    <span>{latestJobResult.duplicateCardCount ?? 0} cards</span>
+                    <span>{latestJobResult.highRiskGroupCount ?? 0} high risk</span>
+                  </>
+                ) : latestJobResult.job === "card_image_repair" ? (
                   <>
                     <span>{latestJobResult.candidatesChecked ?? 0} checked</span>
                     <span>{latestJobResult.cardsUpdated ?? 0} cards</span>
@@ -4079,7 +4132,9 @@ function OperationsScreen({
                     <span>{latestJobResult.cardsUpserted ?? 0} cards</span>
                   </>
                 )}
-                {latestJobResult.job === "card_image_repair" ? (
+                {latestJobResult.report === "duplicate_provider_review" ? (
+                  <span>{latestJobResult.mediumRiskGroupCount ?? 0} medium</span>
+                ) : latestJobResult.job === "card_image_repair" ? (
                   <span>{latestJobResult.repairableCards ?? 0} repairable</span>
                 ) : latestJobResult.job === "sealed_image_repair" ? (
                   <span>{latestJobResult.repairableProducts ?? 0} repairable</span>
@@ -5418,6 +5473,10 @@ function jobTypeLabel(type: JobType) {
 }
 
 function recommendationActionLabel(recommendation: CatalogueGapRecommendation) {
+  if (recommendation.type === "duplicate_review") {
+    return "Review";
+  }
+
   if (recommendation.type === "catalogue_resume") {
     return "Resume";
   }
