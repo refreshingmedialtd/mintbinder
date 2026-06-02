@@ -27,7 +27,7 @@ The product is now feature-complete enough to validate the core idea with a smal
 
 1. Real database/admin QA
 
-   Run the app against a real local or staging PostgreSQL database with an admin user. Exercise Operations directly, including catalogue status, duplicate review, duplicate merge dry runs, and job run history.
+   Run the app against a real local or staging PostgreSQL database with an admin user. Use `npm run qa:admin` after migrations/seed to verify env settings, seeded admin access, core table counts, notification/subscription rows, duplicate provider health, and job-run availability. Exercise Operations directly, including catalogue status, duplicate review, duplicate merge dry runs, and job run history.
 
 2. Catalogue data completion
 
@@ -68,7 +68,7 @@ The product is now feature-complete enough to validate the core idea with a smal
 ## Recommended Order From Here
 
 1. Create a real local/staging admin QA environment.
-2. Run database-backed smoke tests through the Operations screen.
+2. Run `npm run qa:admin`, then run database-backed smoke tests through the Operations screen.
 3. Backfill catalogue data in batches and resolve duplicate provider IDs.
 4. Run image, variant metadata, and pricing repair/enrichment jobs.
 5. Verify Stripe and email integrations end to end.

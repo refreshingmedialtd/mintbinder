@@ -46,6 +46,7 @@ npm run test:billing
 npm run test:jobs
 npm run test:notifications
 npm run test:price-history
+npm run qa:admin
 npm run build
 npm audit --audit-level=moderate
 ```
@@ -103,6 +104,7 @@ npm run db:validate
 npm run db:generate
 npm run db:migrate -- --name init
 npm run db:seed
+npm run qa:admin
 ```
 
 The local sign-in flow uses Auth.js credentials with scrypt-hashed passwords. The seeded demo account is:

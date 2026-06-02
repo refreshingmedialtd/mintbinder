@@ -26,6 +26,7 @@
     "test:variants": "node --experimental-strip-types --test tests/catalogue-variants.test.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
+    "qa:admin": "node scripts/admin-qa-smoke.mjs",
     "db:validate": "prisma validate",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
