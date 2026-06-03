@@ -7,7 +7,12 @@ export type Entitlement =
   | "billing.portal";
 
 export type EntitlementResult = {
+  cancelAtPeriodEnd?: boolean;
+  currentPeriodEnd?: string;
   plan: "free" | "plus";
+  provider?: string;
+  providerSubscriptionId?: string;
+  status?: string;
   entitlements: Record<Entitlement, boolean>;
 };
 
@@ -21,7 +26,11 @@ export async function getEntitlements(userId: string): Promise<EntitlementResult
     where: { userId },
     orderBy: { updatedAt: "desc" },
     select: {
+      cancelAtPeriodEnd: true,
+      currentPeriodEnd: true,
       plan: true,
+      provider: true,
+      providerSubscriptionId: true,
       status: true,
     },
   });
@@ -31,7 +40,12 @@ export async function getEntitlements(userId: string): Promise<EntitlementResult
       subscription?.plan === SubscriptionPlan.PLUS_YEARLY);
 
   return {
+    cancelAtPeriodEnd: subscription?.cancelAtPeriodEnd ?? false,
+    currentPeriodEnd: subscription?.currentPeriodEnd?.toISOString(),
     plan: isPlus ? "plus" : "free",
+    provider: subscription?.provider,
+    providerSubscriptionId: subscription?.providerSubscriptionId ?? undefined,
+    status: subscription?.status,
     entitlements: {
       "billing.portal": isPlus,
       "exports.insurance_report": isPlus,

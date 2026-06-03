@@ -324,7 +324,10 @@ export const sampleAppData: AppData = {
   events: collectionEvents,
   source: "sample",
   subscription: {
+    cancelAtPeriodEnd: false,
     plan: "free",
+    provider: "square",
+    status: "ACTIVE",
     entitlements: {
       "billing.portal": false,
       "exports.insurance_report": false,

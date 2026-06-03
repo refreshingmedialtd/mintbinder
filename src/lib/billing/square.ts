@@ -21,6 +21,16 @@ type SquarePaymentLinkResponse = {
   };
 };
 
+type SquareRequestOptions = {
+  body?: unknown;
+  method?: "GET" | "POST" | "PUT";
+};
+
+type SquareSubscriptionResponse = {
+  errors?: SquareApiError[];
+  subscription?: SquareSubscriptionRecord;
+};
+
 type SquareApiError = {
   category?: string;
   code?: string;
@@ -32,6 +42,15 @@ export type SquareCustomer = {
   emailAddress?: string;
   id: string;
   referenceId?: string;
+};
+
+export type SquareSubscriptionRecord = {
+  canceled_date?: string | null;
+  charged_through_date?: string | null;
+  customer_id?: string | null;
+  id?: string | null;
+  plan_variation_id?: string | null;
+  status?: string | null;
 };
 
 export async function createSquareCustomer({
@@ -95,6 +114,24 @@ export async function retrieveSquareCustomer(customerId: string) {
     id: customer.id,
     referenceId: customer.reference_id,
   } satisfies SquareCustomer;
+}
+
+export async function retrieveSquareSubscription(subscriptionId: string) {
+  const response = await squareRequest<SquareSubscriptionResponse>(`/v2/subscriptions/${subscriptionId}`);
+
+  return response.subscription ?? null;
+}
+
+export async function cancelSquareSubscription(subscriptionId: string) {
+  const response = await squareRequest<SquareSubscriptionResponse>(`/v2/subscriptions/${subscriptionId}/cancel`, {
+    method: "POST",
+  });
+
+  if (!response.subscription?.id) {
+    throw new Error("Square did not return the cancelled subscription.");
+  }
+
+  return response.subscription;
 }
 
 export async function createSquareSubscriptionCheckout({
@@ -174,21 +211,22 @@ function squareLocationId() {
   return locationId;
 }
 
-async function squareRequest<T>(path: string, body?: unknown) {
+async function squareRequest<T>(path: string, bodyOrOptions?: unknown | SquareRequestOptions) {
   const accessToken = process.env.SQUARE_ACCESS_TOKEN?.trim();
+  const options = squareRequestOptions(bodyOrOptions);
 
   if (!accessToken) {
     throw new BillingConfigError("Square is not configured.");
   }
 
   const response = await fetch(`${squareApiBaseUrl()}${path}`, {
-    method: body ? "POST" : "GET",
+    method: options.method,
     headers: {
       authorization: `Bearer ${accessToken}`,
       "content-type": "application/json",
       "square-version": process.env.SQUARE_VERSION?.trim() || "2026-05-20",
     },
-    body: body ? JSON.stringify(body) : undefined,
+    body: options.body ? JSON.stringify(options.body) : undefined,
   });
   const data = (await response.json().catch(() => ({}))) as T & { errors?: SquareApiError[] };
 
@@ -201,6 +239,28 @@ async function squareRequest<T>(path: string, body?: unknown) {
   }
 
   return data;
+}
+
+function squareRequestOptions(bodyOrOptions?: unknown | SquareRequestOptions) {
+  if (isSquareRequestOptions(bodyOrOptions)) {
+    return {
+      body: bodyOrOptions.body,
+      method: bodyOrOptions.method ?? (bodyOrOptions.body ? "POST" : "GET"),
+    };
+  }
+
+  return {
+    body: bodyOrOptions,
+    method: bodyOrOptions ? "POST" : "GET",
+  };
+}
+
+function isSquareRequestOptions(value: unknown): value is SquareRequestOptions {
+  return Boolean(
+    value &&
+    typeof value === "object" &&
+    ("method" in value || "body" in value),
+  );
 }
 
 class SquareApiRequestError extends Error {

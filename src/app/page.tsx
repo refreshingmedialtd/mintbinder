@@ -71,6 +71,7 @@ import { sampleAppData } from "@/lib/sample-data";
 import type {
   AppData,
   AppDataSource,
+  AppSubscription,
   CatalogueItem,
   CollectionEvent,
   CollectionItem,
@@ -338,6 +339,7 @@ export default function Home() {
   const [storageLocations, setStorageLocations] = useState<StorageLocation[]>(sampleAppData.storageLocations);
   const [collectionEvents, setCollectionEvents] = useState<CollectionEvent[]>(sampleAppData.events);
   const [notificationPreferences, setNotificationPreferences] = useState<NotificationPreferences>(sampleAppData.notificationPreferences);
+  const [subscription, setSubscription] = useState<AppSubscription>(sampleAppData.subscription);
   const [dataSource, setDataSource] = useState<AppDataSource>(sampleAppData.source);
   const [dataNotice, setDataNotice] = useState(sampleAppData.notice ?? "");
   const [isLoadingData, setIsLoadingData] = useState(true);
@@ -376,6 +378,7 @@ export default function Home() {
     setStorageLocations(data.storageLocations);
     setCollectionEvents(data.events);
     setNotificationPreferences(data.notificationPreferences);
+    setSubscription(data.subscription);
     setDataSource(data.source);
     setDataNotice(data.notice ?? "");
     setAppState((current) => ({
@@ -1271,16 +1274,64 @@ export default function Home() {
   async function openBillingPortal() {
     try {
       const response = await fetch("/api/billing/portal", { method: "POST" });
-      const body = (await response.json()) as { error?: string; url?: string };
+      const body = (await response.json()) as {
+        error?: string;
+        message?: string;
+        subscription?: AppSubscription;
+        url?: string;
+      };
 
-      if (!response.ok || !body.url) {
+      if (!response.ok) {
         throw new Error(body.error ?? `Billing portal failed with ${response.status}`);
       }
 
-      window.location.assign(body.url);
+      if (body.subscription) {
+        setSubscription(body.subscription);
+      }
+
+      if (body.url) {
+        window.location.assign(body.url);
+        return;
+      }
+
+      showToast(body.message ?? "Billing is managed in PokeStop during beta.");
     } catch (error) {
       console.warn("Unable to open billing management.", error);
       showToast(error instanceof Error ? error.message : "Unable to open billing portal.");
+    }
+  }
+
+  async function cancelPlusSubscription() {
+    if (!window.confirm("Cancel Plus renewal? You will keep Plus until the paid period ends.")) {
+      return;
+    }
+
+    try {
+      const response = await fetch("/api/billing/subscription", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "cancel" }),
+      });
+      const body = (await response.json()) as {
+        error?: string;
+        message?: string;
+        subscription?: AppSubscription;
+      };
+
+      if (!response.ok || !body.subscription) {
+        throw new Error(body.error ?? `Billing update failed with ${response.status}`);
+      }
+
+      setSubscription(body.subscription);
+      setAppState((current) => ({
+        ...current,
+        plus: body.subscription?.plan === "plus",
+      }));
+      void refreshAppData({ quiet: true });
+      showToast(body.message ?? "Plus renewal cancelled.");
+    } catch (error) {
+      console.warn("Unable to cancel Plus renewal.", error);
+      showToast(error instanceof Error ? error.message : "Unable to cancel Plus renewal.");
     }
   }
 
@@ -1448,6 +1499,7 @@ export default function Home() {
     storageLocations,
     collectionEvents,
     notificationPreferences,
+    subscription,
     sets,
     dataSource,
     dataNotice,
@@ -1479,6 +1531,7 @@ export default function Home() {
     exportInsuranceReport,
     startPlusCheckout,
     openBillingPortal,
+    cancelPlusSubscription,
     updateNotificationPreferences,
     downloadImportTemplate,
     importCollectionCsv,
@@ -1522,6 +1575,7 @@ type ScreenContext = {
   storageLocations: StorageLocation[];
   collectionEvents: CollectionEvent[];
   notificationPreferences: NotificationPreferences;
+  subscription: AppSubscription;
   sets: SetProgress[];
   dataSource: AppDataSource;
   dataNotice: string;
@@ -1560,6 +1614,7 @@ type ScreenContext = {
   exportInsuranceReport: () => Promise<void>;
   startPlusCheckout: (plan: "monthly" | "yearly") => Promise<void>;
   openBillingPortal: () => Promise<void>;
+  cancelPlusSubscription: () => Promise<void>;
   updateNotificationPreferences: (preferences: NotificationPreferences) => Promise<boolean>;
   downloadImportTemplate: () => void;
   importCollectionCsv: (file: File) => Promise<boolean>;
@@ -4754,12 +4809,14 @@ function SettingsScreen({
   dataNotice,
   isLoadingData,
   notificationPreferences,
+  subscription,
   resetSampleData,
   storageLocations,
   createStorageLocation,
   deleteStorageLocation,
   exportCollectionCsv,
   exportInsuranceReport,
+  cancelPlusSubscription,
   openBillingPortal,
   startPlusCheckout,
   updateNotificationPreferences,
@@ -4785,11 +4842,13 @@ function SettingsScreen({
           title="Subscription"
           rows={[
             ["Plan", appState.plus ? "Plus" : "Free"],
-            ["Billing", appState.plus ? "Active sample state" : "Not connected"],
+            ["Billing", billingStatusLabel(subscription)],
           ]}
         />
         <BillingPanel
           plus={appState.plus}
+          subscription={subscription}
+          onCancelSubscription={cancelPlusSubscription}
           onOpenBillingPortal={openBillingPortal}
           onStartCheckout={startPlusCheckout}
         />
@@ -5158,13 +5217,21 @@ function PreferenceToggle({
 
 function BillingPanel({
   plus,
+  subscription,
+  onCancelSubscription,
   onOpenBillingPortal,
   onStartCheckout,
 }: {
   plus: boolean;
+  subscription: AppSubscription;
+  onCancelSubscription: () => Promise<void>;
   onOpenBillingPortal: () => Promise<void>;
   onStartCheckout: (plan: "monthly" | "yearly") => Promise<void>;
 }) {
+  const isSquare = subscription.provider === "square";
+  const canCancelSquareRenewal = plus && isSquare && Boolean(subscription.providerSubscriptionId) && !subscription.cancelAtPeriodEnd;
+  const periodLabel = billingPeriodLabel(subscription);
+
   return (
     <section className="tool-panel">
       <div className="panel-title-row">
@@ -5176,6 +5243,11 @@ function BillingPanel({
           ? "Your Plus tools are active. Manage renewals, cards, and invoices through billing settings."
           : "Upgrade when you want price-alert emails, insurance exports, and deeper collection analytics."}
       </p>
+      <div className="billing-status">
+        <span><CreditCard size={16} />{billingProviderLabel(subscription.provider)}</span>
+        <span><Check size={16} />{billingStatusLabel(subscription)}</span>
+        {periodLabel ? <span><RefreshCw size={16} />{periodLabel}</span> : null}
+      </div>
       <div className="billing-plan-grid">
         <article className="billing-plan">
           <div>
@@ -5205,10 +5277,16 @@ function BillingPanel({
         <span><Mail size={16} />Wishlist target digests</span>
       </div>
       <div className="actions">
-        <button className="button" onClick={() => void onOpenBillingPortal()}>
+        <button className="button" onClick={() => void onOpenBillingPortal()} disabled={!plus}>
           <Settings size={17} />
           Manage billing
         </button>
+        {canCancelSquareRenewal ? (
+          <button className="button danger" onClick={() => void onCancelSubscription()}>
+            <X size={17} />
+            Cancel renewal
+          </button>
+        ) : null}
       </div>
     </section>
   );
@@ -6283,6 +6361,58 @@ function eventSummary(event: CollectionEvent) {
   ].filter(Boolean);
 
   return parts.join(" | ");
+}
+
+function billingProviderLabel(provider?: string) {
+  if (provider === "stripe") {
+    return "Stripe";
+  }
+
+  if (provider === "square") {
+    return "Square";
+  }
+
+  return "Billing";
+}
+
+function billingStatusLabel(subscription: AppSubscription) {
+  if (subscription.cancelAtPeriodEnd) {
+    return "Renewal cancelled";
+  }
+
+  if (subscription.plan === "plus" && isActiveBillingStatus(subscription.status)) {
+    return "Active";
+  }
+
+  if (subscription.plan === "free" && !subscription.providerSubscriptionId) {
+    return "Not connected";
+  }
+
+  if (!subscription.status) {
+    return "Not connected";
+  }
+
+  return titleCaseBillingStatus(subscription.status);
+}
+
+function billingPeriodLabel(subscription: AppSubscription) {
+  if (!subscription.currentPeriodEnd) {
+    return "";
+  }
+
+  return `${subscription.cancelAtPeriodEnd ? "Access until" : "Renews"} ${formatEventDate(subscription.currentPeriodEnd)}`;
+}
+
+function isActiveBillingStatus(status?: string) {
+  return status === "ACTIVE" || status === "TRIALING";
+}
+
+function titleCaseBillingStatus(status: string) {
+  return status
+    .toLowerCase()
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
 function formatEventDate(value: string) {

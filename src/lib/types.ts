@@ -92,7 +92,12 @@ export type CollectionEvent = {
 export type AppDataSource = "database" | "sample";
 
 export type AppSubscription = {
+  cancelAtPeriodEnd?: boolean;
+  currentPeriodEnd?: string;
   plan: "free" | "plus";
+  provider?: string;
+  providerSubscriptionId?: string;
+  status?: string;
   entitlements: {
     "billing.portal": boolean;
     "exports.insurance_report": boolean;

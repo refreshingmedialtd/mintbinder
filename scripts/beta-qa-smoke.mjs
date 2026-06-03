@@ -106,6 +106,23 @@ export const betaQaChecks = [
     allowedJsonErrors: AUTH_REQUIRED,
   },
   {
+    id: "billing-subscription-auth-required",
+    gate: "Billing",
+    method: "GET",
+    path: "/api/billing/subscription",
+    expectedStatuses: [401],
+    allowedJsonErrors: AUTH_REQUIRED,
+  },
+  {
+    id: "billing-subscription-cancel-auth-required",
+    gate: "Billing",
+    method: "PATCH",
+    path: "/api/billing/subscription",
+    body: { action: "cancel" },
+    expectedStatuses: [401],
+    allowedJsonErrors: AUTH_REQUIRED,
+  },
+  {
     id: "catalogue-status-job-secret-required",
     gate: "Operations",
     method: "GET",

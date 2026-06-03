@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { getBillingCustomer } from "@/lib/billing/customers";
-import { BillingConfigError, billingErrorStatus } from "@/lib/billing/errors";
+import { billingErrorStatus } from "@/lib/billing/errors";
 import { activeBillingProvider } from "@/lib/billing/provider";
+import { getCurrentBillingSubscription } from "@/lib/billing/subscription-management";
 import { createStripePortalSession } from "@/lib/billing/stripe";
 
 export const dynamic = "force-dynamic";
@@ -25,11 +26,15 @@ export async function POST(request: Request) {
     if (provider === "square") {
       const manageUrl = process.env.SQUARE_CUSTOMER_PORTAL_URL?.trim();
 
-      if (!manageUrl) {
-        throw new BillingConfigError("Square billing management URL is not configured yet.");
+      if (manageUrl) {
+        return NextResponse.json({ provider, url: manageUrl });
       }
 
-      return NextResponse.json({ provider, url: manageUrl });
+      return NextResponse.json({
+        message: "Square billing is managed in PokeStop during beta.",
+        provider,
+        subscription: await getCurrentBillingSubscription(session.user.id),
+      });
     }
 
     const portalSession = await createStripePortalSession({
