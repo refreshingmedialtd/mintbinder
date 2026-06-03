@@ -231,6 +231,10 @@ function holdingFromItem(
   const valueMinor = ownedValueMinor(item, catalogueItem);
   const cost = item.purchasePriceMinor;
 
+  if (valueMinor === undefined) {
+    return undefined;
+  }
+
   return {
     id: item.id,
     catalogueId: item.catalogueId,
@@ -262,7 +266,7 @@ function duplicateInsights(
         lots: items.length,
         quantity: items.reduce((total, item) => total + item.quantity, 0),
         valueMinor: items.reduce(
-          (total, item) => total + (catalogueItem ? ownedValueMinor(item, catalogueItem) : 0),
+          (total, item) => total + (catalogueItem ? ownedValueMinor(item, catalogueItem) ?? 0 : 0),
           0,
         ),
       };
@@ -279,18 +283,19 @@ function wishlistDealInsights(
   return wishlist
     .map((item) => {
       const catalogueItem = catalogueById.get(item.catalogueId);
-      const targetPriceMinor = item.targetPriceMinor ?? catalogueItem?.valueMinor;
+      const currentValueMinor = catalogueItem ? catalogueMarketValueMinor(catalogueItem) : undefined;
+      const targetPriceMinor = item.targetPriceMinor ?? currentValueMinor;
 
-      if (!catalogueItem || targetPriceMinor === undefined || catalogueItem.valueMinor > targetPriceMinor) {
+      if (!catalogueItem || currentValueMinor === undefined || targetPriceMinor === undefined || currentValueMinor > targetPriceMinor) {
         return undefined;
       }
 
       return {
         id: item.id,
         name: catalogueItem.name,
-        currentValueMinor: catalogueItem.valueMinor,
+        currentValueMinor,
         targetPriceMinor,
-        savingMinor: targetPriceMinor - catalogueItem.valueMinor,
+        savingMinor: targetPriceMinor - currentValueMinor,
       };
     })
     .filter((item): item is WishlistOpportunity => Boolean(item))
@@ -311,13 +316,14 @@ function priceAlertInsights({
     .map<PriceAlertInsight | undefined>((item) => {
       const catalogueItem = catalogueById.get(item.catalogueId);
       const targetValueMinor = item.targetPriceMinor;
+      const currentValueMinor = catalogueItem ? catalogueMarketValueMinor(catalogueItem) : undefined;
 
-      if (!catalogueItem || targetValueMinor === undefined) {
+      if (!catalogueItem || currentValueMinor === undefined || targetValueMinor === undefined) {
         return undefined;
       }
 
-      const deltaMinor = catalogueItem.valueMinor - targetValueMinor;
-      const withinWatchBand = catalogueItem.valueMinor <= Math.round(targetValueMinor * 1.1);
+      const deltaMinor = currentValueMinor - targetValueMinor;
+      const withinWatchBand = currentValueMinor <= Math.round(targetValueMinor * 1.1);
 
       if (deltaMinor > 0 && !withinWatchBand) {
         return undefined;
@@ -332,7 +338,7 @@ function priceAlertInsights({
           deltaMinor <= 0
             ? `${catalogueItem.name} is at or below your target.`
             : `${catalogueItem.name} is within 10% of your target.`,
-        currentValueMinor: catalogueItem.valueMinor,
+        currentValueMinor,
         targetValueMinor,
         actionLabel: "Open wishlist",
       };
@@ -428,7 +434,7 @@ function portfolioMixInsights(
   const mix = collection.reduce(
     (total, item) => {
       const catalogueItem = catalogueById.get(item.catalogueId);
-      const value = catalogueItem ? ownedValueMinor(item, catalogueItem) : 0;
+      const value = catalogueItem ? ownedValueMinor(item, catalogueItem) ?? 0 : 0;
 
       if (catalogueItem?.type === "sealed") {
         total.sealed += value;
@@ -634,7 +640,7 @@ function valueTrend(collection: CollectionItem[], catalogueById: Map<string, Cat
 
       return {
         date: item.purchaseDate ? new Date(item.purchaseDate).getTime() : Date.now(),
-        valueMinor: catalogueItem ? ownedValueMinor(item, catalogueItem) : 0,
+        valueMinor: catalogueItem ? ownedValueMinor(item, catalogueItem) ?? 0 : 0,
       };
     })
     .filter((point) => point.valueMinor > 0)
@@ -655,7 +661,13 @@ function valueTrend(collection: CollectionItem[], catalogueById: Map<string, Cat
 }
 
 function ownedValueMinor(item: CollectionItem, catalogueItem: CatalogueItem) {
-  return item.overrideValueMinor ?? catalogueItem.valueMinor * item.quantity;
+  const marketValueMinor = catalogueMarketValueMinor(catalogueItem);
+
+  return item.overrideValueMinor ?? (marketValueMinor === undefined ? undefined : marketValueMinor * item.quantity);
+}
+
+function catalogueMarketValueMinor(catalogueItem: CatalogueItem) {
+  return catalogueItem.hasPrice ? catalogueItem.valueMinor : undefined;
 }
 
 function share(value: number, total: number) {

@@ -19,6 +19,7 @@ export type CollectionImportRow = {
   language: string;
   variant: string;
   paid: string;
+  overrideValue?: string;
   location: string;
   notes: string;
 };
@@ -77,6 +78,9 @@ export function parseCollectionImportCsv(csv: string): CollectionImportRow[] {
       const paid =
         field(record, ["paid", "purchase_price_gbp", "purchase_price"]) ||
         minorToMoney(field(record, ["purchase_price_minor"]));
+      const overrideValue =
+        field(record, ["override_value", "manual_value", "estimated_value_gbp", "estimated_value"]) ||
+        minorToMoney(field(record, ["override_value_minor", "estimated_value_minor"]));
 
       return {
         catalogueId: field(record, ["catalogue_id", "catalogueid", "catalogue_item_id"]),
@@ -85,6 +89,7 @@ export function parseCollectionImportCsv(csv: string): CollectionImportRow[] {
         language: field(record, ["language"]) || "English",
         variant: field(record, ["variant"]) || "Standard",
         paid,
+        overrideValue,
         location: field(record, ["location", "storage_location"]) || "Unassigned",
         notes: field(record, ["notes"]),
       };
@@ -107,6 +112,8 @@ const collectionExportColumns: Array<CsvColumn<CollectionExportRow>> = [
   { header: "grade", value: ({ owned }) => owned.grade },
   { header: "purchase_price_gbp", value: ({ owned }) => moneyValue(owned.purchasePriceMinor) },
   { header: "purchase_price_minor", value: ({ owned }) => owned.purchasePriceMinor },
+  { header: "manual_value_gbp", value: ({ owned }) => moneyValue(owned.overrideValueMinor) },
+  { header: "manual_value_minor", value: ({ owned }) => owned.overrideValueMinor },
   { header: "purchase_date", value: ({ owned }) => owned.purchaseDate },
   { header: "location", value: ({ owned }) => owned.location },
   {
@@ -129,6 +136,7 @@ const collectionImportColumns: Array<CsvColumn<CollectionImportRow>> = [
   { header: "language", value: (row) => row.language },
   { header: "variant", value: (row) => row.variant },
   { header: "paid", value: (row) => row.paid },
+  { header: "manual_value", value: (row) => row.overrideValue },
   { header: "location", value: (row) => row.location },
   { header: "notes", value: (row) => row.notes },
 ];
@@ -235,5 +243,5 @@ function ownedValueMinor(item: CollectionItem, catalogueItem?: CatalogueItem) {
     return undefined;
   }
 
-  return item.overrideValueMinor ?? catalogueItem.valueMinor * item.quantity;
+  return item.overrideValueMinor ?? (catalogueItem.hasPrice ? catalogueItem.valueMinor * item.quantity : undefined);
 }

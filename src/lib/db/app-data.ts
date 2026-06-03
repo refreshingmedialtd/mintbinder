@@ -46,6 +46,7 @@ export type CreateCollectionItemInput = {
   language?: string;
   variant?: string;
   paid?: string;
+  overrideValue?: string;
   location?: string;
   notes?: string;
 };
@@ -53,7 +54,6 @@ export type CreateCollectionItemInput = {
 export type UpdateCollectionItemInput = Omit<CreateCollectionItemInput, "catalogueId"> & {
   gradeCompany?: string;
   gradeScore?: string;
-  overrideValue?: string;
 };
 
 export type SellCollectionItemInput = {
@@ -254,6 +254,7 @@ export async function createCollectionItem(
   const itemType = cardPrinting ? PrismaItemType.CARD : PrismaItemType.SEALED_PRODUCT;
   const storageLocationId = await resolveStorageLocationId(userId, input.location);
   const paidMinor = parseMoneyToMinor(input.paid);
+  const overrideMinor = parseMoneyToMinor(input.overrideValue);
 
   const created = await prisma.collectionItem.create({
     data: {
@@ -268,6 +269,8 @@ export async function createCollectionItem(
       purchasePriceMinor: paidMinor,
       purchaseCurrency: paidMinor === undefined ? undefined : "GBP",
       purchaseDate: paidMinor === undefined ? undefined : new Date(),
+      currentValueOverrideMinor: overrideMinor,
+      currentValueOverrideCurrency: overrideMinor === undefined ? undefined : "GBP",
       storageLocationId,
       notes: input.notes || undefined,
       events: {
@@ -275,6 +278,8 @@ export async function createCollectionItem(
           userId,
           eventType: CollectionEventType.ADDED,
           quantity: Math.max(1, Number(input.quantity ?? 1)),
+          amountMinor: overrideMinor,
+          currency: overrideMinor === undefined ? undefined : "GBP",
           occurredAt: new Date(),
           notes: "Created from app API.",
           metadata: { source: "app_api" },
@@ -756,6 +761,7 @@ function mapCardPrintingToCatalogueItem(
     number: card.number,
     rarity: card.rarity ?? "Unknown",
     image,
+    hasPrice: Boolean(latestPrice),
     valueMinor: latestPrice?.valueMinor ?? 0,
     confidence: latestPrice?.confidence ?? "Weak",
     priceSource: latestPrice?.source,
@@ -790,6 +796,7 @@ function mapSealedProductToCatalogueItem(
     number: "Sealed",
     rarity: enumLabel(product.productType),
     image: product.imageUrl ?? undefined,
+    hasPrice: Boolean(latestPrice),
     valueMinor: latestPrice?.valueMinor ?? 0,
     confidence: latestPrice?.confidence ?? "Weak",
     priceSource: latestPrice?.source,

@@ -141,7 +141,7 @@ function ownedValueMinor(item: CollectionItem, catalogueItem?: CatalogueItem) {
     return undefined;
   }
 
-  return item.overrideValueMinor ?? catalogueItem.valueMinor * item.quantity;
+  return item.overrideValueMinor ?? (catalogueItem.hasPrice ? catalogueItem.valueMinor * item.quantity : undefined);
 }
 
 function formatMoney(valueMinor?: number | null) {

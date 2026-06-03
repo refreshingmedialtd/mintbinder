@@ -502,7 +502,7 @@ export default function Home() {
   const wishlistTotal = useMemo(() => {
     return wishlist.reduce((total, item) => {
       const catalogueItem = catalogueById.get(item.catalogueId);
-      return total + (item.targetPriceMinor ?? catalogueItem?.valueMinor ?? 0);
+      return total + (item.targetPriceMinor ?? (catalogueItem ? catalogueMarketValueMinor(catalogueItem) ?? 0 : 0));
     }, 0);
   }, [catalogueById, wishlist]);
 
@@ -549,6 +549,7 @@ export default function Home() {
         String(formData?.get("variant") ?? "") ||
         (catalogueItem.type === "sealed" ? "Factory sealed" : "Standard"),
       paid: String(formData?.get("paid") ?? ""),
+      overrideValue: String(formData?.get("overrideValue") ?? ""),
       location: String(formData?.get("location") ?? "Unassigned"),
       notes: String(formData?.get("notes") ?? ""),
     };
@@ -601,6 +602,7 @@ export default function Home() {
       purchasePriceMinor:
         paidValue !== undefined && Number.isFinite(paidValue) ? paidValue : undefined,
       purchaseDate: new Date().toISOString().slice(0, 10),
+      overrideValueMinor: moneyInputToMinor(payload.overrideValue),
       location: payload.location,
       notes: payload.notes,
     };
@@ -660,6 +662,7 @@ export default function Home() {
     }
 
     const relatedSet = sets.find((set) => set.id === relatedSetId);
+    const estimatedValueMinor = moneyInputToMinor(estimatedValue);
     const nextItem: CatalogueItem = {
       id: `manual-sealed-${Date.now()}`,
       type: "sealed",
@@ -667,8 +670,11 @@ export default function Home() {
       set: relatedSet?.name ?? "Sealed product",
       number: "Sealed",
       rarity: productType,
-      valueMinor: moneyInputToMinor(estimatedValue) ?? 0,
+      hasPrice: estimatedValueMinor !== undefined,
+      valueMinor: estimatedValueMinor ?? 0,
       confidence: "Weak",
+      priceSource: estimatedValueMinor === undefined ? undefined : "manual",
+      priceObservedAt: estimatedValueMinor === undefined ? undefined : new Date().toISOString(),
     };
 
     setCatalogueItems((items) => upsertCatalogueItem(items, nextItem));
@@ -712,13 +718,15 @@ export default function Home() {
       }
     }
 
+    const marketValueMinor = catalogueMarketValueMinor(catalogueItem);
+
     setWishlist((items) => [
       ...items,
       {
         id: `want-${Date.now()}`,
         catalogueId,
-        priority: catalogueItem.valueMinor > 10000 ? "Grail" : "High",
-        targetPriceMinor: catalogueItem.valueMinor,
+        priority: marketValueMinor !== null && marketValueMinor > 10000 ? "Grail" : "High",
+        targetPriceMinor: marketValueMinor ?? undefined,
         notes: "Added from set progress.",
       },
     ]);
@@ -1347,6 +1355,7 @@ export default function Home() {
         const importedItems = importableRows.map((row, index) => {
           const catalogueItem = catalogueById.get(row.catalogueId);
           const paidValue = moneyInputToMinor(row.paid);
+          const overrideValue = moneyInputToMinor(row.overrideValue);
 
           return {
             id: `owned-import-${importedAt}-${index}-${row.catalogueId}`,
@@ -1358,6 +1367,7 @@ export default function Home() {
             grade: catalogueItem?.type === "sealed" ? "N/A" : "Raw",
             purchasePriceMinor: paidValue,
             purchaseDate: paidValue === undefined ? undefined : new Date().toISOString().slice(0, 10),
+            overrideValueMinor: overrideValue,
             location: row.location,
             notes: row.notes || undefined,
           };
@@ -2537,6 +2547,9 @@ function AddScreen({
               <Field label="Paid">
                 <input name="paid" inputMode="decimal" placeholder="GBP 0.00" />
               </Field>
+              <Field label="Manual value">
+                <input name="overrideValue" inputMode="decimal" placeholder="GBP 0.00" />
+              </Field>
               <Field label="Location">
                 <select
                   name="location"
@@ -2872,12 +2885,12 @@ function ItemDetailScreen({
           <MetricPanel
             title="Value"
             rows={[
-              ["Estimated value", formatMoney(value)],
+              ["Estimated value", formatValuation(value)],
               ["Cost basis", formatMoney(cost)],
               ["Gain/loss", formatMoney(gain), gain !== null && gain >= 0 ? "positive" : ""],
-              ["Confidence", item.confidence],
-              ["Source", owned.overrideValueMinor ? "Manual override" : priceSourceLabel(item.priceSource)],
-              ["Market observed", item.priceObservedAt ? formatEventDate(item.priceObservedAt) : "Unknown"],
+              ["Confidence", valuationStatusLabel(item, owned)],
+              ["Source", valuationSourceLabel(item, owned)],
+              ["Market observed", valuationObservedLabel(item, owned)],
             ]}
           />
           <PriceTrendPanel item={item} overrideValueMinor={owned.overrideValueMinor} />
@@ -2985,7 +2998,7 @@ function SetDetailScreen({
   const rarityOptions = uniqueValues(setCards.map((item) => item.rarity)).sort((left, right) =>
     left.localeCompare(right),
   );
-  const setMarketValue = setCards.reduce((total, item) => total + item.valueMinor, 0);
+  const setMarketValue = setCards.reduce((total, item) => total + (catalogueMarketValueMinor(item) ?? 0), 0);
   const wantedCount = setCards.filter((item) => wishlist.some((entry) => entry.catalogueId === item.id)).length;
 
   const visibleCards = setCards.filter((item) => {
@@ -3092,7 +3105,7 @@ function SetDetailScreen({
                 </div>
                 <div className="tag-row">
                   <span className="tag blue">{item.rarity}</span>
-                  <span className="tag">{formatMoney(item.valueMinor)}</span>
+                  <span className="tag">{formatValuation(catalogueMarketValueMinor(item))}</span>
                 </div>
                 <div className="actions">
                   {owned ? (
@@ -3180,9 +3193,9 @@ function WishlistScreen({
               return null;
             }
             const isEditing = editingId === item.id;
-            const currentValue = catalogueItem.valueMinor;
+            const currentValue = catalogueMarketValueMinor(catalogueItem);
             const targetValue = item.targetPriceMinor ?? currentValue;
-            const delta = targetValue - currentValue;
+            const delta = currentValue === null || targetValue === null ? null : targetValue - currentValue;
 
             return (
               <article className="item-card" key={item.id}>
@@ -3231,9 +3244,9 @@ function WishlistScreen({
                     </form>
                   ) : (
                     <>
-                      <p className="item-value">Target {formatMoney(targetValue)}</p>
-                      <p className={delta >= 0 ? "positive item-note" : "muted item-note"}>
-                        {wishlistDeltaText(delta)}
+                      <p className="item-value">Target {formatValuation(targetValue)}</p>
+                      <p className={delta !== null && delta >= 0 ? "positive item-note" : "muted item-note"}>
+                        {delta === null ? "Needs market estimate" : wishlistDeltaText(delta)}
                       </p>
                       <p className="muted">{item.notes}</p>
                       <div className="actions">
@@ -5301,7 +5314,7 @@ function CollectionTable({
                 <td>{item.condition}</td>
                 <td>{item.quantity}</td>
                 <td>{formatMoney(item.purchasePriceMinor)}</td>
-                <td><strong>{formatMoney(getOwnedValue(item, catalogueItem))}</strong></td>
+                <td><strong>{formatValuation(getOwnedValue(item, catalogueItem))}</strong></td>
                 <td>{item.location}</td>
                 <td><button className="button" onClick={() => openItem(item.id)}>Open</button></td>
               </tr>
@@ -5335,14 +5348,14 @@ function OwnedItemCard({
             <h3>{catalogueItem.name}</h3>
             <p className="muted">{catalogueItem.set} | {catalogueItem.number}</p>
           </div>
-          <span className="confidence-pill">{catalogueItem.confidence}</span>
+          <span className={valuationPillClass(catalogueItem, item)}>{valuationStatusLabel(catalogueItem, item)}</span>
         </div>
         <div className="tag-row">
           <span className="tag">{item.condition}</span>
           <span className="tag">{item.language}</span>
           <span className="tag blue">Qty {item.quantity}</span>
         </div>
-        <p className="item-value">{formatMoney(getOwnedValue(item, catalogueItem))}</p>
+        <p className="item-value">{formatValuation(getOwnedValue(item, catalogueItem))}</p>
       </div>
     </button>
   );
@@ -5368,7 +5381,7 @@ function CatalogueResult({
           </div>
           <span className={selected ? "tag green" : "tag"}>{selected ? "Selected" : item.rarity}</span>
         </div>
-        <p className="item-value">{formatMoney(item.valueMinor)}</p>
+        <p className="item-value">{formatValuation(catalogueMarketValueMinor(item))}</p>
         {item.variantOptions?.length ? (
           <div className="tag-row">
             {item.variantOptions.slice(0, 3).map((option) => (
@@ -5392,7 +5405,7 @@ function CataloguePreview({ item }: { item: CatalogueItem }) {
         <p className="muted">{item.set} | {item.number}</p>
         <div className="tag-row">
           <span className="tag">{item.rarity}</span>
-          <span className="tag blue">{item.confidence}</span>
+          <span className={valuationTagClass(item)}>{valuationStatusLabel(item)}</span>
         </div>
         {variants.length ? (
           <div className="tag-row">
@@ -5553,6 +5566,7 @@ function PriceTrendPanel({
   const delta = latest && first ? latest.valueMinor - first.valueMinor : null;
   const source = latest?.source ?? item.priceSource;
   const observedAt = latest?.observedAt ?? item.priceObservedAt;
+  const latestMarketValue = latest?.valueMinor ?? catalogueMarketValueMinor(item);
 
   return (
     <section className="tool-panel">
@@ -5567,7 +5581,7 @@ function PriceTrendPanel({
       )}
       <MetricList
         rows={[
-          ["Latest market", formatMoney(latest?.valueMinor ?? item.valueMinor)],
+          ["Latest market", formatValuation(latestMarketValue)],
           ["Range", range ? `${formatMoney(range.low)} - ${formatMoney(range.high)}` : "Unknown"],
           [
             "Since first",
@@ -5575,10 +5589,10 @@ function PriceTrendPanel({
             delta !== null && delta >= 0 ? "positive" : "",
           ],
           ["Observed", observedAt ? formatEventDate(observedAt) : "Unknown"],
-          ["Source", priceSourceLabel(source)],
+          ["Source", item.hasPrice ? priceSourceLabel(source) : "No market source"],
           ...(overrideValueMinor === undefined
             ? []
-            : [["Displayed value", "Manual override"] as [string, ReactNode, string?]]),
+            : [["Displayed value", "Manual estimate"] as [string, ReactNode, string?]]),
         ]}
       />
     </section>
@@ -5615,7 +5629,61 @@ function getOwnedValue(item: CollectionItem, catalogueItem?: CatalogueItem) {
     return null;
   }
 
-  return item.overrideValueMinor ?? catalogueValueMinorForVariant(catalogueItem, item.variant) * item.quantity;
+  const marketValueMinor = catalogueMarketValueMinor(catalogueItem, item.variant);
+
+  return item.overrideValueMinor ?? (marketValueMinor === null ? null : marketValueMinor * item.quantity);
+}
+
+function catalogueMarketValueMinor(item: CatalogueItem, variant?: string) {
+  if (!item.hasPrice) {
+    return null;
+  }
+
+  return catalogueValueMinorForVariant(item, variant);
+}
+
+function formatValuation(valueMinor?: number | null) {
+  return valueMinor === null || valueMinor === undefined ? "Needs estimate" : formatMoney(valueMinor);
+}
+
+function valuationStatusLabel(item: CatalogueItem, owned?: CollectionItem) {
+  if (owned?.overrideValueMinor !== undefined) {
+    return "Manual";
+  }
+
+  return item.hasPrice ? item.confidence : "Needs estimate";
+}
+
+function valuationPillClass(item: CatalogueItem, owned?: CollectionItem) {
+  if (owned?.overrideValueMinor !== undefined) {
+    return "confidence-pill manual";
+  }
+
+  return item.hasPrice ? "confidence-pill" : "confidence-pill missing";
+}
+
+function valuationTagClass(item: CatalogueItem, owned?: CollectionItem) {
+  if (owned?.overrideValueMinor !== undefined) {
+    return "tag green";
+  }
+
+  return item.hasPrice ? "tag blue" : "tag amber";
+}
+
+function valuationSourceLabel(item: CatalogueItem, owned?: CollectionItem) {
+  if (owned?.overrideValueMinor !== undefined) {
+    return "Manual estimate";
+  }
+
+  return item.hasPrice ? priceSourceLabel(item.priceSource) : "Needs estimate";
+}
+
+function valuationObservedLabel(item: CatalogueItem, owned?: CollectionItem) {
+  if (owned?.overrideValueMinor !== undefined) {
+    return "Manual estimate";
+  }
+
+  return item.priceObservedAt ? formatEventDate(item.priceObservedAt) : "Unknown";
 }
 
 function gradeCompanyFromLabel(grade: string) {
@@ -5941,7 +6009,8 @@ function sortCatalogueItems(
   sort: CatalogueSort | SetDetailSort,
 ) {
   if (sort === "value-desc") {
-    return right.valueMinor - left.valueMinor || compareCatalogueNumbers(left.number, right.number);
+    return (catalogueMarketValueMinor(right) ?? -1) - (catalogueMarketValueMinor(left) ?? -1) ||
+      compareCatalogueNumbers(left.number, right.number);
   }
 
   if (sort === "name") {
@@ -5988,6 +6057,7 @@ function importPayload(row: CollectionImportRow) {
     language: row.language,
     variant: row.variant,
     paid: row.paid,
+    overrideValue: row.overrideValue ?? "",
     location: row.location,
     notes: row.notes,
   };

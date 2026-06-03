@@ -170,6 +170,18 @@ h3 {
   color: var(--accent-dark);
 }
 
+.confidence-pill.manual {
+  border-color: rgba(21, 128, 61, 0.2);
+  background: #dcfce7;
+  color: #166534;
+}
+
+.confidence-pill.missing {
+  border-color: rgba(217, 119, 6, 0.24);
+  background: #fef3c7;
+  color: #92400e;
+}
+
 .alert-pill {
   min-width: 42px;
   justify-content: center;
