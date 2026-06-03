@@ -16,6 +16,7 @@ export type HoldingInsight = {
   valueMinor: number;
   gainMinor: number | null;
   confidence: CatalogueItem["confidence"];
+  valuationSource: "market" | "manual";
 };
 
 export type DuplicateInsight = {
@@ -77,6 +78,17 @@ export type CollectionIntelligence = {
   weakConfidence: {
     count: number;
     valueMinor: number;
+  };
+  valuationCoverage: {
+    coveragePercent: number;
+    knownLots: number;
+    knownValueMinor: number;
+    manualLots: number;
+    manualValueMinor: number;
+    marketLots: number;
+    totalLots: number;
+    unvaluedLots: number;
+    unvaluedQuantity: number;
   };
   priceAlerts: PriceAlertInsight[];
   storageConcentration?: {
@@ -146,6 +158,7 @@ export function buildCollectionIntelligence({
       : collection.filter((item) => item.location && item.location !== "Unassigned").length /
         collection.length;
   const topHoldings = [...holdings].sort((left, right) => right.valueMinor - left.valueMinor).slice(0, 5);
+  const valuationCoverage = valuationCoverageInsight(collection, catalogueById);
   const bestPerformer = [...holdings]
     .filter((holding) => holding.gainMinor !== null)
     .sort((left, right) => (right.gainMinor ?? 0) - (left.gainMinor ?? 0))[0];
@@ -164,7 +177,7 @@ export function buildCollectionIntelligence({
   const duplicates = duplicateInsights(collection, catalogueById);
   const wishlistOpportunities = wishlistDealInsights(wishlist, catalogueById);
   const weakConfidence = holdings
-    .filter((holding) => holding.confidence === "Weak")
+    .filter((holding) => holding.valuationSource === "market" && holding.confidence === "Weak")
     .reduce(
       (total, holding) => ({
         count: total.count + 1,
@@ -187,12 +200,18 @@ export function buildCollectionIntelligence({
     duplicates,
     gradingCandidates,
     storageConcentration,
+    valuationCoverage,
     weakConfidence,
     wishlistOpportunities,
   });
   const healthScore = scoreCollection({
     costCoverage,
     storageCoverage,
+    manualValueShare: totalValue > 0 ? valuationCoverage.manualValueMinor / totalValue : 0,
+    unvaluedShare:
+      valuationCoverage.totalLots > 0
+        ? valuationCoverage.unvaluedLots / valuationCoverage.totalLots
+        : 0,
     weakConfidenceShare: totalValue > 0 ? weakConfidence.valueMinor / totalValue : 0,
     storageConcentrationShare: storageConcentration?.share ?? 0,
     actionCount: actionQueue.filter((action) => action.tone === "action").length,
@@ -210,6 +229,7 @@ export function buildCollectionIntelligence({
     duplicates,
     wishlistOpportunities,
     weakConfidence,
+    valuationCoverage,
     priceAlerts,
     storageConcentration,
     setFocus,
@@ -244,6 +264,7 @@ function holdingFromItem(
     valueMinor,
     gainMinor: cost === undefined ? null : valueMinor - cost,
     confidence: catalogueItem.confidence,
+    valuationSource: item.overrideValueMinor === undefined ? "market" : "manual",
   };
 }
 
@@ -345,7 +366,7 @@ function priceAlertInsights({
     })
     .filter(isPriceAlertInsight);
   const confidenceAlerts = holdings
-    .filter((holding) => holding.confidence === "Weak")
+    .filter((holding) => holding.valuationSource === "market" && holding.confidence === "Weak")
     .map((holding) => ({
       id: `confidence-${holding.id}`,
       itemName: holding.name,
@@ -385,6 +406,53 @@ function storageInsight(locations: StorageLocation[], totalValue: number) {
     share: Math.round((location.valueMinor / totalValue) * 100),
     valueMinor: location.valueMinor,
     totalQuantity: location.totalQuantity,
+  };
+}
+
+function valuationCoverageInsight(
+  collection: CollectionItem[],
+  catalogueById: Map<string, CatalogueItem>,
+): CollectionIntelligence["valuationCoverage"] {
+  const coverage = collection.reduce(
+    (total, item) => {
+      const catalogueItem = catalogueById.get(item.catalogueId);
+      const valueMinor = catalogueItem ? ownedValueMinor(item, catalogueItem) : undefined;
+
+      total.totalLots += 1;
+
+      if (valueMinor === undefined) {
+        total.unvaluedLots += 1;
+        total.unvaluedQuantity += item.quantity;
+        return total;
+      }
+
+      total.knownLots += 1;
+      total.knownValueMinor += valueMinor;
+
+      if (item.overrideValueMinor === undefined) {
+        total.marketLots += 1;
+      } else {
+        total.manualLots += 1;
+        total.manualValueMinor += valueMinor;
+      }
+
+      return total;
+    },
+    {
+      knownLots: 0,
+      knownValueMinor: 0,
+      manualLots: 0,
+      manualValueMinor: 0,
+      marketLots: 0,
+      totalLots: 0,
+      unvaluedLots: 0,
+      unvaluedQuantity: 0,
+    },
+  );
+
+  return {
+    ...coverage,
+    coveragePercent: share(coverage.knownLots, coverage.totalLots),
   };
 }
 
@@ -493,6 +561,7 @@ function buildActionQueue({
   duplicates,
   gradingCandidates,
   storageConcentration,
+  valuationCoverage,
   weakConfidence,
   wishlistOpportunities,
 }: {
@@ -500,10 +569,35 @@ function buildActionQueue({
   duplicates: DuplicateInsight[];
   gradingCandidates: HoldingInsight[];
   storageConcentration?: { name: string; share: number };
+  valuationCoverage: CollectionIntelligence["valuationCoverage"];
   weakConfidence: { count: number; valueMinor: number };
   wishlistOpportunities: WishlistOpportunity[];
 }): InsightAction[] {
   const actions: InsightAction[] = [];
+
+  if (valuationCoverage.unvaluedLots) {
+    actions.push({
+      id: "unvalued-lots",
+      category: "Valuation",
+      title: "Add missing estimates",
+      detail: `${valuationCoverage.unvaluedLots} lot${valuationCoverage.unvaluedLots === 1 ? "" : "s"} need a market price or manual estimate.`,
+      tone: "action",
+      impact: valuationCoverage.unvaluedLots >= 3 ? "High" : "Medium",
+      actionLabel: "Open unvalued",
+    });
+  }
+
+  if (valuationCoverage.manualLots) {
+    actions.push({
+      id: "manual-valuations",
+      category: "Valuation",
+      title: "Review manual estimates",
+      detail: `${valuationCoverage.manualLots} lot${valuationCoverage.manualLots === 1 ? "" : "s"} use manual valuation for ${formatInsightMoney(valuationCoverage.manualValueMinor)}.`,
+      tone: "watch",
+      impact: valuationCoverage.manualValueMinor >= 10000 ? "High" : "Medium",
+      actionLabel: "Review estimates",
+    });
+  }
 
   if (gradingCandidates.length) {
     actions.push({
@@ -588,16 +682,20 @@ function scoreCollection({
   costCoverage,
   storageConcentrationShare,
   storageCoverage,
+  manualValueShare,
   totalCost,
   totalValue,
+  unvaluedShare,
   weakConfidenceShare,
 }: {
   actionCount: number;
   costCoverage: number;
   storageConcentrationShare: number;
   storageCoverage: number;
+  manualValueShare: number;
   totalCost: number;
   totalValue: number;
+  unvaluedShare: number;
   weakConfidenceShare: number;
 }) {
   if (totalValue <= 0) {
@@ -610,6 +708,8 @@ function scoreCollection({
     costCoverage * 14 +
     storageCoverage * 12 +
     gainScore -
+    unvaluedShare * 20 -
+    manualValueShare * 5 -
     weakConfidenceShare * 18 -
     Math.max(0, storageConcentrationShare - 65) * 0.25 -
     actionCount * 3;
@@ -672,4 +772,11 @@ function catalogueMarketValueMinor(catalogueItem: CatalogueItem) {
 
 function share(value: number, total: number) {
   return total > 0 ? Math.round((value / total) * 100) : 0;
+}
+
+function formatInsightMoney(valueMinor: number) {
+  return `GBP ${(valueMinor / 100).toLocaleString("en-GB", {
+    maximumFractionDigits: 2,
+    minimumFractionDigits: 2,
+  })}`;
 }

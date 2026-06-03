@@ -90,7 +90,7 @@ type AppState = {
   collectionConditionFilter: string;
   collectionLanguageFilter: string;
   collectionLocationFilter: string;
-  collectionValueFilter: "all" | "profit" | "loss" | "unvalued" | "high";
+  collectionValueFilter: "all" | "profit" | "loss" | "unvalued" | "manual" | "weak" | "high";
   collectionSort: "value-desc" | "value-asc" | "name" | "set" | "gain-desc" | "quantity-desc" | "recent";
   collectionView: "list" | "grid";
   setFilter: "all" | "owned" | "missing" | "want";
@@ -2047,6 +2047,11 @@ function CollectionScreen({
           (appState.collectionValueFilter === "profit" && gain !== null && gain > 0) ||
           (appState.collectionValueFilter === "loss" && gain !== null && gain < 0) ||
           (appState.collectionValueFilter === "unvalued" && value === null) ||
+          (appState.collectionValueFilter === "manual" && item.overrideValueMinor !== undefined) ||
+          (appState.collectionValueFilter === "weak" &&
+            item.overrideValueMinor === undefined &&
+            catalogueItem.hasPrice &&
+            catalogueItem.confidence === "Weak") ||
           (appState.collectionValueFilter === "high" && value !== null && value >= 10000));
       const matchesSearch =
         !normalizedSearch ||
@@ -2292,6 +2297,8 @@ function CollectionScreen({
                   <option value="loss">Loss</option>
                   <option value="high">GBP 100+</option>
                   <option value="unvalued">Unknown value</option>
+                  <option value="manual">Manual values</option>
+                  <option value="weak">Weak confidence</option>
                 </select>
               </Field>
             </div>
@@ -3306,6 +3313,36 @@ function AlertsScreen({
       return;
     }
 
+    if (alert.id === "unvalued-lots") {
+      setAppState((current) => ({
+        ...current,
+        screen: "collection",
+        collectionFilter: "unknown",
+        collectionValueFilter: "unvalued",
+      }));
+      return;
+    }
+
+    if (alert.id === "manual-valuations") {
+      setAppState((current) => ({
+        ...current,
+        screen: "collection",
+        collectionFilter: "all",
+        collectionValueFilter: "manual",
+      }));
+      return;
+    }
+
+    if (alert.id === "weak-price-confidence") {
+      setAppState((current) => ({
+        ...current,
+        screen: "collection",
+        collectionFilter: "all",
+        collectionValueFilter: "weak",
+      }));
+      return;
+    }
+
     setAppState((current) => ({ ...current, screen: "collection", collectionFilter: "all" }));
   }
 
@@ -3314,6 +3351,7 @@ function AlertsScreen({
       ...current,
       screen: alert.category === "Wishlist" ? "wishlist" : "collection",
       collectionFilter: alert.category === "Wishlist" ? current.collectionFilter : "all",
+      collectionValueFilter: alert.category === "Wishlist" ? current.collectionValueFilter : "weak",
     }));
   }
 
@@ -3390,6 +3428,9 @@ function AlertsScreen({
         <MetricPanel
           title="Signal summary"
           rows={[
+            ["Valuation coverage", `${intelligence.valuationCoverage.coveragePercent}%`],
+            ["Needs estimate", intelligence.valuationCoverage.unvaluedLots],
+            ["Manual values", intelligence.valuationCoverage.manualLots],
             ["Wishlist hits", intelligence.wishlistOpportunities.length],
             ["Grading candidates", intelligence.gradingCandidates.length],
             ["Duplicate reviews", intelligence.duplicates.length],
@@ -3485,7 +3526,7 @@ function AnalyticsScreen({
       <PageHeader title="Analytics" action={<span className="plan-pill"><Sparkles size={17} />Plus active</span>} />
       <div className="stats-grid">
         <StatCard label="Health score" value={`${intelligence.healthScore}/100`} note={intelligence.healthLabel} />
-        <StatCard label="Current value" value={formatMoney(summary.value)} note={`${summary.items} tracked items`} />
+        <StatCard label="Current value" value={formatMoney(summary.value)} note={`${intelligence.valuationCoverage.coveragePercent}% valued`} />
         <StatCard label="Gain/loss" value={formatMoney(gain)} note="Against known cost" positive={gain >= 0} />
         <StatCard
           label="Sales"
@@ -3512,6 +3553,9 @@ function AnalyticsScreen({
           title="Collection review"
           rows={[
             ["Best performer", intelligence.bestPerformer ? gainLabel(intelligence.bestPerformer) : "Add purchase prices"],
+            ["Valuation coverage", `${intelligence.valuationCoverage.knownLots} / ${intelligence.valuationCoverage.totalLots} lots`],
+            ["Needs estimate", `${intelligence.valuationCoverage.unvaluedLots} lots`],
+            ["Manual values", `${intelligence.valuationCoverage.manualLots} lots`],
             ["Weak prices", `${intelligence.weakConfidence.count} holdings`],
             ["Grading candidates", intelligence.gradingCandidates.length],
             ["Set focus", intelligence.setFocus ? `${intelligence.setFocus.name} (${intelligence.setFocus.remaining} left)` : "No sets loaded"],
