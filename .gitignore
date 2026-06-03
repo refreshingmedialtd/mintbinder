@@ -26,6 +26,7 @@ pnpm-debug.log*
 Thumbs.db
 .vscode/
 .idea/
+.local-tunnel/
 
 # App data generated during local development
 *.sqlite

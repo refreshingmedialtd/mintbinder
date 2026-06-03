@@ -72,7 +72,18 @@ export async function createSquareCustomer({
 }
 
 export async function retrieveSquareCustomer(customerId: string) {
-  const response = await squareRequest<SquareCustomerResponse>(`/v2/customers/${customerId}`);
+  let response: SquareCustomerResponse;
+
+  try {
+    response = await squareRequest<SquareCustomerResponse>(`/v2/customers/${customerId}`);
+  } catch (error) {
+    if (isSquareNotFoundError(error)) {
+      return null;
+    }
+
+    throw error;
+  }
+
   const customer = response.customer;
 
   if (!customer?.id) {
@@ -182,10 +193,26 @@ async function squareRequest<T>(path: string, body?: unknown) {
   const data = (await response.json().catch(() => ({}))) as T & { errors?: SquareApiError[] };
 
   if (!response.ok) {
-    throw new Error(squareErrorMessage(data.errors) ?? `Square request failed with ${response.status}.`);
+    throw new SquareApiRequestError(
+      squareErrorMessage(data.errors) ?? `Square request failed with ${response.status}.`,
+      response.status,
+      data.errors,
+    );
   }
 
   return data;
+}
+
+class SquareApiRequestError extends Error {
+  errors?: SquareApiError[];
+  status: number;
+
+  constructor(message: string, status: number, errors?: SquareApiError[]) {
+    super(message);
+    this.errors = errors;
+    this.name = "SquareApiRequestError";
+    this.status = status;
+  }
 }
 
 function squareApiBaseUrl() {
@@ -199,6 +226,13 @@ function squareErrorMessage(errors?: SquareApiError[]) {
     ?.map((error) => error.detail || error.code)
     .filter(Boolean)
     .join(" ");
+}
+
+function isSquareNotFoundError(error: unknown) {
+  return (
+    error instanceof SquareApiRequestError &&
+    (error.status === 404 || error.errors?.some((entry) => entry.code === "NOT_FOUND"))
+  );
 }
 
 function positiveInteger(value: string | undefined, fallback: number) {
