@@ -1122,6 +1122,30 @@ h3 {
   margin: 0;
 }
 
+.alert-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+  gap: 6px 10px;
+  margin-top: 3px;
+}
+
+.alert-facts span {
+  display: grid;
+  gap: 2px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.35;
+}
+
+.alert-facts b {
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
 .job-run-row {
   align-items: center;
 }

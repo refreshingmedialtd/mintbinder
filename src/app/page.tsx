@@ -3400,10 +3400,15 @@ function AlertsScreen({
                     <span className="tag">{alert.category}</span>
                   </div>
                   <strong>{alert.itemName}</strong>
-                  <p className="muted">
-                    {alert.detail} Current {formatMoney(alert.currentValueMinor)}
-                    {alert.targetValueMinor === undefined ? "" : ` | Target ${formatMoney(alert.targetValueMinor)}`}
-                  </p>
+                  <p className="muted">{alert.detail}</p>
+                  <div className="alert-facts">
+                    {priceAlertFacts(alert).map(([label, value]) => (
+                      <span key={label}>
+                        <b>{label}</b>
+                        {value}
+                      </span>
+                    ))}
+                  </div>
                 </div>
                 <button className="button" onClick={() => openPriceAlert(alert)}>
                   {alert.actionLabel}
@@ -5843,6 +5848,31 @@ function jobStatusClass(status: JobStatus) {
   }
 
   return "blue";
+}
+
+function priceAlertFacts(alert: CollectionIntelligence["priceAlerts"][number]) {
+  const facts: Array<[string, string]> = [
+    ["Reason", alert.explanation],
+    ["Current", formatMoney(alert.currentValueMinor)],
+  ];
+
+  if (alert.targetValueMinor !== undefined) {
+    facts.push(["Target", formatMoney(alert.targetValueMinor)]);
+  }
+
+  if (alert.status === "Watch" && alert.watchBandMinor !== undefined) {
+    facts.push(["Watch band", formatMoney(alert.watchBandMinor)]);
+  }
+
+  if (alert.priceSource) {
+    facts.push(["Source", priceSourceLabel(alert.priceSource)]);
+  }
+
+  if (alert.priceObservedAt) {
+    facts.push(["Observed", formatEventDate(alert.priceObservedAt)]);
+  }
+
+  return facts;
 }
 
 function jobTypeLabel(type: JobType) {

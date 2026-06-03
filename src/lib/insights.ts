@@ -16,6 +16,8 @@ export type HoldingInsight = {
   valueMinor: number;
   gainMinor: number | null;
   confidence: CatalogueItem["confidence"];
+  priceObservedAt?: string;
+  priceSource?: string;
   valuationSource: "market" | "manual";
 };
 
@@ -41,8 +43,13 @@ export type PriceAlertInsight = {
   category: "Wishlist" | "Price confidence";
   status: "Hit" | "Watch" | "Refresh";
   detail: string;
+  explanation: string;
   currentValueMinor: number;
+  deltaMinor?: number;
+  priceObservedAt?: string;
+  priceSource?: string;
   targetValueMinor?: number;
+  watchBandMinor?: number;
   actionLabel: string;
 };
 
@@ -265,6 +272,8 @@ function holdingFromItem(
     valueMinor,
     gainMinor: cost === undefined ? null : valueMinor - cost,
     confidence: catalogueItem.confidence,
+    priceObservedAt: catalogueItem.priceObservedAt,
+    priceSource: catalogueItem.priceSource,
     valuationSource: item.overrideValueMinor === undefined ? "market" : "manual",
   };
 }
@@ -345,7 +354,8 @@ function priceAlertInsights({
       }
 
       const deltaMinor = currentValueMinor - targetValueMinor;
-      const withinWatchBand = currentValueMinor <= Math.round(targetValueMinor * 1.1);
+      const watchBandMinor = Math.round(targetValueMinor * 1.1);
+      const withinWatchBand = currentValueMinor <= watchBandMinor;
 
       if (deltaMinor > 0 && !withinWatchBand) {
         return undefined;
@@ -360,8 +370,13 @@ function priceAlertInsights({
           deltaMinor <= 0
             ? `${catalogueItem.name} is at or below your target.`
             : `${catalogueItem.name} is within 10% of your target.`,
+        explanation: wishlistAlertExplanation(deltaMinor),
         currentValueMinor,
+        deltaMinor,
+        priceObservedAt: catalogueItem.priceObservedAt,
+        priceSource: catalogueItem.priceSource,
         targetValueMinor,
+        watchBandMinor,
         actionLabel: "Open wishlist",
       };
     })
@@ -374,7 +389,10 @@ function priceAlertInsights({
       category: "Price confidence" as const,
       status: "Refresh" as const,
       detail: `${holding.name} is using weak price confidence.`,
+      explanation: weakConfidenceAlertExplanation(holding),
       currentValueMinor: holding.valueMinor,
+      priceObservedAt: holding.priceObservedAt,
+      priceSource: holding.priceSource,
       actionLabel: "Review value",
     }));
 
@@ -389,6 +407,25 @@ function priceAlertInsights({
 
 function isPriceAlertInsight(value: PriceAlertInsight | undefined): value is PriceAlertInsight {
   return Boolean(value);
+}
+
+function wishlistAlertExplanation(deltaMinor: number) {
+  if (deltaMinor === 0) {
+    return "Current price exactly matches your target.";
+  }
+
+  if (deltaMinor < 0) {
+    return `${formatInsightMoney(Math.abs(deltaMinor))} below your target.`;
+  }
+
+  return `${formatInsightMoney(deltaMinor)} above target, inside the 10% watch band.`;
+}
+
+function weakConfidenceAlertExplanation(holding: HoldingInsight) {
+  const source = holding.priceSource ? ` from ${readableSource(holding.priceSource)}` : "";
+  const observed = holding.priceObservedAt ? ` observed ${formatInsightDate(holding.priceObservedAt)}` : "";
+
+  return `Weak confidence${source}${observed}; refresh pricing or add a manual estimate.`;
 }
 
 function storageInsight(locations: StorageLocation[], totalValue: number) {
@@ -787,4 +824,47 @@ function formatInsightMoney(valueMinor: number) {
     maximumFractionDigits: 2,
     minimumFractionDigits: 2,
   })}`;
+}
+
+function formatInsightDate(value: string) {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(date);
+}
+
+function readableSource(source: string) {
+  if (source === "pokemon-tcg-api") {
+    return "Pokemon TCG API";
+  }
+
+  if (source === "pokemon-tcg-api-cardmarket") {
+    return "Cardmarket";
+  }
+
+  if (source === "tcgcsv") {
+    return "TCGCSV";
+  }
+
+  if (source === "tcgcsv-card") {
+    return "TCGCSV card";
+  }
+
+  if (source === "pricecharting-sealed") {
+    return "PriceCharting sealed";
+  }
+
+  return source
+    .split(/[-_]/)
+    .filter(Boolean)
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(" ");
 }

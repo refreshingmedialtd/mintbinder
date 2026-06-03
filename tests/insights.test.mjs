@@ -13,6 +13,8 @@ function catalogueItem(overrides = {}) {
     hasPrice: true,
     valueMinor: 1000,
     confidence: "Strong",
+    priceObservedAt: "2026-06-01T00:00:00.000Z",
+    priceSource: "pokemon-tcg-api",
     ...overrides,
   };
 }
@@ -126,4 +128,72 @@ test("does not treat manual estimates as weak market confidence", () => {
   assert.equal(intelligence.weakConfidence.count, 0);
   assert.equal(intelligence.valuationCoverage.manualLots, 1);
   assert.equal(intelligence.valuationCoverage.manualNotesMissing, 0);
+});
+
+test("explains wishlist and weak-confidence price alerts", () => {
+  const hitCard = catalogueItem({
+    id: "target-hit",
+    name: "Target Hit",
+    priceSource: "tcgcsv-card",
+    valueMinor: 1000,
+  });
+  const watchCard = catalogueItem({
+    id: "target-watch",
+    name: "Target Watch",
+    valueMinor: 1000,
+  });
+  const outsideBandCard = catalogueItem({
+    id: "outside-band",
+    name: "Outside Band",
+    valueMinor: 1000,
+  });
+  const weakCard = catalogueItem({
+    id: "weak-market",
+    confidence: "Weak",
+    name: "Weak Market",
+    priceSource: "tcgcsv",
+    valueMinor: 2500,
+  });
+
+  const intelligence = buildCollectionIntelligence({
+    catalogueById: new Map(
+      [hitCard, watchCard, outsideBandCard, weakCard].map((item) => [item.id, item]),
+    ),
+    collection: [
+      collectionItem({
+        id: "owned-weak-market",
+        catalogueId: weakCard.id,
+      }),
+    ],
+    events: [],
+    sets: [],
+    storageLocations: [],
+    wishlist: [
+      { id: "wish-hit", catalogueId: hitCard.id, priority: "High", targetPriceMinor: 1200 },
+      { id: "wish-watch", catalogueId: watchCard.id, priority: "Medium", targetPriceMinor: 950 },
+      { id: "wish-outside", catalogueId: outsideBandCard.id, priority: "Low", targetPriceMinor: 800 },
+    ],
+  });
+
+  assert.deepEqual(
+    intelligence.priceAlerts.map((alert) => [alert.id, alert.status]),
+    [
+      ["wishlist-wish-hit", "Hit"],
+      ["wishlist-wish-watch", "Watch"],
+      ["confidence-owned-weak-market", "Refresh"],
+    ],
+  );
+
+  assert.equal(intelligence.priceAlerts[0].explanation, "GBP 2.00 below your target.");
+  assert.equal(intelligence.priceAlerts[0].deltaMinor, -200);
+  assert.equal(intelligence.priceAlerts[0].priceSource, "tcgcsv-card");
+  assert.equal(
+    intelligence.priceAlerts[1].explanation,
+    "GBP 0.50 above target, inside the 10% watch band.",
+  );
+  assert.equal(intelligence.priceAlerts[1].watchBandMinor, 1045);
+  assert.equal(
+    intelligence.priceAlerts[2].explanation,
+    "Weak confidence from TCGCSV observed 01 Jun 2026; refresh pricing or add a manual estimate.",
+  );
 });

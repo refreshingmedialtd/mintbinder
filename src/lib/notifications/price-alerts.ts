@@ -150,6 +150,7 @@ function buildPriceAlertDigestEmail({
         <td>${escapeHtml(alert.status)}</td>
         <td>${escapeHtml(alert.itemName)}</td>
         <td>${escapeHtml(alert.category)}</td>
+        <td>${escapeHtml(alert.explanation)}</td>
         <td>${escapeHtml(formatMoney(alert.currentValueMinor))}</td>
         <td>${escapeHtml(alert.targetValueMinor === undefined ? "-" : formatMoney(alert.targetValueMinor))}</td>
       </tr>`,
@@ -159,7 +160,10 @@ function buildPriceAlertDigestEmail({
     `Hi ${ownerName},`,
     "",
     "Your PokeStop price watchlist has new items to review:",
-    ...alerts.map((alert) => `- ${alert.status}: ${alert.itemName} (${formatMoney(alert.currentValueMinor)})`),
+    ...alerts.map(
+      (alert) =>
+        `- ${alert.status}: ${alert.itemName} (${formatMoney(alert.currentValueMinor)}) - ${alert.explanation}`,
+    ),
     "",
     "Open PokeStop to review your wishlist and price-confidence alerts.",
   ].join("\n");
@@ -176,6 +180,7 @@ function buildPriceAlertDigestEmail({
         <th align="left" style="border-bottom:1px solid #e5e7eb;padding:8px;">Status</th>
         <th align="left" style="border-bottom:1px solid #e5e7eb;padding:8px;">Item</th>
         <th align="left" style="border-bottom:1px solid #e5e7eb;padding:8px;">Type</th>
+        <th align="left" style="border-bottom:1px solid #e5e7eb;padding:8px;">Reason</th>
         <th align="left" style="border-bottom:1px solid #e5e7eb;padding:8px;">Current</th>
         <th align="left" style="border-bottom:1px solid #e5e7eb;padding:8px;">Target</th>
       </tr>
