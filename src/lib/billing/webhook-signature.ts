@@ -9,10 +9,28 @@ export type StripeWebhookEvent<T = unknown> = {
   };
 };
 
+export type SquareWebhookEvent<T = unknown> = {
+  data?: {
+    id?: string;
+    object?: T;
+    type?: string;
+  };
+  event_id?: string;
+  merchant_id?: string;
+  type: string;
+};
+
 export class StripeWebhookSignatureError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "StripeWebhookSignatureError";
+  }
+}
+
+export class SquareWebhookSignatureError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SquareWebhookSignatureError";
   }
 }
 
@@ -50,6 +68,30 @@ export function verifyStripeWebhookPayload({
   return JSON.parse(payload) as StripeWebhookEvent;
 }
 
+export function verifySquareWebhookPayload({
+  notificationUrl,
+  payload,
+  signatureHeader,
+  signatureKey,
+}: {
+  notificationUrl: string;
+  payload: string;
+  signatureHeader: string | null;
+  signatureKey: string;
+}): SquareWebhookEvent {
+  if (!signatureHeader) {
+    throw new SquareWebhookSignatureError("Missing Square signature header.");
+  }
+
+  const expectedSignature = signSquarePayload({ notificationUrl, payload, signatureKey });
+
+  if (!constantTimeEqualBase64(signatureHeader, expectedSignature)) {
+    throw new SquareWebhookSignatureError("No matching Square webhook signature.");
+  }
+
+  return JSON.parse(payload) as SquareWebhookEvent;
+}
+
 export function createStripeWebhookSignatureHeader({
   payload,
   secret,
@@ -60,6 +102,18 @@ export function createStripeWebhookSignatureHeader({
   timestamp?: number;
 }) {
   return `t=${timestamp},v1=${signStripePayload(payload, secret, timestamp)}`;
+}
+
+export function createSquareWebhookSignatureHeader({
+  notificationUrl,
+  payload,
+  signatureKey,
+}: {
+  notificationUrl: string;
+  payload: string;
+  signatureKey: string;
+}) {
+  return signSquarePayload({ notificationUrl, payload, signatureKey });
 }
 
 function parseStripeSignatureHeader(header: string) {
@@ -84,9 +138,30 @@ function signStripePayload(payload: string, secret: string, timestamp: number) {
     .digest("hex");
 }
 
+function signSquarePayload({
+  notificationUrl,
+  payload,
+  signatureKey,
+}: {
+  notificationUrl: string;
+  payload: string;
+  signatureKey: string;
+}) {
+  return createHmac("sha256", signatureKey)
+    .update(`${notificationUrl}${payload}`, "utf8")
+    .digest("base64");
+}
+
 function constantTimeEqual(left: string, right: string) {
   const leftBuffer = Buffer.from(left, "hex");
   const rightBuffer = Buffer.from(right, "hex");
+
+  return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function constantTimeEqualBase64(left: string, right: string) {
+  const leftBuffer = Buffer.from(left, "base64");
+  const rightBuffer = Buffer.from(right, "base64");
 
   return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
 }

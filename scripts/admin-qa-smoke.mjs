@@ -153,7 +153,7 @@ export function adminWarnings(adminEmail, adminUser) {
 
   return [
     ...(!isPlus
-      ? [`Admin QA user ${adminEmail} is not on an active Plus plan; complete Stripe/webhook QA before beta.`]
+      ? [`Admin QA user ${adminEmail} is not on an active Plus plan; complete billing/webhook QA before beta.`]
       : []),
     ...(adminUser._count?.storageLocations < 1
       ? [`Admin QA user ${adminEmail} has no storage locations.`]

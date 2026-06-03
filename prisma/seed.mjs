@@ -86,7 +86,7 @@ async function main() {
     create: {
       id: ids.subscription,
       userId: ids.user,
-      provider: "stripe",
+      provider: "square",
       plan: SubscriptionPlan.FREE,
       status: SubscriptionStatus.ACTIVE,
     },

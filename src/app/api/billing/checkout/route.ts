@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { getOrCreateStripeCustomer } from "@/lib/billing/customers";
+import { getOrCreateBillingCustomer } from "@/lib/billing/customers";
+import { billingErrorStatus } from "@/lib/billing/errors";
+import { activeBillingProvider } from "@/lib/billing/provider";
+import { createSquareSubscriptionCheckout } from "@/lib/billing/square";
 import {
-  billingErrorStatus,
   createStripeCheckoutSession,
 } from "@/lib/billing/stripe";
 
@@ -18,23 +20,33 @@ export async function POST(request: Request) {
 
     const body = await request.json().catch(() => ({})) as { plan?: string };
     const plan = body.plan === "yearly" ? "yearly" : "monthly";
-    const customerId = await getOrCreateStripeCustomer({
+    const customerId = await getOrCreateBillingCustomer({
       email: session.user.email,
       name: session.user.name,
       userId: session.user.id,
     });
-    const checkoutSession = await createStripeCheckoutSession({
-      customerId,
-      origin: requestOrigin(request),
-      plan,
-      userId: session.user.id,
-    });
+    const provider = activeBillingProvider();
+    const checkoutSession =
+      provider === "square"
+        ? await createSquareSubscriptionCheckout({
+            customerId,
+            email: session.user.email,
+            origin: requestOrigin(request),
+            plan,
+            userId: session.user.id,
+          })
+        : await createStripeCheckoutSession({
+            customerId,
+            origin: requestOrigin(request),
+            plan,
+            userId: session.user.id,
+          });
 
     if (!checkoutSession.url) {
-      throw new Error("Stripe did not return a checkout URL.");
+      throw new Error(`${provider === "square" ? "Square" : "Stripe"} did not return a checkout URL.`);
     }
 
-    return NextResponse.json({ url: checkoutSession.url });
+    return NextResponse.json({ provider, url: checkoutSession.url });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to start checkout.";
 

@@ -20,7 +20,7 @@ The recommended initial stack is:
 - Database: PostgreSQL.
 - ORM: Prisma.
 - Auth: managed auth or app-native email/password plus OAuth later.
-- Payments: Stripe.
+- Payments: Square by default, with Stripe retained as a fallback provider.
 - Storage: S3-compatible object storage for future owned-copy photos and exports.
 - Background jobs: scheduled workers for catalogue sync and price snapshots.
 
@@ -492,7 +492,7 @@ MVP can store confidence even if the first implementation uses a simple score.
 
 ### Milestone 5: Monetization
 
-- Stripe integration.
+- Square subscription integration.
 - Entitlements.
 - Plus gates.
 - Billing management.

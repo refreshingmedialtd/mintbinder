@@ -15,7 +15,7 @@ Recommended stack:
 - Database: PostgreSQL.
 - ORM: Prisma.
 - Auth: Auth.js or a managed auth provider if speed becomes more important than vendor independence.
-- Payments: Stripe.
+- Payments: Square by default, with Stripe retained as a fallback provider.
 - Background jobs: scheduled worker runner for catalogue sync and price snapshots.
 - File storage: S3-compatible storage for future uploads and generated reports.
 - Hosting: Vercel or similar for the web app, managed PostgreSQL for the database.
@@ -45,16 +45,16 @@ flowchart LR
     API["App API Layer"]
     DB["PostgreSQL"]
     Jobs["Background Jobs"]
-    Stripe["Stripe"]
+    Billing["Square / Stripe"]
     Providers["Catalogue/Pricing Providers"]
     Storage["Object Storage"]
 
     User --> Web
     Web --> API
     API --> DB
-    API --> Stripe
+    API --> Billing
     API --> Storage
-    Stripe --> API
+    Billing --> API
     Jobs --> DB
     Jobs --> Providers
     Jobs --> Storage
@@ -265,7 +265,7 @@ Initial API groups:
 
 - Create checkout session.
 - Create billing portal session.
-- Receive Stripe webhook.
+- Receive billing provider webhook.
 - Read entitlement state.
 
 ### Import And Export
@@ -295,7 +295,7 @@ Rules:
 
 - UI gates are for clarity.
 - API gates are for security.
-- Stripe webhooks update `subscriptions`.
+- Square or Stripe webhooks update `subscriptions`.
 - `subscriptions` determines active access.
 - Grace periods can be handled through `current_period_end`.
 
@@ -379,7 +379,7 @@ Minimum requirements:
 
 - Every user-owned query must scope by `user_id`.
 - Admin routes require explicit admin role.
-- Stripe webhooks require signature verification.
+- Billing webhooks require provider signature verification.
 - Environment secrets must never be committed.
 - CSV export requires authenticated ownership.
 - Public sharing must be opt-in.
@@ -390,7 +390,7 @@ Minimum requirements:
 MVP should include lightweight operational visibility:
 
 - Server error logging.
-- Stripe webhook logging.
+- Billing webhook logging.
 - Background job run logs.
 - Import error reporting.
 - Basic performance monitoring later.
@@ -451,8 +451,8 @@ Environment variables:
 
 - Database URL.
 - Auth secrets.
-- Stripe keys.
-- Stripe webhook secret.
+- Square access token, location ID, plan variation IDs, and webhook signature key.
+- Optional Stripe keys and Stripe webhook secret if using the fallback provider.
 - Storage credentials.
 - Provider API keys.
 
@@ -495,7 +495,7 @@ Recommended order once coding begins:
 9. Build set progress.
 10. Add CSV export.
 11. Add subscription entitlements.
-12. Add Stripe checkout and webhooks.
+12. Add Square checkout and webhooks.
 
 ## Open Architecture Decisions
 
@@ -515,9 +515,8 @@ Use this as the starting implementation choice:
 - PostgreSQL.
 - Prisma.
 - Auth.js unless managed auth is preferred for speed.
-- Stripe.
+- Square by default, with Stripe fallback retained.
 - Local provider abstraction for catalogue and pricing.
 - Web/PWA MVP first.
 
 This keeps the first build familiar, testable, and flexible without spending the project's early energy on infrastructure theatre.
-

@@ -1,3 +1,5 @@
+import { BillingConfigError, billingErrorStatus } from "@/lib/billing/errors";
+
 type StripeSessionResponse = {
   id: string;
   url?: string;
@@ -12,17 +14,7 @@ type StripeErrorResponse = {
     message?: string;
   };
 };
-
-export class BillingConfigError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "BillingConfigError";
-  }
-}
-
-export function billingErrorStatus(error: unknown) {
-  return error instanceof BillingConfigError ? 501 : 400;
-}
+export { BillingConfigError, billingErrorStatus };
 
 export async function createStripeCustomer({
   email,

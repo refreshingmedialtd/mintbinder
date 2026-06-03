@@ -1,11 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { SubscriptionPlan, SubscriptionStatus } from "@prisma/client";
 import {
+  planFromSquarePlanVariationId,
+  statusFromSquare,
+} from "../src/lib/billing/subscription-mapping.ts";
+import {
+  createSquareWebhookSignatureHeader,
   createStripeWebhookSignatureHeader,
+  verifySquareWebhookPayload,
   verifyStripeWebhookPayload,
 } from "../src/lib/billing/webhook-signature.ts";
 
 const secret = "whsec_test_secret";
+const squareSignatureKey = "square_signature_key";
+const squareNotificationUrl = "https://pokestop.example/api/billing/webhook";
 const timestamp = 1_800_000_000;
 const now = new Date(timestamp * 1000);
 const payload = JSON.stringify({
@@ -16,6 +25,23 @@ const payload = JSON.stringify({
   },
   id: "evt_test",
   type: "checkout.session.completed",
+});
+const squarePayload = JSON.stringify({
+  data: {
+    id: "sub_test",
+    object: {
+      subscription: {
+        customer_id: "customer_test",
+        id: "sub_test",
+        plan_variation_id: "square_monthly",
+        status: "ACTIVE",
+      },
+    },
+    type: "subscription",
+  },
+  event_id: "square_evt_test",
+  merchant_id: "merchant_test",
+  type: "subscription.updated",
 });
 
 test("accepts a Stripe webhook with a valid signature", () => {
@@ -50,3 +76,71 @@ test("rejects stale Stripe webhook timestamps", () => {
     /outside tolerance/,
   );
 });
+
+test("accepts a Square webhook with a valid signature", () => {
+  const signatureHeader = createSquareWebhookSignatureHeader({
+    notificationUrl: squareNotificationUrl,
+    payload: squarePayload,
+    signatureKey: squareSignatureKey,
+  });
+  const event = verifySquareWebhookPayload({
+    notificationUrl: squareNotificationUrl,
+    payload: squarePayload,
+    signatureHeader,
+    signatureKey: squareSignatureKey,
+  });
+
+  assert.equal(event.type, "subscription.updated");
+});
+
+test("rejects a tampered Square webhook payload", () => {
+  const signatureHeader = createSquareWebhookSignatureHeader({
+    notificationUrl: squareNotificationUrl,
+    payload: squarePayload,
+    signatureKey: squareSignatureKey,
+  });
+
+  assert.throws(
+    () =>
+      verifySquareWebhookPayload({
+        notificationUrl: squareNotificationUrl,
+        payload: squarePayload.replace("square_evt_test", "square_evt_tampered"),
+        signatureHeader,
+        signatureKey: squareSignatureKey,
+      }),
+    /No matching Square webhook signature/,
+  );
+});
+
+test("maps Square plans and statuses to local subscriptions", () => {
+  const previousMonthly = process.env.SQUARE_PLUS_MONTHLY_PLAN_VARIATION_ID;
+  const previousYearly = process.env.SQUARE_PLUS_YEARLY_PLAN_VARIATION_ID;
+
+  process.env.SQUARE_PLUS_MONTHLY_PLAN_VARIATION_ID = "square_monthly";
+  process.env.SQUARE_PLUS_YEARLY_PLAN_VARIATION_ID = "square_yearly";
+
+  try {
+    assert.equal(planFromSquarePlanVariationId("square_monthly"), SubscriptionPlan.PLUS_MONTHLY);
+    assert.equal(planFromSquarePlanVariationId("square_yearly"), SubscriptionPlan.PLUS_YEARLY);
+    assert.equal(
+      planFromSquarePlanVariationId("unknown", SubscriptionPlan.PLUS_YEARLY),
+      SubscriptionPlan.PLUS_YEARLY,
+    );
+    assert.equal(statusFromSquare("ACTIVE"), SubscriptionStatus.ACTIVE);
+    assert.equal(statusFromSquare("PAUSED"), SubscriptionStatus.PAST_DUE);
+    assert.equal(statusFromSquare("CANCELED"), SubscriptionStatus.CANCELED);
+    assert.equal(statusFromSquare(undefined), SubscriptionStatus.INCOMPLETE);
+  } finally {
+    restoreEnv("SQUARE_PLUS_MONTHLY_PLAN_VARIATION_ID", previousMonthly);
+    restoreEnv("SQUARE_PLUS_YEARLY_PLAN_VARIATION_ID", previousYearly);
+  }
+});
+
+function restoreEnv(key, value) {
+  if (value === undefined) {
+    delete process.env[key];
+    return;
+  }
+
+  process.env[key] = value;
+}

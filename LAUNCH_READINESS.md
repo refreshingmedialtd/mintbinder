@@ -17,7 +17,7 @@ The product is now feature-complete enough to validate the core idea with a smal
 - Wishlist flows with target prices, priorities, update/delete actions, and collection conversion.
 - Set progress, detail views, variant-aware card values, price history, analytics, action queues, and insurance report export.
 - CSV import/export and collection import templates.
-- Stripe checkout, billing portal, webhook verification, and subscription entitlement foundations.
+- Square checkout, webhook verification, subscription entitlement foundations, and retained Stripe fallback support.
 - Notification preferences and price-alert dry-run/email job support.
 - Operations dashboard for catalogue imports, pricing refreshes, sealed imports, job runs, status, gap reports, image repairs, variant metadata repairs, duplicate provider reviews, and guarded duplicate card merges.
 - Catalogue health reporting for coverage, pricing, sealed products, images, variants, duplicate provider IDs, and recommended next actions.
@@ -43,7 +43,7 @@ The product is now feature-complete enough to validate the core idea with a smal
 
 5. Billing verification
 
-   Complete Stripe test-mode checkout, portal, cancellation, renewal, and webhook flows. Confirm Plus gates behave correctly before and after webhook updates.
+   Complete Square sandbox checkout, subscription renewal/cancellation handling, invoice payment, and webhook flows. Confirm Plus gates behave correctly before and after webhook updates.
 
 6. Email and notification readiness
 
@@ -72,7 +72,7 @@ The product is now feature-complete enough to validate the core idea with a smal
 3. Run `npm run qa:admin`, then run database-backed smoke tests through the Operations screen.
 4. Backfill catalogue data in batches and resolve duplicate provider IDs.
 5. Run image, variant metadata, and pricing repair/enrichment jobs.
-6. Verify Stripe and email integrations end to end.
+6. Verify Square and email integrations end to end.
 7. Do a focused mobile UX polish pass.
 8. Add legal/brand/privacy pages.
 9. Configure production monitoring, backups, and deployment runbook.
@@ -88,7 +88,7 @@ Beta can start when:
 - Users can sign up, add cards/sealed products, edit collection items, use wishlist, and view value/set progress without relying on sample data.
 - Catalogue coverage is broad enough for modern Pokemon TCG collections, or gaps are clearly handled.
 - Pricing refreshes produce useful values for common card variants and sealed products.
-- Plus gates, Stripe checkout, portal, and webhook entitlement updates work in test mode.
+- Plus gates, Square checkout, billing management, and webhook entitlement updates work in sandbox mode.
 - Email notifications can be dry-run and sent safely.
 - Basic privacy/terms/non-affiliation pages exist.
 - There is a rollback or recovery plan for migrations and job failures.

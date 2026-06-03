@@ -457,7 +457,7 @@ export default function Home() {
     }
 
     if (billing === "success") {
-      showToast("Checkout complete. Waiting for Stripe confirmation.");
+      showToast("Checkout complete. Waiting for billing confirmation.");
       void refreshAppData({ quiet: true });
     } else if (billing === "cancelled") {
       showToast("Checkout cancelled.");
@@ -1263,7 +1263,7 @@ export default function Home() {
 
       window.location.assign(body.url);
     } catch (error) {
-      console.warn("Unable to start Stripe checkout.", error);
+      console.warn("Unable to start billing checkout.", error);
       showToast(error instanceof Error ? error.message : "Unable to start checkout.");
     }
   }
@@ -1279,7 +1279,7 @@ export default function Home() {
 
       window.location.assign(body.url);
     } catch (error) {
-      console.warn("Unable to open Stripe billing portal.", error);
+      console.warn("Unable to open billing management.", error);
       showToast(error instanceof Error ? error.message : "Unable to open billing portal.");
     }
   }
@@ -5173,7 +5173,7 @@ function BillingPanel({
       </div>
       <p className="muted">
         {plus
-          ? "Your Plus tools are active. Manage renewals, cards, and invoices through Stripe."
+          ? "Your Plus tools are active. Manage renewals, cards, and invoices through billing settings."
           : "Upgrade when you want price-alert emails, insurance exports, and deeper collection analytics."}
       </p>
       <div className="billing-plan-grid">
@@ -5207,7 +5207,7 @@ function BillingPanel({
       <div className="actions">
         <button className="button" onClick={() => void onOpenBillingPortal()}>
           <Settings size={17} />
-          Billing portal
+          Manage billing
         </button>
       </div>
     </section>

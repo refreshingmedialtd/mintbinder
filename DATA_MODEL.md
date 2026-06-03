@@ -77,15 +77,15 @@ Indexes:
 
 ### subscriptions
 
-Stores the current billing entitlement state. Stripe remains the billing source of truth, but the app reads from this table for gates and UI.
+Stores the current billing entitlement state. Square is the default billing source of truth, with Stripe retained as an optional fallback provider. The app reads from this table for gates and UI.
 
 | Column | Type | Notes |
 | --- | --- | --- |
 | id | uuid | Primary key. |
 | user_id | uuid | References `users.id`. |
-| provider | text | Usually `stripe`. |
-| provider_customer_id | text | Stripe customer ID. |
-| provider_subscription_id | text | Stripe subscription ID. |
+| provider | text | Usually `square`; `stripe` remains supported as a fallback. |
+| provider_customer_id | text | Provider customer ID. |
+| provider_subscription_id | text | Provider subscription ID. |
 | plan | subscription_plan | `free`, `plus_monthly`, `plus_yearly`. |
 | status | subscription_status | `active`, `trialing`, `past_due`, `canceled`, etc. |
 | current_period_end | timestamp | Used for access grace. |
@@ -577,4 +577,3 @@ Defer:
 - `price_alerts`
 - `user_reports`
 - `public_collection_shares`
-

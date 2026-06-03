@@ -39,7 +39,7 @@ test("warns when the admin user cannot exercise Plus or audit flows", () => {
       subscriptions: [{ plan: "FREE", status: "ACTIVE" }],
     }),
     [
-      "Admin QA user liam@example.com is not on an active Plus plan; complete Stripe/webhook QA before beta.",
+      "Admin QA user liam@example.com is not on an active Plus plan; complete billing/webhook QA before beta.",
       "Admin QA user liam@example.com has no storage locations.",
       "Admin QA user liam@example.com has no collection events.",
     ],

@@ -18,7 +18,7 @@ PokeStop is a working title for a Pokemon card and sealed product collection tra
 - PostgreSQL.
 - Prisma.
 - Auth.js or managed auth, depending on speed versus independence.
-- Stripe for subscriptions.
+- Square for subscriptions, with Stripe retained as an optional fallback provider.
 - Provider-agnostic catalogue and pricing integrations.
 
 ## Next.js App
@@ -77,6 +77,18 @@ AUTH_SECRET="replace-with-a-random-32-byte-secret"
 AUTH_URL="http://127.0.0.1:3000"
 AUTH_TRUST_HOST="true"
 NEXT_PUBLIC_APP_URL="http://127.0.0.1:3000"
+BILLING_PROVIDER="square"
+SQUARE_ENVIRONMENT="sandbox"
+SQUARE_ACCESS_TOKEN=""
+SQUARE_LOCATION_ID=""
+SQUARE_WEBHOOK_SIGNATURE_KEY=""
+SQUARE_WEBHOOK_NOTIFICATION_URL="http://127.0.0.1:3000/api/billing/webhook"
+SQUARE_PLUS_MONTHLY_PLAN_VARIATION_ID=""
+SQUARE_PLUS_YEARLY_PLAN_VARIATION_ID=""
+SQUARE_PLUS_MONTHLY_AMOUNT_MINOR="249"
+SQUARE_PLUS_YEARLY_AMOUNT_MINOR="2490"
+SQUARE_CURRENCY="GBP"
+SQUARE_CUSTOMER_PORTAL_URL=""
 STRIPE_SECRET_KEY=""
 STRIPE_PLUS_MONTHLY_PRICE_ID=""
 STRIPE_PLUS_YEARLY_PRICE_ID=""
@@ -152,9 +164,9 @@ Creating an account from the sign-in screen creates a new collector profile with
 - `GET/PATCH /api/notification-preferences`: reads or updates user email alert preferences.
 - `GET /api/alerts/price`: returns Plus-gated price alert insights.
 - `GET /api/reports/insurance`: exports a Plus-gated insurance-style HTML report.
-- `POST /api/billing/checkout`: creates a Stripe subscription Checkout session when Stripe env vars are configured.
-- `POST /api/billing/portal`: creates a Stripe billing portal session for users with a Stripe customer.
-- `POST /api/billing/webhook`: verifies Stripe webhook signatures and syncs Plus subscription status.
+- `POST /api/billing/checkout`: creates a Square-hosted Plus subscription checkout link when Square env vars are configured. Set `BILLING_PROVIDER=stripe` to use the retained Stripe fallback.
+- `POST /api/billing/portal`: returns a configured Square billing management URL, or creates a Stripe billing portal session when Stripe is the active provider.
+- `POST /api/billing/webhook`: verifies Square or Stripe webhook signatures and syncs Plus subscription status.
 - `POST /api/jobs/price-alerts`: sends or dry-runs Plus price alert email digests behind `JOB_SECRET`.
 - `POST /api/jobs/catalogue-refresh`: imports card catalogue pages from the Pokemon TCG API behind `JOB_SECRET`.
 - `POST /api/jobs/card-image-repair`: fills missing Pokemon TCG card image URLs from stored provider IDs behind `JOB_SECRET`.
@@ -170,11 +182,15 @@ Creating an account from the sign-in screen creates a new collector profile with
 
 ## Jobs and Integrations
 
-Stripe webhook fulfillment expects events for `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, and `customer.subscription.deleted`. The webhook URL is:
+Square billing is the default provider. In Square Developer, create or choose a sandbox app, copy its access token, choose the business location ID, create Plus monthly and yearly subscription plan variations, and add those plan variation IDs to `.env`. Configure a webhook subscription for this URL:
 
 ```text
 https://your-domain.example/api/billing/webhook
 ```
+
+Use Square events `subscription.created`, `subscription.updated`, and `invoice.payment_made`. Copy Square's webhook signature key into `SQUARE_WEBHOOK_SIGNATURE_KEY`, and set `SQUARE_WEBHOOK_NOTIFICATION_URL` to the exact URL configured in Square because signature validation depends on that exact value. Square does not provide the same built-in Stripe customer portal flow; set `SQUARE_CUSTOMER_PORTAL_URL` if you have a customer-facing billing management page, or manage early beta subscription changes in Square while we add a fuller in-app cancellation/update flow.
+
+Stripe remains available as a fallback by setting `BILLING_PROVIDER=stripe`. Stripe webhook fulfillment expects events for `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, and `customer.subscription.deleted`.
 
 Job routes accept either `Authorization: Bearer <JOB_SECRET>` or `x-job-secret: <JOB_SECRET>`. The in-app Operations screen is visible to admin users only, and the job secret is still required before any import or alert job can run. Each successful authenticated job request creates a `job_runs` record with input, result, status, timing, and errors. Catalogue and pricing refreshes accept `page`, `pageSize`, `q`, and `maxPages`; `maxPages` is capped at 20 per job so broad backfills can be resumed in controlled batches. Pricing refreshes convert Pokemon TCG API USD prices into GBP snapshots with `POKEMON_TCG_USD_TO_GBP_RATE`; when `POKEMON_TCG_EUR_TO_GBP_RATE` is also set, cards without TCGPlayer prices can fall back to embedded Cardmarket EUR prices. Keep conversion rates current before running pricing jobs.
 

@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { getStripeCustomer } from "@/lib/billing/customers";
-import { billingErrorStatus, createStripePortalSession } from "@/lib/billing/stripe";
+import { getBillingCustomer } from "@/lib/billing/customers";
+import { BillingConfigError, billingErrorStatus } from "@/lib/billing/errors";
+import { activeBillingProvider } from "@/lib/billing/provider";
+import { createStripePortalSession } from "@/lib/billing/stripe";
 
 export const dynamic = "force-dynamic";
 
@@ -13,10 +15,21 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Authentication required." }, { status: 401 });
     }
 
-    const customerId = await getStripeCustomer(session.user.id);
+    const provider = activeBillingProvider();
+    const customerId = await getBillingCustomer(session.user.id);
 
     if (!customerId) {
-      return NextResponse.json({ error: "No Stripe customer found. Start checkout first." }, { status: 400 });
+      return NextResponse.json({ error: "No billing customer found. Start checkout first." }, { status: 400 });
+    }
+
+    if (provider === "square") {
+      const manageUrl = process.env.SQUARE_CUSTOMER_PORTAL_URL?.trim();
+
+      if (!manageUrl) {
+        throw new BillingConfigError("Square billing management URL is not configured yet.");
+      }
+
+      return NextResponse.json({ provider, url: manageUrl });
     }
 
     const portalSession = await createStripePortalSession({
@@ -28,7 +41,7 @@ export async function POST(request: Request) {
       throw new Error("Stripe did not return a billing portal URL.");
     }
 
-    return NextResponse.json({ url: portalSession.url });
+    return NextResponse.json({ provider, url: portalSession.url });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to open billing portal.";
 
