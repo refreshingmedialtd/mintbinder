@@ -35,6 +35,7 @@
     "qa:admin": "node scripts/admin-qa-smoke.mjs",
     "qa:beta": "node scripts/beta-qa-smoke.mjs",
     "billing:square-plans": "node scripts/setup-square-subscription-plans.mjs",
+    "billing:square-smoke": "node scripts/smoke-square-billing.mjs",
     "db:validate": "prisma validate",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
