@@ -124,7 +124,7 @@ npm run db:seed
 npm run qa:admin
 ```
 
-`npm run qa:admin` checks the real database-backed admin environment. It verifies required environment variables, seeded admin access, subscription and notification rows, core table counts, catalogue media/variant/pricing coverage, duplicate Pokemon TCG provider groups, latest job runs by type, recent job failures, and pricing conversion-rate configuration.
+`npm run qa:admin` checks the real database-backed admin environment. It verifies required environment variables, seeded admin access, subscription and notification rows, core table counts, catalogue media/variant/pricing coverage, duplicate Pokemon TCG provider groups, latest job runs by type, recent job failure counts/details, and pricing conversion-rate configuration.
 
 ## Beta QA
 
@@ -176,6 +176,8 @@ https://your-domain.example/api/billing/webhook
 ```
 
 Job routes accept either `Authorization: Bearer <JOB_SECRET>` or `x-job-secret: <JOB_SECRET>`. The in-app Operations screen is visible to admin users only, and the job secret is still required before any import or alert job can run. Each successful authenticated job request creates a `job_runs` record with input, result, status, timing, and errors. Catalogue and pricing refreshes accept `page`, `pageSize`, `q`, and `maxPages`; `maxPages` is capped at 20 per job so broad backfills can be resumed in controlled batches. Pricing refreshes convert Pokemon TCG API USD prices into GBP snapshots with `POKEMON_TCG_USD_TO_GBP_RATE`; when `POKEMON_TCG_EUR_TO_GBP_RATE` is also set, cards without TCGPlayer prices can fall back to embedded Cardmarket EUR prices. Keep conversion rates current before running pricing jobs.
+
+If `npm run qa:admin` reports recent failed job runs, inspect the `recentFailedJobRunDetails` JSON first. Fix the named job's configuration or provider issue, rerun a small controlled batch from Operations, confirm the latest run for that job type is `SUCCEEDED`, then rerun `npm run qa:admin` before increasing batch size.
 
 For a first controlled card import, open Operations, enter `JOB_SECRET`, choose a preset or keep the default query `set.id:sv3pt5`, and run Catalogue with a small page size. Review the job result and recent run before increasing page count or switching to Pricing.
 

@@ -101,7 +101,16 @@ test("warns on missing conversion rates, audit rows, and job runs", () => {
   );
   assert.deepEqual(
     jobRunWarnings({
-      failedRecentJobRuns: 1,
+      recentFailedJobRunReport: {
+        runs: [
+          {
+            errorMessage: "Missing GBP conversion rate.",
+            jobType: "PRICING_REFRESH",
+            startedAt: "2026-06-03T09:15:00.000Z",
+          },
+        ],
+        total: 1,
+      },
       latestJobRunsByType: {
         CATALOGUE_REFRESH: null,
         PRICE_ALERTS: { status: "FAILED", errorMessage: "Email provider missing." },
@@ -110,7 +119,7 @@ test("warns on missing conversion rates, audit rows, and job runs", () => {
       },
     }),
     [
-      "1 job run failed in the last 24 hours.",
+      "1 job run failed in the last 24 hours; latest pricing refresh started 2026-06-03T09:15:00.000Z: Missing GBP conversion rate.",
       "No catalogue refresh job run has been recorded yet.",
       "Latest price alerts job run failed: Email provider missing.",
     ],

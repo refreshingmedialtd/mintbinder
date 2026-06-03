@@ -22,6 +22,7 @@ const jobRunTypes = [
   "PRICING_REFRESH",
   "SEALED_PRICING_REFRESH",
 ];
+const recentFailedJobRunDetailLimit = 5;
 
 export async function runAdminQaSmoke({
   adminEmail = defaultAdminEmail,
@@ -36,7 +37,7 @@ export async function runAdminQaSmoke({
       catalogueHealth,
       counts,
       duplicateGroups,
-      failedRecentJobRuns,
+      recentFailedJobRunReport,
       latestJobRun,
       latestJobRunsByType,
     ] = await Promise.all([
@@ -61,7 +62,7 @@ export async function runAdminQaSmoke({
       catalogueHealthReport(prisma),
       databaseCounts(prisma),
       duplicateProviderGroupCount(prisma),
-      recentFailedJobRunCount(prisma, now),
+      recentFailedJobRuns(prisma, now),
       prisma.jobRun.findFirst({
         orderBy: { startedAt: "desc" },
         select: jobRunSelect(),
@@ -78,7 +79,7 @@ export async function runAdminQaSmoke({
       ...countWarnings(counts),
       ...catalogueWarnings(catalogueHealth),
       ...conversionRateWarnings(conversionRates),
-      ...jobRunWarnings({ failedRecentJobRuns, latestJobRunsByType }),
+      ...jobRunWarnings({ recentFailedJobRunReport, latestJobRunsByType }),
       ...(duplicateGroups > 0
         ? [`${duplicateGroups} duplicate Pokemon TCG provider ID group${duplicateGroups === 1 ? "" : "s"} need review.`]
         : []),
@@ -96,7 +97,9 @@ export async function runAdminQaSmoke({
       latestJobRun: latestJobRun ? mapJobRun(latestJobRun) : null,
       latestJobRunsByType,
       ok: failures.length === 0,
-      recentFailedJobRuns24h: failedRecentJobRuns,
+      recentFailedJobRunDetails: recentFailedJobRunReport.runs,
+      recentFailedJobRunDetailLimit: recentFailedJobRunReport.detailLimit,
+      recentFailedJobRuns24h: recentFailedJobRunReport.total,
       warnings,
     };
   } finally {
@@ -220,17 +223,20 @@ export function catalogueWarnings(health) {
   ];
 }
 
-export function jobRunWarnings({ failedRecentJobRuns, latestJobRunsByType }) {
+export function jobRunWarnings({ recentFailedJobRunReport, latestJobRunsByType }) {
+  const recentFailedJobRuns = recentFailedJobRunReport?.total ?? 0;
+  const latestRecentFailure = recentFailedJobRunReport?.runs?.[0] ?? null;
+
   return [
-    ...(failedRecentJobRuns > 0
-      ? [`${failedRecentJobRuns} job run${failedRecentJobRuns === 1 ? "" : "s"} failed in the last 24 hours.`]
+    ...(recentFailedJobRuns > 0
+      ? [recentFailedJobWarning(recentFailedJobRuns, latestRecentFailure)]
       : []),
     ...jobRunTypes
       .filter((type) => !latestJobRunsByType[type])
       .map((type) => `No ${jobTypeLabel(type)} job run has been recorded yet.`),
     ...Object.entries(latestJobRunsByType)
       .filter(([, run]) => run?.status === "FAILED")
-      .map(([type, run]) => `Latest ${jobTypeLabel(type)} job run failed: ${run.errorMessage ?? "No error message."}`),
+      .map(([type, run]) => `Latest ${jobTypeLabel(type)} job run failed: ${jobRunErrorMessage(run)}`),
   ];
 }
 
@@ -368,15 +374,42 @@ async function duplicateProviderGroupCount(prisma) {
   return rows[0]?.count ?? 0;
 }
 
-async function recentFailedJobRunCount(prisma, now) {
-  return prisma.jobRun.count({
-    where: {
-      startedAt: {
-        gte: new Date(now.getTime() - 24 * 60 * 60 * 1000),
-      },
-      status: "FAILED",
+async function recentFailedJobRuns(prisma, now) {
+  const where = {
+    startedAt: {
+      gte: new Date(now.getTime() - 24 * 60 * 60 * 1000),
     },
-  });
+    status: "FAILED",
+  };
+  const [total, runs] = await Promise.all([
+    prisma.jobRun.count({ where }),
+    prisma.jobRun.findMany({
+      orderBy: { startedAt: "desc" },
+      select: jobRunSelect(),
+      take: recentFailedJobRunDetailLimit,
+      where,
+    }),
+  ]);
+
+  return {
+    detailLimit: recentFailedJobRunDetailLimit,
+    runs: runs.map(mapJobRun),
+    total,
+  };
+}
+
+function recentFailedJobWarning(count, latestRun) {
+  const countLabel = `${count} job run${count === 1 ? "" : "s"} failed in the last 24 hours`;
+
+  if (!latestRun) {
+    return `${countLabel}.`;
+  }
+
+  return `${countLabel}; latest ${jobTypeLabel(latestRun.jobType)} started ${latestRun.startedAt}: ${jobRunErrorMessage(latestRun)}`;
+}
+
+function jobRunErrorMessage(run) {
+  return run.errorMessage?.trim() || "No error message.";
 }
 
 async function latestJobRuns(prisma) {

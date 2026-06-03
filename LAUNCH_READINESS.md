@@ -27,7 +27,7 @@ The product is now feature-complete enough to validate the core idea with a smal
 
 1. Real database/admin QA
 
-   Run `npm run build` and `npm run qa:beta` to verify the production app shell, unauthenticated route protections, Plus/report/billing route protections, and Operations job-secret protections. Then run the app against a real local or staging PostgreSQL database with an admin user. Use `npm run qa:admin` after migrations/seed to verify env settings, seeded admin access, subscription/notification rows, core table counts, catalogue media/variant/pricing coverage, duplicate provider health, latest job runs by type, recent job failures, and conversion-rate configuration. Exercise Operations directly, including catalogue status, duplicate review, duplicate merge dry runs, and job run history.
+   Run `npm run build` and `npm run qa:beta` to verify the production app shell, unauthenticated route protections, Plus/report/billing route protections, and Operations job-secret protections. Then run the app against a real local or staging PostgreSQL database with an admin user. Use `npm run qa:admin` after migrations/seed to verify env settings, seeded admin access, subscription/notification rows, core table counts, catalogue media/variant/pricing coverage, duplicate provider health, latest job runs by type, recent job failure counts/details, and conversion-rate configuration. Exercise Operations directly, including catalogue status, duplicate review, duplicate merge dry runs, and job run history.
 
 2. Catalogue data completion
 
@@ -59,7 +59,7 @@ The product is now feature-complete enough to validate the core idea with a smal
 
 9. Monitoring and operations
 
-   Add production logging/error monitoring, job failure visibility, webhook failure alerts, and a small runbook for catalogue/pricing job recovery.
+   Add production logging/error monitoring, job failure alerts beyond the local admin smoke, webhook failure alerts, and a small runbook for catalogue/pricing job recovery.
 
 10. Beta launch
 
