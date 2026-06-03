@@ -42,14 +42,16 @@ Useful checks:
 ```sh
 npm run typecheck
 npm run lint
+npm run test:beta-qa
 npm run test:billing
 npm run test:jobs
 npm run test:notifications
 npm run test:price-history
 npm run test:pricecharting-sealed
 npm run test:tcgcsv-card-pricing
-npm run qa:admin
 npm run build
+npm run qa:beta
+npm run qa:admin
 npm audit --audit-level=moderate
 ```
 
@@ -120,6 +122,10 @@ npm run db:migrate -- --name init
 npm run db:seed
 npm run qa:admin
 ```
+
+## Beta QA
+
+Run `npm run build` before `npm run qa:beta`. The beta smoke starts the production app locally, verifies the app shell, checks auth/session behaviour, confirms protected collection, wishlist, billing, report, notification, and Plus alert routes reject unauthenticated access, and confirms Operations job routes require `JOB_SECRET`. Set `BETA_QA_BASE_URL` to test an already-running local or staging deployment instead of starting a local server.
 
 The local sign-in flow uses Auth.js credentials with scrypt-hashed passwords. The seeded demo account is:
 

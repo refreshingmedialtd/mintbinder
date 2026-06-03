@@ -1,6 +1,6 @@
 # PokeStop Launch Readiness
 
-Last updated: 2026-06-02
+Last updated: 2026-06-03
 
 ## Overall Progress
 
@@ -21,13 +21,13 @@ The product is now feature-complete enough to validate the core idea with a smal
 - Notification preferences and price-alert dry-run/email job support.
 - Operations dashboard for catalogue imports, pricing refreshes, sealed imports, job runs, status, gap reports, image repairs, variant metadata repairs, duplicate provider reviews, and guarded duplicate card merges.
 - Catalogue health reporting for coverage, pricing, sealed products, images, variants, duplicate provider IDs, and recommended next actions.
-- Tests for auth roles, billing webhooks, catalogue status/gaps, job runs, notifications, pricing, price history, variants, image repairs, sealed imports, duplicate reviews, and duplicate merge planning.
+- Tests for auth roles, beta route smoke checks, billing webhooks, catalogue status/gaps, job runs, notifications, pricing, price history, variants, image repairs, sealed imports, duplicate reviews, and duplicate merge planning.
 
 ## Main Remaining Work
 
 1. Real database/admin QA
 
-   Run the app against a real local or staging PostgreSQL database with an admin user. Use `npm run qa:admin` after migrations/seed to verify env settings, seeded admin access, core table counts, notification/subscription rows, duplicate provider health, and job-run availability. Exercise Operations directly, including catalogue status, duplicate review, duplicate merge dry runs, and job run history.
+   Run `npm run build` and `npm run qa:beta` to verify the production app shell, unauthenticated route protections, Plus/report/billing route protections, and Operations job-secret protections. Then run the app against a real local or staging PostgreSQL database with an admin user. Use `npm run qa:admin` after migrations/seed to verify env settings, seeded admin access, core table counts, notification/subscription rows, duplicate provider health, and job-run availability. Exercise Operations directly, including catalogue status, duplicate review, duplicate merge dry runs, and job run history.
 
 2. Catalogue data completion
 
@@ -67,21 +67,23 @@ The product is now feature-complete enough to validate the core idea with a smal
 
 ## Recommended Order From Here
 
-1. Create a real local/staging admin QA environment.
-2. Run `npm run qa:admin`, then run database-backed smoke tests through the Operations screen.
-3. Backfill catalogue data in batches and resolve duplicate provider IDs.
-4. Run image, variant metadata, and pricing repair/enrichment jobs.
-5. Verify Stripe and email integrations end to end.
-6. Do a focused mobile UX polish pass.
-7. Add legal/brand/privacy pages.
-8. Configure production monitoring, backups, and deployment runbook.
-9. Launch a small beta.
+1. Run `npm run build` and `npm run qa:beta` against the production app shell.
+2. Create a real local/staging admin QA environment.
+3. Run `npm run qa:admin`, then run database-backed smoke tests through the Operations screen.
+4. Backfill catalogue data in batches and resolve duplicate provider IDs.
+5. Run image, variant metadata, and pricing repair/enrichment jobs.
+6. Verify Stripe and email integrations end to end.
+7. Do a focused mobile UX polish pass.
+8. Add legal/brand/privacy pages.
+9. Configure production monitoring, backups, and deployment runbook.
+10. Launch a small beta.
 
 ## Launch Gates
 
 Beta can start when:
 
 - A real database-backed admin session has been tested.
+- `npm run qa:beta` passes against the production build or staging deployment.
 - Users can sign up, add cards/sealed products, edit collection items, use wishlist, and view value/set progress without relying on sample data.
 - Catalogue coverage is broad enough for modern Pokemon TCG collections, or gaps are clearly handled.
 - Pricing refreshes produce useful values for common card variants and sealed products.
