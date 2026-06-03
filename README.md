@@ -42,6 +42,7 @@ Useful checks:
 ```sh
 npm run typecheck
 npm run lint
+npm run test:admin-qa
 npm run test:beta-qa
 npm run test:billing
 npm run test:jobs
@@ -122,6 +123,8 @@ npm run db:migrate -- --name init
 npm run db:seed
 npm run qa:admin
 ```
+
+`npm run qa:admin` checks the real database-backed admin environment. It verifies required environment variables, seeded admin access, subscription and notification rows, core table counts, catalogue media/variant/pricing coverage, duplicate Pokemon TCG provider groups, latest job runs by type, recent job failures, and pricing conversion-rate configuration.
 
 ## Beta QA
 

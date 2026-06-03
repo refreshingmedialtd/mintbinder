@@ -7,6 +7,7 @@
     "dev": "next dev --hostname 127.0.0.1",
     "build": "next build",
     "start": "next start --hostname 127.0.0.1",
+    "test:admin-qa": "node --test tests/admin-qa-smoke.test.mjs",
     "test:auth": "node --experimental-strip-types --test tests/auth-roles.test.mjs",
     "test:beta-qa": "node --test tests/beta-qa-smoke.test.mjs",
     "test:batch": "node --test tests/catalogue-batch-options.test.mjs",

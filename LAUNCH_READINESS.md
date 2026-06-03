@@ -21,13 +21,13 @@ The product is now feature-complete enough to validate the core idea with a smal
 - Notification preferences and price-alert dry-run/email job support.
 - Operations dashboard for catalogue imports, pricing refreshes, sealed imports, job runs, status, gap reports, image repairs, variant metadata repairs, duplicate provider reviews, and guarded duplicate card merges.
 - Catalogue health reporting for coverage, pricing, sealed products, images, variants, duplicate provider IDs, and recommended next actions.
-- Tests for auth roles, beta route smoke checks, billing webhooks, catalogue status/gaps, job runs, notifications, pricing, price history, variants, image repairs, sealed imports, duplicate reviews, and duplicate merge planning.
+- Tests for auth roles, beta route smoke checks, admin/database readiness, billing webhooks, catalogue status/gaps, job runs, notifications, pricing, price history, variants, image repairs, sealed imports, duplicate reviews, and duplicate merge planning.
 
 ## Main Remaining Work
 
 1. Real database/admin QA
 
-   Run `npm run build` and `npm run qa:beta` to verify the production app shell, unauthenticated route protections, Plus/report/billing route protections, and Operations job-secret protections. Then run the app against a real local or staging PostgreSQL database with an admin user. Use `npm run qa:admin` after migrations/seed to verify env settings, seeded admin access, core table counts, notification/subscription rows, duplicate provider health, and job-run availability. Exercise Operations directly, including catalogue status, duplicate review, duplicate merge dry runs, and job run history.
+   Run `npm run build` and `npm run qa:beta` to verify the production app shell, unauthenticated route protections, Plus/report/billing route protections, and Operations job-secret protections. Then run the app against a real local or staging PostgreSQL database with an admin user. Use `npm run qa:admin` after migrations/seed to verify env settings, seeded admin access, subscription/notification rows, core table counts, catalogue media/variant/pricing coverage, duplicate provider health, latest job runs by type, recent job failures, and conversion-rate configuration. Exercise Operations directly, including catalogue status, duplicate review, duplicate merge dry runs, and job run history.
 
 2. Catalogue data completion
 
@@ -84,6 +84,7 @@ Beta can start when:
 
 - A real database-backed admin session has been tested.
 - `npm run qa:beta` passes against the production build or staging deployment.
+- `npm run qa:admin` passes without launch-blocking failures and any warnings are understood.
 - Users can sign up, add cards/sealed products, edit collection items, use wishlist, and view value/set progress without relying on sample data.
 - Catalogue coverage is broad enough for modern Pokemon TCG collections, or gaps are clearly handled.
 - Pricing refreshes produce useful values for common card variants and sealed products.
