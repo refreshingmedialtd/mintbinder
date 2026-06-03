@@ -1371,7 +1371,7 @@ h3 {
 
 .mini-chart {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  grid-template-columns: repeat(var(--chart-count, 7), minmax(0, 1fr));
   align-items: end;
   gap: 7px;
   height: 148px;
@@ -1385,6 +1385,10 @@ h3 {
   min-height: 24px;
   border-radius: 5px 5px 0 0;
   background: linear-gradient(180deg, var(--teal), var(--blue));
+}
+
+.mini-chart.empty span {
+  background: var(--line);
 }
 
 .locked-tile {

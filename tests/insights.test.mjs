@@ -197,3 +197,134 @@ test("explains wishlist and weak-confidence price alerts", () => {
     "Weak confidence from TCGCSV observed 01 Jun 2026; refresh pricing or add a manual estimate.",
   );
 });
+
+test("builds portfolio-wide value history from price snapshots", () => {
+  const historyCard = catalogueItem({
+    id: "history-card",
+    name: "History Card",
+    priceObservedAt: undefined,
+    priceHistory: [
+      {
+        observedAt: "2026-04-01T00:00:00.000Z",
+        valueMinor: 1000,
+        confidence: "Fair",
+        source: "pokemon-tcg-api",
+        variantLabel: "Holofoil",
+      },
+      {
+        observedAt: "2026-05-01T00:00:00.000Z",
+        valueMinor: 1200,
+        confidence: "Fair",
+        source: "pokemon-tcg-api",
+        variantLabel: "Holofoil",
+      },
+      {
+        observedAt: "2026-06-01T00:00:00.000Z",
+        valueMinor: 1100,
+        confidence: "Fair",
+        source: "pokemon-tcg-api",
+        variantLabel: "Holofoil",
+      },
+      {
+        observedAt: "2026-06-01T00:00:00.000Z",
+        valueMinor: 900,
+        confidence: "Fair",
+        source: "pokemon-tcg-api",
+        variantLabel: "Reverse Holofoil",
+      },
+    ],
+  });
+  const laterCard = catalogueItem({
+    id: "later-card",
+    name: "Later Card",
+    priceObservedAt: undefined,
+    priceHistory: [
+      {
+        observedAt: "2026-05-01T00:00:00.000Z",
+        valueMinor: 500,
+        confidence: "Strong",
+        source: "tcgcsv-card",
+      },
+      {
+        observedAt: "2026-06-01T00:00:00.000Z",
+        valueMinor: 800,
+        confidence: "Strong",
+        source: "tcgcsv-card",
+      },
+    ],
+  });
+  const manualItem = catalogueItem({
+    id: "manual-history",
+    hasPrice: false,
+    name: "Manual History",
+    priceObservedAt: undefined,
+  });
+
+  const intelligence = buildCollectionIntelligence({
+    catalogueById: new Map([historyCard, laterCard, manualItem].map((item) => [item.id, item])),
+    collection: [
+      collectionItem({
+        catalogueId: historyCard.id,
+        id: "owned-history",
+        quantity: 2,
+        variant: "Holofoil",
+      }),
+      collectionItem({
+        catalogueId: laterCard.id,
+        id: "owned-later",
+      }),
+      collectionItem({
+        catalogueId: manualItem.id,
+        id: "owned-manual-history",
+        overrideValueMinor: 3000,
+        purchaseDate: "2026-04-15",
+      }),
+    ],
+    events: [],
+    sets: [],
+    storageLocations: [],
+    wishlist: [],
+  });
+
+  assert.deepEqual(
+    intelligence.portfolioHistory.map((point) => ({
+      manualLots: point.manualLots,
+      manualValueMinor: point.manualValueMinor,
+      marketLots: point.marketLots,
+      marketValueMinor: point.marketValueMinor,
+      observedAt: point.observedAt,
+      valueMinor: point.valueMinor,
+      valuedLots: point.valuedLots,
+    })),
+    [
+      {
+        manualLots: 1,
+        manualValueMinor: 3000,
+        marketLots: 1,
+        marketValueMinor: 2000,
+        observedAt: "2026-04-01T00:00:00.000Z",
+        valueMinor: 5000,
+        valuedLots: 2,
+      },
+      {
+        manualLots: 1,
+        manualValueMinor: 3000,
+        marketLots: 2,
+        marketValueMinor: 2900,
+        observedAt: "2026-05-01T00:00:00.000Z",
+        valueMinor: 5900,
+        valuedLots: 3,
+      },
+      {
+        manualLots: 1,
+        manualValueMinor: 3000,
+        marketLots: 2,
+        marketValueMinor: 3000,
+        observedAt: "2026-06-01T00:00:00.000Z",
+        valueMinor: 6000,
+        valuedLots: 3,
+      },
+    ],
+  );
+  assert.deepEqual(intelligence.valueTrend, [5000, 5900, 6000]);
+});

@@ -2,6 +2,7 @@ import type {
   CatalogueItem,
   CollectionEvent,
   CollectionItem,
+  PricePoint,
   SetProgress,
   StorageLocation,
   WishlistItem,
@@ -63,6 +64,16 @@ export type SaleInsight = {
   occurredAt: string;
 };
 
+export type PortfolioHistoryPoint = {
+  observedAt: string;
+  valueMinor: number;
+  manualLots: number;
+  manualValueMinor: number;
+  marketLots: number;
+  marketValueMinor: number;
+  valuedLots: number;
+};
+
 export type InsightAction = {
   id: string;
   category: "Wishlist" | "Valuation" | "Grading" | "Storage" | "Duplicates" | "Momentum";
@@ -76,6 +87,7 @@ export type InsightAction = {
 export type CollectionIntelligence = {
   healthScore: number;
   healthLabel: string;
+  portfolioHistory: PortfolioHistoryPoint[];
   valueTrend: number[];
   topHoldings: HoldingInsight[];
   bestPerformer?: HoldingInsight;
@@ -201,6 +213,7 @@ export function buildCollectionIntelligence({
   const storageConcentration = storageInsight(storageLocations, totalValue);
   const setFocus = setFocusInsight(sets);
   const activity = activityInsight(events);
+  const portfolioHistory = portfolioValueHistory(collection, catalogueById);
   const portfolioMix = portfolioMixInsights(collection, catalogueById, totalValue);
   const realizedSales = realizedSalesInsight(events);
   const actionQueue = buildActionQueue({
@@ -230,7 +243,8 @@ export function buildCollectionIntelligence({
   return {
     healthScore,
     healthLabel: healthLabel(healthScore),
-    valueTrend: valueTrend(collection, catalogueById),
+    portfolioHistory,
+    valueTrend: valueTrend(portfolioHistory),
     topHoldings,
     bestPerformer,
     gradingCandidates,
@@ -563,6 +577,179 @@ function portfolioMixInsights(
   ].filter((item) => item.valueMinor > 0);
 }
 
+function portfolioValueHistory(
+  collection: CollectionItem[],
+  catalogueById: Map<string, CatalogueItem>,
+): PortfolioHistoryPoint[] {
+  const entries = collection
+    .map((item) => portfolioHistoryEntry(item, catalogueById.get(item.catalogueId)))
+    .filter((entry): entry is PortfolioHistoryEntry => Boolean(entry));
+  const marketDateKeys = uniqueSortedDateKeys(
+    entries.flatMap((entry) => entry.kind === "market" ? entry.series.map((point) => point.dateKey) : []),
+  );
+  const manualDateKeys = uniqueSortedDateKeys(
+    entries.flatMap((entry) => entry.kind === "manual" && entry.observedAt ? [entry.observedAt] : []),
+  );
+  const dateKeys = marketDateKeys.length ? marketDateKeys : manualDateKeys;
+
+  if (!dateKeys.length) {
+    return [];
+  }
+
+  return dateKeys
+    .map((dateKey) => portfolioHistoryPoint(dateKey, entries))
+    .filter((point) => point.valuedLots > 0);
+}
+
+type PortfolioHistoryEntry =
+  | {
+      kind: "manual";
+      observedAt?: string;
+      valueMinor: number;
+    }
+  | {
+      kind: "market";
+      quantity: number;
+      series: PortfolioPricePoint[];
+    };
+
+type PortfolioPricePoint = {
+  dateKey: string;
+  timestamp: number;
+  valueMinor: number;
+};
+
+function portfolioHistoryEntry(
+  item: CollectionItem,
+  catalogueItem?: CatalogueItem,
+): PortfolioHistoryEntry | undefined {
+  if (item.overrideValueMinor !== undefined) {
+    return {
+      kind: "manual",
+      observedAt: item.purchaseDate ? dateKey(item.purchaseDate) : undefined,
+      valueMinor: item.overrideValueMinor,
+    };
+  }
+
+  if (!catalogueItem?.hasPrice) {
+    return undefined;
+  }
+
+  const series = portfolioMarketSeries(catalogueItem, item.variant);
+
+  if (!series.length) {
+    return undefined;
+  }
+
+  return {
+    kind: "market",
+    quantity: item.quantity,
+    series,
+  };
+}
+
+function portfolioMarketSeries(item: CatalogueItem, variant: string) {
+  const history = item.priceHistory ?? [];
+  const normalizedVariant = normalizeVariantLabel(variant);
+  const variantHistory = normalizedVariant
+    ? history.filter((point) => normalizeVariantLabel(point.variantLabel) === normalizedVariant)
+    : [];
+  const sourceHistory = variantHistory.length ? variantHistory : history;
+  const points = new Map<string, PortfolioPricePoint>();
+
+  for (const point of sourceHistory) {
+    const normalized = portfolioPricePoint(point);
+
+    if (normalized) {
+      points.set(normalized.dateKey, normalized);
+    }
+  }
+
+  const currentObservedAt = item.priceObservedAt ? dateKey(item.priceObservedAt) : undefined;
+
+  if (currentObservedAt) {
+    const timestamp = Date.parse(`${currentObservedAt}T00:00:00.000Z`);
+
+    points.set(currentObservedAt, {
+      dateKey: currentObservedAt,
+      timestamp,
+      valueMinor: catalogueValueMinorForVariant(item, variant),
+    });
+  }
+
+  return [...points.values()].sort((left, right) => left.timestamp - right.timestamp);
+}
+
+function portfolioPricePoint(point: PricePoint): PortfolioPricePoint | undefined {
+  const normalizedDate = dateKey(point.observedAt);
+  const timestamp = normalizedDate ? Date.parse(`${normalizedDate}T00:00:00.000Z`) : Number.NaN;
+  const valueMinor = Number(point.valueMinor);
+
+  if (!normalizedDate || !Number.isFinite(timestamp) || !Number.isFinite(valueMinor) || valueMinor < 0) {
+    return undefined;
+  }
+
+  return {
+    dateKey: normalizedDate,
+    timestamp,
+    valueMinor: Math.round(valueMinor),
+  };
+}
+
+function portfolioHistoryPoint(
+  dateKeyValue: string,
+  entries: PortfolioHistoryEntry[],
+): PortfolioHistoryPoint {
+  const timestamp = Date.parse(`${dateKeyValue}T00:00:00.000Z`);
+  const total = entries.reduce(
+    (current, entry) => {
+      if (entry.kind === "manual") {
+        current.manualLots += 1;
+        current.manualValueMinor += entry.valueMinor;
+        current.valuedLots += 1;
+        current.valueMinor += entry.valueMinor;
+        return current;
+      }
+
+      const price = latestPriceOnOrBefore(entry.series, timestamp);
+
+      if (!price) {
+        return current;
+      }
+
+      const valueMinor = price.valueMinor * entry.quantity;
+      current.marketLots += 1;
+      current.marketValueMinor += valueMinor;
+      current.valuedLots += 1;
+      current.valueMinor += valueMinor;
+      return current;
+    },
+    {
+      manualLots: 0,
+      manualValueMinor: 0,
+      marketLots: 0,
+      marketValueMinor: 0,
+      valueMinor: 0,
+      valuedLots: 0,
+    },
+  );
+
+  return {
+    observedAt: `${dateKeyValue}T00:00:00.000Z`,
+    ...total,
+  };
+}
+
+function latestPriceOnOrBefore(series: PortfolioPricePoint[], timestamp: number) {
+  for (let index = series.length - 1; index >= 0; index -= 1) {
+    if (series[index].timestamp <= timestamp) {
+      return series[index];
+    }
+  }
+
+  return undefined;
+}
+
 function realizedSalesInsight(events: CollectionEvent[]) {
   const sales = events
     .filter((event) => event.type === "Sold")
@@ -778,41 +965,40 @@ function healthLabel(score: number) {
   return "Needs setup";
 }
 
-function valueTrend(collection: CollectionItem[], catalogueById: Map<string, CatalogueItem>) {
-  const points = collection
-    .map((item) => {
-      const catalogueItem = catalogueById.get(item.catalogueId);
-
-      return {
-        date: item.purchaseDate ? new Date(item.purchaseDate).getTime() : Date.now(),
-        valueMinor: catalogueItem ? ownedValueMinor(item, catalogueItem) ?? 0 : 0,
-      };
-    })
-    .filter((point) => point.valueMinor > 0)
-    .sort((left, right) => left.date - right.date)
-    .reduce<number[]>((totals, point) => {
-      totals.push((totals[totals.length - 1] ?? 0) + point.valueMinor);
-      return totals;
-    }, []);
+function valueTrend(history: PortfolioHistoryPoint[]) {
+  const points = history.map((point) => point.valueMinor).filter((value) => value > 0);
 
   if (!points.length) {
-    return [0, 0, 0, 0, 0, 0, 0];
+    return [];
   }
 
-  return Array.from({ length: 7 }, (_unused, index) => {
-    const sourceIndex = Math.round((index / 6) * (points.length - 1));
-    return points[sourceIndex] ?? points[points.length - 1] ?? 0;
-  });
+  return sampleTrend(points, 7);
 }
 
 function ownedValueMinor(item: CollectionItem, catalogueItem: CatalogueItem) {
-  const marketValueMinor = catalogueMarketValueMinor(catalogueItem);
+  const marketValueMinor = catalogueMarketValueMinor(catalogueItem, item.variant);
 
   return item.overrideValueMinor ?? (marketValueMinor === undefined ? undefined : marketValueMinor * item.quantity);
 }
 
-function catalogueMarketValueMinor(catalogueItem: CatalogueItem) {
-  return catalogueItem.hasPrice ? catalogueItem.valueMinor : undefined;
+function catalogueMarketValueMinor(catalogueItem: CatalogueItem, variant?: string) {
+  return catalogueItem.hasPrice ? catalogueValueMinorForVariant(catalogueItem, variant) : undefined;
+}
+
+function catalogueValueMinorForVariant(catalogueItem: CatalogueItem, variant?: string) {
+  return latestPricePointForVariant(catalogueItem.priceHistory ?? [], variant)?.valueMinor ?? catalogueItem.valueMinor;
+}
+
+function latestPricePointForVariant(history: PricePoint[], variant?: string | null) {
+  const normalizedVariant = normalizeVariantLabel(variant);
+
+  if (!normalizedVariant) {
+    return undefined;
+  }
+
+  return [...history]
+    .reverse()
+    .find((point) => normalizeVariantLabel(point.variantLabel) === normalizedVariant);
 }
 
 function share(value: number, total: number) {
@@ -824,6 +1010,17 @@ function formatInsightMoney(valueMinor: number) {
     maximumFractionDigits: 2,
     minimumFractionDigits: 2,
   })}`;
+}
+
+function sampleTrend(points: number[], count: number) {
+  if (points.length <= count) {
+    return points;
+  }
+
+  return Array.from({ length: count }, (_unused, index) => {
+    const sourceIndex = Math.round((index / (count - 1)) * (points.length - 1));
+    return points[sourceIndex] ?? points[points.length - 1] ?? 0;
+  });
 }
 
 function formatInsightDate(value: string) {
@@ -839,6 +1036,30 @@ function formatInsightDate(value: string) {
     year: "numeric",
     timeZone: "UTC",
   }).format(date);
+}
+
+function dateKey(value: string) {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return undefined;
+  }
+
+  return date.toISOString().slice(0, 10);
+}
+
+function uniqueSortedDateKeys(values: Array<string | undefined>) {
+  return [...new Set(values.filter((value): value is string => Boolean(value)))]
+    .sort((left, right) => Date.parse(`${left}T00:00:00.000Z`) - Date.parse(`${right}T00:00:00.000Z`));
+}
+
+function normalizeVariantLabel(value?: string | null) {
+  return String(value ?? "")
+    .trim()
+    .replace(/foil/i, "foil")
+    .replace(/\s+/g, " ")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
 }
 
 function readableSource(source: string) {

@@ -38,7 +38,7 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import { signIn, signOut, useSession } from "next-auth/react";
-import type { ChangeEvent, Dispatch, FormEvent, ReactNode, SetStateAction } from "react";
+import type { ChangeEvent, CSSProperties, Dispatch, FormEvent, ReactNode, SetStateAction } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { canUseOperations, normalizeAppRole, type AppUserRole } from "@/lib/auth/roles";
 import { catalogueValueMinorForVariant, catalogueVariantLabels } from "@/lib/catalogue/variants";
@@ -3490,6 +3490,7 @@ function AnalyticsScreen({
   const duplicateValue = intelligence.duplicates.reduce((total, item) => total + item.valueMinor, 0);
   const leadAction = intelligence.actionQueue[0];
   const realizedSales = intelligence.realizedSales;
+  const portfolioDelta = portfolioHistoryDelta(intelligence.portfolioHistory);
 
   if (!appState.plus) {
     return (
@@ -3555,6 +3556,12 @@ function AnalyticsScreen({
         <StatCard label="Current value" value={formatMoney(summary.value)} note={`${intelligence.valuationCoverage.coveragePercent}% valued`} />
         <StatCard label="Gain/loss" value={formatMoney(gain)} note="Against known cost" positive={gain >= 0} />
         <StatCard
+          label="Value movement"
+          value={portfolioDelta === null ? "Unknown" : formatSignedMoney(portfolioDelta)}
+          note={portfolioDelta === null ? "Needs price history" : "Since first price point"}
+          positive={portfolioDelta !== null && portfolioDelta >= 0}
+        />
+        <StatCard
           label="Sales"
           value={formatMoney(realizedSales.proceedsMinor)}
           note={`${realizedSales.count} recorded sale${realizedSales.count === 1 ? "" : "s"}`}
@@ -3564,13 +3571,7 @@ function AnalyticsScreen({
         <StatCard label="Wishlist hits" value={intelligence.wishlistOpportunities.length.toString()} note="At or below target" />
       </div>
       <div className="dashboard-grid">
-        <section className="tool-panel">
-          <div className="panel-title-row">
-            <h2>Value path</h2>
-            <span className="status-pill">{formatMoney(summary.value)}</span>
-          </div>
-          <MiniChart values={intelligence.valueTrend} />
-        </section>
+        <PortfolioHistoryPanel history={intelligence.portfolioHistory} currentValueMinor={summary.value} />
         <ActionQueue actions={intelligence.actionQueue} />
         <TopHoldings holdings={intelligence.topHoldings} />
         <PortfolioMix rows={intelligence.portfolioMix} />
@@ -4871,6 +4872,60 @@ function TopHoldings({ holdings }: { holdings: HoldingInsight[] }) {
   );
 }
 
+function PortfolioHistoryPanel({
+  currentValueMinor,
+  history,
+}: {
+  currentValueMinor: number;
+  history: CollectionIntelligence["portfolioHistory"];
+}) {
+  const first = history[0];
+  const latest = history[history.length - 1];
+  const high = portfolioHistoryExtreme(history, "high");
+  const low = portfolioHistoryExtreme(history, "low");
+  const delta = portfolioHistoryDelta(history);
+
+  return (
+    <section className="tool-panel">
+      <div className="panel-title-row">
+        <h2>Portfolio value path</h2>
+        <span className="status-pill">{latest ? `${history.length} points` : "No history"}</span>
+      </div>
+      {history.length > 1 ? (
+        <MiniChart label="Portfolio value history chart" values={history.map((point) => point.valueMinor)} />
+      ) : (
+        <p className="muted">Run pricing imports to build a dated portfolio value history.</p>
+      )}
+      <MetricList
+        rows={[
+          ["Latest value", latest ? formatMoney(latest.valueMinor) : formatMoney(currentValueMinor)],
+          [
+            "Since first",
+            delta === null ? "Unknown" : formatSignedMoney(delta),
+            delta !== null && delta >= 0 ? "positive" : "",
+          ],
+          ["First point", first ? formatEventDate(first.observedAt) : "Unknown"],
+          ["Latest point", latest ? formatEventDate(latest.observedAt) : "Unknown"],
+          ["High", high ? formatMoney(high.valueMinor) : "Unknown"],
+          ["Low", low ? formatMoney(low.valueMinor) : "Unknown"],
+          [
+            "Latest mix",
+            latest
+              ? `${formatMoney(latest.marketValueMinor)} market | ${formatMoney(latest.manualValueMinor)} manual`
+              : "Unknown",
+          ],
+          [
+            "Valued lots",
+            latest
+              ? `${latest.valuedLots} total | ${latest.marketLots} market | ${latest.manualLots} manual`
+              : "Unknown",
+          ],
+        ]}
+      />
+    </section>
+  );
+}
+
 function PortfolioMix({
   rows,
 }: {
@@ -5607,13 +5662,18 @@ function EmptyState({ title, action }: { title: string; action?: ReactNode }) {
   );
 }
 
-function MiniChart({ values }: { values?: number[] }) {
-  const source = values?.length ? values : [39, 45, 52, 58, 64, 74, 88];
+function MiniChart({ label = "Value trend chart", values }: { label?: string; values?: number[] }) {
+  const source = values?.filter((value) => Number.isFinite(value)) ?? [];
   const max = Math.max(...source, 1);
+  const chartValues = source.length ? source : [0];
 
   return (
-    <div className="mini-chart" aria-label="Value trend chart">
-      {source.map((value, index) => (
+    <div
+      aria-label={label}
+      className={`mini-chart${source.length ? "" : " empty"}`}
+      style={{ "--chart-count": chartValues.length } as CSSProperties}
+    >
+      {chartValues.map((value, index) => (
         <span
           key={`${value}-${index}`}
           style={{ height: `${Math.max(14, Math.round((value / max) * 100))}%` }}
@@ -5794,6 +5854,34 @@ function gainLabel(holding: HoldingInsight) {
   const prefix = holding.gainMinor >= 0 ? "+" : "";
 
   return `${holding.name} ${prefix}${formatMoney(holding.gainMinor)}`;
+}
+
+function portfolioHistoryDelta(history: CollectionIntelligence["portfolioHistory"]) {
+  const first = history[0];
+  const latest = history[history.length - 1];
+
+  return first && latest ? latest.valueMinor - first.valueMinor : null;
+}
+
+function portfolioHistoryExtreme(
+  history: CollectionIntelligence["portfolioHistory"],
+  kind: "high" | "low",
+) {
+  return history.reduce<CollectionIntelligence["portfolioHistory"][number] | undefined>((selected, point) => {
+    if (!selected) {
+      return point;
+    }
+
+    return kind === "high"
+      ? point.valueMinor > selected.valueMinor ? point : selected
+      : point.valueMinor < selected.valueMinor ? point : selected;
+  }, undefined);
+}
+
+function formatSignedMoney(valueMinor: number) {
+  const prefix = valueMinor > 0 ? "+" : "";
+
+  return `${prefix}${formatMoney(valueMinor)}`;
 }
 
 function actionTagClass(tone: InsightAction["tone"]) {
