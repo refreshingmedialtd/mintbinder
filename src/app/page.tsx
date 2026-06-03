@@ -5190,7 +5190,7 @@ function BillingPanel({
         <article className="billing-plan featured">
           <div>
             <span className="tag green">Best value</span>
-            <strong>Yearly</strong>
+            <strong>GBP 19.99</strong>
           </div>
           <button className="button" onClick={() => void onStartCheckout("yearly")} disabled={plus}>
             <Sparkles size={17} />

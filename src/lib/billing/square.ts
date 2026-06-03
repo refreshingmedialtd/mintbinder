@@ -140,7 +140,7 @@ function squarePlanConfig(plan: SquarePlan) {
       : process.env.SQUARE_PLUS_MONTHLY_PLAN_VARIATION_ID?.trim();
   const amountMinor =
     plan === "yearly"
-      ? positiveInteger(process.env.SQUARE_PLUS_YEARLY_AMOUNT_MINOR, 2490)
+      ? positiveInteger(process.env.SQUARE_PLUS_YEARLY_AMOUNT_MINOR, 1999)
       : positiveInteger(process.env.SQUARE_PLUS_MONTHLY_AMOUNT_MINOR, 249);
 
   if (!planVariationId) {

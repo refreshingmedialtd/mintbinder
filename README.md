@@ -86,7 +86,7 @@ SQUARE_WEBHOOK_NOTIFICATION_URL="http://127.0.0.1:3000/api/billing/webhook"
 SQUARE_PLUS_MONTHLY_PLAN_VARIATION_ID=""
 SQUARE_PLUS_YEARLY_PLAN_VARIATION_ID=""
 SQUARE_PLUS_MONTHLY_AMOUNT_MINOR="249"
-SQUARE_PLUS_YEARLY_AMOUNT_MINOR="2490"
+SQUARE_PLUS_YEARLY_AMOUNT_MINOR="1999"
 SQUARE_CURRENCY="GBP"
 SQUARE_CUSTOMER_PORTAL_URL=""
 STRIPE_SECRET_KEY=""
@@ -182,7 +182,7 @@ Creating an account from the sign-in screen creates a new collector profile with
 
 ## Jobs and Integrations
 
-Square billing is the default provider. In Square Developer, create or choose a sandbox app, copy its access token, choose the business location ID, create Plus monthly and yearly subscription plan variations, and add those plan variation IDs to `.env`. Configure a webhook subscription for this URL:
+Square billing is the default provider. In Square Developer, create or choose a sandbox app, copy its access token, and choose the business location ID. Use `npm run billing:square-plans` to create/reuse the Plus monthly subscription plan variation at GBP 2.49 and the Plus yearly subscription plan variation at GBP 19.99, then add the printed plan variation IDs to `.env`. Configure a webhook subscription for this URL:
 
 ```text
 https://your-domain.example/api/billing/webhook
