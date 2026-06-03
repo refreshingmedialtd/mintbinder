@@ -100,6 +100,7 @@ TCGCSV_SEALED_GROUP_IDS=""
 TCGCSV_SEALED_GROUP_LIMIT=""
 TCGCSV_USD_TO_GBP_RATE=""
 TCGCSV_SEALED_PRICE_ONLY_UNPRICED="true"
+TCGCSV_SEALED_WAIT_MS="120"
 TCGCSV_SEALED_WRITE_PRICES="true"
 TCGCSV_CARD_GROUP_IDS=""
 TCGCSV_CARD_GROUP_LIMIT=""
@@ -177,7 +178,7 @@ https://your-domain.example/api/billing/webhook
 
 Job routes accept either `Authorization: Bearer <JOB_SECRET>` or `x-job-secret: <JOB_SECRET>`. The in-app Operations screen is visible to admin users only, and the job secret is still required before any import or alert job can run. Each successful authenticated job request creates a `job_runs` record with input, result, status, timing, and errors. Catalogue and pricing refreshes accept `page`, `pageSize`, `q`, and `maxPages`; `maxPages` is capped at 20 per job so broad backfills can be resumed in controlled batches. Pricing refreshes convert Pokemon TCG API USD prices into GBP snapshots with `POKEMON_TCG_USD_TO_GBP_RATE`; when `POKEMON_TCG_EUR_TO_GBP_RATE` is also set, cards without TCGPlayer prices can fall back to embedded Cardmarket EUR prices. Keep conversion rates current before running pricing jobs.
 
-If `npm run qa:admin` reports recent failed job runs, inspect the `recentFailedJobRunDetails` JSON first. Fix the named job's configuration or provider issue, rerun a small controlled batch from Operations, confirm the latest run for that job type is `SUCCEEDED`, then rerun `npm run qa:admin` before increasing batch size.
+If `npm run qa:admin` reports recent failed job runs, inspect the `recentFailedJobRunDetails` JSON first. Fix the named job's configuration or provider issue, rerun a small controlled batch from Operations, confirm the latest run for that job type is `SUCCEEDED`, then rerun `npm run qa:admin` before increasing batch size. The warning notes when the latest failed job type has since recovered with a later successful run.
 
 For a first controlled card import, open Operations, enter `JOB_SECRET`, choose a preset or keep the default query `set.id:sv3pt5`, and run Catalogue with a small page size. Review the job result and recent run before increasing page count or switching to Pricing.
 
@@ -190,6 +191,8 @@ Use `npm run report:catalogue-gaps` or the Operations export button to check loc
 For TCGCSV card-pricing enrichment, run `npm run job:tcgcsv-card-pricing`. The importer reads TCGCSV's cached TCGplayer Pokemon groups/products/prices, matches groups to local card sets, matches card products by set/name/number, and writes card price snapshots with source `tcgcsv-card`. Set `TCGCSV_CARD_GROUP_IDS` to a comma-separated list of TCGplayer group IDs for a targeted run, `TCGCSV_USD_TO_GBP_RATE` to override the Pokemon USD rate, and `TCGCSV_CARD_PRICE_ONLY_UNPRICED=true` to enrich only cards without any existing price snapshot.
 
 For sealed product catalogue imports, run `npm run job:sealed-tcgcsv`. The importer reads TCGCSV's cached TCGplayer Pokemon groups/products/prices, matches groups to local card sets, filters sealed products, and writes sealed-product price snapshots. Set `TCGCSV_SEALED_GROUP_IDS` to a comma-separated list of TCGplayer group IDs for a smaller import, `TCGCSV_USD_TO_GBP_RATE` to override the Pokemon USD rate, and `TCGCSV_SEALED_PRICE_ONLY_UNPRICED=true` to enrich only products that do not already have sealed prices.
+
+For tracked sealed-pricing backfills through the same API route used by Operations, set `JOB_SECRET`, confirm `TCGCSV_USD_TO_GBP_RATE` or `POKEMON_TCG_USD_TO_GBP_RATE`, then run `npm run job:sealed-pricing-batch`. The helper starts the built app, posts to `/api/jobs/sealed-pricing-refresh`, records a `sealed_pricing_refresh` job run, prints the JSON result, and stops the server. Use `TCGCSV_SEALED_GROUP_LIMIT` or `TCGCSV_SEALED_GROUP_IDS` for small batches before scaling up.
 
 For PriceCharting sealed-price enrichment, run `npm run job:pricecharting-sealed`. The importer uses the official PriceCharting Prices API, checks unpriced sealed products, searches by UPC first and then by conservative sealed-product name matching, and writes source `pricecharting-sealed` snapshots from the `new-price` field only. Set `PRICECHARTING_API_TOKEN`, keep `PRICECHARTING_SEALED_WAIT_MS=1100` or higher for the API rate limit, and use `PRICECHARTING_SEALED_LIMIT` for small controlled batches.
 

@@ -43,6 +43,7 @@
     "job:repair-card-images": "node scripts/repair-card-images.mjs",
     "job:repair-sealed-images": "node scripts/repair-sealed-images.mjs",
     "job:repair-variant-metadata": "node scripts/repair-variant-metadata.mjs",
+    "job:sealed-pricing-batch": "node scripts/run-sealed-pricing-batch.mjs",
     "job:tcgcsv-card-pricing": "node scripts/import-tcgcsv-card-prices.mjs",
     "job:pricecharting-sealed": "node scripts/import-pricecharting-sealed-prices.mjs",
     "job:sealed-tcgcsv": "node scripts/import-tcgcsv-sealed-products.mjs",

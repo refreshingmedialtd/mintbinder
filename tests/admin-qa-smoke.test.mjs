@@ -114,12 +114,12 @@ test("warns on missing conversion rates, audit rows, and job runs", () => {
       latestJobRunsByType: {
         CATALOGUE_REFRESH: null,
         PRICE_ALERTS: { status: "FAILED", errorMessage: "Email provider missing." },
-        PRICING_REFRESH: { status: "SUCCEEDED" },
+        PRICING_REFRESH: { status: "SUCCEEDED", startedAt: "2026-06-03T09:20:00.000Z" },
         SEALED_PRICING_REFRESH: { status: "SUCCEEDED" },
       },
     }),
     [
-      "1 job run failed in the last 24 hours; latest pricing refresh started 2026-06-03T09:15:00.000Z: Missing GBP conversion rate.",
+      "1 job run failed in the last 24 hours; latest failed pricing refresh started 2026-06-03T09:15:00.000Z: Missing GBP conversion rate. Latest pricing refresh has since succeeded at 2026-06-03T09:20:00.000Z.",
       "No catalogue refresh job run has been recorded yet.",
       "Latest price alerts job run failed: Email provider missing.",
     ],

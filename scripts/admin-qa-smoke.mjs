@@ -229,7 +229,7 @@ export function jobRunWarnings({ recentFailedJobRunReport, latestJobRunsByType }
 
   return [
     ...(recentFailedJobRuns > 0
-      ? [recentFailedJobWarning(recentFailedJobRuns, latestRecentFailure)]
+      ? [recentFailedJobWarning(recentFailedJobRuns, latestRecentFailure, latestJobRunsByType)]
       : []),
     ...jobRunTypes
       .filter((type) => !latestJobRunsByType[type])
@@ -398,18 +398,35 @@ async function recentFailedJobRuns(prisma, now) {
   };
 }
 
-function recentFailedJobWarning(count, latestRun) {
+function recentFailedJobWarning(count, latestRun, latestJobRunsByType = {}) {
   const countLabel = `${count} job run${count === 1 ? "" : "s"} failed in the last 24 hours`;
 
   if (!latestRun) {
     return `${countLabel}.`;
   }
 
-  return `${countLabel}; latest ${jobTypeLabel(latestRun.jobType)} started ${latestRun.startedAt}: ${jobRunErrorMessage(latestRun)}`;
+  const latestRunForType = latestJobRunsByType[latestRun.jobType];
+  const recoveryNote =
+    latestRunForType?.status === "SUCCEEDED" && isAfter(latestRunForType.startedAt, latestRun.startedAt)
+      ? ` Latest ${jobTypeLabel(latestRun.jobType)} has since succeeded at ${latestRunForType.startedAt}.`
+      : "";
+
+  return `${countLabel}; latest failed ${jobTypeLabel(latestRun.jobType)} started ${latestRun.startedAt}: ${sentenceFragment(jobRunErrorMessage(latestRun))}.${recoveryNote}`;
 }
 
 function jobRunErrorMessage(run) {
   return run.errorMessage?.trim() || "No error message.";
+}
+
+function sentenceFragment(value) {
+  return value.replace(/[.!?]+$/u, "");
+}
+
+function isAfter(value, comparison) {
+  const date = new Date(value);
+  const comparisonDate = new Date(comparison);
+
+  return date.getTime() > comparisonDate.getTime();
 }
 
 async function latestJobRuns(prisma) {
