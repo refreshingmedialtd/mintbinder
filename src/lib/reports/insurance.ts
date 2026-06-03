@@ -86,7 +86,7 @@ function collectionSection(collection: CollectionItem[], catalogueById: Map<stri
 
   return `<h2>Collection</h2>
   <table>
-    <thead><tr><th>Item</th><th>Set</th><th>Qty</th><th>Condition</th><th>Grade</th><th>Location</th><th>Paid</th><th>Value</th><th>Notes</th></tr></thead>
+    <thead><tr><th>Item</th><th>Set</th><th>Qty</th><th>Condition</th><th>Grade</th><th>Location</th><th>Paid</th><th>Value</th><th>Valuation note</th><th>Notes</th></tr></thead>
     <tbody>
       ${collection
         .map((owned) => {
@@ -101,6 +101,7 @@ function collectionSection(collection: CollectionItem[], catalogueById: Map<stri
             <td>${escapeHtml(owned.location)}</td>
             <td>${escapeHtml(formatMoney(owned.purchasePriceMinor))}</td>
             <td>${escapeHtml(formatMoney(ownedValueMinor(owned, catalogueItem)))}</td>
+            <td>${escapeHtml(owned.valuationNote ?? "")}</td>
             <td>${escapeHtml(owned.notes ?? "")}</td>
           </tr>`;
         })

@@ -47,6 +47,7 @@ export type CreateCollectionItemInput = {
   variant?: string;
   paid?: string;
   overrideValue?: string;
+  valuationNote?: string;
   location?: string;
   notes?: string;
 };
@@ -271,6 +272,7 @@ export async function createCollectionItem(
       purchaseDate: paidMinor === undefined ? undefined : new Date(),
       currentValueOverrideMinor: overrideMinor,
       currentValueOverrideCurrency: overrideMinor === undefined ? undefined : "GBP",
+      valuationNote: normalizeOptionalText(input.valuationNote),
       storageLocationId,
       notes: input.notes || undefined,
       events: {
@@ -376,6 +378,7 @@ export async function updateCollectionItem(
       currentValueOverrideMinor: input.overrideValue === undefined ? undefined : overrideMinor ?? null,
       currentValueOverrideCurrency:
         input.overrideValue === undefined ? undefined : overrideMinor === undefined ? null : "GBP",
+      valuationNote: input.valuationNote === undefined ? undefined : normalizeOptionalText(input.valuationNote) ?? null,
       storageLocationId: storageLocationId ?? null,
       notes: input.notes || null,
       events: {
@@ -392,6 +395,7 @@ export async function updateCollectionItem(
             ...(gradedCompany ? { grade_company: gradedCompany } : {}),
             ...(gradedScore ? { grade_score: gradedScore } : {}),
             value_override_changed: overrideChanged,
+            valuation_note_updated: input.valuationNote !== undefined,
           },
         },
       },
@@ -823,6 +827,7 @@ function mapCollectionItem(item: {
   purchasePriceMinor: number | null;
   purchaseDate: Date | null;
   currentValueOverrideMinor: number | null;
+  valuationNote: string | null;
   storageLocation: { name: string } | null;
   notes: string | null;
 }): CollectionItem {
@@ -841,6 +846,7 @@ function mapCollectionItem(item: {
     location: item.storageLocation?.name ?? "Unassigned",
     notes: item.notes ?? undefined,
     overrideValueMinor: item.currentValueOverrideMinor ?? undefined,
+    valuationNote: item.valuationNote ?? undefined,
   };
 }
 

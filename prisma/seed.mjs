@@ -347,6 +347,7 @@ async function seedCollectionItems() {
       purchaseDate: new Date("2026-05-01T00:00:00.000Z"),
       currentValueOverrideMinor: 11800,
       currentValueOverrideCurrency: "GBP",
+      valuationNote: "Manual estimate from recent local card show comps.",
       storageLocationId: ids.storage.binder,
       notes: "Bought at card show.",
     },

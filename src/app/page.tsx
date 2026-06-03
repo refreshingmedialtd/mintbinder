@@ -550,6 +550,7 @@ export default function Home() {
         (catalogueItem.type === "sealed" ? "Factory sealed" : "Standard"),
       paid: String(formData?.get("paid") ?? ""),
       overrideValue: String(formData?.get("overrideValue") ?? ""),
+      valuationNote: String(formData?.get("valuationNote") ?? ""),
       location: String(formData?.get("location") ?? "Unassigned"),
       notes: String(formData?.get("notes") ?? ""),
     };
@@ -603,6 +604,7 @@ export default function Home() {
         paidValue !== undefined && Number.isFinite(paidValue) ? paidValue : undefined,
       purchaseDate: new Date().toISOString().slice(0, 10),
       overrideValueMinor: moneyInputToMinor(payload.overrideValue),
+      valuationNote: payload.valuationNote || undefined,
       location: payload.location,
       notes: payload.notes,
     };
@@ -794,6 +796,7 @@ export default function Home() {
       gradeCompany: String(formData.get("gradeCompany") ?? gradeCompanyFromLabel(source.grade)),
       gradeScore: String(formData.get("gradeScore") ?? gradeScoreFromLabel(source.grade)),
       overrideValue: String(formData.get("overrideValue") ?? moneyInputValue(source.overrideValueMinor)),
+      valuationNote: String(formData.get("valuationNote") ?? source.valuationNote ?? ""),
       location: String(formData.get("location") ?? source.location),
       notes: String(formData.get("notes") ?? ""),
     };
@@ -836,6 +839,7 @@ export default function Home() {
         : undefined,
       grade: gradeLabelFromForm(payload.gradeCompany, payload.gradeScore, catalogueItem.type),
       overrideValueMinor: moneyInputToMinor(payload.overrideValue),
+      valuationNote: payload.valuationNote || undefined,
       location: payload.location,
       notes: payload.notes || undefined,
     };
@@ -1368,6 +1372,7 @@ export default function Home() {
             purchasePriceMinor: paidValue,
             purchaseDate: paidValue === undefined ? undefined : new Date().toISOString().slice(0, 10),
             overrideValueMinor: overrideValue,
+            valuationNote: row.valuationNote || undefined,
             location: row.location,
             notes: row.notes || undefined,
           };
@@ -2065,6 +2070,7 @@ function CollectionScreen({
           item.language,
           item.location,
           item.notes ?? "",
+          item.valuationNote ?? "",
           item.variant,
         ]
           .join(" ")
@@ -2571,6 +2577,9 @@ function AddScreen({
                 {selected ? <VariantSelect item={selected} /> : <input name="variant" disabled />}
               </Field>
             </div>
+            <Field label="Valuation note">
+              <textarea name="valuationNote" placeholder="Source or reason for valuation" />
+            </Field>
             <Field label="Notes">
               <textarea name="notes" placeholder="Optional" />
             </Field>
@@ -2857,6 +2866,13 @@ function ItemDetailScreen({
                     <VariantSelect item={item} defaultValue={owned.variant} />
                   </Field>
                 </div>
+                <Field label="Valuation note">
+                  <textarea
+                    name="valuationNote"
+                    defaultValue={owned.valuationNote ?? ""}
+                    placeholder="Source or reason for valuation"
+                  />
+                </Field>
                 <Field label="Notes">
                   <textarea name="notes" defaultValue={owned.notes ?? ""} placeholder="Optional" />
                 </Field>
@@ -2901,6 +2917,10 @@ function ItemDetailScreen({
             ]}
           />
           <PriceTrendPanel item={item} overrideValueMinor={owned.overrideValueMinor} />
+          <section className="tool-panel">
+            <h2>Valuation note</h2>
+            <p className="muted">{owned.valuationNote || "No valuation note yet."}</p>
+          </section>
           {isSelling ? (
             <section className="tool-panel">
               <h2>Record sale</h2>
@@ -3431,6 +3451,7 @@ function AlertsScreen({
             ["Valuation coverage", `${intelligence.valuationCoverage.coveragePercent}%`],
             ["Needs estimate", intelligence.valuationCoverage.unvaluedLots],
             ["Manual values", intelligence.valuationCoverage.manualLots],
+            ["Missing value notes", intelligence.valuationCoverage.manualNotesMissing],
             ["Wishlist hits", intelligence.wishlistOpportunities.length],
             ["Grading candidates", intelligence.gradingCandidates.length],
             ["Duplicate reviews", intelligence.duplicates.length],
@@ -3556,6 +3577,7 @@ function AnalyticsScreen({
             ["Valuation coverage", `${intelligence.valuationCoverage.knownLots} / ${intelligence.valuationCoverage.totalLots} lots`],
             ["Needs estimate", `${intelligence.valuationCoverage.unvaluedLots} lots`],
             ["Manual values", `${intelligence.valuationCoverage.manualLots} lots`],
+            ["Missing value notes", intelligence.valuationCoverage.manualNotesMissing],
             ["Weak prices", `${intelligence.weakConfidence.count} holdings`],
             ["Grading candidates", intelligence.gradingCandidates.length],
             ["Set focus", intelligence.setFocus ? `${intelligence.setFocus.name} (${intelligence.setFocus.remaining} left)` : "No sets loaded"],
@@ -6102,6 +6124,7 @@ function importPayload(row: CollectionImportRow) {
     variant: row.variant,
     paid: row.paid,
     overrideValue: row.overrideValue ?? "",
+    valuationNote: row.valuationNote ?? "",
     location: row.location,
     notes: row.notes,
   };
@@ -6166,6 +6189,8 @@ function payloadFromCollectionItem(item: CollectionItem) {
     language: item.language,
     variant: item.variant,
     paid: moneyInputValue(item.purchasePriceMinor),
+    overrideValue: moneyInputValue(item.overrideValueMinor),
+    valuationNote: item.valuationNote ?? "",
     location: item.location,
     notes: item.notes ?? "",
   };

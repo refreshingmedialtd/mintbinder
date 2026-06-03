@@ -20,6 +20,7 @@ export type CollectionImportRow = {
   variant: string;
   paid: string;
   overrideValue?: string;
+  valuationNote?: string;
   location: string;
   notes: string;
 };
@@ -51,6 +52,7 @@ export function buildCollectionImportTemplateCsv() {
       language: "English",
       variant: "Standard",
       paid: "0.00",
+      valuationNote: "Optional valuation source",
       location: "Unassigned",
       notes: "Optional notes",
     },
@@ -81,6 +83,7 @@ export function parseCollectionImportCsv(csv: string): CollectionImportRow[] {
       const overrideValue =
         field(record, ["override_value", "manual_value", "estimated_value_gbp", "estimated_value"]) ||
         minorToMoney(field(record, ["override_value_minor", "estimated_value_minor"]));
+      const valuationNote = field(record, ["valuation_note", "value_note", "pricing_note", "estimate_note"]);
 
       return {
         catalogueId: field(record, ["catalogue_id", "catalogueid", "catalogue_item_id"]),
@@ -90,6 +93,7 @@ export function parseCollectionImportCsv(csv: string): CollectionImportRow[] {
         variant: field(record, ["variant"]) || "Standard",
         paid,
         overrideValue,
+        valuationNote,
         location: field(record, ["location", "storage_location"]) || "Unassigned",
         notes: field(record, ["notes"]),
       };
@@ -114,6 +118,7 @@ const collectionExportColumns: Array<CsvColumn<CollectionExportRow>> = [
   { header: "purchase_price_minor", value: ({ owned }) => owned.purchasePriceMinor },
   { header: "manual_value_gbp", value: ({ owned }) => moneyValue(owned.overrideValueMinor) },
   { header: "manual_value_minor", value: ({ owned }) => owned.overrideValueMinor },
+  { header: "valuation_note", value: ({ owned }) => owned.valuationNote },
   { header: "purchase_date", value: ({ owned }) => owned.purchaseDate },
   { header: "location", value: ({ owned }) => owned.location },
   {
@@ -137,6 +142,7 @@ const collectionImportColumns: Array<CsvColumn<CollectionImportRow>> = [
   { header: "variant", value: (row) => row.variant },
   { header: "paid", value: (row) => row.paid },
   { header: "manual_value", value: (row) => row.overrideValue },
+  { header: "valuation_note", value: (row) => row.valuationNote },
   { header: "location", value: (row) => row.location },
   { header: "notes", value: (row) => row.notes },
 ];

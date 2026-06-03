@@ -323,6 +323,7 @@ model CollectionItem {
   purchaseDate                 DateTime?         @map("purchase_date") @db.Date
   currentValueOverrideMinor    Int?              @map("current_value_override_minor")
   currentValueOverrideCurrency String?           @map("current_value_override_currency")
+  valuationNote                 String?           @map("valuation_note")
   storageLocationId            String?           @map("storage_location_id") @db.Uuid
   notes                        String?
   acquiredAt                   DateTime          @default(now()) @map("acquired_at")

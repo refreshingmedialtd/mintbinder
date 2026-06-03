@@ -13,6 +13,7 @@
     "test:card-images": "node --experimental-strip-types --test tests/card-image-repair.test.mjs",
     "test:catalogue": "node --experimental-strip-types --test tests/catalogue-status.test.mjs",
     "test:catalogue-gaps": "node --experimental-strip-types --test tests/catalogue-gap-report.test.mjs",
+    "test:csv": "node --experimental-strip-types --test tests/csv.test.mjs",
     "test:duplicate-merge": "node --experimental-strip-types --test tests/duplicate-card-merge.test.mjs",
     "test:duplicates": "node --experimental-strip-types --test tests/duplicate-provider-review.test.mjs",
     "test:insights": "node --experimental-strip-types --test tests/insights.test.mjs",

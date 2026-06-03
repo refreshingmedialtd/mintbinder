@@ -47,6 +47,7 @@ export type CollectionItem = {
   location: string;
   notes?: string;
   overrideValueMinor?: number;
+  valuationNote?: string;
 };
 
 export type WishlistItem = {

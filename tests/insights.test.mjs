@@ -84,6 +84,7 @@ test("summarizes valuation coverage and review actions", () => {
     knownLots: 3,
     knownValueMinor: 8000,
     manualLots: 1,
+    manualNotesMissing: 1,
     manualValueMinor: 5000,
     marketLots: 2,
     totalLots: 4,
@@ -113,6 +114,7 @@ test("does not treat manual estimates as weak market confidence", () => {
         id: "owned-manual-weak",
         catalogueId: manualWeakCatalogue.id,
         overrideValueMinor: 3000,
+        valuationNote: "Recent sale comp.",
       }),
     ],
     events: [],
@@ -123,4 +125,5 @@ test("does not treat manual estimates as weak market confidence", () => {
 
   assert.equal(intelligence.weakConfidence.count, 0);
   assert.equal(intelligence.valuationCoverage.manualLots, 1);
+  assert.equal(intelligence.valuationCoverage.manualNotesMissing, 0);
 });

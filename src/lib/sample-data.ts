@@ -186,6 +186,7 @@ export const initialCollection: CollectionItem[] = [
     location: "Blue Binder",
     notes: "Bought at card show.",
     overrideValueMinor: 11800,
+    valuationNote: "Manual estimate from recent local card show comps.",
   },
   {
     id: "owned-bundle",

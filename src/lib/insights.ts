@@ -84,6 +84,7 @@ export type CollectionIntelligence = {
     knownLots: number;
     knownValueMinor: number;
     manualLots: number;
+    manualNotesMissing: number;
     manualValueMinor: number;
     marketLots: number;
     totalLots: number;
@@ -434,6 +435,9 @@ function valuationCoverageInsight(
       } else {
         total.manualLots += 1;
         total.manualValueMinor += valueMinor;
+        if (!item.valuationNote?.trim()) {
+          total.manualNotesMissing += 1;
+        }
       }
 
       return total;
@@ -442,6 +446,7 @@ function valuationCoverageInsight(
       knownLots: 0,
       knownValueMinor: 0,
       manualLots: 0,
+      manualNotesMissing: 0,
       manualValueMinor: 0,
       marketLots: 0,
       totalLots: 0,
@@ -592,7 +597,10 @@ function buildActionQueue({
       id: "manual-valuations",
       category: "Valuation",
       title: "Review manual estimates",
-      detail: `${valuationCoverage.manualLots} lot${valuationCoverage.manualLots === 1 ? "" : "s"} use manual valuation for ${formatInsightMoney(valuationCoverage.manualValueMinor)}.`,
+      detail:
+        valuationCoverage.manualNotesMissing > 0
+          ? `${valuationCoverage.manualNotesMissing} manual estimate${valuationCoverage.manualNotesMissing === 1 ? "" : "s"} need valuation notes.`
+          : `${valuationCoverage.manualLots} lot${valuationCoverage.manualLots === 1 ? "" : "s"} use manual valuation for ${formatInsightMoney(valuationCoverage.manualValueMinor)}.`,
       tone: "watch",
       impact: valuationCoverage.manualValueMinor >= 10000 ? "High" : "Medium",
       actionLabel: "Review estimates",

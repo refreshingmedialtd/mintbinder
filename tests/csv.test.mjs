@@ -40,13 +40,14 @@ function csvRecord(csv) {
 test("exports manual values for unpriced catalogue items", () => {
   const csv = buildCollectionCsv({
     catalogueById: new Map([[unpricedSealed.id, unpricedSealed]]),
-    collection: [collectionItem({ overrideValueMinor: 12345 })],
+    collection: [collectionItem({ overrideValueMinor: 12345, valuationNote: "Recent sold listings." })],
     exportedAt: new Date("2026-06-03T12:00:00.000Z"),
   });
   const record = csvRecord(csv);
 
   assert.equal(record.manual_value_gbp, "123.45");
   assert.equal(record.manual_value_minor, "12345");
+  assert.equal(record.valuation_note, "Recent sold listings.");
   assert.equal(record.estimated_value_gbp, "123.45");
   assert.equal(record.estimated_value_minor, "12345");
 });
@@ -60,16 +61,18 @@ test("leaves estimated value blank when no market or manual value exists", () =>
   const record = csvRecord(csv);
 
   assert.equal(record.manual_value_gbp, "");
+  assert.equal(record.valuation_note, "");
   assert.equal(record.estimated_value_gbp, "");
   assert.equal(record.estimated_value_minor, "");
 });
 
 test("imports manual value aliases", () => {
   const rows = parseCollectionImportCsv(
-    "catalogue_id,quantity,manual_value,notes\r\nsealed-unpriced,2,123.45,Needs estimate",
+    "catalogue_id,quantity,manual_value,valuation_note,notes\r\nsealed-unpriced,2,123.45,Recent sold listings,Needs estimate",
   );
 
   assert.equal(rows[0].catalogueId, "sealed-unpriced");
   assert.equal(rows[0].quantity, 2);
   assert.equal(rows[0].overrideValue, "123.45");
+  assert.equal(rows[0].valuationNote, "Recent sold listings");
 });
