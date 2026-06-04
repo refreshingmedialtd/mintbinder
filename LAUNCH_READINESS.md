@@ -34,6 +34,7 @@ Completed on 2026-06-04:
 - Continued beta UX polish with a cleaner item-detail mobile layout, moving owned-lot actions out of the page header, adding a compact owned-lot summary, and clarifying edit/sale form states.
 - Continued mobile UX polish across set detail and wishlist flows, adding clearer set progress summaries, target-watch summaries, full-width mobile actions, and better no-results/empty states.
 - Added beta-draft legal pages for privacy, terms, and Pokemon non-affiliation, linked them from the app/auth surfaces, and added first-run onboarding copy to the sign-in/create-account screen.
+- Added a production deployment runbook, `npm run qa:production-env` validator, and `npm run db:deploy` command for staging/production migration flow.
 
 Known QA warnings:
 
@@ -80,7 +81,7 @@ Known QA warnings:
 
 5. Production environment
 
-   Choose hosting and database providers, configure environment variables, run migrations, generate the Prisma client, set up backup policy, and document deploy steps.
+   Deployment steps are now documented and production env readiness can be validated with `npm run qa:production-env`. Choose hosting/database providers, configure real production variables, run `npm run db:deploy`, set up backup policy, and connect monitoring.
 
 6. UX polish and beta fit-and-finish
 
@@ -108,7 +109,7 @@ Known QA warnings:
 2. Run controlled catalogue and pricing backfills, including measured variant metadata repair batches, then review catalogue gap/status reports.
 3. Do a focused mobile UX polish pass on authenticated core flows.
 4. Review/finalize legal, privacy, brand/non-affiliation, and onboarding copy once the final name/domain is chosen.
-5. Choose hosting/database providers and prepare production env/deploy steps.
+5. Choose hosting/database providers and configure real production env/deploy targets.
 6. Run the domain setup batch once the final name/domain is chosen.
 7. Complete a hosted Square checkout browser smoke on staging/production.
 8. Configure production monitoring, backups, webhook alerts, and job failure alerts.

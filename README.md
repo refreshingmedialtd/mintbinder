@@ -10,6 +10,7 @@ PokeStop is a working title for a Pokemon card and sealed product collection tra
 - [ARCHITECTURE.md](ARCHITECTURE.md): recommended stack, app layers, API surface, entitlements, jobs, and deployment strategy.
 - [UX_WIREFRAMES.md](UX_WIREFRAMES.md): navigation, screen wireframes, user flows, states, and prototype scope.
 - [LAUNCH_READINESS.md](LAUNCH_READINESS.md): current completion estimate, remaining launch tasks, beta gates, and recommended order of work.
+- [PRODUCTION_DEPLOYMENT.md](PRODUCTION_DEPLOYMENT.md): staging/production deployment runbook, env checklist, and launch smoke order.
 
 ## Current Technical Direction
 
@@ -54,6 +55,7 @@ npm run build
 npm run qa:beta
 npm run qa:admin
 npm run qa:operations
+npm run qa:production-env
 npm run qa:square-activation
 npm run job:price-alerts
 npm audit --audit-level=moderate
@@ -141,9 +143,12 @@ Useful commands:
 npm run db:validate
 npm run db:generate
 npm run db:migrate -- --name init
+npm run db:deploy
 npm run db:seed
 npm run qa:admin
 ```
+
+Use `npm run db:deploy` for staging/production because it applies committed migrations without creating new ones.
 
 `npm run qa:admin` checks the real database-backed admin environment. It verifies required environment variables, seeded admin access, subscription and notification rows, core table counts, catalogue media/variant/pricing coverage, duplicate Pokemon TCG provider groups, latest job runs by type, recent job failure counts/details, and pricing conversion-rate configuration.
 
