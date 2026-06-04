@@ -1,12 +1,28 @@
 # PokeStop Launch Readiness
 
-Last updated: 2026-06-03
+Last updated: 2026-06-04
 
 ## Overall Progress
 
-PokeStop is approximately 70% of the way to a credible MVP/beta release and around 55% of the way to a polished public launch.
+PokeStop is approximately 78% of the way to a credible MVP/beta release and around 60% of the way to a polished public launch.
 
-The product is now feature-complete enough to validate the core idea with a small beta group: users can track cards and sealed products, manage wishlist targets, review value history, see set progress, use Plus-gated analytics/reporting, and admins can operate catalogue/pricing imports. The remaining work is less about inventing the product and more about hardening, filling real catalogue data, running end-to-end QA, and preparing production operations.
+The product is now feature-complete enough to validate the core idea with a small beta group: users can track cards and sealed products, manage wishlist targets, review value history, see set progress, use Plus-gated analytics/reporting, and admins can operate catalogue/pricing imports. The remaining work is less about inventing the product and more about finishing integration QA, production setup, legal/brand readiness, and a focused mobile polish pass.
+
+## Latest QA Snapshot
+
+Completed on 2026-06-04:
+
+- Applied all Prisma migrations to the local PostgreSQL `pokestop` database.
+- Seeded the local database with the admin demo user, sample collection, wishlist, storage, catalogue, sealed products, events, and price snapshots.
+- Ran `npm run qa:admin` successfully with zero failures.
+- Ran `npm run build` successfully.
+- Ran `npm run qa:beta` successfully with 18/18 checks passing.
+
+Known QA warnings:
+
+- The seeded admin user is still on a Free subscription. Complete Square sandbox checkout/webhook activation before beta so Plus entitlements are verified against a real paid subscription row.
+- One sealed-pricing job failed in the last 24 hours, but the latest sealed-pricing job has since succeeded.
+- `npm run db:generate` hit a Windows `EPERM` while replacing Prisma's existing query engine DLL. The migration, seed, build, admin QA, and beta QA all completed successfully, so this is currently a local Windows file-lock warning rather than a launch blocker.
 
 ## What Is Already In Place
 
@@ -18,6 +34,7 @@ The product is now feature-complete enough to validate the core idea with a smal
 - Set progress, detail views, variant-aware card values, price history, analytics, action queues, and insurance report export.
 - CSV import/export and collection import templates.
 - Square checkout, webhook verification, subscription entitlement foundations, and retained Stripe fallback support.
+- Square local tunnel testing and beta subscription management, including in-app renewal cancellation while preserving paid access until the period ends.
 - Notification preferences and price-alert dry-run/email job support.
 - Operations dashboard for catalogue imports, pricing refreshes, sealed imports, job runs, status, gap reports, image repairs, variant metadata repairs, duplicate provider reviews, and guarded duplicate card merges.
 - Catalogue health reporting for coverage, pricing, sealed products, images, variants, duplicate provider IDs, and recommended next actions.
@@ -25,9 +42,9 @@ The product is now feature-complete enough to validate the core idea with a smal
 
 ## Main Remaining Work
 
-1. Real database/admin QA
+1. Square billing activation QA
 
-   Run `npm run build` and `npm run qa:beta` to verify the production app shell, unauthenticated route protections, Plus/report/billing route protections, and Operations job-secret protections. Then run the app against a real local or staging PostgreSQL database with an admin user. Use `npm run qa:admin` after migrations/seed to verify env settings, seeded admin access, subscription/notification rows, core table counts, catalogue media/variant/pricing coverage, duplicate provider health, latest job runs by type, recent job failure counts/details, and conversion-rate configuration. Exercise Operations directly, including catalogue status, duplicate review, duplicate merge dry runs, and job run history.
+   Complete sandbox checkout for monthly and yearly Plus, verify webhook entitlement activation, confirm billing state in Settings, test renewal cancellation, and confirm Plus access remains until the paid period ends.
 
 2. Catalogue data completion
 
@@ -37,13 +54,13 @@ The product is now feature-complete enough to validate the core idea with a smal
 
    Run card pricing and sealed pricing jobs enough times to create useful market baselines. Confirm normal/reverse holo/holo pricing choices work for real imported cards and identify which provider segments remain sparse.
 
-4. Production environment
+4. Authenticated Operations QA
+
+   Exercise the database-backed Operations screen directly, including catalogue status, gap reports, duplicate review, duplicate merge dry runs, job run history, and small controlled job runs.
+
+5. Production environment
 
    Choose hosting and database providers, configure environment variables, run migrations, generate the Prisma client, set up backup policy, and document deploy steps.
-
-5. Billing verification
-
-   Complete Square sandbox checkout, subscription renewal/cancellation handling, invoice payment, and webhook flows. Confirm Plus gates behave correctly before and after webhook updates.
 
 6. Email and notification readiness
 
@@ -67,24 +84,23 @@ The product is now feature-complete enough to validate the core idea with a smal
 
 ## Recommended Order From Here
 
-1. Run `npm run build` and `npm run qa:beta` against the production app shell.
-2. Create a real local/staging admin QA environment.
-3. Run `npm run qa:admin`, then run database-backed smoke tests through the Operations screen.
-4. Backfill catalogue data in batches and resolve duplicate provider IDs.
-5. Run image, variant metadata, and pricing repair/enrichment jobs.
-6. Verify Square and email integrations end to end.
-7. Do a focused mobile UX polish pass.
-8. Add legal/brand/privacy pages.
-9. Configure production monitoring, backups, and deployment runbook.
-10. Launch a small beta.
+1. Complete Square sandbox checkout/webhook activation for monthly and yearly Plus.
+2. Configure email sending and run notification dry-runs/send tests.
+3. Exercise the database-backed Operations screen directly, especially catalogue status, job history, and gap reports.
+4. Do a focused mobile UX polish pass on authenticated core flows.
+5. Add legal, privacy, and brand/non-affiliation pages.
+6. Choose hosting/database providers and prepare production env/deploy steps.
+7. Configure production monitoring, backups, webhook alerts, and job failure alerts.
+8. Run one final `npm run build`, `npm run qa:beta`, and `npm run qa:admin`.
+9. Invite a small beta group.
 
 ## Launch Gates
 
 Beta can start when:
 
 - A real database-backed admin session has been tested.
-- `npm run qa:beta` passes against the production build or staging deployment.
-- `npm run qa:admin` passes without launch-blocking failures and any warnings are understood.
+- `npm run qa:beta` passes against the production build or staging deployment. Completed locally on 2026-06-04.
+- `npm run qa:admin` passes without launch-blocking failures and any warnings are understood. Completed locally on 2026-06-04.
 - Users can sign up, add cards/sealed products, edit collection items, use wishlist, and view value/set progress without relying on sample data.
 - Catalogue coverage is broad enough for modern Pokemon TCG collections, or gaps are clearly handled.
 - Pricing refreshes produce useful values for common card variants and sealed products.
