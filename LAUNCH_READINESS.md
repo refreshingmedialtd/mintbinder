@@ -4,7 +4,7 @@ Last updated: 2026-06-04
 
 ## Overall Progress
 
-PokeStop is approximately 83% of the way to a credible MVP/beta release and around 65% of the way to a polished public launch.
+PokeStop is approximately 84% of the way to a credible MVP/beta release and around 66% of the way to a polished public launch.
 
 The product is now feature-complete enough to validate the core idea with a small beta group: users can track cards and sealed products, manage wishlist targets, review value history, see set progress, use Plus-gated analytics/reporting, and admins can operate catalogue/pricing imports. The remaining work is less about inventing the product and more about finishing integration QA, production setup, legal/brand readiness, and a focused mobile polish pass.
 
@@ -21,12 +21,14 @@ Completed on 2026-06-04:
 - Reran `npm run qa:admin` after Square activation; the admin QA user now reports `PLUS_YEARLY` / `ACTIVE`.
 - Added `npm run job:price-alerts` and ran a successful dry-run against the local production build. The job selected 1 active Plus user, found 3 alert items, recorded a succeeded `price_alerts` job run, and did not send email because Resend is not configured locally.
 - Added and ran `npm run qa:operations` successfully. The pass validated protected Operations endpoints for catalogue status, catalogue gap export, duplicate provider review, job history, and local dry-run maintenance job recording.
+- Completed a browser click-through of the admin Operations screen. This caught and fixed a mobile access gap by adding an admin-only `Ops` shortcut to the bottom nav; status loading, gap export API verification, duplicate review, alert dry-run, and job history were validated.
+- Ran controlled Pokemon TCG API-backed variant metadata repair dry-runs for 10 and 50 candidates. Both fetched provider data successfully once network access was allowed, but found 0 repairable cards in those batches, so no catalogue rows were changed.
 
 Known QA warnings:
 
 - Hosted Square checkout link creation has been smoke-tested, and webhook activation is now validated. Do one final browser-based hosted checkout smoke on a stable staging/production URL before public launch.
 - Resend email credentials and sender/domain verification are not configured locally yet, so live price-alert email sending remains pending. Dry-run selection, preferences, and job recording are validated.
-- The Operations gap report currently shows 814 card variant-metadata gaps. The default Operations QA skips provider-network repairs; run a controlled `OPERATIONS_QA_NETWORK_REPAIRS=true` or variant metadata repair batch later.
+- The Operations gap report currently shows 814 card variant-metadata gaps. A controlled 50-card provider dry-run found 0 repairable rows, so the remaining gaps may include cards where Pokemon TCG API does not expose TCGPlayer variant prices. Continue with measured batches before treating this as a data-quality blocker.
 - One sealed-pricing job failed in the last 24 hours, but the latest sealed-pricing job has since succeeded.
 - `npm run db:generate` hit a Windows `EPERM` while replacing Prisma's existing query engine DLL. The migration, seed, build, admin QA, and beta QA all completed successfully, so this is currently a local Windows file-lock warning rather than a launch blocker.
 
@@ -60,51 +62,46 @@ Known QA warnings:
 
    Run card pricing and sealed pricing jobs enough times to create useful market baselines. Confirm normal/reverse holo/holo pricing choices work for real imported cards and identify which provider segments remain sparse.
 
-4. Operations UI click-through
-
-   The protected Operations API surface is now smoke-tested. Do a browser click-through of the admin Operations screen before beta to confirm the same status, exports, and dry-run controls feel right in the UI.
-
-5. Hosted checkout and billing browser QA
+4. Hosted checkout and billing browser QA
 
    On staging or the eventual production URL, complete one Square-hosted checkout in a browser, confirm the app Settings billing state, and confirm Square webhook delivery without the local tunnel.
 
-6. Production environment
+5. Production environment
 
    Choose hosting and database providers, configure environment variables, run migrations, generate the Prisma client, set up backup policy, and document deploy steps.
 
-7. UX polish and beta fit-and-finish
+6. UX polish and beta fit-and-finish
 
    Review mobile layouts, loading states, empty states, error messages, accessibility, button text, and first-run flows. The product already works, but this is where it starts feeling calm and trustworthy.
 
-8. Legal, privacy, and brand safety
+7. Legal, privacy, and brand safety
 
    Finalize the product name, add clear non-affiliation language for Pokemon/Nintendo/The Pokemon Company, write privacy and terms pages, and confirm data export/deletion expectations.
 
-9. Domain setup batch
+8. Domain setup batch
 
    Once the final name/domain is chosen, verify the Resend sending domain/subdomain, configure the production Square webhook URL, update sender/legal URLs, and add the final URLs to monitoring/runbooks.
 
-10. Monitoring and operations
+9. Monitoring and operations
 
    Add production logging/error monitoring, job failure alerts beyond the local admin smoke, webhook failure alerts, and a small runbook for catalogue/pricing job recovery.
 
-11. Beta launch
+10. Beta launch
 
    Invite a small group, import enough catalogue/pricing data for their likely collections, gather feedback, and fix the highest-friction issues before a wider release.
 
 ## Recommended Order From Here
 
 1. Configure Resend sender credentials and run a live price-alert send smoke test.
-2. Run a browser click-through of the admin Operations screen.
-3. Run controlled catalogue and pricing backfills, including a variant metadata repair batch, then review catalogue gap/status reports.
-4. Do a focused mobile UX polish pass on authenticated core flows.
-5. Add legal, privacy, and brand/non-affiliation pages.
-6. Choose hosting/database providers and prepare production env/deploy steps.
-7. Run the domain setup batch once the final name/domain is chosen.
-8. Complete a hosted Square checkout browser smoke on staging/production.
-9. Configure production monitoring, backups, webhook alerts, and job failure alerts.
-10. Run one final `npm run build`, `npm run qa:beta`, and `npm run qa:admin`.
-11. Invite a small beta group.
+2. Run controlled catalogue and pricing backfills, including measured variant metadata repair batches, then review catalogue gap/status reports.
+3. Do a focused mobile UX polish pass on authenticated core flows.
+4. Add legal, privacy, and brand/non-affiliation pages.
+5. Choose hosting/database providers and prepare production env/deploy steps.
+6. Run the domain setup batch once the final name/domain is chosen.
+7. Complete a hosted Square checkout browser smoke on staging/production.
+8. Configure production monitoring, backups, webhook alerts, and job failure alerts.
+9. Run one final `npm run build`, `npm run qa:beta`, and `npm run qa:admin`.
+10. Invite a small beta group.
 
 ## Launch Gates
 
@@ -118,7 +115,7 @@ Beta can start when:
 - Pricing refreshes produce useful values for common card variants and sealed products.
 - Plus gates, Square checkout link creation, billing management, and webhook entitlement updates work in sandbox mode. Backend activation completed locally on 2026-06-04; hosted-checkout browser smoke remains for staging/production.
 - Email notifications can be dry-run and sent safely.
-- Operations status, exports, job history, and safe dry-run job controls pass protected API QA. Completed locally on 2026-06-04.
+- Operations status, exports, job history, and safe dry-run job controls pass protected API QA and browser UI click-through. Completed locally on 2026-06-04.
 - Basic privacy/terms/non-affiliation pages exist.
 - There is a rollback or recovery plan for migrations and job failures.
 

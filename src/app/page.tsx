@@ -1560,7 +1560,7 @@ export default function Home() {
         />
         <main className="main">{renderScreen(context)}</main>
       </div>
-      <BottomNav active={appState.screen} onNavigate={navigate} />
+      <BottomNav active={appState.screen} canUseOperations={operationsEnabled} onNavigate={navigate} />
       {toast ? <div className="toast">{toast}</div> : null}
     </div>
   );
@@ -1847,13 +1847,15 @@ function Sidebar({
 
 function BottomNav({
   active,
+  canUseOperations,
   onNavigate,
 }: {
   active: Screen;
+  canUseOperations: boolean;
   onNavigate: (screen: Screen) => void;
 }) {
   return (
-    <nav className="bottom-nav" aria-label="Primary navigation">
+    <nav className={canUseOperations ? "bottom-nav admin" : "bottom-nav"} aria-label="Primary navigation">
       <MobileNavButton active={active === "dashboard"} icon={<LayoutDashboard />} label="Home" onClick={() => onNavigate("dashboard")} />
       <MobileNavButton active={active === "collection"} icon={<Layers3 />} label="Cards" onClick={() => onNavigate("collection")} />
       <button className={active === "add" ? "active add-button" : "add-button"} onClick={() => onNavigate("add")}>
@@ -1864,6 +1866,9 @@ function BottomNav({
       </button>
       <MobileNavButton active={active === "sets" || active === "setDetail"} icon={<GalleryVerticalEnd />} label="Sets" onClick={() => onNavigate("sets")} />
       <MobileNavButton active={active === "wishlist"} icon={<Heart />} label="Want" onClick={() => onNavigate("wishlist")} />
+      {canUseOperations ? (
+        <MobileNavButton active={active === "ops"} icon={<TerminalSquare />} label="Ops" onClick={() => onNavigate("ops")} />
+      ) : null}
     </nav>
   );
 }
