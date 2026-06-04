@@ -3378,6 +3378,7 @@ function SetDetailScreen({
     left.localeCompare(right),
   );
   const setMarketValue = setCards.reduce((total, item) => total + (catalogueMarketValueMinor(item) ?? 0), 0);
+  const missingCount = Math.max(set.total - set.owned, 0);
   const wantedCount = setCards.filter((item) => wishlist.some((entry) => entry.catalogueId === item.id)).length;
 
   const visibleCards = setCards.filter((item) => {
@@ -3404,6 +3405,12 @@ function SetDetailScreen({
     return matchesSearch && matchesRarity;
   }).sort((left, right) => sortCatalogueItems(left, right, sort));
 
+  function resetSetFilters() {
+    setCardSearch("");
+    setRarityFilter("all");
+    setAppState((current) => ({ ...current, setFilter: "all" }));
+  }
+
   return (
     <section className="page">
       <PageHeader
@@ -3415,18 +3422,28 @@ function SetDetailScreen({
           </button>
         }
       />
-      <section className="tool-panel">
-        <div className="set-card-header">
-          <span>{set.owned} / {set.total} owned</span>
-          <strong>{done}%</strong>
+      <section className="tool-panel set-detail-panel">
+        <div className="panel-title-row">
+          <div>
+            <h2>Set progress</h2>
+            <p className="muted">{set.owned} of {set.total} cards owned</p>
+          </div>
+          <span className={done === 100 ? "tag green" : "tag blue"}>{done === 100 ? "Complete" : `${done}%`}</span>
         </div>
-        <ProgressBar value={done} />
-        <div className="set-stat-row">
-          <span>{visibleCards.length} shown</span>
-          <span>{wantedCount} wanted</span>
-          <span>{formatMoney(setMarketValue)} market</span>
+        <div className="set-progress-hero">
+          <div className="set-progress-copy">
+            <strong>{done}%</strong>
+            <span>{visibleCards.length} shown</span>
+          </div>
+          <ProgressBar value={done} />
         </div>
-        <div className="segmented">
+        <div className="set-summary-grid">
+          <span><b>{set.owned}</b>Owned</span>
+          <span><b>{missingCount}</b>Missing</span>
+          <span><b>{wantedCount}</b>Wanted</span>
+          <span><b>{formatMoney(setMarketValue)}</b>Market</span>
+        </div>
+        <div className="segmented set-filter-tabs" aria-label="Set card filter">
           {(["all", "owned", "missing", "want"] as const).map((filter) => (
             <button
               key={filter}
@@ -3486,7 +3503,7 @@ function SetDetailScreen({
                   <span className="tag blue">{item.rarity}</span>
                   <span className="tag">{formatValuation(catalogueMarketValueMinor(item))}</span>
                 </div>
-                <div className="actions">
+                <div className="actions item-action-grid">
                   {owned ? (
                     <button
                       className="button"
@@ -3509,7 +3526,7 @@ function SetDetailScreen({
                       Add
                     </button>
                   )}
-                  <button className="button" disabled={wanted} onClick={() => void addToWishlist(item.id)}>
+                  <button className="button" type="button" disabled={wanted} onClick={() => void addToWishlist(item.id)}>
                     <Heart size={17} />
                     {wanted ? "Wanted" : "Want"}
                   </button>
@@ -3518,7 +3535,15 @@ function SetDetailScreen({
             </article>
           );
         }) : (
-          <EmptyState title="No matching cards" />
+          <EmptyState
+            title="No matching cards"
+            description="Try a different search, rarity, or set filter."
+            action={
+              <button className="button" type="button" onClick={resetSetFilters}>
+                Reset filters
+              </button>
+            }
+          />
         )}
       </div>
     </section>
@@ -3536,6 +3561,28 @@ function WishlistScreen({
 }: ScreenContext) {
   const [editingId, setEditingId] = useState("");
   const [savingId, setSavingId] = useState("");
+  const wishlistInsight = wishlist.reduce(
+    (summary, item) => {
+      const catalogueItem = catalogueById.get(item.catalogueId);
+      const currentValue = catalogueItem ? catalogueMarketValueMinor(catalogueItem) : null;
+      const targetValue = item.targetPriceMinor ?? currentValue;
+
+      if (item.priority === "Grail") {
+        summary.grailCount += 1;
+      }
+
+      if (currentValue !== null && targetValue !== null) {
+        summary.pricedCount += 1;
+
+        if (currentValue <= targetValue) {
+          summary.targetHits += 1;
+        }
+      }
+
+      return summary;
+    },
+    { grailCount: 0, pricedCount: 0, targetHits: 0 },
+  );
 
   async function handleUpdate(event: FormEvent<HTMLFormElement>, itemId: string) {
     event.preventDefault();
@@ -3563,6 +3610,26 @@ function WishlistScreen({
         <StatCard label="Wanted" value={wishlist.length.toString()} note="Cards and sealed products" />
         <StatCard label="Target total" value={formatMoney(wishlistTotal)} note="Based on target prices" />
       </div>
+      {wishlist.length ? (
+        <section className="tool-panel wishlist-summary-panel">
+          <div className="panel-title-row">
+            <div>
+              <h2>Target watch</h2>
+              <p className="muted">
+                {wishlistInsight.targetHits
+                  ? `${wishlistInsight.targetHits} target ${wishlistInsight.targetHits === 1 ? "is" : "are"} at or below your buy price.`
+                  : "No targets are at or below your buy price yet."}
+              </p>
+            </div>
+            <span className="tag amber">{wishlistInsight.grailCount} grail</span>
+          </div>
+          <div className="wishlist-summary-grid">
+            <span><b>{wishlistInsight.targetHits}</b>At target</span>
+            <span><b>{wishlistInsight.pricedCount}</b>Priced</span>
+            <span><b>{wishlist.length - wishlistInsight.pricedCount}</b>Needs estimate</span>
+          </div>
+        </section>
+      ) : null}
 
       <div className="item-list">
         {wishlist.length ? (
@@ -3577,7 +3644,7 @@ function WishlistScreen({
             const delta = currentValue === null || targetValue === null ? null : targetValue - currentValue;
 
             return (
-              <article className="item-card" key={item.id}>
+              <article className="item-card wishlist-card" key={item.id}>
                 <div className="item-image">{renderItemImage(catalogueItem)}</div>
                 <div className="item-main">
                   <div className="item-title-row">
@@ -3589,6 +3656,10 @@ function WishlistScreen({
                   </div>
                   {isEditing ? (
                     <form className="form-stack" onSubmit={(event) => void handleUpdate(event, item.id)}>
+                      <div className="panel-title-row compact-row">
+                        <strong>Edit target</strong>
+                        <span className="tag">{item.priority}</span>
+                      </div>
                       <div className="field-grid">
                         <Field label="Priority">
                           <select name="priority" defaultValue={item.priority}>
@@ -3610,7 +3681,7 @@ function WishlistScreen({
                       <Field label="Notes">
                         <textarea name="notes" defaultValue={item.notes ?? ""} placeholder="Optional" />
                       </Field>
-                      <div className="actions">
+                      <div className="actions item-action-grid">
                         <button className="button primary" type="submit" disabled={savingId === item.id}>
                           <Check size={17} />
                           {savingId === item.id ? "Saving" : "Save target"}
@@ -3623,12 +3694,22 @@ function WishlistScreen({
                     </form>
                   ) : (
                     <>
-                      <p className="item-value">Target {formatValuation(targetValue)}</p>
-                      <p className={delta !== null && delta >= 0 ? "positive item-note" : "muted item-note"}>
-                        {delta === null ? "Needs market estimate" : wishlistDeltaText(delta)}
-                      </p>
-                      <p className="muted">{item.notes}</p>
-                      <div className="actions">
+                      <div className="wishlist-target-grid">
+                        <span>
+                          <small>Target</small>
+                          <strong>{formatValuation(targetValue)}</strong>
+                        </span>
+                        <span>
+                          <small>Market</small>
+                          <strong>{formatValuation(currentValue)}</strong>
+                        </span>
+                        <span className={delta !== null && delta >= 0 ? "target-hit" : ""}>
+                          <small>Status</small>
+                          <strong>{delta === null ? "Needs estimate" : wishlistDeltaText(delta)}</strong>
+                        </span>
+                      </div>
+                      {item.notes ? <p className="muted wishlist-note">{item.notes}</p> : null}
+                      <div className="actions item-action-grid">
                         <button className="button primary" onClick={() => void addToCollection(item.catalogueId)}>
                           <Check size={17} />
                           Move to collection
@@ -3652,7 +3733,16 @@ function WishlistScreen({
             );
           })
         ) : (
-          <EmptyState title="No wishlist items" />
+          <EmptyState
+            title="No wishlist items"
+            description="Add cards or sealed products you want to track before buying."
+            action={
+              <button className="button primary" type="button" onClick={() => startAdd("card")}>
+                <Plus size={17} />
+                Add target
+              </button>
+            }
+          />
         )}
       </div>
     </section>

@@ -870,6 +870,112 @@ h3 {
   background: var(--control);
 }
 
+.set-detail-panel,
+.wishlist-summary-panel {
+  align-content: start;
+}
+
+.set-progress-hero {
+  display: grid;
+  gap: 8px;
+}
+
+.set-progress-copy {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.set-progress-copy strong {
+  color: var(--teal);
+  font-size: 28px;
+  line-height: 1;
+}
+
+.set-progress-copy span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.set-summary-grid,
+.wishlist-summary-grid,
+.wishlist-target-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(116px, 1fr));
+  gap: 8px;
+}
+
+.set-summary-grid span,
+.wishlist-summary-grid span,
+.wishlist-target-grid span {
+  display: grid;
+  min-height: 58px;
+  align-content: center;
+  gap: 4px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--control);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 850;
+  line-height: 1.25;
+}
+
+.set-summary-grid b,
+.wishlist-summary-grid b,
+.wishlist-target-grid strong {
+  color: var(--ink);
+  font-size: 15px;
+  line-height: 1.15;
+}
+
+.wishlist-target-grid small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.wishlist-target-grid .target-hit {
+  border-color: rgba(21, 128, 61, 0.22);
+  background: var(--green-soft);
+}
+
+.wishlist-target-grid .target-hit strong {
+  color: #166534;
+}
+
+.set-filter-tabs {
+  display: grid;
+  width: 100%;
+  grid-template-columns: repeat(4, minmax(max-content, 1fr));
+}
+
+.item-action-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(126px, 1fr));
+  align-items: stretch;
+}
+
+.item-action-grid .button {
+  width: 100%;
+}
+
+.compact-row {
+  align-items: center;
+}
+
+.wishlist-card {
+  align-items: start;
+}
+
+.wishlist-note {
+  margin-bottom: 0;
+  overflow-wrap: anywhere;
+}
+
 .search-box {
   display: flex;
   min-height: 44px;
@@ -2121,7 +2227,21 @@ h3 {
     font-size: 28px;
   }
 
+  .page-header {
+    display: grid;
+  }
+
+  .page-header .actions,
+  .page-header .actions .button {
+    width: 100%;
+  }
+
   .stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .stats-grid.compact,
+  .item-action-grid {
     grid-template-columns: 1fr;
   }
 
