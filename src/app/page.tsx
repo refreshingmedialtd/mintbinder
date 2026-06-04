@@ -22,6 +22,7 @@ import {
   MapPin,
   Mail,
   Lock,
+  Palette,
   PackagePlus,
   Plus,
   RefreshCw,
@@ -110,6 +111,21 @@ type Viewer = {
 type AuthMode = "sign-in" | "register";
 type CatalogueSort = "set-number" | "value-desc" | "name" | "rarity";
 type SetDetailSort = "number" | "value-desc" | "name" | "rarity";
+type ThemeId =
+  | "light"
+  | "dark"
+  | "league"
+  | "forest"
+  | "ocean"
+  | "ember"
+  | "electric"
+  | "psychic"
+  | "fairy"
+  | "dragon"
+  | "steel"
+  | "ghost"
+  | "meadow"
+  | "sunset";
 type JobType = "price_alerts" | "catalogue_refresh" | "pricing_refresh" | "sealed_pricing_refresh";
 type OperationsJobKind =
   | "alerts"
@@ -267,6 +283,14 @@ type ResumeJob = {
   query?: string;
 };
 
+type ThemeOption = {
+  access: "free" | "plus";
+  description: string;
+  id: ThemeId;
+  name: string;
+  swatches: [string, string, string];
+};
+
 const initialState: AppState = {
   screen: "dashboard",
   addType: "card",
@@ -314,6 +338,108 @@ const plusPlanFeatures = [
   "Richer price-confidence and collection health insights",
   "Priority access to future advanced reporting tools",
 ];
+const themeStorageKey = "pokestop-theme";
+const themeOptions: ThemeOption[] = [
+  {
+    access: "free",
+    description: "Clean daylight tracking for everyday use.",
+    id: "light",
+    name: "Light",
+    swatches: ["#ffffff", "#dc2626", "#0f766e"],
+  },
+  {
+    access: "free",
+    description: "Low-glare tracking for late sorting sessions.",
+    id: "dark",
+    name: "Dark",
+    swatches: ["#111827", "#f43f5e", "#22d3ee"],
+  },
+  {
+    access: "plus",
+    description: "Bright red, teal, and gold for a classic collector feel.",
+    id: "league",
+    name: "League",
+    swatches: ["#fff7ed", "#dc2626", "#f59e0b"],
+  },
+  {
+    access: "plus",
+    description: "Deep green and soft mint for binder-building calm.",
+    id: "forest",
+    name: "Forest Badge",
+    swatches: ["#f0fdf4", "#047857", "#84cc16"],
+  },
+  {
+    access: "plus",
+    description: "Cool blue with aqua accents for sealed-product shelves.",
+    id: "ocean",
+    name: "Ocean Gym",
+    swatches: ["#eff6ff", "#2563eb", "#06b6d4"],
+  },
+  {
+    access: "plus",
+    description: "Warm red and amber for chase-card energy.",
+    id: "ember",
+    name: "Ember",
+    swatches: ["#fff7ed", "#ea580c", "#dc2626"],
+  },
+  {
+    access: "plus",
+    description: "Punchy yellow and blue for high-contrast scans.",
+    id: "electric",
+    name: "Electric Pop",
+    swatches: ["#fefce8", "#ca8a04", "#2563eb"],
+  },
+  {
+    access: "plus",
+    description: "Violet, pink, and blue for a vivid analytics mood.",
+    id: "psychic",
+    name: "Psychic Neon",
+    swatches: ["#faf5ff", "#7c3aed", "#db2777"],
+  },
+  {
+    access: "plus",
+    description: "Soft rose and sky accents without losing readability.",
+    id: "fairy",
+    name: "Fairy Pastel",
+    swatches: ["#fff1f2", "#e11d48", "#38bdf8"],
+  },
+  {
+    access: "plus",
+    description: "Inky navy with red and gold highlights.",
+    id: "dragon",
+    name: "Dragon Vault",
+    swatches: ["#111827", "#ef4444", "#f59e0b"],
+  },
+  {
+    access: "plus",
+    description: "Crisp steel grey with blue-green controls.",
+    id: "steel",
+    name: "Steel Case",
+    swatches: ["#f8fafc", "#475569", "#14b8a6"],
+  },
+  {
+    access: "plus",
+    description: "Dark violet and mint for night-time collection review.",
+    id: "ghost",
+    name: "Ghost Night",
+    swatches: ["#171326", "#8b5cf6", "#2dd4bf"],
+  },
+  {
+    access: "plus",
+    description: "Fresh green and sky tones for relaxed cataloguing.",
+    id: "meadow",
+    name: "Meadow",
+    swatches: ["#f7fee7", "#16a34a", "#0ea5e9"],
+  },
+  {
+    access: "plus",
+    description: "Orange, pink, and blue for a warmer showcase look.",
+    id: "sunset",
+    name: "Sunset League",
+    swatches: ["#fff7ed", "#f97316", "#2563eb"],
+  },
+];
+const freeThemeIds = new Set<ThemeId>(["light", "dark"]);
 
 const importPresets: ImportPreset[] = [
   {
@@ -359,6 +485,7 @@ export default function Home() {
   const [subscription, setSubscription] = useState<AppSubscription>(sampleAppData.subscription);
   const [dataSource, setDataSource] = useState<AppDataSource>(sampleAppData.source);
   const [dataNotice, setDataNotice] = useState(sampleAppData.notice ?? "");
+  const [themeId, setThemeId] = useState<ThemeId>("light");
   const [isLoadingData, setIsLoadingData] = useState(true);
   const [toast, setToast] = useState("");
   const [authMode, setAuthMode] = useState<AuthMode>("sign-in");
@@ -386,6 +513,24 @@ export default function Home() {
     role: normalizeAppRole(session?.user?.role),
   };
   const operationsEnabled = canUseOperations(viewer.role);
+
+  useEffect(() => {
+    const storedTheme = window.localStorage.getItem(themeStorageKey);
+
+    if (isThemeId(storedTheme)) {
+      setThemeId(storedTheme);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isThemeAllowed(themeId, appState.plus)) {
+      setThemeId("light");
+      return;
+    }
+
+    document.documentElement.dataset.theme = themeId;
+    window.localStorage.setItem(themeStorageKey, themeId);
+  }, [appState.plus, themeId]);
 
   const applyAppData = useCallback((data: AppData) => {
     setCatalogueItems(data.catalogue);
@@ -1552,10 +1697,12 @@ export default function Home() {
     updateNotificationPreferences,
     downloadImportTemplate,
     importCollectionCsv,
+    setThemeId,
     setAppState,
     showToast,
     resetSampleData,
     refreshAppData,
+    themeId,
   };
 
   return (
@@ -1635,10 +1782,12 @@ type ScreenContext = {
   updateNotificationPreferences: (preferences: NotificationPreferences) => Promise<boolean>;
   downloadImportTemplate: () => void;
   importCollectionCsv: (file: File) => Promise<boolean>;
+  setThemeId: Dispatch<SetStateAction<ThemeId>>;
   setAppState: Dispatch<SetStateAction<AppState>>;
   showToast: (message: string) => void;
   resetSampleData: () => void;
   refreshAppData: (options?: { quiet?: boolean }) => Promise<boolean>;
+  themeId: ThemeId;
 };
 
 function renderScreen(context: ScreenContext) {
@@ -1945,6 +2094,11 @@ function DashboardScreen({
   setAppState,
 }: ScreenContext) {
   const recent = collection.slice(-3).reverse();
+  const focusSets = sets
+    .filter((set) => set.owned > 0)
+    .sort((left, right) => completionPercent(right.owned, right.total) - completionPercent(left.owned, left.total))
+    .slice(0, 4);
+  const dashboardSets = focusSets.length ? focusSets : sets.slice(0, 4);
   const gain = summary.value - summary.cost;
 
   return (
@@ -1966,11 +2120,33 @@ function DashboardScreen({
         <StatCard label="Wishlist" value={wishlist.length.toString()} note={`${formatMoney(wishlistTotal)} target total`} />
       </div>
 
+      {!collection.length ? (
+        <section className="starter-panel">
+          <div>
+            <span className="tag blue">First run</span>
+            <h2>Start with one card or sealed product.</h2>
+            <p className="muted">
+              You can save the basics first, then add condition, values, storage, and notes when you have them.
+            </p>
+          </div>
+          <div className="actions">
+            <button className="button primary" onClick={() => startAdd("card")}>
+              <Plus size={17} />
+              Add first card
+            </button>
+            <button className="button" onClick={() => startAdd("sealed")}>
+              <PackagePlus size={17} />
+              Add sealed
+            </button>
+          </div>
+        </section>
+      ) : null}
+
       <div className="dashboard-grid">
         <section className="section-block">
           <SectionHeader title="Recent additions" />
           <div className="item-list">
-            {recent.map((item) => (
+            {recent.length ? recent.map((item) => (
               <OwnedItemCard
                 key={item.id}
                 item={item}
@@ -1980,7 +2156,18 @@ function DashboardScreen({
                   navigate("item");
                 }}
               />
-            ))}
+            )) : (
+              <EmptyState
+                title="No items yet"
+                description="Add your first card or sealed product to start building the dashboard."
+                action={
+                  <button className="button primary" onClick={() => startAdd("card")}>
+                    <Plus size={17} />
+                    Add first item
+                  </button>
+                }
+              />
+            )}
           </div>
         </section>
 
@@ -2024,7 +2211,7 @@ function DashboardScreen({
           <section className="section-block">
             <SectionHeader title="Set progress" action={<button className="button" onClick={() => navigate("sets")}>Open sets</button>} />
             <div className="set-list">
-              {sets.map((set) => (
+              {dashboardSets.map((set) => (
                 <SetProgressCard
                   key={set.id}
                   set={set}
@@ -2035,6 +2222,9 @@ function DashboardScreen({
                 />
               ))}
             </div>
+            {sets.length > dashboardSets.length ? (
+              <p className="muted">Showing {dashboardSets.length} focus sets. Open Sets for the full catalogue.</p>
+            ) : null}
           </section>
 
           <section className="tool-panel">
@@ -2215,6 +2405,42 @@ function CollectionScreen({
       collectionSetFilter: "all",
       collectionValueFilter: "all",
     }));
+  }
+
+  if (!collection.length) {
+    return (
+      <section className="page">
+        <PageHeader
+          title="Collection"
+          action={
+            <button className="button primary" onClick={() => startAdd("card")}>
+              <Plus size={17} />
+              Add item
+            </button>
+          }
+        />
+        <EmptyState
+          title="Your collection is ready."
+          description="Add a card, add a sealed product, or import a CSV when you already have a list."
+          action={
+            <div className="actions">
+              <button className="button primary" onClick={() => startAdd("card")}>
+                <Plus size={17} />
+                Add card
+              </button>
+              <button className="button" onClick={() => startAdd("sealed")}>
+                <PackagePlus size={17} />
+                Add sealed
+              </button>
+              <button className="button" onClick={() => navigate("settings")}>
+                <Upload size={17} />
+                Import CSV
+              </button>
+            </div>
+          }
+        />
+      </section>
+    );
   }
 
   return (
@@ -2439,6 +2665,7 @@ function CollectionScreen({
       ) : (
         <EmptyState
           title="No matching items"
+          description="Try clearing filters, or add the item if it is not in your collection yet."
           action={
             <div className="actions">
               <button className="button" onClick={resetFilters} disabled={!activeFilterCount}>
@@ -2492,7 +2719,9 @@ function AddScreen({
 
     return matchesSearch && matchesSet && matchesRarity;
   }).sort((left, right) => sortCatalogueItems(left, right, catalogueSort));
-  const visibleResults = filteredResults.slice(0, 120);
+  const hasNarrowedResults = Boolean(normalizedSearch) || catalogueSetFilter !== "all" || catalogueRarityFilter !== "all";
+  const resultLimit = hasNarrowedResults ? 80 : 16;
+  const visibleResults = filteredResults.slice(0, resultLimit);
   const selected =
     filteredResults.find((item) => item.id === appState.selectedCatalogueId && item.type === appState.addType) ??
     filteredResults[0];
@@ -2592,6 +2821,7 @@ function AddScreen({
 
           <p className="result-meta">
             Showing {visibleResults.length} of {filteredResults.length} {appState.addType === "sealed" ? "products" : "cards"}
+            {!hasNarrowedResults && filteredResults.length > visibleResults.length ? " | Search or filter to see more" : ""}
           </p>
           <div className="item-list">
             {visibleResults.length ? visibleResults.map((item) => (
@@ -2602,14 +2832,25 @@ function AddScreen({
                 onClick={() => setAppState((current) => ({ ...current, selectedCatalogueId: item.id }))}
               />
             )) : (
-              <EmptyState title="No matching catalogue items" />
+              <EmptyState
+                title="No matching catalogue items"
+                description={
+                  appState.addType === "sealed"
+                    ? "Try a shorter search, or create a private manual sealed product."
+                    : "Try a card name, set name, or collector number."
+                }
+              />
             )}
           </div>
         </section>
 
-        <section className="tool-panel">
+        <section className="tool-panel add-details-panel">
           <h2>Owned details</h2>
-          {selected ? <CataloguePreview item={selected} /> : <EmptyState title="No item selected" />}
+          {selected ? (
+            <CataloguePreview item={selected} />
+          ) : (
+            <EmptyState title="No item selected" description="Choose a catalogue result to add owned-copy details." />
+          )}
           <form className="form-stack" key={selected?.id ?? "no-selection"} onSubmit={handleSubmit}>
             <div className="field-grid">
               <Field label="Condition">
@@ -4885,6 +5126,8 @@ function SettingsScreen({
   downloadImportTemplate,
   importCollectionCsv,
   navigate,
+  setThemeId,
+  themeId,
 }: ScreenContext) {
   return (
     <section className="page">
@@ -4906,6 +5149,12 @@ function SettingsScreen({
             ["Plan", appState.plus ? "Plus" : "Free"],
             ["Billing", billingStatusLabel(subscription)],
           ]}
+        />
+        <ThemePanel
+          plus={appState.plus}
+          selectedThemeId={themeId}
+          onSelectTheme={setThemeId}
+          onStartCheckout={startPlusCheckout}
         />
         <BillingPanel
           plus={appState.plus}
@@ -5156,6 +5405,81 @@ function WishlistOpportunities({
       ) : (
         <p className="muted">No wishlist items are at target right now.</p>
       )}
+    </section>
+  );
+}
+
+function ThemePanel({
+  onSelectTheme,
+  onStartCheckout,
+  plus,
+  selectedThemeId,
+}: {
+  onSelectTheme: (themeId: ThemeId) => void;
+  onStartCheckout: (plan: "monthly" | "yearly") => Promise<void>;
+  plus: boolean;
+  selectedThemeId: ThemeId;
+}) {
+  return (
+    <section className="tool-panel theme-panel">
+      <div className="panel-title-row">
+        <h2>Themes</h2>
+        <span className="plan-pill">
+          <Palette size={17} />
+          {plus ? "Plus palette" : "Light and dark"}
+        </span>
+      </div>
+      <p className="muted">
+        Free includes Light and Dark. Plus unlocks collector colour schemes for a more personal workspace.
+      </p>
+      <div className="theme-grid">
+        {themeOptions.map((theme) => {
+          const locked = theme.access === "plus" && !plus;
+          const selected = theme.id === selectedThemeId;
+
+          return (
+            <button
+              aria-pressed={selected}
+              className={`theme-option${selected ? " selected" : ""}${locked ? " locked" : ""}`}
+              disabled={locked}
+              key={theme.id}
+              onClick={() => onSelectTheme(theme.id)}
+              type="button"
+            >
+              <span className="theme-swatches" aria-hidden="true">
+                {theme.swatches.map((swatch) => (
+                  <span key={swatch} style={{ background: swatch }} />
+                ))}
+              </span>
+              <span className="theme-copy">
+                <strong>{theme.name}</strong>
+                <small>{theme.description}</small>
+              </span>
+              <span className={locked ? "tag amber" : selected ? "tag green" : "tag"}>
+                {locked ? "Plus" : selected ? "Active" : theme.access === "free" ? "Free" : "Plus"}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      {!plus ? (
+        <div className="locked-preview">
+          <div>
+            <strong>Want the full palette?</strong>
+            <p className="muted">Plus adds a dozen extra schemes alongside analytics, alerts, and reports.</p>
+          </div>
+          <div className="upgrade-actions">
+            <button className="button primary" onClick={() => void onStartCheckout("monthly")}>
+              <CreditCard size={17} />
+              Monthly
+            </button>
+            <button className="button" onClick={() => void onStartCheckout("yearly")}>
+              <Sparkles size={17} />
+              Yearly
+            </button>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -5871,10 +6195,19 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-function EmptyState({ title, action }: { title: string; action?: ReactNode }) {
+function EmptyState({
+  action,
+  description,
+  title,
+}: {
+  action?: ReactNode;
+  description?: string;
+  title: string;
+}) {
   return (
     <div className="empty-state">
       <h2>{title}</h2>
+      {description ? <p className="muted">{description}</p> : null}
       {action}
     </div>
   );
@@ -6641,6 +6974,14 @@ function dateStamp(date = new Date()) {
 
 function uniqueValues(values: string[]) {
   return Array.from(new Set(values.filter(Boolean)));
+}
+
+function isThemeId(value: unknown): value is ThemeId {
+  return typeof value === "string" && themeOptions.some((theme) => theme.id === value);
+}
+
+function isThemeAllowed(themeId: ThemeId, plus: boolean) {
+  return plus || freeThemeIds.has(themeId);
 }
 
 function capitalize(value: string) {

@@ -120,6 +120,7 @@ Can manage catalogue imports, sealed products, pricing sources, and basic operat
 - Basic collection review signals.
 - Wishlist with priorities, target prices, notes, and move-to-collection flow.
 - Set progress and set detail views.
+- Light and dark themes.
 - Item-level market value, source/confidence labels, and limited price-history context where pricing data exists.
 - Notification preferences can be configured, but automated email delivery requires Plus.
 - CSV import, CSV export, and import template download.
@@ -131,6 +132,7 @@ Can manage catalogue imports, sealed products, pricing sources, and basic operat
 - Deeper weak-price, duplicate review, grading opportunity, and collection-health insights.
 - Price alert emails, wishlist target digests, and weak-price confidence digests.
 - Insurance report export.
+- Extended theme palette with collector-style colour schemes.
 - Richer price-confidence and reporting views as pricing sources mature.
 - Priority access to future advanced reporting and automation tools.
 

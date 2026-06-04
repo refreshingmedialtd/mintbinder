@@ -30,6 +30,7 @@ Completed on 2026-06-04:
 - Ran targeted TCGCSV card pricing against the final six matched sparse groups. It matched 825 card products but created 0 additional snapshots, confirming the remaining card gaps are provider/no-price edge cases rather than missed group coverage.
 - Ran a full targeted TCGCSV sealed sweep across all 87 groups with unpriced sealed products. It processed 13,594 products and created 0 additional snapshots, confirming the remaining sealed gaps need PriceCharting or another sealed-price source rather than more TCGCSV coverage.
 - Started the beta UX polish pass by removing the prototype-only Plus simulation path, adding a clear Free vs Plus comparison in Settings, clarifying Plus email notification behavior, and locking automated price-watch content behind real checkout actions for free users.
+- Added local theme selection with free Light/Dark options and a Plus-gated extended palette, plus first-run dashboard/collection empty states, a shorter mobile dashboard set-progress preview, and a less overwhelming Add Item catalogue result cap.
 
 Known QA warnings:
 
@@ -80,7 +81,7 @@ Known QA warnings:
 
 6. UX polish and beta fit-and-finish
 
-   Review mobile layouts, loading states, empty states, error messages, accessibility, button text, and first-run flows. The first pass has clarified Free vs Plus messaging, Analytics upgrade actions, and free-user alert states; continue with collection/add-flow mobile spacing and first-run empty states.
+   Review mobile layouts, loading states, empty states, error messages, accessibility, button text, and first-run flows. The first passes have clarified Free vs Plus messaging, Analytics upgrade actions, free-user alert states, theme selection, collection/add-flow mobile scanning, and first-run empty states; continue with deeper mobile detail-form QA.
 
 7. Legal, privacy, and brand safety
 
