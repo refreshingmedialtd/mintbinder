@@ -54,6 +54,7 @@ npm run build
 npm run qa:beta
 npm run qa:admin
 npm run qa:square-activation
+npm run job:price-alerts
 npm audit --audit-level=moderate
 ```
 
@@ -98,6 +99,8 @@ STRIPE_WEBHOOK_SECRET=""
 JOB_SECRET=""
 RESEND_API_KEY=""
 EMAIL_FROM="PokeStop <alerts@example.com>"
+PRICE_ALERT_DIGEST_DRY_RUN="true"
+PRICE_ALERT_DIGEST_NOW=""
 POKEMON_TCG_API_KEY=""
 POKEMON_TCG_QUERY=""
 POKEMON_TCG_USD_TO_GBP_RATE=""
@@ -202,6 +205,8 @@ Run `npm run billing:square-smoke` to verify the configured Square sandbox locat
 Stripe remains available as a fallback by setting `BILLING_PROVIDER=stripe`. Stripe webhook fulfillment expects events for `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, and `customer.subscription.deleted`.
 
 Job routes accept either `Authorization: Bearer <JOB_SECRET>` or `x-job-secret: <JOB_SECRET>`. The in-app Operations screen is visible to admin users only, and the job secret is still required before any import or alert job can run. Each successful authenticated job request creates a `job_runs` record with input, result, status, timing, and errors. Catalogue and pricing refreshes accept `page`, `pageSize`, `q`, and `maxPages`; `maxPages` is capped at 20 per job so broad backfills can be resumed in controlled batches. Pricing refreshes convert Pokemon TCG API USD prices into GBP snapshots with `POKEMON_TCG_USD_TO_GBP_RATE`; when `POKEMON_TCG_EUR_TO_GBP_RATE` is also set, cards without TCGPlayer prices can fall back to embedded Cardmarket EUR prices. Keep conversion rates current before running pricing jobs.
+
+Email alerts are sent through Resend. Before live sending, verify a sending domain or subdomain in Resend, add the required DNS records, create a sending API key, then set `RESEND_API_KEY` and `EMAIL_FROM` in `.env`. Run `npm run job:price-alerts` to execute the digest job through the production app. It defaults to dry-run mode with `PRICE_ALERT_DIGEST_DRY_RUN=true`, selects active Plus users, applies notification preferences, records a `price_alerts` job run, and does not send email. Set `PRICE_ALERT_DIGEST_DRY_RUN=false` only after `RESEND_API_KEY` and `EMAIL_FROM` are configured. Use `PRICE_ALERT_DIGEST_NOW` with an ISO timestamp when you need to test daily/weekly scheduling deterministically.
 
 If `npm run qa:admin` reports recent failed job runs, inspect the `recentFailedJobRunDetails` JSON first. Fix the named job's configuration or provider issue, rerun a small controlled batch from Operations, confirm the latest run for that job type is `SUCCEEDED`, then rerun `npm run qa:admin` before increasing batch size. The warning notes when the latest failed job type has since recovered with a later successful run.
 

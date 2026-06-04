@@ -43,6 +43,7 @@
     "db:migrate": "prisma migrate dev",
     "db:seed": "prisma db seed",
     "job:catalogue-batch": "node scripts/run-catalogue-batch.mjs",
+    "job:price-alerts": "node scripts/run-price-alert-digests.mjs",
     "job:pricing-batch": "node scripts/run-pricing-batch.mjs",
     "job:repair-card-images": "node scripts/repair-card-images.mjs",
     "job:repair-sealed-images": "node scripts/repair-sealed-images.mjs",

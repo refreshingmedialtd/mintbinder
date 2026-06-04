@@ -4,7 +4,7 @@ Last updated: 2026-06-04
 
 ## Overall Progress
 
-PokeStop is approximately 81% of the way to a credible MVP/beta release and around 63% of the way to a polished public launch.
+PokeStop is approximately 82% of the way to a credible MVP/beta release and around 64% of the way to a polished public launch.
 
 The product is now feature-complete enough to validate the core idea with a small beta group: users can track cards and sealed products, manage wishlist targets, review value history, see set progress, use Plus-gated analytics/reporting, and admins can operate catalogue/pricing imports. The remaining work is less about inventing the product and more about finishing integration QA, production setup, legal/brand readiness, and a focused mobile polish pass.
 
@@ -19,10 +19,12 @@ Completed on 2026-06-04:
 - Ran `npm run qa:beta` successfully with 18/18 checks passing.
 - Ran `npm run qa:square-activation` successfully. The final pass created Square sandbox monthly/yearly subscriptions through a live Cloudflare webhook tunnel, verified Square's test webhook, confirmed monthly Plus activation, confirmed cancellation keeps Plus active through the estimated paid period, and left the admin account on active yearly Plus. The final pass used real Square webhook delivery with no signed local replay fallback.
 - Reran `npm run qa:admin` after Square activation; the admin QA user now reports `PLUS_YEARLY` / `ACTIVE`.
+- Added `npm run job:price-alerts` and ran a successful dry-run against the local production build. The job selected 1 active Plus user, found 3 alert items, recorded a succeeded `price_alerts` job run, and did not send email because Resend is not configured locally.
 
 Known QA warnings:
 
 - Hosted Square checkout link creation has been smoke-tested, and webhook activation is now validated. Do one final browser-based hosted checkout smoke on a stable staging/production URL before public launch.
+- Resend email credentials and sender/domain verification are not configured locally yet, so live price-alert email sending remains pending. Dry-run selection, preferences, and job recording are validated.
 - One sealed-pricing job failed in the last 24 hours, but the latest sealed-pricing job has since succeeded.
 - `npm run db:generate` hit a Windows `EPERM` while replacing Prisma's existing query engine DLL. The migration, seed, build, admin QA, and beta QA all completed successfully, so this is currently a local Windows file-lock warning rather than a launch blocker.
 
@@ -46,7 +48,7 @@ Known QA warnings:
 
 1. Email and notification readiness
 
-   Configure the email provider, verify sender/domain setup, run price-alert dry runs with real users, and decide the schedule for daily/weekly digests.
+   Configure Resend, verify sender/domain setup, run a live price-alert send test, and decide the schedule for daily/weekly digests. Dry-run digest selection is already validated locally.
 
 2. Catalogue data completion
 
@@ -86,7 +88,7 @@ Known QA warnings:
 
 ## Recommended Order From Here
 
-1. Configure email sending and run notification dry-runs/send tests.
+1. Configure Resend sender credentials and run a live price-alert send smoke test.
 2. Exercise the database-backed Operations screen directly, especially catalogue status, job history, and gap reports.
 3. Run controlled catalogue and pricing backfills, then review catalogue gap/status reports.
 4. Do a focused mobile UX polish pass on authenticated core flows.

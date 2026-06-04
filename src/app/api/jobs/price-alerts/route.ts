@@ -10,11 +10,12 @@ export async function POST(request: Request) {
   try {
     requireJobSecret(request);
 
-    const body = (await request.json().catch(() => ({}))) as { dryRun?: boolean };
+    const body = (await request.json().catch(() => ({}))) as { dryRun?: boolean; now?: string };
+    const now = parseOptionalDate(body.now);
     const { jobRun, result } = await runTrackedJob({
       input: body,
       type: "price_alerts",
-      task: () => sendPriceAlertDigests({ dryRun: body.dryRun === true }),
+      task: () => sendPriceAlertDigests({ dryRun: body.dryRun === true, now }),
     });
 
     return NextResponse.json({ ...result, jobRun });
@@ -25,4 +26,18 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ error: message, jobRun }, { status: jobErrorStatus(originalError) });
   }
+}
+
+function parseOptionalDate(value?: string) {
+  if (!value) {
+    return undefined;
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    throw new Error("Invalid price alert digest timestamp.");
+  }
+
+  return date;
 }
