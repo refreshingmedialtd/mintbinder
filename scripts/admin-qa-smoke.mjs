@@ -306,7 +306,10 @@ async function catalogueHealthReport(prisma) {
     prisma.$queryRaw`
       SELECT
         COUNT(*)::int AS "total",
-        COUNT(*) FILTER (WHERE variant_metadata <> '{}'::jsonb)::int AS "covered"
+        COUNT(*) FILTER (
+          WHERE jsonb_typeof(variant_metadata->'availablePrices') = 'array'
+            AND jsonb_array_length(variant_metadata->'availablePrices') > 0
+        )::int AS "covered"
       FROM card_printings
     `,
     prisma.$queryRaw`

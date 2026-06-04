@@ -53,6 +53,7 @@ npm run test:tcgcsv-card-pricing
 npm run build
 npm run qa:beta
 npm run qa:admin
+npm run qa:operations
 npm run qa:square-activation
 npm run job:price-alerts
 npm audit --audit-level=moderate
@@ -101,6 +102,7 @@ RESEND_API_KEY=""
 EMAIL_FROM="PokeStop <alerts@example.com>"
 PRICE_ALERT_DIGEST_DRY_RUN="true"
 PRICE_ALERT_DIGEST_NOW=""
+OPERATIONS_QA_NETWORK_REPAIRS="false"
 POKEMON_TCG_API_KEY=""
 POKEMON_TCG_QUERY=""
 POKEMON_TCG_USD_TO_GBP_RATE=""
@@ -143,6 +145,8 @@ npm run qa:admin
 ```
 
 `npm run qa:admin` checks the real database-backed admin environment. It verifies required environment variables, seeded admin access, subscription and notification rows, core table counts, catalogue media/variant/pricing coverage, duplicate Pokemon TCG provider groups, latest job runs by type, recent job failure counts/details, and pricing conversion-rate configuration.
+
+`npm run qa:operations` starts the production app locally and exercises the protected Operations API surface with `JOB_SECRET`: catalogue status, catalogue gap export, duplicate provider review, job history, and safe dry-run maintenance jobs. Network-backed repair jobs are skipped by default to keep the smoke local and repeatable; set `OPERATIONS_QA_NETWORK_REPAIRS=true` only when deliberately testing provider-backed sealed image or variant metadata repair calls.
 
 ## Beta QA
 
@@ -225,6 +229,8 @@ For sealed product catalogue imports, run `npm run job:sealed-tcgcsv`. The impor
 For tracked sealed-pricing backfills through the same API route used by Operations, set `JOB_SECRET`, confirm `TCGCSV_USD_TO_GBP_RATE` or `POKEMON_TCG_USD_TO_GBP_RATE`, then run `npm run job:sealed-pricing-batch`. The helper starts the built app, posts to `/api/jobs/sealed-pricing-refresh`, records a `sealed_pricing_refresh` job run, prints the JSON result, and stops the server. Use `TCGCSV_SEALED_GROUP_LIMIT` or `TCGCSV_SEALED_GROUP_IDS` for small batches before scaling up.
 
 For PriceCharting sealed-price enrichment, run `npm run job:pricecharting-sealed`. The importer uses the official PriceCharting Prices API, checks unpriced sealed products, searches by UPC first and then by conservative sealed-product name matching, and writes source `pricecharting-sealed` snapshots from the `new-price` field only. Set `PRICECHARTING_API_TOKEN`, keep `PRICECHARTING_SEALED_WAIT_MS=1100` or higher for the API rate limit, and use `PRICECHARTING_SEALED_LIMIT` for small controlled batches.
+
+When the final product name/domain is chosen, run a domain setup batch: verify the Resend sending domain/subdomain and sender address, update `EMAIL_FROM`, configure the production Square webhook URL, add privacy/terms/non-affiliation pages at their final URLs, and wire those URLs into monitoring and operational runbooks.
 
 ## Static Prototype
 

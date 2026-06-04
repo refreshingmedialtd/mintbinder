@@ -34,6 +34,7 @@
     "lint": "eslint .",
     "qa:admin": "node scripts/admin-qa-smoke.mjs",
     "qa:beta": "node scripts/beta-qa-smoke.mjs",
+    "qa:operations": "node scripts/operations-qa-smoke.mjs",
     "qa:square-activation": "node scripts/qa-square-subscription-activation.mjs",
     "billing:square-plans": "node scripts/setup-square-subscription-plans.mjs",
     "billing:square-smoke": "node scripts/smoke-square-billing.mjs",
