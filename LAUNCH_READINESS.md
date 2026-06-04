@@ -23,11 +23,12 @@ Completed on 2026-06-04:
 - Added and ran `npm run qa:operations` successfully. The pass validated protected Operations endpoints for catalogue status, catalogue gap export, duplicate provider review, job history, and local dry-run maintenance job recording.
 - Completed a browser click-through of the admin Operations screen. This caught and fixed a mobile access gap by adding an admin-only `Ops` shortcut to the bottom nav; status loading, gap export API verification, duplicate review, alert dry-run, and job history were validated.
 - Ran controlled Pokemon TCG API-backed variant metadata repair dry-runs for 10 and 50 candidates. Both fetched provider data successfully once network access was allowed, but found 0 repairable cards in those batches, so no catalogue rows were changed.
+- Added a safer price-alert live-smoke path with `PRICE_ALERT_DIGEST_TEST_RECIPIENT`, allowing real digest content to be sent to one controlled mailbox before clearing the override for beta users.
 
 Known QA warnings:
 
 - Hosted Square checkout link creation has been smoke-tested, and webhook activation is now validated. Do one final browser-based hosted checkout smoke on a stable staging/production URL before public launch.
-- Resend email credentials and sender/domain verification are not configured locally yet, so live price-alert email sending remains pending. Dry-run selection, preferences, and job recording are validated.
+- Resend email credentials and sender/domain verification are not configured locally yet, so live price-alert email sending remains pending. Dry-run selection, preferences, job recording, and the controlled live-smoke override are validated in code.
 - The Operations gap report currently shows 814 card variant-metadata gaps. A controlled 50-card provider dry-run found 0 repairable rows, so the remaining gaps may include cards where Pokemon TCG API does not expose TCGPlayer variant prices. Continue with measured batches before treating this as a data-quality blocker.
 - One sealed-pricing job failed in the last 24 hours, but the latest sealed-pricing job has since succeeded.
 - `npm run db:generate` hit a Windows `EPERM` while replacing Prisma's existing query engine DLL. The migration, seed, build, admin QA, and beta QA all completed successfully, so this is currently a local Windows file-lock warning rather than a launch blocker.
@@ -52,7 +53,7 @@ Known QA warnings:
 
 1. Email and notification readiness
 
-   Configure Resend, verify sender/domain setup, run a live price-alert send test, and decide the schedule for daily/weekly digests. Dry-run digest selection is already validated locally.
+   Configure Resend, verify sender/domain setup, run a live price-alert send test with `PRICE_ALERT_DIGEST_TEST_RECIPIENT`, and decide the schedule for daily/weekly digests. Dry-run digest selection is already validated locally.
 
 2. Catalogue data completion
 

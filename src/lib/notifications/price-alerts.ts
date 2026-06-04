@@ -11,6 +11,7 @@ import {
 
 type PriceAlertDigestResult = {
   alerts: number;
+  deliveryEmail?: string;
   emailId?: string;
   email: string;
   status: "sent" | "dry_run" | "skipped" | "failed" | "filtered" | "not_scheduled" | "preferences_off";
@@ -21,10 +22,13 @@ type PriceAlertDigestResult = {
 export async function sendPriceAlertDigests({
   dryRun = false,
   now = new Date(),
+  testRecipient,
 }: {
   dryRun?: boolean;
   now?: Date;
+  testRecipient?: string;
 } = {}) {
+  const testRecipientEmail = optionalEmail(testRecipient, "Price alert digest test recipient");
   const users = await prisma.user.findMany({
     where: {
       email: { not: "" },
@@ -46,6 +50,7 @@ export async function sendPriceAlertDigests({
   const results: PriceAlertDigestResult[] = [];
 
   for (const user of users) {
+    const deliveryEmail = testRecipientEmail ?? user.email;
     const data = await getAppData(user.id);
     const intelligence = buildCollectionIntelligence({
       catalogueById: new Map(data.catalogue.map((item) => [item.id, item])),
@@ -63,6 +68,7 @@ export async function sendPriceAlertDigests({
     if (data.notificationPreferences.digestFrequency === "Off") {
       results.push({
         alerts: 0,
+        deliveryEmail: testRecipientEmail,
         email: user.email,
         status: "preferences_off",
         userId: user.id,
@@ -73,6 +79,7 @@ export async function sendPriceAlertDigests({
     if (!shouldSendDigestForFrequency(data.notificationPreferences.digestFrequency, now)) {
       results.push({
         alerts: alerts.length,
+        deliveryEmail: testRecipientEmail,
         email: user.email,
         status: "not_scheduled",
         userId: user.id,
@@ -83,6 +90,7 @@ export async function sendPriceAlertDigests({
     if (!alerts.length) {
       results.push({
         alerts: intelligence.priceAlerts.length,
+        deliveryEmail: testRecipientEmail,
         email: user.email,
         status: intelligence.priceAlerts.length ? "filtered" : "skipped",
         userId: user.id,
@@ -93,6 +101,7 @@ export async function sendPriceAlertDigests({
     if (dryRun || !emailReady) {
       results.push({
         alerts: alerts.length,
+        deliveryEmail: testRecipientEmail,
         email: user.email,
         status: "dry_run",
         userId: user.id,
@@ -108,11 +117,12 @@ export async function sendPriceAlertDigests({
       const sent = await sendEmail({
         ...email,
         idempotencyKey: `price-alerts-${user.id}-${dateStamp()}`,
-        to: user.email,
+        to: deliveryEmail,
       });
 
       results.push({
         alerts: alerts.length,
+        deliveryEmail: testRecipientEmail,
         email: user.email,
         emailId: sent.id,
         status: "sent",
@@ -121,6 +131,7 @@ export async function sendPriceAlertDigests({
     } catch (error) {
       results.push({
         alerts: alerts.length,
+        deliveryEmail: testRecipientEmail,
         email: user.email,
         error: error instanceof Error ? error.message : "Unknown email error.",
         status: "failed",
@@ -196,6 +207,20 @@ function buildPriceAlertDigestEmail({
 
 function dateStamp(date = new Date()) {
   return date.toISOString().slice(0, 10);
+}
+
+function optionalEmail(value: string | undefined, label: string) {
+  const trimmed = value?.trim();
+
+  if (!trimmed) {
+    return undefined;
+  }
+
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+    throw new Error(`${label} must be a valid email address.`);
+  }
+
+  return trimmed;
 }
 
 function escapeHtml(value: string) {

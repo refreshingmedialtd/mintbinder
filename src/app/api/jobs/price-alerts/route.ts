@@ -10,12 +10,20 @@ export async function POST(request: Request) {
   try {
     requireJobSecret(request);
 
-    const body = (await request.json().catch(() => ({}))) as { dryRun?: boolean; now?: string };
+    const body = (await request.json().catch(() => ({}))) as {
+      dryRun?: boolean;
+      now?: string;
+      testRecipient?: string;
+    };
     const now = parseOptionalDate(body.now);
     const { jobRun, result } = await runTrackedJob({
       input: body,
       type: "price_alerts",
-      task: () => sendPriceAlertDigests({ dryRun: body.dryRun === true, now }),
+      task: () => sendPriceAlertDigests({
+        dryRun: body.dryRun === true,
+        now,
+        testRecipient: body.testRecipient,
+      }),
     });
 
     return NextResponse.json({ ...result, jobRun });
