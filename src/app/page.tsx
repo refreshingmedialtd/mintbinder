@@ -1722,7 +1722,10 @@ export default function Home() {
           canUseOperations={operationsEnabled}
           onNavigate={navigate}
         />
-        <main className="main">{renderScreen(context)}</main>
+        <main className="main">
+          {renderScreen(context)}
+          <LegalFooter />
+        </main>
       </div>
       <BottomNav active={appState.screen} canUseOperations={operationsEnabled} onNavigate={navigate} />
       {toast ? <div className="toast">{toast}</div> : null}
@@ -1857,66 +1860,78 @@ function SignInScreen({
 }) {
   return (
     <main className="auth-shell">
-      <form className="auth-card" onSubmit={onSubmit}>
-        <AuthBrand />
-        <div>
-          <h1>{authMode === "register" ? "Create account" : "Sign in"}</h1>
-          <p className="muted">Your collection, wishlist, and set progress stay attached to your account.</p>
-        </div>
-        <div className="segmented" aria-label="Authentication mode">
-          <button
-            className={authMode === "sign-in" ? "active" : ""}
-            type="button"
-            onClick={() => onAuthModeChange("sign-in")}
-          >
-            Sign in
-          </button>
-          <button
-            className={authMode === "register" ? "active" : ""}
-            type="button"
-            onClick={() => onAuthModeChange("register")}
-          >
-            Create account
-          </button>
-        </div>
-        <Field label="Email">
-          <input
-            type="email"
-            value={email}
-            onChange={(event) => onEmailChange(event.target.value)}
-            required
-          />
-        </Field>
-        <Field label="Password">
-          <input
-            type="password"
-            value={password}
-            onChange={(event) => onPasswordChange(event.target.value)}
-            minLength={8}
-            required
-          />
-        </Field>
-        {authMode === "register" ? (
-          <Field label="Display name">
+      <div className="auth-stack">
+        <form className="auth-card" onSubmit={onSubmit}>
+          <AuthBrand />
+          <div>
+            <h1>{authMode === "register" ? "Create account" : "Sign in"}</h1>
+            <p className="muted">Track the cards and sealed products you own, want, and are watching.</p>
+          </div>
+          <div className="segmented" aria-label="Authentication mode">
+            <button
+              className={authMode === "sign-in" ? "active" : ""}
+              type="button"
+              onClick={() => onAuthModeChange("sign-in")}
+            >
+              Sign in
+            </button>
+            <button
+              className={authMode === "register" ? "active" : ""}
+              type="button"
+              onClick={() => onAuthModeChange("register")}
+            >
+              Create account
+            </button>
+          </div>
+          <Field label="Email">
             <input
-              value={name}
-              onChange={(event) => onNameChange(event.target.value)}
+              type="email"
+              value={email}
+              onChange={(event) => onEmailChange(event.target.value)}
               required
             />
           </Field>
-        ) : null}
-        {error ? <p className="auth-error">{error}</p> : null}
-        <button className="button primary full" type="submit" disabled={isSubmitting}>
-          {authMode === "register" ? <UserRound size={17} /> : <LogIn size={17} />}
-          {isSubmitting
-            ? authMode === "register"
-              ? "Creating account"
-              : "Signing in"
-            : authMode === "register"
-              ? "Create account"
-              : "Sign in"}
-        </button>
-      </form>
+          <Field label="Password">
+            <input
+              type="password"
+              value={password}
+              onChange={(event) => onPasswordChange(event.target.value)}
+              minLength={8}
+              required
+            />
+          </Field>
+          {authMode === "register" ? (
+            <Field label="Display name">
+              <input
+                value={name}
+                onChange={(event) => onNameChange(event.target.value)}
+                required
+              />
+            </Field>
+          ) : null}
+          {error ? <p className="auth-error">{error}</p> : null}
+          <button className="button primary full" type="submit" disabled={isSubmitting}>
+            {authMode === "register" ? <UserRound size={17} /> : <LogIn size={17} />}
+            {isSubmitting
+              ? authMode === "register"
+                ? "Creating account"
+                : "Signing in"
+              : authMode === "register"
+                ? "Create account"
+                : "Sign in"}
+          </button>
+        </form>
+        <section className="auth-onboarding" aria-label="Getting started">
+          <h2>Start with one binder</h2>
+          <div className="onboarding-list">
+            <span><Layers3 size={17} />Add owned cards or sealed products.</span>
+            <span><Heart size={17} />Set wishlist targets before buying.</span>
+            <span><Sparkles size={17} />Upgrade later for alerts and deeper analytics.</span>
+          </div>
+          <p className="muted">PokeStop is a working title and independent beta, not an official Pokemon product.</p>
+        </section>
+        <LegalFooter compact />
+      </div>
     </main>
   );
 }
@@ -1929,6 +1944,17 @@ function AuthBrand() {
       </span>
       <span>PokeStop</span>
     </div>
+  );
+}
+
+function LegalFooter({ compact = false }: { compact?: boolean }) {
+  return (
+    <footer className={compact ? "legal-footer compact" : "legal-footer"} aria-label="Legal links">
+      <span>PokeStop is a working title.</span>
+      <a href="/legal/privacy">Privacy</a>
+      <a href="/legal/terms">Terms</a>
+      <a href="/legal/non-affiliation">Non-affiliation</a>
+    </footer>
   );
 }
 

@@ -231,7 +231,7 @@ For tracked sealed-pricing backfills through the same API route used by Operatio
 
 For PriceCharting sealed-price enrichment, run `npm run job:pricecharting-sealed`. The importer uses the official PriceCharting Prices API, checks unpriced sealed products, searches by UPC first and then by conservative sealed-product name matching, and writes source `pricecharting-sealed` snapshots from the `new-price` field only. Set `PRICECHARTING_API_TOKEN`, keep `PRICECHARTING_SEALED_WAIT_MS=1100` or higher for the API rate limit, and use `PRICECHARTING_SEALED_LIMIT` for small controlled batches.
 
-When the final product name/domain is chosen, run a domain setup batch: verify the Resend sending domain/subdomain and sender address, update `EMAIL_FROM`, configure the production Square webhook URL, add privacy/terms/non-affiliation pages at their final URLs, and wire those URLs into monitoring and operational runbooks.
+When the final product name/domain is chosen, run a domain setup batch: verify the Resend sending domain/subdomain and sender address, update `EMAIL_FROM`, configure the production Square webhook URL, update the beta-draft privacy/terms/non-affiliation pages with final URLs/contact details, and wire those URLs into monitoring and operational runbooks.
 
 ## Static Prototype
 

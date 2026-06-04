@@ -33,6 +33,7 @@ Completed on 2026-06-04:
 - Added local theme selection with free Light/Dark options and a Plus-gated extended palette, plus first-run dashboard/collection empty states, a shorter mobile dashboard set-progress preview, and a less overwhelming Add Item catalogue result cap.
 - Continued beta UX polish with a cleaner item-detail mobile layout, moving owned-lot actions out of the page header, adding a compact owned-lot summary, and clarifying edit/sale form states.
 - Continued mobile UX polish across set detail and wishlist flows, adding clearer set progress summaries, target-watch summaries, full-width mobile actions, and better no-results/empty states.
+- Added beta-draft legal pages for privacy, terms, and Pokemon non-affiliation, linked them from the app/auth surfaces, and added first-run onboarding copy to the sign-in/create-account screen.
 
 Known QA warnings:
 
@@ -87,7 +88,7 @@ Known QA warnings:
 
 7. Legal, privacy, and brand safety
 
-   Finalize the product name, add clear non-affiliation language for Pokemon/Nintendo/The Pokemon Company, write privacy and terms pages, and confirm data export/deletion expectations.
+   Beta-draft privacy, terms, and non-affiliation pages now exist. Finalize the product name, domain, company/contact details, legal review, Pokemon/Nintendo/The Pokemon Company non-affiliation wording, and data export/deletion expectations.
 
 8. Domain setup batch
 
@@ -106,7 +107,7 @@ Known QA warnings:
 1. Configure Resend sender credentials and run a live price-alert send smoke test.
 2. Run controlled catalogue and pricing backfills, including measured variant metadata repair batches, then review catalogue gap/status reports.
 3. Do a focused mobile UX polish pass on authenticated core flows.
-4. Add legal, privacy, and brand/non-affiliation pages.
+4. Review/finalize legal, privacy, brand/non-affiliation, and onboarding copy once the final name/domain is chosen.
 5. Choose hosting/database providers and prepare production env/deploy steps.
 6. Run the domain setup batch once the final name/domain is chosen.
 7. Complete a hosted Square checkout browser smoke on staging/production.
@@ -127,7 +128,7 @@ Beta can start when:
 - Plus gates, Square checkout link creation, billing management, and webhook entitlement updates work in sandbox mode. Backend activation completed locally on 2026-06-04; hosted-checkout browser smoke remains for staging/production.
 - Email notifications can be dry-run and sent safely.
 - Operations status, exports, job history, and safe dry-run job controls pass protected API QA and browser UI click-through. Completed locally on 2026-06-04.
-- Basic privacy/terms/non-affiliation pages exist.
+- Basic privacy/terms/non-affiliation pages exist in beta-draft form. Completed locally on 2026-06-04; final legal/name/domain review remains.
 - There is a rollback or recovery plan for migrations and job failures.
 
 Public launch should wait until:
