@@ -1,7 +1,11 @@
 import { SubscriptionPlan, SubscriptionStatus } from "@prisma/client";
 import { activeBillingProvider } from "@/lib/billing/provider";
 import { cancelSquareSubscription } from "@/lib/billing/square";
-import { planFromSquarePlanVariationId, statusFromSquare } from "@/lib/billing/subscription-mapping";
+import {
+  planFromSquarePlanVariationId,
+  squareSubscriptionPeriodEnd,
+  statusFromSquareForLocalAccess,
+} from "@/lib/billing/subscription-mapping";
 import { prisma } from "@/lib/db/prisma";
 import type { AppSubscription } from "@/lib/types";
 
@@ -41,15 +45,26 @@ export async function cancelCurrentSquareSubscription(userId: string): Promise<A
   }
 
   const squareSubscription = await cancelSquareSubscription(subscription.providerSubscriptionId);
+  const plan = planFromSquarePlanVariationId(squareSubscription.plan_variation_id, subscription.plan);
+  const currentPeriodEnd = squareSubscriptionPeriodEnd({
+    anchor: subscription.updatedAt,
+    chargedThroughDate: squareSubscription.charged_through_date,
+    estimateWhenMissing: true,
+    fallback: subscription.currentPeriodEnd,
+    plan,
+  });
   const updated = await prisma.subscription.update({
     where: { id: subscription.id },
     data: {
       cancelAtPeriodEnd: Boolean(squareSubscription.canceled_date) || true,
-      currentPeriodEnd:
-        squareDateToPeriodEnd(squareSubscription.charged_through_date) ??
-        subscription.currentPeriodEnd,
-      plan: planFromSquarePlanVariationId(squareSubscription.plan_variation_id, subscription.plan),
-      status: statusFromSquare(squareSubscription.status),
+      currentPeriodEnd,
+      plan,
+      status: statusFromSquareForLocalAccess({
+        cancelAtPeriodEnd: true,
+        currentPeriodEnd,
+        plan,
+        status: squareSubscription.status,
+      }),
     },
   });
 
@@ -96,16 +111,4 @@ function serializeSubscription(
     providerSubscriptionId: subscription.providerSubscriptionId ?? undefined,
     status: subscription.status,
   };
-}
-
-function squareDateToPeriodEnd(value?: string | null) {
-  if (!value) {
-    return undefined;
-  }
-
-  const date = /^\d{4}-\d{2}-\d{2}$/.test(value)
-    ? new Date(`${value}T23:59:59.999Z`)
-    : new Date(value);
-
-  return Number.isNaN(date.getTime()) ? undefined : date;
 }

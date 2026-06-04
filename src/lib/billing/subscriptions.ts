@@ -5,7 +5,9 @@ import {
   planFromHint,
   planFromPriceId,
   planFromSquarePlanVariationId,
+  squareSubscriptionPeriodEnd,
   statusFromSquare,
+  statusFromSquareForLocalAccess,
   statusFromStripe,
 } from "@/lib/billing/subscription-mapping";
 import type { SquareWebhookEvent, StripeWebhookEvent } from "@/lib/billing/webhook-signature";
@@ -14,6 +16,8 @@ export {
   planFromHint,
   planFromPriceId,
   planFromSquarePlanVariationId,
+  squareSubscriptionPeriodEnd,
+  statusFromSquareForLocalAccess,
   statusFromSquare,
   statusFromStripe,
 } from "@/lib/billing/subscription-mapping";
@@ -188,13 +192,31 @@ export async function fulfillSquareSubscription(subscription: SquareSubscription
     };
   }
 
+  const cancelAtPeriodEnd = Boolean(subscription.canceled_date);
+  const plan = planFromSquarePlanVariationId(subscription.plan_variation_id, existing?.plan);
+  const squareStatus = statusFromSquare(subscription.status);
+  const currentPeriodEnd = squareSubscriptionPeriodEnd({
+    anchor: existing?.updatedAt ?? existing?.createdAt,
+    chargedThroughDate: subscription.charged_through_date,
+    estimateWhenMissing:
+      cancelAtPeriodEnd ||
+      squareStatus === SubscriptionStatus.ACTIVE,
+    fallback: existing?.currentPeriodEnd,
+    plan,
+  });
+
   await writeProviderSubscription({
-    cancelAtPeriodEnd: Boolean(subscription.canceled_date),
-    currentPeriodEnd: squareDateToPeriodEnd(subscription.charged_through_date),
+    cancelAtPeriodEnd,
+    currentPeriodEnd,
     customerId,
-    plan: planFromSquarePlanVariationId(subscription.plan_variation_id, existing?.plan),
+    plan,
     provider: "square",
-    status: statusFromSquare(subscription.status),
+    status: statusFromSquareForLocalAccess({
+      cancelAtPeriodEnd,
+      currentPeriodEnd,
+      plan,
+      status: subscription.status,
+    }),
     subscriptionId,
     userId,
   });
@@ -386,16 +408,4 @@ async function userExists(userId: string) {
   });
 
   return Boolean(user);
-}
-
-function squareDateToPeriodEnd(value?: string | null) {
-  if (!value) {
-    return undefined;
-  }
-
-  const date = /^\d{4}-\d{2}-\d{2}$/.test(value)
-    ? new Date(`${value}T23:59:59.999Z`)
-    : new Date(value);
-
-  return Number.isNaN(date.getTime()) ? undefined : date;
 }

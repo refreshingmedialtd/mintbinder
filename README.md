@@ -53,6 +53,7 @@ npm run test:tcgcsv-card-pricing
 npm run build
 npm run qa:beta
 npm run qa:admin
+npm run qa:square-activation
 npm audit --audit-level=moderate
 ```
 
@@ -185,6 +186,8 @@ Creating an account from the sign-in screen creates a new collector profile with
 ## Jobs and Integrations
 
 Square billing is the default provider. In Square Developer, create or choose a sandbox app, copy its access token, and choose the business location ID. Use `npm run billing:square-plans` to create/reuse the Plus monthly subscription plan variation at GBP 2.49 and the Plus yearly subscription plan variation at GBP 19.99, then add the printed plan variation IDs to `.env`. For local webhook testing without buying a domain, run `npm run build` and then `npm run billing:square-tunnel`. The tunnel helper creates a temporary Cloudflare URL, creates or updates a Square webhook subscription, writes `SQUARE_WEBHOOK_NOTIFICATION_URL`, `SQUARE_WEBHOOK_SIGNATURE_KEY`, and `SQUARE_WEBHOOK_SUBSCRIPTION_ID` to your ignored local `.env`, starts the built app, sends Square's test webhook, and keeps the tunnel open until you press Ctrl+C. Use `npm run billing:square-tunnel -- --once` for a one-shot webhook smoke test that exits after Square's test webhook succeeds. During beta, Square billing management is handled in-app: active Plus users can open billing settings to see provider/status/renewal information and schedule renewal cancellation through Square while keeping Plus access until the paid period ends.
+
+Run `npm run qa:square-activation` after a production build to perform the local end-to-end Square activation pass. It starts the tunnel helper, validates Square's test webhook, creates sandbox monthly/yearly subscription records, verifies monthly Plus activation, verifies cancellation preserves paid access locally, and leaves the admin QA account on active yearly Plus. The runner tries real Square webhook delivery first and reports whether it had to use its signed local webhook replay fallback for sandbox flakiness. Hosted checkout link creation is covered by `npm run billing:square-smoke`; do one final browser-based hosted checkout smoke on a stable staging or production URL before public launch.
 
 For production, configure a webhook subscription for this URL:
 

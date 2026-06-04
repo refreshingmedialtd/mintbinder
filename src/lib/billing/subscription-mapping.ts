@@ -37,6 +37,32 @@ export function statusFromSquare(status?: string | null) {
   }
 }
 
+export function statusFromSquareForLocalAccess({
+  cancelAtPeriodEnd,
+  currentPeriodEnd,
+  now = new Date(),
+  plan,
+  status,
+}: {
+  cancelAtPeriodEnd: boolean;
+  currentPeriodEnd?: Date;
+  now?: Date;
+  plan: SubscriptionPlan;
+  status?: string | null;
+}) {
+  const mappedStatus = statusFromSquare(status);
+
+  if (!cancelAtPeriodEnd || !isPlusPlan(plan)) {
+    return mappedStatus;
+  }
+
+  if (!currentPeriodEnd || currentPeriodEnd.getTime() > now.getTime()) {
+    return SubscriptionStatus.ACTIVE;
+  }
+
+  return mappedStatus;
+}
+
 export function planFromHint(plan?: string | null) {
   return plan === "yearly" ? SubscriptionPlan.PLUS_YEARLY : SubscriptionPlan.PLUS_MONTHLY;
 }
@@ -51,6 +77,58 @@ export function planFromPriceId(priceId?: string | null, fallback?: Subscription
   }
 
   return fallback === SubscriptionPlan.PLUS_YEARLY ? fallback : SubscriptionPlan.PLUS_MONTHLY;
+}
+
+export function squareSubscriptionPeriodEnd({
+  anchor = new Date(),
+  chargedThroughDate,
+  estimateWhenMissing = false,
+  fallback,
+  plan,
+}: {
+  anchor?: Date;
+  chargedThroughDate?: string | null;
+  estimateWhenMissing?: boolean;
+  fallback?: Date | null;
+  plan: SubscriptionPlan;
+}) {
+  return (
+    squareDateToPeriodEnd(chargedThroughDate) ??
+    fallback ??
+    (estimateWhenMissing ? estimateSquarePeriodEnd(plan, anchor) : undefined)
+  );
+}
+
+function isPlusPlan(plan: SubscriptionPlan) {
+  return plan === SubscriptionPlan.PLUS_MONTHLY || plan === SubscriptionPlan.PLUS_YEARLY;
+}
+
+function estimateSquarePeriodEnd(plan: SubscriptionPlan, anchor: Date) {
+  if (!isPlusPlan(plan)) {
+    return undefined;
+  }
+
+  const periodEnd = new Date(anchor);
+
+  if (plan === SubscriptionPlan.PLUS_YEARLY) {
+    periodEnd.setUTCFullYear(periodEnd.getUTCFullYear() + 1);
+    return periodEnd;
+  }
+
+  periodEnd.setUTCMonth(periodEnd.getUTCMonth() + 1);
+  return periodEnd;
+}
+
+function squareDateToPeriodEnd(value?: string | null) {
+  if (!value) {
+    return undefined;
+  }
+
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(value)
+    ? new Date(`${value}T23:59:59.999Z`)
+    : new Date(value);
+
+  return Number.isNaN(date.getTime()) ? undefined : date;
 }
 
 export function planFromSquarePlanVariationId(planVariationId?: string | null, fallback?: SubscriptionPlan) {

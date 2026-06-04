@@ -3,7 +3,9 @@ import test from "node:test";
 import { SubscriptionPlan, SubscriptionStatus } from "@prisma/client";
 import {
   planFromSquarePlanVariationId,
+  squareSubscriptionPeriodEnd,
   statusFromSquare,
+  statusFromSquareForLocalAccess,
 } from "../src/lib/billing/subscription-mapping.ts";
 import {
   createSquareWebhookSignatureHeader,
@@ -134,6 +136,36 @@ test("maps Square plans and statuses to local subscriptions", () => {
     restoreEnv("SQUARE_PLUS_MONTHLY_PLAN_VARIATION_ID", previousMonthly);
     restoreEnv("SQUARE_PLUS_YEARLY_PLAN_VARIATION_ID", previousYearly);
   }
+});
+
+test("preserves Square Plus access locally during a cancelled paid period", () => {
+  const anchor = new Date("2026-06-04T12:00:00.000Z");
+  const periodEnd = squareSubscriptionPeriodEnd({
+    anchor,
+    estimateWhenMissing: true,
+    plan: SubscriptionPlan.PLUS_MONTHLY,
+  });
+
+  assert.equal(periodEnd?.toISOString(), "2026-07-04T12:00:00.000Z");
+  assert.equal(
+    statusFromSquareForLocalAccess({
+      cancelAtPeriodEnd: true,
+      currentPeriodEnd: periodEnd,
+      now: anchor,
+      plan: SubscriptionPlan.PLUS_MONTHLY,
+      status: "CANCELED",
+    }),
+    SubscriptionStatus.ACTIVE,
+  );
+  assert.equal(
+    statusFromSquareForLocalAccess({
+      cancelAtPeriodEnd: false,
+      now: anchor,
+      plan: SubscriptionPlan.PLUS_MONTHLY,
+      status: "CANCELED",
+    }),
+    SubscriptionStatus.CANCELED,
+  );
 });
 
 function restoreEnv(key, value) {
