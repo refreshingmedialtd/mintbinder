@@ -112,28 +112,27 @@ Can manage catalogue imports, sealed products, pricing sources, and basic operat
 
 ### Free
 
-- Add and manage cards.
-- Add and manage sealed products.
-- Basic dashboard.
-- Wishlist.
-- Set progress.
-- Manual purchase price and current value.
-- CSV export.
-- Limited history view.
+- Add, edit, duplicate, sell/remove, and manage cards.
+- Add, edit, duplicate, sell/remove, and manage sealed products, including private manual sealed-product entries.
+- Quantity, condition, language, variant, grade, purchase price/date, notes, manual current value, and storage-location tracking.
+- Basic dashboard with collection value, gain/loss, item mix, unvalued item count, recent history, and quick actions.
+- Collection search, filters, sorting, grid/list view, and desktop table view.
+- Basic collection review signals.
+- Wishlist with priorities, target prices, notes, and move-to-collection flow.
+- Set progress and set detail views.
+- Item-level market value, source/confidence labels, and limited price-history context where pricing data exists.
+- Notification preferences can be configured, but automated email delivery requires Plus.
+- CSV import, CSV export, and import template download.
 
 ### Plus
 
-- Full analytics dashboard.
-- Full price history.
-- Gain/loss over time.
-- Advanced duplicate manager.
-- Advanced wishlist planning.
-- Price confidence details.
-- Price alerts.
-- Grading opportunity calculator.
-- Advanced CSV import/export.
-- Storage organization.
+- Full portfolio analytics dashboard.
+- Portfolio value movement/history, collection health, portfolio mix, best/worst performer, realised sales, and gain/loss analysis.
+- Deeper weak-price, duplicate review, grading opportunity, and collection-health insights.
+- Price alert emails, wishlist target digests, and weak-price confidence digests.
 - Insurance report export.
+- Richer price-confidence and reporting views as pricing sources mature.
+- Priority access to future advanced reporting and automation tools.
 
 For MVP, Plus features can be partially implemented behind gates while the product validates demand.
 

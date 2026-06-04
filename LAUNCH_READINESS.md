@@ -29,6 +29,7 @@ Completed on 2026-06-04:
 - Added `npm run job:pricing-targets` for multi-set Pokemon TCG price catch-ups, then processed 29 remaining sparse set queries. The sweep added 59 more card price snapshots and moved card pricing coverage to 99.9%, leaving 17 edge-case unpriced printings.
 - Ran targeted TCGCSV card pricing against the final six matched sparse groups. It matched 825 card products but created 0 additional snapshots, confirming the remaining card gaps are provider/no-price edge cases rather than missed group coverage.
 - Ran a full targeted TCGCSV sealed sweep across all 87 groups with unpriced sealed products. It processed 13,594 products and created 0 additional snapshots, confirming the remaining sealed gaps need PriceCharting or another sealed-price source rather than more TCGCSV coverage.
+- Started the beta UX polish pass by removing the prototype-only Plus simulation path, adding a clear Free vs Plus comparison in Settings, clarifying Plus email notification behavior, and locking automated price-watch content behind real checkout actions for free users.
 
 Known QA warnings:
 
@@ -79,7 +80,7 @@ Known QA warnings:
 
 6. UX polish and beta fit-and-finish
 
-   Review mobile layouts, loading states, empty states, error messages, accessibility, button text, and first-run flows. The product already works, but this is where it starts feeling calm and trustworthy.
+   Review mobile layouts, loading states, empty states, error messages, accessibility, button text, and first-run flows. The first pass has clarified Free vs Plus messaging, Analytics upgrade actions, and free-user alert states; continue with collection/add-flow mobile spacing and first-run empty states.
 
 7. Legal, privacy, and brand safety
 

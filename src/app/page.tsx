@@ -297,6 +297,23 @@ const sealedProductTypes = [
   "Case",
   "Other",
 ];
+const freePlanFeatures = [
+  "Track cards and sealed products",
+  "Add manual sealed products and values",
+  "Dashboard value, gain/loss, and recent history",
+  "Collection search, filters, and storage locations",
+  "Basic collection review signals",
+  "Wishlist and set progress",
+  "CSV import, CSV export, and item-level price context",
+];
+const plusPlanFeatures = [
+  "Full portfolio analytics and value movement",
+  "Price alert emails and wishlist target digests",
+  "Insurance report export",
+  "Deeper weak-price, duplicate, and grading review insights",
+  "Richer price-confidence and collection health insights",
+  "Priority access to future advanced reporting tools",
+];
 
 const importPresets: ImportPreset[] = [
   {
@@ -3368,7 +3385,9 @@ function WishlistScreen({
 }
 
 function AlertsScreen({
+  appState,
   intelligence,
+  startPlusCheckout,
   setAppState,
 }: ScreenContext) {
   const alerts = intelligence.actionQueue;
@@ -3389,7 +3408,7 @@ function AlertsScreen({
     }
 
     if (alert.category === "Momentum") {
-      setAppState((current) => ({ ...current, screen: "analytics", plus: true }));
+      setAppState((current) => ({ ...current, screen: "analytics" }));
       return;
     }
 
@@ -3450,7 +3469,27 @@ function AlertsScreen({
           <h2>Price watchlist</h2>
           <span className="plan-pill"><Sparkles size={17} />Plus</span>
         </div>
-        {priceAlerts.length ? (
+        {!appState.plus ? (
+          <div className="locked-preview">
+            <div>
+              <strong>Automated price alerts are a Plus feature.</strong>
+              <p className="muted">
+                Free users can still track wishlist targets and item values. Plus adds email digests when targets hit,
+                weak prices need attention, or watched items move.
+              </p>
+            </div>
+            <div className="upgrade-actions">
+              <button className="button primary" onClick={() => void startPlusCheckout("monthly")}>
+                <CreditCard size={17} />
+                Monthly
+              </button>
+              <button className="button" onClick={() => void startPlusCheckout("yearly")}>
+                <Sparkles size={17} />
+                Yearly
+              </button>
+            </div>
+          </div>
+        ) : priceAlerts.length ? (
           <div className="alert-list">
             {priceAlerts.map((alert) => (
               <article className="alert-row" key={alert.id}>
@@ -3542,9 +3581,10 @@ function AnalyticsScreen({
   appState,
   collectionEvents,
   intelligence,
+  navigate,
+  startPlusCheckout,
   summary,
   wishlistTotal,
-  setAppState,
 }: ScreenContext) {
   const gain = summary.value - summary.cost;
   const duplicateValue = intelligence.duplicates.reduce((total, item) => total + item.valueMinor, 0);
@@ -3589,19 +3629,36 @@ function AnalyticsScreen({
               ))}
             </div>
           </section>
-          <section className="tool-panel">
-            <h2>Plus</h2>
+          <section className="tool-panel upgrade-panel">
+            <div className="panel-title-row">
+              <h2>Plus</h2>
+              <span className="tag green">GBP 19.99 yearly</span>
+            </div>
+            <p className="muted">
+              Keep the free tracking tools. Add automation, richer analytics, and reports when the collection needs
+              deeper attention.
+            </p>
             <MetricList
               rows={[
                 ["Monthly", "GBP 2.49"],
-                ["Yearly", "Discounted"],
+                ["Yearly", "GBP 19.99"],
                 ["Unlocks", "Trends, alerts, reports"],
               ]}
             />
-            <button className="button primary full" onClick={() => setAppState((current) => ({ ...current, plus: true }))}>
-              <Sparkles size={17} />
-              Simulate Plus
-            </button>
+            <div className="upgrade-actions">
+              <button className="button primary" onClick={() => void startPlusCheckout("monthly")}>
+                <CreditCard size={17} />
+                Monthly
+              </button>
+              <button className="button" onClick={() => void startPlusCheckout("yearly")}>
+                <Sparkles size={17} />
+                Yearly
+              </button>
+              <button className="button" onClick={() => navigate("settings")}>
+                <Settings size={17} />
+                Compare
+              </button>
+            </div>
           </section>
         </div>
       </section>
@@ -4857,7 +4914,12 @@ function SettingsScreen({
           onOpenBillingPortal={openBillingPortal}
           onStartCheckout={startPlusCheckout}
         />
+        <PlanComparisonPanel
+          plus={appState.plus}
+          onStartCheckout={startPlusCheckout}
+        />
         <NotificationPreferencesPanel
+          plus={appState.plus}
           preferences={notificationPreferences}
           onUpdate={updateNotificationPreferences}
         />
@@ -5100,9 +5162,11 @@ function WishlistOpportunities({
 
 function NotificationPreferencesPanel({
   onUpdate,
+  plus,
   preferences,
 }: {
   onUpdate: (preferences: NotificationPreferences) => Promise<boolean>;
+  plus: boolean;
   preferences: NotificationPreferences;
 }) {
   const [draft, setDraft] = useState(preferences);
@@ -5127,8 +5191,14 @@ function NotificationPreferencesPanel({
     <section className="tool-panel">
       <div className="panel-title-row">
         <h2>Notifications</h2>
-        <span className="plan-pill"><Mail size={17} />Email</span>
+        <span className="plan-pill">
+          {plus ? <Mail size={17} /> : <Lock size={17} />}
+          {plus ? "Email" : "Plus email"}
+        </span>
       </div>
+      {!plus ? (
+        <p className="muted">You can set preferences now. Price-alert and wishlist-target emails send once Plus is active.</p>
+      ) : null}
       <form className="form-stack" onSubmit={handleSubmit}>
         <label className="field">
           Digest frequency
@@ -5217,6 +5287,71 @@ function PreferenceToggle({
         <small>{note}</small>
       </span>
     </label>
+  );
+}
+
+function PlanComparisonPanel({
+  plus,
+  onStartCheckout,
+}: {
+  plus: boolean;
+  onStartCheckout: (plan: "monthly" | "yearly") => Promise<void>;
+}) {
+  return (
+    <section className="tool-panel plan-comparison-panel">
+      <div className="panel-title-row">
+        <h2>Free vs Plus</h2>
+        <span className="tag blue">Current beta split</span>
+      </div>
+      <div className="plan-comparison">
+        <article className={plus ? "plan-card" : "plan-card current"}>
+          <div className="plan-card-head">
+            <div>
+              <span className="tag">Free</span>
+              <strong>Core collection tracking</strong>
+            </div>
+            {!plus ? <span className="status-pill"><Check size={16} />Current</span> : null}
+          </div>
+          <ul>
+            {freePlanFeatures.map((feature) => (
+              <li key={feature}>
+                <Check size={16} />
+                <span>{feature}</span>
+              </li>
+            ))}
+          </ul>
+        </article>
+        <article className={plus ? "plan-card featured current" : "plan-card featured"}>
+          <div className="plan-card-head">
+            <div>
+              <span className="tag green">Plus</span>
+              <strong>GBP 2.49 monthly or GBP 19.99 yearly</strong>
+            </div>
+            {plus ? <span className="status-pill"><Sparkles size={16} />Active</span> : null}
+          </div>
+          <ul>
+            {plusPlanFeatures.map((feature) => (
+              <li key={feature}>
+                <Sparkles size={16} />
+                <span>{feature}</span>
+              </li>
+            ))}
+          </ul>
+          {!plus ? (
+            <div className="upgrade-actions">
+              <button className="button primary" onClick={() => void onStartCheckout("monthly")}>
+                <CreditCard size={17} />
+                Monthly
+              </button>
+              <button className="button" onClick={() => void onStartCheckout("yearly")}>
+                <Sparkles size={17} />
+                Yearly
+              </button>
+            </div>
+          ) : null}
+        </article>
+      </div>
+    </section>
   );
 }
 
