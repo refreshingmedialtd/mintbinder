@@ -3012,13 +3012,13 @@ function ItemDetailScreen({
   const owned = collection.find((item) => item.id === appState.selectedItemId) ?? collection[0];
 
   if (!owned) {
-    return <EmptyState title="No collection items yet" />;
+    return <EmptyState title="No collection items yet" description="Add an item before opening owned-copy details." />;
   }
 
   const item = catalogueById.get(owned.catalogueId);
 
   if (!item) {
-    return <EmptyState title="Item not found" />;
+    return <EmptyState title="Item not found" description="This owned lot no longer matches a catalogue item." />;
   }
 
   const value = getOwnedValue(owned, item);
@@ -3066,45 +3066,79 @@ function ItemDetailScreen({
       <PageHeader
         title={item.name}
         action={
-          <div className="actions">
-            <button className="button" onClick={() => navigate("collection")}>
-              <ArrowLeft size={17} />
-              Collection
-            </button>
-            <button
-              className="button"
-              onClick={() => {
-                setIsSelling(false);
-                setIsEditing((current) => !current);
-              }}
-            >
-              {isEditing ? <X size={17} /> : <Settings size={17} />}
-              {isEditing ? "Cancel edit" : "Edit"}
-            </button>
-            <button
-              className="button"
-              onClick={() => {
-                setIsEditing(false);
-                setIsSelling((current) => !current);
-              }}
-            >
-              {isSelling ? <X size={17} /> : <History size={17} />}
-              {isSelling ? "Cancel sale" : "Record sale"}
-            </button>
-            <button className="button primary" onClick={() => void duplicateItem(owned.id)}>
-              <Plus size={17} />
-              Duplicate lot
-            </button>
-          </div>
+          <button className="button" onClick={() => navigate("collection")}>
+            <ArrowLeft size={17} />
+            Collection
+          </button>
         }
       />
 
       <div className="detail-layout">
-        <div className="detail-image">{renderItemImage(item)}</div>
+        <div className="detail-media-stack">
+          <div className="detail-image">{renderItemImage(item)}</div>
+          <section className="tool-panel detail-summary-panel">
+            <div className="panel-title-row">
+              <h2>Owned lot</h2>
+              <span className={valuationPillClass(item, owned)}>{valuationStatusLabel(item, owned)}</span>
+            </div>
+            <div className="tag-row">
+              <span className="tag">{item.type === "sealed" ? "Sealed product" : "Card"}</span>
+              <span className="tag blue">Qty {owned.quantity}</span>
+              <span className="tag">{owned.condition}</span>
+            </div>
+            <MetricList
+              rows={[
+                ["Value", formatValuation(value)],
+                ["Gain/loss", formatMoney(gain), gain !== null && gain >= 0 ? "positive" : ""],
+                ["Location", owned.location],
+              ]}
+            />
+          </section>
+        </div>
         <div className="detail-stack">
+          <section className="tool-panel detail-action-panel">
+            <div className="panel-title-row">
+              <h2>Lot actions</h2>
+              <span className="tag">{isEditing ? "Editing" : isSelling ? "Recording sale" : "Ready"}</span>
+            </div>
+            <div className="detail-action-grid">
+              <button
+                className={isEditing ? "button primary" : "button"}
+                onClick={() => {
+                  setIsSelling(false);
+                  setIsEditing((current) => !current);
+                }}
+              >
+                {isEditing ? <X size={17} /> : <Settings size={17} />}
+                {isEditing ? "Cancel edit" : "Edit details"}
+              </button>
+              <button
+                className={isSelling ? "button primary" : "button"}
+                onClick={() => {
+                  setIsEditing(false);
+                  setIsSelling((current) => !current);
+                }}
+              >
+                {isSelling ? <X size={17} /> : <History size={17} />}
+                {isSelling ? "Cancel sale" : "Record sale"}
+              </button>
+              <button className="button" onClick={() => void duplicateItem(owned.id)}>
+                <Plus size={17} />
+                Duplicate lot
+              </button>
+              <button className="button danger" onClick={handleRemove} disabled={isRemoving}>
+                <Trash2 size={17} />
+                {isRemoving ? "Removing" : "Remove"}
+              </button>
+            </div>
+          </section>
           {isEditing ? (
             <section className="tool-panel">
-              <h2>Edit owned details</h2>
+              <div className="panel-title-row">
+                <h2>Edit owned details</h2>
+                <span className="tag blue">{item.type === "sealed" ? "Sealed" : "Card"}</span>
+              </div>
+              <p className="muted">Update only what changed. Unknown values can stay blank and be filled later.</p>
               <form className="form-stack" onSubmit={handleUpdate}>
                 <div className="field-grid">
                   <Field label="Condition">
@@ -3203,10 +3237,6 @@ function ItemDetailScreen({
                     <X size={17} />
                     Cancel
                   </button>
-                  <button className="button danger" type="button" onClick={handleRemove} disabled={isRemoving}>
-                    <Trash2 size={17} />
-                    {isRemoving ? "Removing" : "Remove item"}
-                  </button>
                 </div>
               </form>
             </section>
@@ -3241,7 +3271,11 @@ function ItemDetailScreen({
           </section>
           {isSelling ? (
             <section className="tool-panel">
-              <h2>Record sale</h2>
+              <div className="panel-title-row">
+                <h2>Record sale</h2>
+                <span className="tag amber">Removes lot</span>
+              </div>
+              <p className="muted">Record the sale amount and date. The item will move out of the active collection.</p>
               <form className="form-stack" onSubmit={handleSale}>
                 <div className="field-grid">
                   <Field label="Sale amount">

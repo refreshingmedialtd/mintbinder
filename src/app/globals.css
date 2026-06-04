@@ -1199,6 +1199,11 @@ h3 {
   align-items: start;
 }
 
+.detail-media-stack {
+  display: grid;
+  gap: 14px;
+}
+
 .detail-image {
   position: relative;
   width: min(100%, 330px);
@@ -1213,6 +1218,21 @@ h3 {
 
 .detail-image > span {
   aspect-ratio: 0.72;
+}
+
+.detail-summary-panel,
+.detail-action-panel {
+  align-content: start;
+}
+
+.detail-action-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(138px, 1fr));
+  gap: 8px;
+}
+
+.detail-action-grid .button {
+  width: 100%;
 }
 
 .metric-list {
