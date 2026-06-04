@@ -4,7 +4,7 @@ Last updated: 2026-06-04
 
 ## Overall Progress
 
-PokeStop is approximately 84% of the way to a credible MVP/beta release and around 66% of the way to a polished public launch.
+PokeStop is approximately 85% of the way to a credible MVP/beta release and around 67% of the way to a polished public launch.
 
 The product is now feature-complete enough to validate the core idea with a small beta group: users can track cards and sealed products, manage wishlist targets, review value history, see set progress, use Plus-gated analytics/reporting, and admins can operate catalogue/pricing imports. The remaining work is less about inventing the product and more about finishing integration QA, production setup, legal/brand readiness, and a focused mobile polish pass.
 
@@ -26,13 +26,16 @@ Completed on 2026-06-04:
 - Added a safer price-alert live-smoke path with `PRICE_ALERT_DIGEST_TEST_RECIPIENT`, allowing real digest content to be sent to one controlled mailbox before clearing the override for beta users.
 - Ran controlled pricing backfills for Guardians Rising, Sun & Moon, and Burning Shadows. These added 20 card price snapshots, improved card pricing coverage from 99.5% to 99.6%, and reduced Sun & Moon unpriced cards from 64 to 44.
 - Ran targeted TCGCSV sealed pricing groups for current unpriced products. The batch added 1 sealed price snapshot and moved sealed pricing coverage from 81.4% to 81.5%; many remaining sealed products appear to lack usable provider prices rather than missing import coverage.
+- Added `npm run job:pricing-targets` for multi-set Pokemon TCG price catch-ups, then processed 29 remaining sparse set queries. The sweep added 59 more card price snapshots and moved card pricing coverage to 99.9%, leaving 17 edge-case unpriced printings.
+- Ran targeted TCGCSV card pricing against the final six matched sparse groups. It matched 825 card products but created 0 additional snapshots, confirming the remaining card gaps are provider/no-price edge cases rather than missed group coverage.
+- Ran a full targeted TCGCSV sealed sweep across all 87 groups with unpriced sealed products. It processed 13,594 products and created 0 additional snapshots, confirming the remaining sealed gaps need PriceCharting or another sealed-price source rather than more TCGCSV coverage.
 
 Known QA warnings:
 
 - Hosted Square checkout link creation has been smoke-tested, and webhook activation is now validated. Do one final browser-based hosted checkout smoke on a stable staging/production URL before public launch.
 - Resend email credentials and sender/domain verification are not configured locally yet, so live price-alert email sending remains pending. Dry-run selection, preferences, job recording, and the controlled live-smoke override are validated in code.
 - The Operations gap report currently shows 814 card variant-metadata gaps. A controlled 50-card provider dry-run found 0 repairable rows, so the remaining gaps may include cards where Pokemon TCG API does not expose TCGPlayer variant prices. Continue with measured batches before treating this as a data-quality blocker.
-- Sealed pricing remains the largest data-depth gap at 81.5% coverage. Targeted TCGCSV batches can improve it slightly, but the next substantial improvement may require PriceCharting or another sealed-price source.
+- Sealed pricing remains the largest data-depth gap at 81.5% coverage. A full targeted TCGCSV sweep found no more usable prices for the remaining sealed products; the next substantial improvement requires PriceCharting or another sealed-price source.
 - Recent `fetch failed` job records are from sandbox-blocked provider calls before rerunning with network permission. The latest pricing, sealed-pricing, catalogue, and price-alert jobs have since succeeded.
 - `npm run db:generate` hit a Windows `EPERM` while replacing Prisma's existing query engine DLL. The migration, seed, build, admin QA, and beta QA all completed successfully, so this is currently a local Windows file-lock warning rather than a launch blocker.
 
@@ -64,7 +67,7 @@ Known QA warnings:
 
 3. Pricing data depth
 
-   Run card pricing and sealed pricing jobs enough times to create useful market baselines. Confirm normal/reverse holo/holo pricing choices work for real imported cards and identify which provider segments remain sparse.
+   Card pricing is now effectively complete at 99.9% coverage, with only provider/no-price edge cases remaining. Sealed pricing is 81.5% covered from TCGCSV; add PriceCharting or another sealed-price source for the next meaningful improvement.
 
 4. Hosted checkout and billing browser QA
 
