@@ -24,13 +24,16 @@ Completed on 2026-06-04:
 - Completed a browser click-through of the admin Operations screen. This caught and fixed a mobile access gap by adding an admin-only `Ops` shortcut to the bottom nav; status loading, gap export API verification, duplicate review, alert dry-run, and job history were validated.
 - Ran controlled Pokemon TCG API-backed variant metadata repair dry-runs for 10 and 50 candidates. Both fetched provider data successfully once network access was allowed, but found 0 repairable cards in those batches, so no catalogue rows were changed.
 - Added a safer price-alert live-smoke path with `PRICE_ALERT_DIGEST_TEST_RECIPIENT`, allowing real digest content to be sent to one controlled mailbox before clearing the override for beta users.
+- Ran controlled pricing backfills for Guardians Rising, Sun & Moon, and Burning Shadows. These added 20 card price snapshots, improved card pricing coverage from 99.5% to 99.6%, and reduced Sun & Moon unpriced cards from 64 to 44.
+- Ran targeted TCGCSV sealed pricing groups for current unpriced products. The batch added 1 sealed price snapshot and moved sealed pricing coverage from 81.4% to 81.5%; many remaining sealed products appear to lack usable provider prices rather than missing import coverage.
 
 Known QA warnings:
 
 - Hosted Square checkout link creation has been smoke-tested, and webhook activation is now validated. Do one final browser-based hosted checkout smoke on a stable staging/production URL before public launch.
 - Resend email credentials and sender/domain verification are not configured locally yet, so live price-alert email sending remains pending. Dry-run selection, preferences, job recording, and the controlled live-smoke override are validated in code.
 - The Operations gap report currently shows 814 card variant-metadata gaps. A controlled 50-card provider dry-run found 0 repairable rows, so the remaining gaps may include cards where Pokemon TCG API does not expose TCGPlayer variant prices. Continue with measured batches before treating this as a data-quality blocker.
-- One sealed-pricing job failed in the last 24 hours, but the latest sealed-pricing job has since succeeded.
+- Sealed pricing remains the largest data-depth gap at 81.5% coverage. Targeted TCGCSV batches can improve it slightly, but the next substantial improvement may require PriceCharting or another sealed-price source.
+- Recent `fetch failed` job records are from sandbox-blocked provider calls before rerunning with network permission. The latest pricing, sealed-pricing, catalogue, and price-alert jobs have since succeeded.
 - `npm run db:generate` hit a Windows `EPERM` while replacing Prisma's existing query engine DLL. The migration, seed, build, admin QA, and beta QA all completed successfully, so this is currently a local Windows file-lock warning rather than a launch blocker.
 
 ## What Is Already In Place
@@ -81,7 +84,7 @@ Known QA warnings:
 
 8. Domain setup batch
 
-   Once the final name/domain is chosen, verify the Resend sending domain/subdomain, configure the production Square webhook URL, update sender/legal URLs, and add the final URLs to monitoring/runbooks.
+   Once the final name/domain is chosen, verify the Resend sending domain/subdomain DNS records, configure `EMAIL_FROM`, run the controlled live price-alert smoke with `PRICE_ALERT_DIGEST_TEST_RECIPIENT`, configure the production Square webhook URL, update sender/legal URLs, and add the final URLs to monitoring/runbooks.
 
 9. Monitoring and operations
 
