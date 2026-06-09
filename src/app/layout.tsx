@@ -3,8 +3,8 @@ import { Providers } from "./providers";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "PokeStop",
-  description: "Pokemon card and sealed product collection tracker.",
+  title: "Mint Binder",
+  description: "Trading card and sealed product collection tracker.",
 };
 
 export default function RootLayout({

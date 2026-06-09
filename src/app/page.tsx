@@ -338,7 +338,7 @@ const plusPlanFeatures = [
   "Richer price-confidence and collection health insights",
   "Priority access to future advanced reporting tools",
 ];
-const themeStorageKey = "pokestop-theme";
+const themeStorageKey = "mintbinder-theme";
 const themeOptions: ThemeOption[] = [
   {
     access: "free",
@@ -491,7 +491,7 @@ export default function Home() {
   const [authMode, setAuthMode] = useState<AuthMode>("sign-in");
   const [signInEmail, setSignInEmail] = useState("liam@example.com");
   const [signInName, setSignInName] = useState("Liam");
-  const [signInPassword, setSignInPassword] = useState("PokeStop2026!");
+  const [signInPassword, setSignInPassword] = useState("MintBinder2026!");
   const [signInError, setSignInError] = useState("");
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [collectionSearch, setCollectionSearch] = useState("");
@@ -1356,7 +1356,7 @@ export default function Home() {
       exportedAt: new Date(),
     });
 
-    downloadCsv(`pokestop-collection-${dateStamp()}.csv`, csv);
+    downloadCsv(`mintbinder-collection-${dateStamp()}.csv`, csv);
     showToast(`${collection.length} collection rows exported.`);
   }
 
@@ -1376,7 +1376,7 @@ export default function Home() {
           throw new Error(body.error ?? `Insurance report failed with ${response.status}`);
         }
 
-        downloadBlob(`pokestop-insurance-report-${dateStamp()}.html`, await response.blob());
+        downloadBlob(`mintbinder-insurance-report-${dateStamp()}.html`, await response.blob());
         showToast("Insurance report exported.");
         return;
       } catch (error) {
@@ -1409,7 +1409,7 @@ export default function Home() {
       ownerName: viewer.name,
     });
 
-    downloadBlob(`pokestop-insurance-report-${dateStamp()}.html`, new Blob([html], { type: "text/html" }));
+    downloadBlob(`mintbinder-insurance-report-${dateStamp()}.html`, new Blob([html], { type: "text/html" }));
     showToast("Insurance report exported.");
   }
 
@@ -1456,7 +1456,7 @@ export default function Home() {
         return;
       }
 
-      showToast(body.message ?? "Billing is managed in PokeStop during beta.");
+      showToast(body.message ?? "Billing is managed in Mint Binder during beta.");
     } catch (error) {
       console.warn("Unable to open billing management.", error);
       showToast(error instanceof Error ? error.message : "Unable to open billing portal.");
@@ -1527,7 +1527,7 @@ export default function Home() {
   }
 
   function downloadImportTemplate() {
-    downloadCsv("pokestop-collection-import-template.csv", buildCollectionImportTemplateCsv());
+    downloadCsv("mintbinder-collection-import-template.csv", buildCollectionImportTemplateCsv());
     showToast("Collection import template downloaded.");
   }
 
@@ -1928,7 +1928,7 @@ function SignInScreen({
             <span><Heart size={17} />Set wishlist targets before buying.</span>
             <span><Sparkles size={17} />Upgrade later for alerts and deeper analytics.</span>
           </div>
-          <p className="muted">PokeStop is a working title and independent beta, not an official Pokemon product.</p>
+          <p className="muted">Mint Binder is an independent beta, not an official Pokemon product.</p>
         </section>
         <LegalFooter compact />
       </div>
@@ -1942,7 +1942,7 @@ function AuthBrand() {
       <span className="brand-mark">
         <span className="brand-dot" />
       </span>
-      <span>PokeStop</span>
+      <span>Mint Binder</span>
     </div>
   );
 }
@@ -1950,7 +1950,7 @@ function AuthBrand() {
 function LegalFooter({ compact = false }: { compact?: boolean }) {
   return (
     <footer className={compact ? "legal-footer compact" : "legal-footer"} aria-label="Legal links">
-      <span>PokeStop is a working title.</span>
+      <span>Independent collector app.</span>
       <a href="/legal/privacy">Privacy</a>
       <a href="/legal/terms">Terms</a>
       <a href="/legal/non-affiliation">Non-affiliation</a>
@@ -1979,7 +1979,7 @@ function Header({
         <span className="brand-mark">
           <span className="brand-dot" />
         </span>
-        <span className="brand-text">PokeStop</span>
+        <span className="brand-text">Mint Binder</span>
       </button>
       <div className="topbar-actions">
         <button className="plan-pill" onClick={() => onNavigate(plus ? "analytics" : "settings")}>
@@ -4434,7 +4434,7 @@ function OperationsScreen({
         throw new Error(body.error ?? `Catalogue gap export failed with ${response.status}`);
       }
 
-      downloadBlob(`pokestop-catalogue-gaps-${dateStamp()}.json`, await response.blob());
+      downloadBlob(`mintbinder-catalogue-gaps-${dateStamp()}.json`, await response.blob());
       showToast("Catalogue gap report downloaded.");
       return true;
     } catch (error) {

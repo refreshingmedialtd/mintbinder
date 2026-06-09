@@ -64,7 +64,7 @@ export async function createSquareCustomer({
 }) {
   const body: Record<string, unknown> = {
     idempotency_key: randomUUID(),
-    note: "PokeStop subscription customer",
+    note: "Mint Binder subscription customer",
     reference_id: userId,
   };
 
@@ -154,13 +154,13 @@ export async function createSquareSubscriptionCheckout({
       subscription_plan_id: config.planVariationId,
     },
     idempotency_key: randomUUID(),
-    payment_note: `pokestop_user=${userId};square_customer=${customerId};plan=${plan}`,
+    payment_note: `mintbinder_user=${userId};square_customer=${customerId};plan=${plan}`,
     pre_populated_data: {
       buyer_email: email ?? undefined,
     },
     quick_pay: {
       location_id: squareLocationId(),
-      name: `PokeStop Plus ${plan === "yearly" ? "Yearly" : "Monthly"}`,
+      name: `Mint Binder Plus ${plan === "yearly" ? "Yearly" : "Monthly"}`,
       price_money: {
         amount: config.amountMinor,
         currency: process.env.SQUARE_CURRENCY?.trim() || "GBP",

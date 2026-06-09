@@ -237,9 +237,9 @@ async function createCustomer({
   const response = await squareRequest("/v2/customers", {
     body: {
       email_address: email,
-      given_name: name || "PokeStop",
+      given_name: name || "Mint Binder",
       idempotency_key: randomUUID(),
-      note: `PokeStop Square activation QA ${label}`,
+      note: `Mint Binder Square activation QA ${label}`,
       reference_id: referenceId,
     },
     method: "POST",
@@ -260,7 +260,7 @@ async function createCardOnFile(customerId) {
         billing_address: {
           postal_code: "94103",
         },
-        cardholder_name: "PokeStop QA",
+        cardholder_name: "Mint Binder QA",
         customer_id: customerId,
       },
       idempotency_key: randomUUID(),

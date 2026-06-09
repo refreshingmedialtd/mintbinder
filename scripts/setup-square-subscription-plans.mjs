@@ -2,9 +2,9 @@ import "dotenv/config";
 import { randomUUID } from "node:crypto";
 
 const squareVersion = process.env.SQUARE_VERSION?.trim() || "2026-05-20";
-const planName = process.env.SQUARE_PLUS_PLAN_NAME?.trim() || "PokeStop Plus";
-const monthlyVariationName = process.env.SQUARE_PLUS_MONTHLY_VARIATION_NAME?.trim() || "PokeStop Plus Monthly";
-const yearlyVariationName = process.env.SQUARE_PLUS_YEARLY_VARIATION_NAME?.trim() || "PokeStop Plus Yearly";
+const planName = process.env.SQUARE_PLUS_PLAN_NAME?.trim() || "Mint Binder Plus";
+const monthlyVariationName = process.env.SQUARE_PLUS_MONTHLY_VARIATION_NAME?.trim() || "Mint Binder Plus Monthly";
+const yearlyVariationName = process.env.SQUARE_PLUS_YEARLY_VARIATION_NAME?.trim() || "Mint Binder Plus Yearly";
 const currency = process.env.SQUARE_CURRENCY?.trim() || "GBP";
 const monthlyAmountMinor = positiveInteger(process.env.SQUARE_PLUS_MONTHLY_AMOUNT_MINOR, 249);
 const yearlyAmountMinor = positiveInteger(process.env.SQUARE_PLUS_YEARLY_AMOUNT_MINOR, 1999);
@@ -55,7 +55,7 @@ async function createSubscriptionPlan() {
   const body = {
     idempotency_key: randomUUID(),
     object: {
-      id: "#pokestop-plus-plan",
+      id: "#mintbinder-plus-plan",
       present_at_all_locations: true,
       subscription_plan_data: {
         all_items: true,

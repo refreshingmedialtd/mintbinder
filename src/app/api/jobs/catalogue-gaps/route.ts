@@ -15,7 +15,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json(report, {
       headers: {
-        "content-disposition": `attachment; filename="pokestop-catalogue-gaps-${report.generatedAt.slice(0, 10)}.json"`,
+        "content-disposition": `attachment; filename="mintbinder-catalogue-gaps-${report.generatedAt.slice(0, 10)}.json"`,
       },
     });
   } catch (error) {

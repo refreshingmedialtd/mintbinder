@@ -41,7 +41,7 @@ async function fetchTcgcsvGroups() {
   const response = await fetch(`https://tcgcsv.com/tcgplayer/${tcgcsvPokemonCategoryId}/groups`, {
     headers: {
       accept: "application/json",
-      "user-agent": "PokeStopLocalImporter/0.1",
+      "user-agent": "MintBinderLocalImporter/0.1",
     },
   });
   const body = await response.json().catch(() => ({}));

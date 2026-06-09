@@ -262,7 +262,7 @@ function publicCheck(check) {
 }
 
 function printHumanReport(result) {
-  console.log("PokeStop production environment validation");
+  console.log("Mint Binder production environment validation");
   console.log(`Generated: ${result.generatedAt}`);
   console.log(`Summary: ${result.summary.blockers} blocker(s), ${result.summary.warnings} warning(s), ${result.summary.reported} reported signal(s).`);
   console.log("");

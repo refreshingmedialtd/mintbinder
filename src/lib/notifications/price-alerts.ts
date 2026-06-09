@@ -170,13 +170,13 @@ function buildPriceAlertDigestEmail({
   const text = [
     `Hi ${ownerName},`,
     "",
-    "Your PokeStop price watchlist has new items to review:",
+    "Your Mint Binder price watchlist has new items to review:",
     ...alerts.map(
       (alert) =>
         `- ${alert.status}: ${alert.itemName} (${formatMoney(alert.currentValueMinor)}) - ${alert.explanation}`,
     ),
     "",
-    "Open PokeStop to review your wishlist and price-confidence alerts.",
+    "Open Mint Binder to review your wishlist and price-confidence alerts.",
   ].join("\n");
 
   return {
@@ -184,7 +184,7 @@ function buildPriceAlertDigestEmail({
 <html lang="en">
 <body style="color:#171717;font-family:Arial,sans-serif;margin:0;padding:24px;">
   <h1 style="margin:0 0 8px;">Price alerts are ready</h1>
-  <p style="color:#626b77;">Hi ${escapeHtml(ownerName)}, your PokeStop watchlist has ${alerts.length} item${alerts.length === 1 ? "" : "s"} to review.</p>
+  <p style="color:#626b77;">Hi ${escapeHtml(ownerName)}, your Mint Binder watchlist has ${alerts.length} item${alerts.length === 1 ? "" : "s"} to review.</p>
   <table style="border-collapse:collapse;width:100%;">
     <thead>
       <tr>
@@ -200,7 +200,7 @@ function buildPriceAlertDigestEmail({
   </table>
 </body>
 </html>`,
-    subject: `PokeStop price alerts: ${alerts.length} to review`,
+    subject: `Mint Binder price alerts: ${alerts.length} to review`,
     text,
   };
 }

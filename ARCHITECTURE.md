@@ -1,4 +1,4 @@
-# PokeStop Architecture
+# Mint Binder Architecture
 
 ## Purpose
 

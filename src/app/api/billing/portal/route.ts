@@ -31,7 +31,7 @@ export async function POST(request: Request) {
       }
 
       return NextResponse.json({
-        message: "Square billing is managed in PokeStop during beta.",
+        message: "Square billing is managed in Mint Binder during beta.",
         provider,
         subscription: await getCurrentBillingSubscription(session.user.id),
       });

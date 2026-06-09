@@ -40,5 +40,5 @@ const server = createServer((request, response) => {
 });
 
 server.listen(port, "127.0.0.1", () => {
-  console.log(`PokeStop prototype running at http://127.0.0.1:${port}`);
+  console.log(`Mint Binder prototype running at http://127.0.0.1:${port}`);
 });

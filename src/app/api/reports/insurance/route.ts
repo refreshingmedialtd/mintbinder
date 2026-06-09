@@ -25,7 +25,7 @@ export async function GET() {
 
     return new Response(html, {
       headers: {
-        "content-disposition": `attachment; filename="pokestop-insurance-report-${dateStamp()}.html"`,
+        "content-disposition": `attachment; filename="mintbinder-insurance-report-${dateStamp()}.html"`,
         "content-type": "text/html; charset=utf-8",
       },
     });

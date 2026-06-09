@@ -92,7 +92,7 @@ async function fetchTcgcsvProductImages(groupId: string, fetchImpl: typeof fetch
     {
       headers: {
         accept: "application/json",
-        "user-agent": "PokeStopLocalImporter/0.1",
+        "user-agent": "MintBinderLocalImporter/0.1",
       },
     },
   );

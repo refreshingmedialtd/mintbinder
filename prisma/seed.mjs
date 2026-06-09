@@ -15,7 +15,7 @@ import {
 } from "@prisma/client";
 
 const prisma = new PrismaClient();
-const demoPassword = "PokeStop2026!";
+const demoPassword = "MintBinder2026!";
 
 const ids = {
   user: "11111111-1111-4111-8111-111111111111",

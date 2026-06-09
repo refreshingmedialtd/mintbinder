@@ -1,13 +1,13 @@
-# PokeStop Production Deployment Runbook
+# Mint Binder Production Deployment Runbook
 
 Last updated: 2026-06-04
 
-PokeStop is not ready for a public production launch until the final name/domain and production provider accounts are chosen. This runbook defines the deployment path so staging can be prepared without guessing.
+Mint Binder is not ready for a public production launch until production provider accounts, DNS, email, monitoring, and final legal details are complete. This runbook defines the deployment path so staging can be prepared without guessing.
 
 ## Recommended First Deployment Shape
 
-- App host: a managed Next.js host or Node host that supports Next.js 15, API routes, environment variables, build logs, and HTTPS.
-- Database: managed PostgreSQL with backups, restore testing, and connection pooling suitable for serverless or autoscaled app hosting.
+- App host: 20i NodeJS Optimised Managed Cloud Server for `mintbinder.co.uk`.
+- Database: Neon PostgreSQL in Europe/London region for deployment testing, upgraded before real beta users.
 - Payments: Square production app, production access token, production location, production subscription plan variations, and a production webhook URL.
 - Email: Resend or equivalent transactional email provider with a verified sending domain or subdomain.
 - Jobs: protected app routes triggered manually from Operations at first, then scheduled later by a trusted scheduler using `JOB_SECRET`.
@@ -60,7 +60,7 @@ Billing:
 Email and alerts:
 
 - `RESEND_API_KEY`: production sending key.
-- `EMAIL_FROM`: verified sender on the final domain or subdomain.
+- `EMAIL_FROM`: verified sender on `mintbinder.co.uk` or a sending subdomain.
 - `PRICE_ALERT_DIGEST_DRY_RUN=true` until the controlled live smoke is complete.
 - `PRICE_ALERT_DIGEST_TEST_RECIPIENT`: controlled mailbox for first live smoke.
 - `PRICE_ALERT_DIGEST_ALLOW_LIVE_RECIPIENTS=false` until real beta digests are approved.
@@ -89,7 +89,7 @@ Pricing:
 
 ## Public Production Deploy Order
 
-1. Finalize product name, domain, support email, legal contact, and legal page copy.
+1. Finalize support email, legal contact, and legal page copy for `mintbinder.co.uk`.
 2. Create the production database and enable automated backups.
 3. Add production env vars to the app host.
 4. Run `npm run qa:production-env`; fix every blocker.
@@ -112,7 +112,7 @@ Pricing:
 
 ## Square Domain Batch
 
-When the final domain is chosen:
+For `mintbinder.co.uk`:
 
 - Set `NEXT_PUBLIC_APP_URL` and `AUTH_URL` to the final HTTPS origin.
 - Create or update the Square production webhook subscription at `/api/billing/webhook`.
@@ -124,7 +124,7 @@ When the final domain is chosen:
 
 ## Email Domain Batch
 
-When the final domain is chosen:
+For `mintbinder.co.uk`:
 
 - Verify the Resend sending domain or subdomain.
 - Add required DNS records.
@@ -146,9 +146,8 @@ Minimum beta monitoring:
 
 ## Current Open Items
 
-- Final product name and domain are not chosen.
-- Production Square app/webhook cannot be finalized without that domain.
-- Resend sender verification cannot be finalized without that domain.
-- Legal pages are beta drafts and need final contact/entity/domain details.
-- Production hosting/database provider has not been selected.
+- Production Square app/webhook must be configured for `mintbinder.co.uk`.
+- Resend sender verification must be completed for `mintbinder.co.uk` or a sending subdomain.
+- Legal pages are beta drafts and need final company/address review plus active support email verification.
+- 20i hosting and Neon database are selected; deployment, env vars, and migrations are not complete yet.
 - Production monitoring and backup provider choices are still open.

@@ -1,12 +1,12 @@
-# PokeStop Project Brief
+# Mint Binder Project Brief
 
 ## Working Title
 
-PokeStop is the temporary project name. Before public launch, choose a brand name that does not imply affiliation with Pokemon, Nintendo, Creatures, Game Freak, The Pokemon Company, Pokemon GO, or any official product.
+Mint Binder is the chosen product name for the beta. Before public launch, complete a trademark/brand review and keep language clear that the app is not affiliated with Pokemon, Nintendo, Creatures, Game Freak, The Pokemon Company, Pokemon GO, or any official product.
 
 ## Product Summary
 
-PokeStop is a Pokemon card and sealed product collection tracker for collectors who want the hobby to stay fun while also understanding the value of what they own.
+Mint Binder is a Pokemon card and sealed product collection tracker for collectors who want the hobby to stay fun while also understanding the value of what they own.
 
 The product should help users answer four questions quickly:
 
@@ -37,7 +37,7 @@ Collectors who sell duplicates, trade locally, or manage inventory casually. The
 
 ## Product Positioning
 
-PokeStop should sit between a joyful collector app and a lightweight portfolio tool.
+Mint Binder should sit between a joyful collector app and a lightweight portfolio tool.
 
 It should not become a cold finance dashboard. Pokemon collecting is nostalgic, visual, and emotional. The analytics should feel helpful and empowering, not predatory or spreadsheet-heavy.
 
@@ -121,7 +121,7 @@ Users should not feel trapped:
 
 ## Monetization Strategy
 
-PokeStop should have a generous free plan and a very low-cost subscription for advanced features.
+Mint Binder should have a generous free plan and a very low-cost subscription for advanced features.
 
 ### Free Tier
 
@@ -173,7 +173,7 @@ This avoids the cost of building two frontends before the product shape is prove
 
 ## Data And API Strategy
 
-Card catalogue and market data can change, and third-party API access is not guaranteed. PokeStop should therefore use provider-agnostic architecture from the beginning.
+Card catalogue and market data can change, and third-party API access is not guaranteed. Mint Binder should therefore use provider-agnostic architecture from the beginning.
 
 Principles:
 

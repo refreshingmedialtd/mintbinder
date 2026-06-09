@@ -157,7 +157,7 @@ export async function fulfillSubscription(subscription: StripeSubscription) {
   if (!userId || !customerId || !subscriptionId) {
     return {
       handled: false,
-      message: "Subscription event could not be matched to a PokeStop user.",
+      message: "Subscription event could not be matched to a Mint Binder user.",
     };
   }
 
@@ -188,7 +188,7 @@ export async function fulfillSquareSubscription(subscription: SquareSubscription
   if (!userId || !customerId || !subscriptionId) {
     return {
       handled: false,
-      message: "Square subscription event could not be matched to a PokeStop user.",
+      message: "Square subscription event could not be matched to a Mint Binder user.",
     };
   }
 
@@ -235,7 +235,7 @@ export async function fulfillSquareInvoicePayment(invoice: SquareInvoice | null)
   if (!existing) {
     return {
       handled: false,
-      message: "Square invoice payment could not be matched to a PokeStop subscription.",
+      message: "Square invoice payment could not be matched to a Mint Binder subscription.",
     };
   }
 

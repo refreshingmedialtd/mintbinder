@@ -151,8 +151,8 @@ const initialWishlist = [
 
 const urlParams = new URLSearchParams(window.location.search);
 if (urlParams.has("reset")) {
-  localStorage.removeItem("pokestop-prototype-collection");
-  localStorage.removeItem("pokestop-prototype-wishlist");
+  localStorage.removeItem("mintbinder-prototype-collection");
+  localStorage.removeItem("mintbinder-prototype-wishlist");
   window.history.replaceState({}, "", window.location.pathname);
 }
 
@@ -167,10 +167,10 @@ const state = {
   plus: false,
   toast: "",
   collection:
-    JSON.parse(localStorage.getItem("pokestop-prototype-collection") || "null") ||
+    JSON.parse(localStorage.getItem("mintbinder-prototype-collection") || "null") ||
     initialCollection,
   wishlist:
-    JSON.parse(localStorage.getItem("pokestop-prototype-wishlist") || "null") ||
+    JSON.parse(localStorage.getItem("mintbinder-prototype-wishlist") || "null") ||
     initialWishlist,
 };
 
@@ -197,11 +197,11 @@ function percent(value, total) {
 
 function saveState() {
   localStorage.setItem(
-    "pokestop-prototype-collection",
+    "mintbinder-prototype-collection",
     JSON.stringify(state.collection),
   );
   localStorage.setItem(
-    "pokestop-prototype-wishlist",
+    "mintbinder-prototype-wishlist",
     JSON.stringify(state.wishlist),
   );
 }
@@ -315,9 +315,9 @@ function renderShell(content) {
   app.innerHTML = `
     <div class="app-shell">
       <header class="topbar">
-        <button class="brand" data-action="nav" data-screen="dashboard" aria-label="PokeStop dashboard">
+        <button class="brand" data-action="nav" data-screen="dashboard" aria-label="Mint Binder dashboard">
           <span class="brand-mark"><span class="brand-dot"></span></span>
-          <span class="brand-text">PokeStop</span>
+          <span class="brand-text">Mint Binder</span>
         </button>
         <div class="topbar-actions">
           <button class="plan-pill" data-action="nav" data-screen="analytics">
@@ -1364,8 +1364,8 @@ app.addEventListener("click", (event) => {
   }
 
   if (action === "reset-prototype") {
-    localStorage.removeItem("pokestop-prototype-collection");
-    localStorage.removeItem("pokestop-prototype-wishlist");
+    localStorage.removeItem("mintbinder-prototype-collection");
+    localStorage.removeItem("mintbinder-prototype-wishlist");
     state.collection = initialCollection;
     state.wishlist = initialWishlist;
     state.plus = false;

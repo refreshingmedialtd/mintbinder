@@ -1,4 +1,4 @@
-# PokeStop MVP Spec
+# Mint Binder MVP Spec
 
 ## MVP Goal
 

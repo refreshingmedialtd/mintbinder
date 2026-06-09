@@ -49,6 +49,6 @@ test("reports missing shell content and unexpected statuses", () => {
   assert.equal(result.ok, false);
   assert.deepEqual(result.problems, [
     "Expected status 200, got 500.",
-    'Response body did not include "PokeStop".',
+    'Response body did not include "Mint Binder".',
   ]);
 });

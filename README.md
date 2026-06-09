@@ -1,6 +1,6 @@
-# PokeStop
+# Mint Binder
 
-PokeStop is a working title for a Pokemon card and sealed product collection tracking app. The project now has a Next.js app foundation plus the original planning docs and static prototype.
+Mint Binder is a Pokemon card and sealed product collection tracking app. The project now has a Next.js app foundation plus the original planning docs and static prototype.
 
 ## Planning Docs
 
@@ -67,17 +67,17 @@ The Prisma schema lives in [prisma/schema.prisma](prisma/schema.prisma), migrati
 
 Before running database commands, create a local `.env` from [.env.example](.env.example) and set `DATABASE_URL` to your PostgreSQL database.
 
-For a simple local Windows setup, install PostgreSQL 17 and create the `pokestop` database:
+For a simple local Windows setup, install PostgreSQL 17 and create the `mintbinder` database:
 
 ```sh
 winget install --id PostgreSQL.PostgreSQL.17 --source winget
-createdb -h 127.0.0.1 -p 5432 -U postgres pokestop
+createdb -h 127.0.0.1 -p 5432 -U postgres mintbinder
 ```
 
 Use this local development connection string:
 
 ```env
-DATABASE_URL="postgresql://postgres:postgres@localhost:5432/pokestop?schema=public"
+DATABASE_URL="postgresql://postgres:postgres@localhost:5432/mintbinder?schema=public"
 AUTH_SECRET="replace-with-a-random-32-byte-secret"
 AUTH_URL="http://127.0.0.1:3000"
 AUTH_TRUST_HOST="true"
@@ -101,7 +101,7 @@ STRIPE_PLUS_YEARLY_PRICE_ID=""
 STRIPE_WEBHOOK_SECRET=""
 JOB_SECRET=""
 RESEND_API_KEY=""
-EMAIL_FROM="PokeStop <alerts@example.com>"
+EMAIL_FROM="Mint Binder <alerts@mintbinder.co.uk>"
 PRICE_ALERT_DIGEST_DRY_RUN="true"
 PRICE_ALERT_DIGEST_NOW=""
 OPERATIONS_QA_NETWORK_REPAIRS="false"
@@ -162,7 +162,7 @@ The local sign-in flow uses Auth.js credentials with scrypt-hashed passwords. Th
 
 ```text
 Email: liam@example.com
-Password: PokeStop2026!
+Password: MintBinder2026!
 ```
 
 Creating an account from the sign-in screen creates a new collector profile with an empty collection against the same global catalogue.
@@ -236,7 +236,7 @@ For tracked sealed-pricing backfills through the same API route used by Operatio
 
 For PriceCharting sealed-price enrichment, run `npm run job:pricecharting-sealed`. The importer uses the official PriceCharting Prices API, checks unpriced sealed products, searches by UPC first and then by conservative sealed-product name matching, and writes source `pricecharting-sealed` snapshots from the `new-price` field only. Set `PRICECHARTING_API_TOKEN`, keep `PRICECHARTING_SEALED_WAIT_MS=1100` or higher for the API rate limit, and use `PRICECHARTING_SEALED_LIMIT` for small controlled batches.
 
-When the final product name/domain is chosen, run a domain setup batch: verify the Resend sending domain/subdomain and sender address, update `EMAIL_FROM`, configure the production Square webhook URL, update the beta-draft privacy/terms/non-affiliation pages with final URLs/contact details, and wire those URLs into monitoring and operational runbooks.
+For the `mintbinder.co.uk` domain setup batch, verify the Resend sending domain/subdomain and sender address, update `EMAIL_FROM`, configure the production Square webhook URL, update the beta-draft privacy/terms/non-affiliation pages with final contact details, and wire those URLs into monitoring and operational runbooks.
 
 ## Static Prototype
 

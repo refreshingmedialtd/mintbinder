@@ -1,4 +1,4 @@
-# PokeStop Data Model
+# Mint Binder Data Model
 
 ## Purpose
 

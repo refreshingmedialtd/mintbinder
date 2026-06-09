@@ -25,7 +25,7 @@ export function buildInsuranceReportHtml({
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>PokeStop Insurance Report</title>
+  <title>Mint Binder Insurance Report</title>
   <style>
     body { color: #171717; font-family: Arial, sans-serif; margin: 32px; }
     h1 { margin-bottom: 4px; }
@@ -39,7 +39,7 @@ export function buildInsuranceReportHtml({
   </style>
 </head>
 <body>
-  <h1>PokeStop Insurance Report</h1>
+  <h1>Mint Binder Insurance Report</h1>
   <p class="muted">Generated ${escapeHtml(formatDate(generatedAt.toISOString()))}${ownerName ? ` for ${escapeHtml(ownerName)}` : ""}${ownerEmail ? ` (${escapeHtml(ownerEmail)})` : ""}</p>
   <section class="summary">
     <div class="card"><strong>${escapeHtml(formatMoney(knownValueMinor))}</strong><br /><span class="muted">Known value</span></div>

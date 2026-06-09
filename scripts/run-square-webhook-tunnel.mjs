@@ -6,7 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const WEBHOOK_EVENTS = ["subscription.created", "subscription.updated", "invoice.payment_made"];
-const DEFAULT_WEBHOOK_NAME = "PokeStop Local Billing Webhook";
+const DEFAULT_WEBHOOK_NAME = "Mint Binder Local Billing Webhook";
 const DEFAULT_PORT = 3000;
 const DEFAULT_HOST = "127.0.0.1";
 const SQUARE_VERSION = process.env.SQUARE_VERSION?.trim() || "2026-05-20";
@@ -274,7 +274,7 @@ async function sendLocalWebhookSelfCheck({ notificationUrl, signatureKey }) {
     },
     event_id: `local_${randomUUID()}`,
     merchant_id: "local_self_check",
-    type: "pokestop.local_webhook_self_check",
+    type: "mintbinder.local_webhook_self_check",
   });
   const response = await fetch(`${localBaseUrl}/api/billing/webhook`, {
     body: payload,

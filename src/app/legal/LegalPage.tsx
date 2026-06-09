@@ -6,10 +6,10 @@ type LegalSection = {
   body: ReactNode;
 };
 
-export const legalLastUpdated = "4 June 2026";
-export const legalProductName = "PokeStop";
+export const legalLastUpdated = "10 June 2026";
+export const legalProductName = "Mint Binder";
 export const legalBusinessName = "Refreshing Media";
-export const legalContact = "support email to be confirmed";
+export const legalContact = "support@mintbinder.co.uk";
 
 export function LegalPage({
   children,

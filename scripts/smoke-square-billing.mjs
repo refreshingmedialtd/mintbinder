@@ -93,14 +93,14 @@ async function retrievePlanVariations(objectIds) {
 }
 
 async function createSmokeCustomer() {
-  const referenceId = `pokestop-square-smoke-${Date.now()}`;
+  const referenceId = `mintbinder-square-smoke-${Date.now()}`;
   const response = await squareRequest("/v2/customers", {
     body: {
       email_address: smokeEmail,
       family_name: "Smoke",
-      given_name: "PokeStop",
+      given_name: "Mint Binder",
       idempotency_key: randomUUID(),
-      note: "PokeStop Square billing smoke test customer",
+      note: "Mint Binder Square billing smoke test customer",
       reference_id: referenceId,
     },
     method: "POST",
@@ -126,13 +126,13 @@ async function createCheckoutLink({ amountMinor, customerEmail, customerId, plan
         subscription_plan_id: planVariationId,
       },
       idempotency_key: randomUUID(),
-      payment_note: `pokestop_smoke=true;square_customer=${customerId};plan=${plan}`,
+      payment_note: `mintbinder_smoke=true;square_customer=${customerId};plan=${plan}`,
       pre_populated_data: {
         buyer_email: customerEmail,
       },
       quick_pay: {
         location_id: config.locationId,
-        name: `PokeStop Plus ${plan === "yearly" ? "Yearly" : "Monthly"} Smoke`,
+        name: `Mint Binder Plus ${plan === "yearly" ? "Yearly" : "Monthly"} Smoke`,
         price_money: {
           amount: amountMinor,
           currency,

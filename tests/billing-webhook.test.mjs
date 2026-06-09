@@ -16,7 +16,7 @@ import {
 
 const secret = "whsec_test_secret";
 const squareSignatureKey = "square_signature_key";
-const squareNotificationUrl = "https://pokestop.example/api/billing/webhook";
+const squareNotificationUrl = "https://mintbinder.example/api/billing/webhook";
 const timestamp = 1_800_000_000;
 const now = new Date(timestamp * 1000);
 const payload = JSON.stringify({

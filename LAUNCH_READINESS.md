@@ -1,10 +1,10 @@
-# PokeStop Launch Readiness
+# Mint Binder Launch Readiness
 
 Last updated: 2026-06-04
 
 ## Overall Progress
 
-PokeStop is approximately 85% of the way to a credible MVP/beta release and around 67% of the way to a polished public launch.
+Mint Binder is approximately 85% of the way to a credible MVP/beta release and around 67% of the way to a polished public launch.
 
 The product is now feature-complete enough to validate the core idea with a small beta group: users can track cards and sealed products, manage wishlist targets, review value history, see set progress, use Plus-gated analytics/reporting, and admins can operate catalogue/pricing imports. The remaining work is less about inventing the product and more about finishing integration QA, production setup, legal/brand readiness, and a focused mobile polish pass.
 
@@ -12,7 +12,7 @@ The product is now feature-complete enough to validate the core idea with a smal
 
 Completed on 2026-06-04:
 
-- Applied all Prisma migrations to the local PostgreSQL `pokestop` database.
+- Applied all Prisma migrations to the local PostgreSQL `mintbinder` database.
 - Seeded the local database with the admin demo user, sample collection, wishlist, storage, catalogue, sealed products, events, and price snapshots.
 - Ran `npm run qa:admin` successfully with zero failures.
 - Ran `npm run build` successfully.
@@ -93,7 +93,7 @@ Known QA warnings:
 
 8. Domain setup batch
 
-   Once the final name/domain is chosen, verify the Resend sending domain/subdomain DNS records, configure `EMAIL_FROM`, run the controlled live price-alert smoke with `PRICE_ALERT_DIGEST_TEST_RECIPIENT`, configure the production Square webhook URL, update sender/legal URLs, and add the final URLs to monitoring/runbooks.
+   For `mintbinder.co.uk`, verify the Resend sending domain/subdomain DNS records, configure `EMAIL_FROM`, run the controlled live price-alert smoke with `PRICE_ALERT_DIGEST_TEST_RECIPIENT`, configure the production Square webhook URL, update sender/legal URLs, and add the final URLs to monitoring/runbooks.
 
 9. Monitoring and operations
 
@@ -108,9 +108,9 @@ Known QA warnings:
 1. Configure Resend sender credentials and run a live price-alert send smoke test.
 2. Run controlled catalogue and pricing backfills, including measured variant metadata repair batches, then review catalogue gap/status reports.
 3. Do a focused mobile UX polish pass on authenticated core flows.
-4. Review/finalize legal, privacy, brand/non-affiliation, and onboarding copy once the final name/domain is chosen.
+4. Review/finalize legal, privacy, brand/non-affiliation, and onboarding copy for `mintbinder.co.uk`.
 5. Choose hosting/database providers and configure real production env/deploy targets.
-6. Run the domain setup batch once the final name/domain is chosen.
+6. Run the `mintbinder.co.uk` domain setup batch.
 7. Complete a hosted Square checkout browser smoke on staging/production.
 8. Configure production monitoring, backups, webhook alerts, and job failure alerts.
 9. Run one final `npm run build`, `npm run qa:beta`, and `npm run qa:admin`.

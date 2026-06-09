@@ -10,7 +10,7 @@ export default function NonAffiliationPage() {
   return (
     <LegalPage
       title="Non-Affiliation Notice"
-      intro={`${legalProductName} is a working title for an independent collection tracker. The final product name and brand treatment must be reviewed before public launch.`}
+      intro={`${legalProductName} is an independent collection tracker. Its brand treatment and legal wording should be reviewed before public launch.`}
       sections={[
         {
           title: "Independent product",
@@ -49,12 +49,12 @@ export default function NonAffiliationPage() {
           ),
         },
         {
-          title: "Working name risk",
+          title: "Brand review",
           body: (
             <p>
-              The name {legalProductName} is not final. Before public launch, the app needs a brand review, trademark
-              search, domain choice, final non-affiliation wording, and replacement of any name or visual treatment that
-              creates unnecessary confusion with official Pokemon products or services.
+              Before public launch, the app needs a brand review, trademark search, final non-affiliation wording, and
+              replacement of any visual treatment that creates unnecessary confusion with official Pokemon products or
+              services.
             </p>
           ),
         },

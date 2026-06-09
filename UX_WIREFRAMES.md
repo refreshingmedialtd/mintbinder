@@ -1,8 +1,8 @@
-# PokeStop UX Wireframes
+# Mint Binder UX Wireframes
 
 ## Purpose
 
-This document defines the first user experience for the PokeStop MVP before app code is built. It covers navigation, core screens, main flows, important states, and wireframe-level layout decisions.
+This document defines the first user experience for the Mint Binder MVP before app code is built. It covers navigation, core screens, main flows, important states, and wireframe-level layout decisions.
 
 The goal is not final visual design. The goal is to make the product flow obvious enough that implementation can begin with fewer surprises.
 
@@ -70,7 +70,7 @@ Admin-only links can appear at the bottom for admin users:
 
 ```text
 +--------------------------------+
-| PokeStop                 [User] |
+| Mint Binder                 [User] |
 |--------------------------------|
 |                                |
 | Page content                   |
@@ -92,7 +92,7 @@ Notes:
 
 ```text
 +---------------+------------------------------------------+
-| PokeStop      | Page title                         [User] |
+| Mint Binder      | Page title                         [User] |
 |---------------|------------------------------------------|
 | Dashboard     |                                          |
 | Collection    | Page content                             |
@@ -131,7 +131,7 @@ Mobile wireframe:
 
 ```text
 +--------------------------------+
-| PokeStop                 [User] |
+| Mint Binder                 [User] |
 |--------------------------------|
 | Collection value               |
 | GBP 1,284.50        +GBP 93.20 |

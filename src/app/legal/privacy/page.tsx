@@ -10,15 +10,15 @@ export default function PrivacyNoticePage() {
   return (
     <LegalPage
       title="Privacy Notice"
-      intro={`${legalProductName} is a working-title collection tracker for Pokemon cards and sealed products. This draft explains how ${legalBusinessName} expects to handle personal data during the beta.`}
+      intro={`${legalProductName} is a collection tracker for Pokemon cards and sealed products. This draft explains how ${legalBusinessName} expects to handle personal data during the beta.`}
       sections={[
         {
           title: "Who controls your data",
           body: (
             <>
               <p>
-                The intended controller is {legalBusinessName}. The final legal entity, registered address, support email,
-                and any required data-protection registration details still need to be confirmed before public launch.
+                The intended controller is {legalBusinessName}. The final legal entity, registered address, and any
+                required data-protection registration details still need to be confirmed before public launch.
               </p>
               <p className="muted">Contact for beta privacy requests: {legalContact}.</p>
             </>

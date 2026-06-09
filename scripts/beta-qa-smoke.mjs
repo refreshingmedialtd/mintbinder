@@ -19,7 +19,7 @@ export const betaQaChecks = [
     method: "GET",
     path: "/",
     expectedStatuses: [200],
-    requiredText: ["PokeStop"],
+    requiredText: ["Mint Binder"],
   },
   {
     id: "auth-session-public",
@@ -159,7 +159,7 @@ export const betaQaChecks = [
     id: "not-found-route",
     gate: "Routing",
     method: "GET",
-    path: "/__pokestop_beta_smoke_missing__",
+    path: "/__mintbinder_beta_smoke_missing__",
     expectedStatuses: [404],
   },
 ];

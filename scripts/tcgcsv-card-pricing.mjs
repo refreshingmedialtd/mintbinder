@@ -302,7 +302,7 @@ async function fetchTcgcsv(url, fetchImpl) {
   const response = await fetchImpl(url, {
     headers: {
       accept: "application/json",
-      "user-agent": "PokeStopLocalImporter/0.1",
+      "user-agent": "MintBinderLocalImporter/0.1",
     },
   });
   const body = await response.json().catch(() => ({}));
