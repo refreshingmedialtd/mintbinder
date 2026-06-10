@@ -1,7 +1,7 @@
 module.exports = {
   apps: [
     {
-      name: "Mint Binder",
+      name: "MintBinder",
       cwd: "/home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder",
       script: "npm",
       args: "start",
