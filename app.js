@@ -1,5 +1,7 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
 
+require("dotenv/config");
+
 const { createServer } = require("node:http");
 const { parse } = require("node:url");
 const next = require("next");
