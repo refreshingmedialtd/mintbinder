@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "next dev --hostname 127.0.0.1",
     "build": "next build",
-    "start": "next start --hostname 127.0.0.1",
+    "start": "node app.js",
     "test:admin-qa": "node --test tests/admin-qa-smoke.test.mjs",
     "test:auth": "node --experimental-strip-types --test tests/auth-roles.test.mjs",
     "test:beta-qa": "node --test tests/beta-qa-smoke.test.mjs",
