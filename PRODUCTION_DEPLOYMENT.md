@@ -9,7 +9,7 @@ Mint Binder is not ready for a public production launch until production provide
 - App host: 20i NodeJS Optimised Managed Cloud Server for `mintbinder.co.uk`.
 - Database: Neon PostgreSQL in Europe/London region for deployment testing, upgraded before real beta users.
 - Payments: Square production app, production access token, production location, production subscription plan variations, and a production webhook URL.
-- Email: Resend or equivalent transactional email provider with a verified sending domain or subdomain.
+- Email: 20i SMTP mailbox with SPF/DKIM/DMARC configured, or Resend/equivalent transactional email if SMTP deliverability is not good enough.
 - Jobs: protected app routes triggered manually from Operations at first, then scheduled later by a trusted scheduler using `JOB_SECRET`.
 - Monitoring: error tracking, uptime checks, job/webhook failure alerts, and database backup monitoring.
 
@@ -59,9 +59,15 @@ Billing:
 
 Email and alerts:
 
-- `RESEND_API_KEY`: production sending key.
-- `EMAIL_FROM`: verified sender on `mintbinder.co.uk` or a sending subdomain, preferably `Mint Binder <alerts@notifications.mintbinder.co.uk>`.
-- `EMAIL_SMOKE_TO`: controlled recipient mailbox for the one-off Resend delivery smoke.
+- `EMAIL_PROVIDER`: `smtp` for 20i SMTP, or `resend` if using Resend instead.
+- `EMAIL_FROM`: verified sender on `mintbinder.co.uk`, for example `Mint Binder <alerts@mintbinder.co.uk>`.
+- `EMAIL_SMOKE_TO`: controlled recipient mailbox for the one-off email delivery smoke.
+- `SMTP_HOST`: 20i outgoing SMTP host, usually `smtp.stackmail.com`.
+- `SMTP_PORT`: secure SMTP port, usually `465` for SSL or `587` for STARTTLS.
+- `SMTP_SECURE`: `true` for port 465, `false` for port 587.
+- `SMTP_USER`: 20i mailbox username.
+- `SMTP_PASSWORD`: 20i mailbox password.
+- `RESEND_API_KEY`: required only when `EMAIL_PROVIDER=resend`.
 - `PRICE_ALERT_DIGEST_DRY_RUN=true` until the controlled live smoke is complete.
 - `PRICE_ALERT_DIGEST_TEST_RECIPIENT`: controlled mailbox for first live smoke.
 - `PRICE_ALERT_DIGEST_ALLOW_LIVE_RECIPIENTS=false` until real beta digests are approved.
@@ -127,10 +133,11 @@ For `mintbinder.co.uk`:
 
 For `mintbinder.co.uk`:
 
-- Verify the Resend sending domain or subdomain.
-- Add required DNS records.
+- Create a 20i mailbox for app notifications, such as `alerts@mintbinder.co.uk`.
+- Confirm SPF, DKIM, and DMARC DNS records are configured for the sending domain.
 - Set `EMAIL_FROM` to the verified sender.
-- Set `EMAIL_SMOKE_TO` to a mailbox you control and run `npm run email:resend-smoke`.
+- Set `EMAIL_PROVIDER=smtp` plus the 20i `SMTP_*` values.
+- Set `EMAIL_SMOKE_TO` to a mailbox you control and run `npm run email:smoke`.
 - Run `npm run job:price-alerts` with dry-run mode.
 - Run one controlled live smoke with `PRICE_ALERT_DIGEST_TEST_RECIPIENT`.
 - Clear the test recipient only when ready for real beta digests.
@@ -149,7 +156,7 @@ Minimum beta monitoring:
 ## Current Open Items
 
 - Production Square app/webhook must be configured for `mintbinder.co.uk`.
-- Resend sender verification must be completed for `mintbinder.co.uk` or a sending subdomain.
+- 20i sender mailbox and SPF/DKIM/DMARC must be configured for `mintbinder.co.uk`.
 - Legal pages are beta drafts and need final company/address review plus active support email verification.
 - 20i hosting and Neon database are selected; deployment, env vars, and migrations are not complete yet.
 - Production monitoring and backup provider choices are still open.

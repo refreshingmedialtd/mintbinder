@@ -100,10 +100,16 @@ STRIPE_PLUS_MONTHLY_PRICE_ID=""
 STRIPE_PLUS_YEARLY_PRICE_ID=""
 STRIPE_WEBHOOK_SECRET=""
 JOB_SECRET=""
-RESEND_API_KEY=""
-EMAIL_FROM="Mint Binder <alerts@notifications.mintbinder.co.uk>"
+EMAIL_PROVIDER="smtp"
+EMAIL_FROM="Mint Binder <alerts@mintbinder.co.uk>"
 EMAIL_SMOKE_TO=""
 EMAIL_SMOKE_SUBJECT=""
+SMTP_HOST="smtp.stackmail.com"
+SMTP_PORT="465"
+SMTP_SECURE="true"
+SMTP_USER="alerts@mintbinder.co.uk"
+SMTP_PASSWORD=""
+RESEND_API_KEY=""
 PRICE_ALERT_DIGEST_DRY_RUN="true"
 PRICE_ALERT_DIGEST_NOW=""
 OPERATIONS_QA_NETWORK_REPAIRS="false"
@@ -218,7 +224,7 @@ Stripe remains available as a fallback by setting `BILLING_PROVIDER=stripe`. Str
 
 Job routes accept either `Authorization: Bearer <JOB_SECRET>` or `x-job-secret: <JOB_SECRET>`. The in-app Operations screen is visible to admin users only, and the job secret is still required before any import or alert job can run. Each successful authenticated job request creates a `job_runs` record with input, result, status, timing, and errors. Catalogue and pricing refreshes accept `page`, `pageSize`, `q`, and `maxPages`; `maxPages` is capped at 20 per job so broad backfills can be resumed in controlled batches. Pricing refreshes convert Pokemon TCG API USD prices into GBP snapshots with `POKEMON_TCG_USD_TO_GBP_RATE`; when `POKEMON_TCG_EUR_TO_GBP_RATE` is also set, cards without TCGPlayer prices can fall back to embedded Cardmarket EUR prices. Keep conversion rates current before running pricing jobs.
 
-Email alerts are sent through Resend. Before live sending, verify a sending domain or subdomain in Resend, add the required DNS records, create a sending API key, then set `RESEND_API_KEY` and `EMAIL_FROM` in `.env`. Prefer a dedicated sending subdomain such as `notifications.mintbinder.co.uk`, with `EMAIL_FROM` set to `Mint Binder <alerts@notifications.mintbinder.co.uk>`. Set `EMAIL_SMOKE_TO` to a mailbox you control and run `npm run email:resend-smoke` to confirm one harmless transactional test email can be delivered before running app-level alert jobs. Run `npm run job:price-alerts` to execute the digest job through the production app. It defaults to dry-run mode with `PRICE_ALERT_DIGEST_DRY_RUN=true`, selects active Plus users, applies notification preferences, records a `price_alerts` job run, and does not send email. Set `PRICE_ALERT_DIGEST_DRY_RUN=false` only after `RESEND_API_KEY` and `EMAIL_FROM` are configured. For the first live price-alert smoke, set `PRICE_ALERT_DIGEST_TEST_RECIPIENT` to a mailbox you control so real digest content is delivered to that address while the job still records which user would have received it. The command-line runner will not email real users unless `PRICE_ALERT_DIGEST_TEST_RECIPIENT` is set or `PRICE_ALERT_DIGEST_ALLOW_LIVE_RECIPIENTS=true` is explicitly configured. Clear `PRICE_ALERT_DIGEST_TEST_RECIPIENT` and set `PRICE_ALERT_DIGEST_ALLOW_LIVE_RECIPIENTS=true` only when you are ready to send real beta digests. Use `PRICE_ALERT_DIGEST_NOW` with an ISO timestamp when you need to test daily/weekly scheduling deterministically.
+Email alerts can be sent through 20i SMTP or Resend. For the 20i path, create a mailbox such as `alerts@mintbinder.co.uk`, confirm SPF/DKIM/DMARC are configured in 20i DNS, then set `EMAIL_PROVIDER=smtp`, `EMAIL_FROM`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, and `SMTP_PASSWORD` in `.env`. The expected 20i outgoing host is usually `smtp.stackmail.com`; use the exact values shown in your 20i mailbox setup screen. Resend remains available as an optional fallback by setting `EMAIL_PROVIDER=resend` and `RESEND_API_KEY`. Set `EMAIL_SMOKE_TO` to a mailbox you control and run `npm run email:smoke` to confirm one harmless transactional test email can be delivered before running app-level alert jobs. Run `npm run job:price-alerts` to execute the digest job through the production app. It defaults to dry-run mode with `PRICE_ALERT_DIGEST_DRY_RUN=true`, selects active Plus users, applies notification preferences, records a `price_alerts` job run, and does not send email. Set `PRICE_ALERT_DIGEST_DRY_RUN=false` only after email sending is configured. For the first live price-alert smoke, set `PRICE_ALERT_DIGEST_TEST_RECIPIENT` to a mailbox you control so real digest content is delivered to that address while the job still records which user would have received it. The command-line runner will not email real users unless `PRICE_ALERT_DIGEST_TEST_RECIPIENT` is set or `PRICE_ALERT_DIGEST_ALLOW_LIVE_RECIPIENTS=true` is explicitly configured. Clear `PRICE_ALERT_DIGEST_TEST_RECIPIENT` and set `PRICE_ALERT_DIGEST_ALLOW_LIVE_RECIPIENTS=true` only when you are ready to send real beta digests. Use `PRICE_ALERT_DIGEST_NOW` with an ISO timestamp when you need to test daily/weekly scheduling deterministically.
 
 If `npm run qa:admin` reports recent failed job runs, inspect the `recentFailedJobRunDetails` JSON first. Fix the named job's configuration or provider issue, rerun a small controlled batch from Operations, confirm the latest run for that job type is `SUCCEEDED`, then rerun `npm run qa:admin` before increasing batch size. The warning notes when the latest failed job type has since recovered with a later successful run.
 
@@ -238,7 +244,7 @@ For tracked sealed-pricing backfills through the same API route used by Operatio
 
 For PriceCharting sealed-price enrichment, run `npm run job:pricecharting-sealed`. The importer uses the official PriceCharting Prices API, checks unpriced sealed products, searches by UPC first and then by conservative sealed-product name matching, and writes source `pricecharting-sealed` snapshots from the `new-price` field only. Set `PRICECHARTING_API_TOKEN`, keep `PRICECHARTING_SEALED_WAIT_MS=1100` or higher for the API rate limit, and use `PRICECHARTING_SEALED_LIMIT` for small controlled batches.
 
-For the `mintbinder.co.uk` domain setup batch, verify the Resend sending domain/subdomain and sender address, update `EMAIL_FROM`, configure the production Square webhook URL, update the beta-draft privacy/terms/non-affiliation pages with final contact details, and wire those URLs into monitoring and operational runbooks.
+For the `mintbinder.co.uk` domain setup batch, create and verify the 20i sender mailbox, confirm SPF/DKIM/DMARC, update `EMAIL_FROM` and SMTP settings, configure the production Square webhook URL, update the beta-draft privacy/terms/non-affiliation pages with final contact details, and wire those URLs into monitoring and operational runbooks.
 
 ## Static Prototype
 

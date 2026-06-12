@@ -39,7 +39,7 @@
     "billing:square-plans": "node scripts/setup-square-subscription-plans.mjs",
     "billing:square-smoke": "node scripts/smoke-square-billing.mjs",
     "billing:square-tunnel": "node scripts/run-square-webhook-tunnel.mjs",
-    "email:resend-smoke": "node scripts/smoke-resend-email.mjs",
+    "email:smoke": "node scripts/smoke-email.mjs",
     "db:validate": "prisma validate",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
@@ -65,6 +65,7 @@
     "lucide-react": "^0.468.0",
     "next": "^15.0.0",
     "next-auth": "^5.0.0-beta.31",
+    "nodemailer": "^7.0.13",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
@@ -74,6 +75,7 @@
   "devDependencies": {
     "@eslint/eslintrc": "^3.1.0",
     "@types/node": "^22.10.0",
+    "@types/nodemailer": "^8.0.1",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "eslint": "^9.16.0",

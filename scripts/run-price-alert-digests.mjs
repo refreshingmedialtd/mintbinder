@@ -14,7 +14,7 @@ if (!secret) {
 }
 
 if (!dryRun && !isEmailConfigured()) {
-  throw new Error("Set RESEND_API_KEY and EMAIL_FROM before running a live price alert send.");
+  throw new Error("Configure EMAIL_FROM with either 20i SMTP settings or RESEND_API_KEY before running a live price alert send.");
 }
 
 if (!dryRun && !testRecipient && !allowLiveRecipients) {
@@ -72,5 +72,9 @@ function optionalString(value) {
 }
 
 function isEmailConfigured() {
-  return Boolean(process.env.RESEND_API_KEY?.trim() && process.env.EMAIL_FROM?.trim());
+  return Boolean(
+    process.env.EMAIL_FROM?.trim() &&
+      ((process.env.SMTP_HOST?.trim() && process.env.SMTP_USER?.trim() && process.env.SMTP_PASSWORD?.trim()) ||
+        process.env.RESEND_API_KEY?.trim()),
+  );
 }

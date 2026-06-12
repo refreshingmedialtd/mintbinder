@@ -61,7 +61,7 @@ export default function PrivacyNoticePage() {
           title: "Sharing and processors",
           body: (
             <>
-              <p>We expect to share limited data with service providers that help run the product, such as hosting/database providers, Square for payments, Resend or another email provider for notifications, and error-monitoring tools if configured.</p>
+              <p>We expect to share limited data with service providers that help run the product, such as hosting/database providers, Square for payments, an email provider for notifications, and error-monitoring tools if configured.</p>
               <p>Pokemon catalogue and pricing providers may be used to retrieve card, sealed-product, image, and market data. These providers do not need your personal collection data to perform those lookups.</p>
             </>
           ),

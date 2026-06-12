@@ -19,7 +19,7 @@ Completed on 2026-06-04:
 - Ran `npm run qa:beta` successfully with 18/18 checks passing.
 - Ran `npm run qa:square-activation` successfully. The final pass created Square sandbox monthly/yearly subscriptions through a live Cloudflare webhook tunnel, verified Square's test webhook, confirmed monthly Plus activation, confirmed cancellation keeps Plus active through the estimated paid period, and left the admin account on active yearly Plus. The final pass used real Square webhook delivery with no signed local replay fallback.
 - Reran `npm run qa:admin` after Square activation; the admin QA user now reports `PLUS_YEARLY` / `ACTIVE`.
-- Added `npm run job:price-alerts` and ran a successful dry-run against the local production build. The job selected 1 active Plus user, found 3 alert items, recorded a succeeded `price_alerts` job run, and did not send email because Resend is not configured locally.
+- Added `npm run job:price-alerts` and ran a successful dry-run against the local production build. The job selected 1 active Plus user, found 3 alert items, recorded a succeeded `price_alerts` job run, and did not send email because no live email provider is configured locally.
 - Added and ran `npm run qa:operations` successfully. The pass validated protected Operations endpoints for catalogue status, catalogue gap export, duplicate provider review, job history, and local dry-run maintenance job recording.
 - Completed a browser click-through of the admin Operations screen. This caught and fixed a mobile access gap by adding an admin-only `Ops` shortcut to the bottom nav; status loading, gap export API verification, duplicate review, alert dry-run, and job history were validated.
 - Ran controlled Pokemon TCG API-backed variant metadata repair dry-runs for 10 and 50 candidates. Both fetched provider data successfully once network access was allowed, but found 0 repairable cards in those batches, so no catalogue rows were changed.
@@ -39,7 +39,7 @@ Completed on 2026-06-04:
 Known QA warnings:
 
 - Hosted Square checkout link creation has been smoke-tested, and webhook activation is now validated. Do one final browser-based hosted checkout smoke on a stable staging/production URL before public launch.
-- Resend email credentials and sender/domain verification are not configured locally yet, so live price-alert email sending remains pending. Dry-run selection, preferences, job recording, the dedicated Resend delivery smoke, and the controlled live-smoke override are validated in code.
+- 20i email credentials and sender/domain authentication are not configured locally yet, so live price-alert email sending remains pending. Dry-run selection, preferences, job recording, the dedicated email delivery smoke, and the controlled live-smoke override are validated in code.
 - The Operations gap report currently shows 814 card variant-metadata gaps. A controlled 50-card provider dry-run found 0 repairable rows, so the remaining gaps may include cards where Pokemon TCG API does not expose TCGPlayer variant prices. Continue with measured batches before treating this as a data-quality blocker.
 - Sealed pricing remains the largest data-depth gap at 81.5% coverage. A full targeted TCGCSV sweep found no more usable prices for the remaining sealed products; the next substantial improvement requires PriceCharting or another sealed-price source.
 - Recent `fetch failed` job records are from sandbox-blocked provider calls before rerunning with network permission. The latest pricing, sealed-pricing, catalogue, and price-alert jobs have since succeeded.
@@ -65,7 +65,7 @@ Known QA warnings:
 
 1. Email and notification readiness
 
-   Configure Resend, verify sender/domain setup, run `npm run email:resend-smoke`, run a live price-alert send test with `PRICE_ALERT_DIGEST_TEST_RECIPIENT`, and decide the schedule for daily/weekly digests. Dry-run digest selection is already validated locally.
+   Configure 20i SMTP, verify SPF/DKIM/DMARC setup, run `npm run email:smoke`, run a live price-alert send test with `PRICE_ALERT_DIGEST_TEST_RECIPIENT`, and decide the schedule for daily/weekly digests. Dry-run digest selection is already validated locally.
 
 2. Catalogue data completion
 
@@ -93,7 +93,7 @@ Known QA warnings:
 
 8. Domain setup batch
 
-   For `mintbinder.co.uk`, verify the Resend sending domain/subdomain DNS records, configure `EMAIL_FROM`, run `npm run email:resend-smoke`, run the controlled live price-alert smoke with `PRICE_ALERT_DIGEST_TEST_RECIPIENT`, configure the production Square webhook URL, update sender/legal URLs, and add the final URLs to monitoring/runbooks.
+   For `mintbinder.co.uk`, create the 20i sender mailbox, verify SPF/DKIM/DMARC DNS records, configure `EMAIL_FROM`, run `npm run email:smoke`, run the controlled live price-alert smoke with `PRICE_ALERT_DIGEST_TEST_RECIPIENT`, configure the production Square webhook URL, update sender/legal URLs, and add the final URLs to monitoring/runbooks.
 
 9. Monitoring and operations
 
@@ -105,7 +105,7 @@ Known QA warnings:
 
 ## Recommended Order From Here
 
-1. Configure Resend sender credentials and run a live price-alert send smoke test.
+1. Configure 20i SMTP sender credentials and run a live price-alert send smoke test.
 2. Run controlled catalogue and pricing backfills, including measured variant metadata repair batches, then review catalogue gap/status reports.
 3. Do a focused mobile UX polish pass on authenticated core flows.
 4. Review/finalize legal, privacy, brand/non-affiliation, and onboarding copy for `mintbinder.co.uk`.

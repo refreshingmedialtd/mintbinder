@@ -64,9 +64,23 @@ if (billingProvider === "stripe") {
   required("STRIPE_WEBHOOK_SECRET", "Set STRIPE_WEBHOOK_SECRET when Stripe is active.");
 }
 
-required("RESEND_API_KEY", "Set a Resend API key before live notification email.");
 required("EMAIL_FROM", "Set EMAIL_FROM to a verified sender on the production domain.");
 notPlaceholder("EMAIL_FROM", ["example.com", "alerts@example.com"], "EMAIL_FROM still uses the example sender.");
+oneOf("EMAIL_PROVIDER", ["smtp", "resend", ""], "EMAIL_PROVIDER should be smtp or resend. Empty auto-detects from configured values.");
+const emailProvider = normalized("EMAIL_PROVIDER") || (normalized("SMTP_HOST") ? "smtp" : normalized("RESEND_API_KEY") ? "resend" : "");
+if (!emailProvider) {
+  blocker("EMAIL_PROVIDER", "Configure 20i SMTP settings or a Resend API key before live notification email.");
+}
+if (emailProvider === "smtp") {
+  required("SMTP_HOST", "Set the 20i outgoing SMTP host, for example smtp.stackmail.com.");
+  positiveInteger("SMTP_PORT", "Set SMTP_PORT to the secure SMTP port, usually 465 or 587.");
+  required("SMTP_SECURE", "Set SMTP_SECURE=true for port 465 or false for STARTTLS on port 587.");
+  required("SMTP_USER", "Set SMTP_USER to the 20i mailbox username.");
+  required("SMTP_PASSWORD", "Set SMTP_PASSWORD to the 20i mailbox password.");
+}
+if (emailProvider === "resend") {
+  required("RESEND_API_KEY", "Set a Resend API key before live notification email.");
+}
 warnIf(
   normalized("PRICE_ALERT_DIGEST_DRY_RUN") !== "false",
   "PRICE_ALERT_DIGEST_DRY_RUN",
