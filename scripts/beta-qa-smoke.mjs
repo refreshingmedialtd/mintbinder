@@ -156,6 +156,15 @@ export const betaQaChecks = [
     allowedJsonErrors: JOB_SECRET_REQUIRED,
   },
   {
+    id: "email-smoke-job-secret-required",
+    gate: "Operations",
+    method: "POST",
+    path: "/api/jobs/email-smoke",
+    body: { note: "beta smoke auth check" },
+    expectedStatuses: [401, 501],
+    allowedJsonErrors: JOB_SECRET_REQUIRED,
+  },
+  {
     id: "not-found-route",
     gate: "Routing",
     method: "GET",

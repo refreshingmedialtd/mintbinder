@@ -40,6 +40,7 @@
     "billing:square-smoke": "node scripts/smoke-square-billing.mjs",
     "billing:square-tunnel": "node scripts/run-square-webhook-tunnel.mjs",
     "email:smoke": "node scripts/smoke-email.mjs",
+    "email:production-smoke": "node scripts/smoke-production-email.mjs",
     "db:validate": "prisma validate",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",

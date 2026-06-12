@@ -138,6 +138,7 @@ For `mintbinder.co.uk`:
 - Set `EMAIL_FROM` to the verified sender.
 - Set `EMAIL_PROVIDER=smtp` plus the 20i `SMTP_*` values.
 - Set `EMAIL_SMOKE_TO` to a mailbox you control and run `npm run email:smoke`.
+- After deployment, run `npm run email:production-smoke` to send through the live app's protected email-smoke route.
 - Run `npm run job:price-alerts` with dry-run mode.
 - Run one controlled live smoke with `PRICE_ALERT_DIGEST_TEST_RECIPIENT`.
 - Clear the test recipient only when ready for real beta digests.
