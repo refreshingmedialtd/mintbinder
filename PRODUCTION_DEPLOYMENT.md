@@ -60,7 +60,8 @@ Billing:
 Email and alerts:
 
 - `RESEND_API_KEY`: production sending key.
-- `EMAIL_FROM`: verified sender on `mintbinder.co.uk` or a sending subdomain.
+- `EMAIL_FROM`: verified sender on `mintbinder.co.uk` or a sending subdomain, preferably `Mint Binder <alerts@notifications.mintbinder.co.uk>`.
+- `EMAIL_SMOKE_TO`: controlled recipient mailbox for the one-off Resend delivery smoke.
 - `PRICE_ALERT_DIGEST_DRY_RUN=true` until the controlled live smoke is complete.
 - `PRICE_ALERT_DIGEST_TEST_RECIPIENT`: controlled mailbox for first live smoke.
 - `PRICE_ALERT_DIGEST_ALLOW_LIVE_RECIPIENTS=false` until real beta digests are approved.
@@ -129,6 +130,7 @@ For `mintbinder.co.uk`:
 - Verify the Resend sending domain or subdomain.
 - Add required DNS records.
 - Set `EMAIL_FROM` to the verified sender.
+- Set `EMAIL_SMOKE_TO` to a mailbox you control and run `npm run email:resend-smoke`.
 - Run `npm run job:price-alerts` with dry-run mode.
 - Run one controlled live smoke with `PRICE_ALERT_DIGEST_TEST_RECIPIENT`.
 - Clear the test recipient only when ready for real beta digests.
