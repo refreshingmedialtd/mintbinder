@@ -52,7 +52,7 @@ Known QA warnings:
 
 - Hosted Square checkout link creation has been smoke-tested in sandbox on the production URL, and webhook activation is validated. Do one final browser-based hosted checkout smoke before public beta, then switch to production Square credentials before paid launch.
 - 20i SMTP email delivery and controlled price-alert digest sending are production-verified. A first-pass job monitor now exists; remaining notification work is deciding the real daily/weekly digest schedule and enabling scheduled monitor alerts.
-- 20i Git Version Control currently pulls the latest commit but does not appear to run the configured deployment script (`npm ci && npm run db:generate && npm run build`). This leaves the Next `.next` build stale unless manually rebuilt, so 20i support needs to confirm how deployment scripts are supposed to execute for NodeJS packages.
+- 20i support confirmed Git Version Control expects a path to a bash script rather than inline commands. A repository script now exists at `scripts/deploy-20i.sh`; update the 20i deployment script field to `/home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/deploy-20i.sh`, then verify a fresh deploy runs `npm ci`, Prisma generation/migrations, and `next build`.
 - The Operations gap report currently shows 814 card variant-metadata gaps. A controlled 50-card provider dry-run found 0 repairable rows, so the remaining gaps may include cards where Pokemon TCG API does not expose TCGPlayer variant prices. Continue with measured batches before treating this as a data-quality blocker.
 - Sealed pricing remains the largest data-depth gap at 81.5% coverage. A full targeted TCGCSV sweep found no more usable prices for the remaining sealed products; the next substantial improvement requires PriceCharting or another sealed-price source.
 - Recent `fetch failed` job records are from sandbox-blocked provider calls before rerunning with network permission. The latest pricing, sealed-pricing, catalogue, and price-alert jobs have since succeeded.
@@ -118,7 +118,7 @@ Known QA warnings:
 
 ## Recommended Order From Here
 
-1. Get 20i support to fix or clarify why the Git deployment script is not executing, then remove the temporary app-server workaround when normal Next builds deploy correctly.
+1. Update the 20i Git deployment script field to `/home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/deploy-20i.sh`, test a fresh deploy, then remove the temporary app-server workaround when normal Next builds deploy correctly.
 2. Decide the price-alert digest schedule and keep real beta recipient emails disabled until the first beta group is approved.
 3. Run controlled catalogue and pricing backfills, including measured variant metadata repair batches, then review catalogue gap/status reports.
 4. Do a focused mobile UX polish pass on authenticated core flows.

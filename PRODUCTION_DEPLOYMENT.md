@@ -161,15 +161,30 @@ Observed on 2026-06-13:
 - It does not show `npm ci`, `npm run db:generate`, `npm run build`, or Next.js build output.
 - New Next route handlers remained unavailable until a temporary `app.js` server-level fallback was added.
 
-Configured deployment script:
+20i support confirmed the Git Version Control field expects a path to a bash script, not inline shell commands. The deployment script is now in the repository at:
 
 ```sh
-npm ci && npm run db:generate && npm run build
+scripts/deploy-20i.sh
 ```
 
-Expected behaviour: after Git deploy, 20i should run the script from the repository root, rebuild `.next`, and restart or refresh the registered NodeJS app so new Next routes are available.
+For the 20i deployment script field, use the absolute path:
 
-Support request: confirm whether Git deployment scripts are supported for this NodeJS package, where their output appears, whether a different field/syntax is required, and whether app restart is automatic after the script completes.
+```sh
+/home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/deploy-20i.sh
+```
+
+The script runs:
+
+```sh
+npm ci
+npm run db:generate
+npm run db:deploy
+npm run build
+```
+
+Expected behaviour: after Git deploy, 20i should run the script from the repository root, apply pending Prisma migrations, rebuild `.next`, and restart or refresh the registered NodeJS app so new Next routes are available.
+
+Follow-up to confirm with support if needed: whether the script output appears in the Git deployment modal/history and whether the registered NodeJS app restarts automatically after the script completes.
 
 ## Monitoring And Recovery
 
@@ -185,7 +200,7 @@ Minimum beta monitoring:
 ## Current Open Items
 
 - Production Square app/webhook must be configured for `mintbinder.co.uk`.
-- 20i Git deployment script is not visibly executing; support ticket pending.
+- 20i Git deployment script path needs to be updated to `/home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/deploy-20i.sh`, then tested with a fresh Git deploy.
 - Controlled live price-alert digest smoke is complete; decide the real digest schedule before enabling beta recipient emails.
 - `/api/health` and `npm run monitor:jobs` are available for first-pass uptime and job-run monitoring; schedule them after 20i deployment-script behaviour is confirmed.
 - Legal pages are beta drafts and need final company/address review plus active support email verification.
