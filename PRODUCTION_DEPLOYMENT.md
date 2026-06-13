@@ -68,6 +68,10 @@ Email and alerts:
 - `SMTP_USER`: 20i mailbox username.
 - `SMTP_PASSWORD`: 20i mailbox password.
 - `RESEND_API_KEY`: required only when `EMAIL_PROVIDER=resend`.
+- `JOB_MONITOR_DRY_RUN=true` until monitor emails are approved; set to `false` when ready to alert.
+- `JOB_MONITOR_ALERT_TO`: mailbox for operational alerts. Falls back to `EMAIL_SMOKE_TO` if not set.
+- `JOB_MONITOR_LOOKBACK_MINUTES`: failed-job lookback window, default `90`.
+- `JOB_MONITOR_STALE_MINUTES`: running-job stale threshold, default `45`.
 - `PRICE_ALERT_DIGEST_DRY_RUN=true` until the controlled live smoke is complete.
 - `PRICE_ALERT_DIGEST_TEST_RECIPIENT`: controlled mailbox for first live smoke.
 - `PRICE_ALERT_DIGEST_ALLOW_LIVE_RECIPIENTS=false` until real beta digests are approved.
@@ -171,10 +175,10 @@ Support request: confirm whether Git deployment scripts are supported for this N
 
 Minimum beta monitoring:
 
-- Public uptime check for `/`.
+- Public uptime check for `/api/health`.
 - Error monitoring for app/API exceptions.
 - Alert when Square webhook failures occur.
-- Alert when `job_runs` records fail or stall.
+- Run `npm run monitor:jobs` on a schedule to alert when `job_runs` records fail or stall. Keep `JOB_MONITOR_DRY_RUN=true` for the first dry run, then set it to `false` when alert emails are approved.
 - Daily database backup completion alert.
 - Manual runbook for disabling checkout, pausing email digests, and reverting a deployment.
 
@@ -183,6 +187,7 @@ Minimum beta monitoring:
 - Production Square app/webhook must be configured for `mintbinder.co.uk`.
 - 20i Git deployment script is not visibly executing; support ticket pending.
 - Controlled live price-alert digest smoke is complete; decide the real digest schedule before enabling beta recipient emails.
+- `/api/health` and `npm run monitor:jobs` are available for first-pass uptime and job-run monitoring; schedule them after 20i deployment-script behaviour is confirmed.
 - Legal pages are beta drafts and need final company/address review plus active support email verification.
 - 20i hosting and Neon database are active; Neon should be upgraded before real beta users.
 - Production monitoring and backup provider choices are still open.

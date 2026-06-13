@@ -8,6 +8,7 @@ const tls = require("node:tls");
 const { parse } = require("node:url");
 const next = require("next");
 
+let healthPrisma;
 const port = Number(cliArg("port") || process.env.PORT || process.env.NODE_PORT || 3000);
 const hostname = cliArg("hostname") || process.env.APP_HOST || process.env.HOST || "127.0.0.1";
 const dev = process.env.NODE_ENV !== "production";
@@ -19,6 +20,11 @@ app.prepare().then(() => {
   createServer((request, response) => {
     const parsedUrl = parse(request.url || "/", true);
 
+    if (request.method === "GET" && parsedUrl.pathname === "/api/health") {
+      handleHealth(request, response);
+      return;
+    }
+
     if (request.method === "POST" && parsedUrl.pathname === "/api/jobs/email-smoke") {
       handleEmailSmoke(request, response);
       return;
@@ -29,6 +35,39 @@ app.prepare().then(() => {
     console.log(`Mint Binder listening on http://${hostname}:${port}`);
   });
 });
+
+async function handleHealth(_request, response) {
+  const startedAt = Date.now();
+  const checkedAt = new Date().toISOString();
+
+  try {
+    const prisma = getHealthPrisma();
+
+    await prisma.$queryRaw`SELECT 1`;
+    sendJson(response, 200, {
+      checks: {
+        database: "ok",
+      },
+      durationMs: Date.now() - startedAt,
+      ok: true,
+      service: "mintbinder",
+      status: "ok",
+      checkedAt,
+    });
+  } catch (error) {
+    sendJson(response, 503, {
+      checks: {
+        database: "failed",
+      },
+      durationMs: Date.now() - startedAt,
+      error: error instanceof Error ? error.message : "Health check failed.",
+      ok: false,
+      service: "mintbinder",
+      status: "degraded",
+      checkedAt,
+    });
+  }
+}
 
 async function handleEmailSmoke(request, response) {
   try {
@@ -171,6 +210,16 @@ async function sendSmtpEmail({ from, html, subject, text, to }) {
   }
 
   return messageId;
+}
+
+function getHealthPrisma() {
+  if (!healthPrisma) {
+    const { PrismaClient } = require("@prisma/client");
+
+    healthPrisma = new PrismaClient();
+  }
+
+  return healthPrisma;
 }
 
 function smtpCommand(socket, command, expectedCodes) {

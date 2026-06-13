@@ -46,11 +46,12 @@ Completed on 2026-06-13:
 - Added a disposable `npm run job:price-alert-fixture` helper so the controlled live price-alert digest smoke can be tested even before real Plus beta users exist.
 - Ran a live-database price-alert digest dry run with one disposable Plus fixture user and one alert; the `price_alerts` job recorded a successful dry run with 1 eligible user and 1 alert.
 - Ran the controlled live price-alert digest smoke through 20i SMTP to the configured smoke mailbox; the `price_alerts` job recorded a successful send, then the disposable fixture user, subscription, wishlist item, card, price snapshot, and set were removed.
+- Added a public `/api/health` endpoint and `npm run monitor:jobs` for first-pass uptime and job-run failure/stale-run monitoring.
 
 Known QA warnings:
 
 - Hosted Square checkout link creation has been smoke-tested in sandbox on the production URL, and webhook activation is validated. Do one final browser-based hosted checkout smoke before public beta, then switch to production Square credentials before paid launch.
-- 20i SMTP email delivery and controlled price-alert digest sending are production-verified. Remaining notification work is deciding the real daily/weekly digest schedule and adding monitoring around failed notification job runs.
+- 20i SMTP email delivery and controlled price-alert digest sending are production-verified. A first-pass job monitor now exists; remaining notification work is deciding the real daily/weekly digest schedule and enabling scheduled monitor alerts.
 - 20i Git Version Control currently pulls the latest commit but does not appear to run the configured deployment script (`npm ci && npm run db:generate && npm run build`). This leaves the Next `.next` build stale unless manually rebuilt, so 20i support needs to confirm how deployment scripts are supposed to execute for NodeJS packages.
 - The Operations gap report currently shows 814 card variant-metadata gaps. A controlled 50-card provider dry-run found 0 repairable rows, so the remaining gaps may include cards where Pokemon TCG API does not expose TCGPlayer variant prices. Continue with measured batches before treating this as a data-quality blocker.
 - Sealed pricing remains the largest data-depth gap at 81.5% coverage. A full targeted TCGCSV sweep found no more usable prices for the remaining sealed products; the next substantial improvement requires PriceCharting or another sealed-price source.
@@ -77,7 +78,7 @@ Known QA warnings:
 
 1. Email and notification readiness
 
-   20i SMTP, SPF, DKIM, DMARC, local email smoke, production email smoke, price-alert dry run, and controlled live price-alert sending are complete. Next, decide the real digest schedule and add job-failure monitoring before enabling real beta recipient emails.
+   20i SMTP, SPF, DKIM, DMARC, local email smoke, production email smoke, price-alert dry run, and controlled live price-alert sending are complete. The first-pass job monitor is in place; next, decide the real digest schedule and enable scheduled monitor alerts before enabling real beta recipient emails.
 
 2. Catalogue data completion
 
@@ -93,7 +94,7 @@ Known QA warnings:
 
 5. Production environment
 
-   20i hosting, Neon PostgreSQL, Square sandbox, and 20i SMTP are configured on `mintbinder.co.uk`. Fix the 20i deployment-script issue, upgrade Neon before real beta users, run `npm run qa:production-env`, set up backup policy, and connect monitoring.
+   20i hosting, Neon PostgreSQL, Square sandbox, and 20i SMTP are configured on `mintbinder.co.uk`. Fix the 20i deployment-script issue, upgrade Neon before real beta users, run `npm run qa:production-env`, set up backup policy, and connect scheduled monitoring.
 
 6. UX polish and beta fit-and-finish
 
@@ -109,7 +110,7 @@ Known QA warnings:
 
 9. Monitoring and operations
 
-   Add production logging/error monitoring, job failure alerts beyond the local admin smoke, webhook failure alerts, and a small runbook for catalogue/pricing job recovery.
+   `/api/health` and `npm run monitor:jobs` are in place for first-pass uptime and job-run failure/stale-run monitoring. Remaining operations work: choose the uptime/error-monitoring provider, schedule the monitor, add webhook failure alerts, database backup checks, and a small runbook for catalogue/pricing job recovery.
 
 10. Beta launch
 
@@ -123,7 +124,7 @@ Known QA warnings:
 4. Do a focused mobile UX polish pass on authenticated core flows.
 5. Review/finalize legal, privacy, brand/non-affiliation, and onboarding copy for `mintbinder.co.uk`.
 6. Complete a hosted Square checkout browser smoke on production.
-7. Configure production monitoring, backups, webhook alerts, and job failure alerts.
+7. Schedule the job monitor, configure public uptime/error monitoring, backups, webhook alerts, and database backup checks.
 8. Run one final `npm run build`, `npm run qa:beta`, and `npm run qa:admin`.
 9. Invite a small beta group.
 
