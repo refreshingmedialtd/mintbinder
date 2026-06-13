@@ -1,10 +1,10 @@
 # Mint Binder Launch Readiness
 
-Last updated: 2026-06-04
+Last updated: 2026-06-13
 
 ## Overall Progress
 
-Mint Binder is approximately 85% of the way to a credible MVP/beta release and around 67% of the way to a polished public launch.
+Mint Binder is approximately 88% of the way to a credible MVP/beta release and around 72% of the way to a polished public launch.
 
 The product is now feature-complete enough to validate the core idea with a small beta group: users can track cards and sealed products, manage wishlist targets, review value history, see set progress, use Plus-gated analytics/reporting, and admins can operate catalogue/pricing imports. The remaining work is less about inventing the product and more about finishing integration QA, production setup, legal/brand readiness, and a focused mobile polish pass.
 
@@ -36,10 +36,19 @@ Completed on 2026-06-04:
 - Added beta-draft legal pages for privacy, terms, and Pokemon non-affiliation, linked them from the app/auth surfaces, and added first-run onboarding copy to the sign-in/create-account screen.
 - Added a production deployment runbook, `npm run qa:production-env` validator, and `npm run db:deploy` command for staging/production migration flow.
 
+Completed on 2026-06-13:
+
+- Deployed Mint Binder to the live `mintbinder.co.uk` 20i NodeJS Optimised Managed Cloud Server and confirmed the public app returns `200`.
+- Connected the live app to Neon PostgreSQL after 20i enabled outbound TCP 5432; live account registration, session creation, database-backed app data, storage-location creation, and Square sandbox checkout link creation all passed.
+- Configured 20i SMTP for `alerts@mintbinder.co.uk`, with public SPF, DKIM selector `s1`, and DMARC records visible.
+- Ran local and production email smoke tests successfully through 20i SMTP. Production `/api/jobs/email-smoke` returned `200` and sent via provider `smtp`.
+- Added a temporary `app.js` protected email-smoke fallback because 20i Git deploy currently pulls commits but does not execute the configured deployment script.
+
 Known QA warnings:
 
-- Hosted Square checkout link creation has been smoke-tested, and webhook activation is now validated. Do one final browser-based hosted checkout smoke on a stable staging/production URL before public launch.
-- 20i email credentials and sender/domain authentication are not configured locally yet, so live price-alert email sending remains pending. Dry-run selection, preferences, job recording, the dedicated email delivery smoke, and the controlled live-smoke override are validated in code.
+- Hosted Square checkout link creation has been smoke-tested in sandbox on the production URL, and webhook activation is validated. Do one final browser-based hosted checkout smoke before public beta, then switch to production Square credentials before paid launch.
+- 20i SMTP email delivery is production-verified. The remaining notification step is a controlled live price-alert digest smoke using `PRICE_ALERT_DIGEST_TEST_RECIPIENT`, followed by a decision on daily/weekly digest scheduling.
+- 20i Git Version Control currently pulls the latest commit but does not appear to run the configured deployment script (`npm ci && npm run db:generate && npm run build`). This leaves the Next `.next` build stale unless manually rebuilt, so 20i support needs to confirm how deployment scripts are supposed to execute for NodeJS packages.
 - The Operations gap report currently shows 814 card variant-metadata gaps. A controlled 50-card provider dry-run found 0 repairable rows, so the remaining gaps may include cards where Pokemon TCG API does not expose TCGPlayer variant prices. Continue with measured batches before treating this as a data-quality blocker.
 - Sealed pricing remains the largest data-depth gap at 81.5% coverage. A full targeted TCGCSV sweep found no more usable prices for the remaining sealed products; the next substantial improvement requires PriceCharting or another sealed-price source.
 - Recent `fetch failed` job records are from sandbox-blocked provider calls before rerunning with network permission. The latest pricing, sealed-pricing, catalogue, and price-alert jobs have since succeeded.
@@ -65,7 +74,7 @@ Known QA warnings:
 
 1. Email and notification readiness
 
-   Configure 20i SMTP, verify SPF/DKIM/DMARC setup, run `npm run email:smoke`, run a live price-alert send test with `PRICE_ALERT_DIGEST_TEST_RECIPIENT`, and decide the schedule for daily/weekly digests. Dry-run digest selection is already validated locally.
+   20i SMTP, SPF, DKIM, DMARC, local email smoke, and production email smoke are complete. Next, run a live price-alert send test with `PRICE_ALERT_DIGEST_TEST_RECIPIENT`, then decide the schedule for daily/weekly digests. Dry-run digest selection is already validated locally.
 
 2. Catalogue data completion
 
@@ -81,7 +90,7 @@ Known QA warnings:
 
 5. Production environment
 
-   Deployment steps are now documented and production env readiness can be validated with `npm run qa:production-env`. Choose hosting/database providers, configure real production variables, run `npm run db:deploy`, set up backup policy, and connect monitoring.
+   20i hosting, Neon PostgreSQL, Square sandbox, and 20i SMTP are configured on `mintbinder.co.uk`. Fix the 20i deployment-script issue, upgrade Neon before real beta users, run `npm run qa:production-env`, set up backup policy, and connect monitoring.
 
 6. UX polish and beta fit-and-finish
 
@@ -93,7 +102,7 @@ Known QA warnings:
 
 8. Domain setup batch
 
-   For `mintbinder.co.uk`, create the 20i sender mailbox, verify SPF/DKIM/DMARC DNS records, configure `EMAIL_FROM`, run `npm run email:smoke`, run the controlled live price-alert smoke with `PRICE_ALERT_DIGEST_TEST_RECIPIENT`, configure the production Square webhook URL, update sender/legal URLs, and add the final URLs to monitoring/runbooks.
+   For `mintbinder.co.uk`, the 20i sender mailbox, SPF/DKIM/DMARC records, `EMAIL_FROM`, local email smoke, and production email smoke are complete. Remaining domain tasks: run the controlled live price-alert smoke with `PRICE_ALERT_DIGEST_TEST_RECIPIENT`, configure production Square credentials/webhook when ready, update final legal URLs, and add the final URLs to monitoring/runbooks.
 
 9. Monitoring and operations
 
@@ -105,16 +114,15 @@ Known QA warnings:
 
 ## Recommended Order From Here
 
-1. Configure 20i SMTP sender credentials and run a live price-alert send smoke test.
-2. Run controlled catalogue and pricing backfills, including measured variant metadata repair batches, then review catalogue gap/status reports.
-3. Do a focused mobile UX polish pass on authenticated core flows.
-4. Review/finalize legal, privacy, brand/non-affiliation, and onboarding copy for `mintbinder.co.uk`.
-5. Choose hosting/database providers and configure real production env/deploy targets.
-6. Run the `mintbinder.co.uk` domain setup batch.
-7. Complete a hosted Square checkout browser smoke on staging/production.
-8. Configure production monitoring, backups, webhook alerts, and job failure alerts.
-9. Run one final `npm run build`, `npm run qa:beta`, and `npm run qa:admin`.
-10. Invite a small beta group.
+1. Get 20i support to fix or clarify why the Git deployment script is not executing, then remove the temporary app-server workaround when normal Next builds deploy correctly.
+2. Run a controlled live price-alert send smoke test.
+3. Run controlled catalogue and pricing backfills, including measured variant metadata repair batches, then review catalogue gap/status reports.
+4. Do a focused mobile UX polish pass on authenticated core flows.
+5. Review/finalize legal, privacy, brand/non-affiliation, and onboarding copy for `mintbinder.co.uk`.
+6. Complete a hosted Square checkout browser smoke on production.
+7. Configure production monitoring, backups, webhook alerts, and job failure alerts.
+8. Run one final `npm run build`, `npm run qa:beta`, and `npm run qa:admin`.
+9. Invite a small beta group.
 
 ## Launch Gates
 

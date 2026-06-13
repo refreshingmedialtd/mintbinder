@@ -1,6 +1,6 @@
 # Mint Binder Production Deployment Runbook
 
-Last updated: 2026-06-04
+Last updated: 2026-06-13
 
 Mint Binder is not ready for a public production launch until production provider accounts, DNS, email, monitoring, and final legal details are complete. This runbook defines the deployment path so staging can be prepared without guessing.
 
@@ -102,6 +102,7 @@ Pricing:
 4. Run `npm run qa:production-env`; fix every blocker.
 5. Run `npm run db:deploy`.
 6. Deploy the app.
+   - Current 20i note: Git deploy pulls commits, but the deployment script is not visibly executing. Support ticket pending. Until fixed, verify every deploy by checking the expected route exists on `https://mintbinder.co.uk`.
 7. Run `npm run qa:beta` against the production URL.
 8. Run `npm run qa:admin` against production data.
 9. Run Square hosted-checkout browser smoke for monthly and yearly plans.
@@ -143,6 +144,27 @@ For `mintbinder.co.uk`:
 - Run one controlled live smoke with `PRICE_ALERT_DIGEST_TEST_RECIPIENT`.
 - Clear the test recipient only when ready for real beta digests.
 
+Status on 2026-06-13: local and production 20i SMTP smoke tests passed for `alerts@mintbinder.co.uk`; SPF, DKIM selector `s1`, and DMARC are visible publicly. The controlled price-alert digest smoke is still pending.
+
+## 20i Deployment Script Issue
+
+Observed on 2026-06-13:
+
+- Git Version Control history shows new commits are pulled correctly.
+- The deployment modal output only shows Git checkout/fetch status.
+- It does not show `npm ci`, `npm run db:generate`, `npm run build`, or Next.js build output.
+- New Next route handlers remained unavailable until a temporary `app.js` server-level fallback was added.
+
+Configured deployment script:
+
+```sh
+npm ci && npm run db:generate && npm run build
+```
+
+Expected behaviour: after Git deploy, 20i should run the script from the repository root, rebuild `.next`, and restart or refresh the registered NodeJS app so new Next routes are available.
+
+Support request: confirm whether Git deployment scripts are supported for this NodeJS package, where their output appears, whether a different field/syntax is required, and whether app restart is automatic after the script completes.
+
 ## Monitoring And Recovery
 
 Minimum beta monitoring:
@@ -157,7 +179,8 @@ Minimum beta monitoring:
 ## Current Open Items
 
 - Production Square app/webhook must be configured for `mintbinder.co.uk`.
-- 20i sender mailbox and SPF/DKIM/DMARC must be configured for `mintbinder.co.uk`.
+- 20i Git deployment script is not visibly executing; support ticket pending.
+- Controlled live price-alert digest smoke is pending now that SMTP is verified.
 - Legal pages are beta drafts and need final company/address review plus active support email verification.
-- 20i hosting and Neon database are selected; deployment, env vars, and migrations are not complete yet.
+- 20i hosting and Neon database are active; Neon should be upgraded before real beta users.
 - Production monitoring and backup provider choices are still open.

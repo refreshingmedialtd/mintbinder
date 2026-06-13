@@ -192,6 +192,7 @@ Creating an account from the sign-in screen creates a new collector profile with
 - `GET/PATCH /api/billing/subscription`: returns the signed-in user's billing subscription state and, for Square, schedules Plus renewal cancellation while preserving access until the paid period ends.
 - `POST /api/billing/webhook`: verifies Square or Stripe webhook signatures and syncs Plus subscription status.
 - `POST /api/jobs/price-alerts`: sends or dry-runs Plus price alert email digests behind `JOB_SECRET`.
+- `POST /api/jobs/email-smoke`: sends one protected production email smoke to `EMAIL_SMOKE_TO` behind `JOB_SECRET`.
 - `POST /api/jobs/catalogue-refresh`: imports card catalogue pages from the Pokemon TCG API behind `JOB_SECRET`.
 - `POST /api/jobs/card-image-repair`: fills missing Pokemon TCG card image URLs from stored provider IDs behind `JOB_SECRET`.
 - `POST /api/jobs/sealed-image-repair`: fills missing TCGCSV sealed product image URLs from stored provider IDs behind `JOB_SECRET`.
