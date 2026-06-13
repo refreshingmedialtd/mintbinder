@@ -176,13 +176,15 @@ For the 20i deployment script field, use the absolute path:
 The script runs:
 
 ```sh
-npm ci
+npm ci --include=dev
 npm run db:generate
 npm run db:deploy
 npm run build
 ```
 
 Expected behaviour: after Git deploy, 20i should run the script from the repository root, apply pending Prisma migrations, rebuild `.next`, and restart or refresh the registered NodeJS app so new Next routes are available.
+
+Note: the first successful script run auto-installed missing build-time dev dependencies because `NODE_ENV=production` had been set before `npm ci`, leaving `package.json` and `package-lock.json` modified on the server. The script now restores those files and uses `npm ci --include=dev` before building.
 
 Follow-up to confirm with support if needed: whether the script output appears in the Git deployment modal/history and whether the registered NodeJS app restarts automatically after the script completes.
 
