@@ -5,8 +5,10 @@ import { startJobServer, stopServer, waitForServer } from "./job-server-runner.m
 const port = positiveInteger(process.env.JOB_SERVER_PORT, 3015);
 const dryRun = booleanSetting(process.env.PRICE_ALERT_DIGEST_DRY_RUN, true);
 const now = optionalDate(process.env.PRICE_ALERT_DIGEST_NOW);
-const testRecipient = optionalString(process.env.PRICE_ALERT_DIGEST_TEST_RECIPIENT);
 const allowLiveRecipients = booleanSetting(process.env.PRICE_ALERT_DIGEST_ALLOW_LIVE_RECIPIENTS, false);
+const explicitTestRecipient = optionalString(process.env.PRICE_ALERT_DIGEST_TEST_RECIPIENT);
+const smokeTestRecipient = optionalString(process.env.EMAIL_SMOKE_TO);
+const testRecipient = explicitTestRecipient || (!allowLiveRecipients ? smokeTestRecipient : undefined);
 const secret = process.env.JOB_SECRET?.trim();
 
 if (!secret) {
@@ -18,7 +20,7 @@ if (!dryRun && !isEmailConfigured()) {
 }
 
 if (!dryRun && !testRecipient && !allowLiveRecipients) {
-  throw new Error("Set PRICE_ALERT_DIGEST_TEST_RECIPIENT for a live smoke, or PRICE_ALERT_DIGEST_ALLOW_LIVE_RECIPIENTS=true to email real users.");
+  throw new Error("Set PRICE_ALERT_DIGEST_TEST_RECIPIENT or EMAIL_SMOKE_TO for a live smoke, or PRICE_ALERT_DIGEST_ALLOW_LIVE_RECIPIENTS=true to email real users.");
 }
 
 const { baseUrl, output, server } = startJobServer({ port });

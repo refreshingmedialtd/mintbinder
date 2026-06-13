@@ -4,7 +4,7 @@ Last updated: 2026-06-13
 
 ## Overall Progress
 
-Mint Binder is approximately 88% of the way to a credible MVP/beta release and around 72% of the way to a polished public launch.
+Mint Binder is approximately 89% of the way to a credible MVP/beta release and around 73% of the way to a polished public launch.
 
 The product is now feature-complete enough to validate the core idea with a small beta group: users can track cards and sealed products, manage wishlist targets, review value history, see set progress, use Plus-gated analytics/reporting, and admins can operate catalogue/pricing imports. The remaining work is less about inventing the product and more about finishing integration QA, production setup, legal/brand readiness, and a focused mobile polish pass.
 
@@ -43,11 +43,14 @@ Completed on 2026-06-13:
 - Configured 20i SMTP for `alerts@mintbinder.co.uk`, with public SPF, DKIM selector `s1`, and DMARC records visible.
 - Ran local and production email smoke tests successfully through 20i SMTP. Production `/api/jobs/email-smoke` returned `200` and sent via provider `smtp`.
 - Added a temporary `app.js` protected email-smoke fallback because 20i Git deploy currently pulls commits but does not execute the configured deployment script.
+- Added a disposable `npm run job:price-alert-fixture` helper so the controlled live price-alert digest smoke can be tested even before real Plus beta users exist.
+- Ran a live-database price-alert digest dry run with one disposable Plus fixture user and one alert; the `price_alerts` job recorded a successful dry run with 1 eligible user and 1 alert.
+- Ran the controlled live price-alert digest smoke through 20i SMTP to the configured smoke mailbox; the `price_alerts` job recorded a successful send, then the disposable fixture user, subscription, wishlist item, card, price snapshot, and set were removed.
 
 Known QA warnings:
 
 - Hosted Square checkout link creation has been smoke-tested in sandbox on the production URL, and webhook activation is validated. Do one final browser-based hosted checkout smoke before public beta, then switch to production Square credentials before paid launch.
-- 20i SMTP email delivery is production-verified. The remaining notification step is a controlled live price-alert digest smoke using `PRICE_ALERT_DIGEST_TEST_RECIPIENT`, followed by a decision on daily/weekly digest scheduling.
+- 20i SMTP email delivery and controlled price-alert digest sending are production-verified. Remaining notification work is deciding the real daily/weekly digest schedule and adding monitoring around failed notification job runs.
 - 20i Git Version Control currently pulls the latest commit but does not appear to run the configured deployment script (`npm ci && npm run db:generate && npm run build`). This leaves the Next `.next` build stale unless manually rebuilt, so 20i support needs to confirm how deployment scripts are supposed to execute for NodeJS packages.
 - The Operations gap report currently shows 814 card variant-metadata gaps. A controlled 50-card provider dry-run found 0 repairable rows, so the remaining gaps may include cards where Pokemon TCG API does not expose TCGPlayer variant prices. Continue with measured batches before treating this as a data-quality blocker.
 - Sealed pricing remains the largest data-depth gap at 81.5% coverage. A full targeted TCGCSV sweep found no more usable prices for the remaining sealed products; the next substantial improvement requires PriceCharting or another sealed-price source.
@@ -74,7 +77,7 @@ Known QA warnings:
 
 1. Email and notification readiness
 
-   20i SMTP, SPF, DKIM, DMARC, local email smoke, and production email smoke are complete. Next, run a live price-alert send test with `PRICE_ALERT_DIGEST_TEST_RECIPIENT`, then decide the schedule for daily/weekly digests. Dry-run digest selection is already validated locally.
+   20i SMTP, SPF, DKIM, DMARC, local email smoke, production email smoke, price-alert dry run, and controlled live price-alert sending are complete. Next, decide the real digest schedule and add job-failure monitoring before enabling real beta recipient emails.
 
 2. Catalogue data completion
 
@@ -115,7 +118,7 @@ Known QA warnings:
 ## Recommended Order From Here
 
 1. Get 20i support to fix or clarify why the Git deployment script is not executing, then remove the temporary app-server workaround when normal Next builds deploy correctly.
-2. Run a controlled live price-alert send smoke test.
+2. Decide the price-alert digest schedule and keep real beta recipient emails disabled until the first beta group is approved.
 3. Run controlled catalogue and pricing backfills, including measured variant metadata repair batches, then review catalogue gap/status reports.
 4. Do a focused mobile UX polish pass on authenticated core flows.
 5. Review/finalize legal, privacy, brand/non-affiliation, and onboarding copy for `mintbinder.co.uk`.
@@ -135,7 +138,7 @@ Beta can start when:
 - Catalogue coverage is broad enough for modern Pokemon TCG collections, or gaps are clearly handled.
 - Pricing refreshes produce useful values for common card variants and sealed products.
 - Plus gates, Square checkout link creation, billing management, and webhook entitlement updates work in sandbox mode. Backend activation completed locally on 2026-06-04; hosted-checkout browser smoke remains for staging/production.
-- Email notifications can be dry-run and sent safely.
+- Email notifications can be dry-run and sent safely. Production SMTP smoke and controlled price-alert digest smoke completed on 2026-06-13.
 - Operations status, exports, job history, and safe dry-run job controls pass protected API QA and browser UI click-through. Completed locally on 2026-06-04.
 - Basic privacy/terms/non-affiliation pages exist in beta-draft form. Completed locally on 2026-06-04; final legal/name/domain review remains.
 - There is a rollback or recovery plan for migrations and job failures.

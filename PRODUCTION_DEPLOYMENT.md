@@ -141,10 +141,12 @@ For `mintbinder.co.uk`:
 - Set `EMAIL_SMOKE_TO` to a mailbox you control and run `npm run email:smoke`.
 - After deployment, run `npm run email:production-smoke` to send through the live app's protected email-smoke route.
 - Run `npm run job:price-alerts` with dry-run mode.
-- Run one controlled live smoke with `PRICE_ALERT_DIGEST_TEST_RECIPIENT`.
+- If no eligible Plus users exist yet, run `npm run job:price-alert-fixture -- setup --confirm` to create one disposable alert fixture.
+- Run one controlled live smoke with `PRICE_ALERT_DIGEST_TEST_RECIPIENT`; if that is not set, the job uses `EMAIL_SMOKE_TO` while live recipients remain disabled.
+- Run `npm run job:price-alert-fixture -- cleanup --confirm` after the smoke passes.
 - Clear the test recipient only when ready for real beta digests.
 
-Status on 2026-06-13: local and production 20i SMTP smoke tests passed for `alerts@mintbinder.co.uk`; SPF, DKIM selector `s1`, and DMARC are visible publicly. The controlled price-alert digest smoke is still pending.
+Status on 2026-06-13: local and production 20i SMTP smoke tests passed for `alerts@mintbinder.co.uk`; SPF, DKIM selector `s1`, and DMARC are visible publicly. A disposable fixture script is available for creating one safe Plus test user and alert when the live database has no eligible recipients. The controlled price-alert digest dry run and live send smoke both passed, and the disposable fixture rows were cleaned up afterwards.
 
 ## 20i Deployment Script Issue
 
@@ -180,7 +182,7 @@ Minimum beta monitoring:
 
 - Production Square app/webhook must be configured for `mintbinder.co.uk`.
 - 20i Git deployment script is not visibly executing; support ticket pending.
-- Controlled live price-alert digest smoke is pending now that SMTP is verified.
+- Controlled live price-alert digest smoke is complete; decide the real digest schedule before enabling beta recipient emails.
 - Legal pages are beta drafts and need final company/address review plus active support email verification.
 - 20i hosting and Neon database are active; Neon should be upgraded before real beta users.
 - Production monitoring and backup provider choices are still open.
