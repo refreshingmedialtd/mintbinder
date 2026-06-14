@@ -5,6 +5,8 @@ import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import { normalizeAppRole, type AppUserRole } from "@/lib/auth/roles";
 import { prisma } from "@/lib/db/prisma";
 
+const authSecret = process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET ?? process.env.JOB_SECRET;
+
 declare module "next-auth" {
   interface User {
     role?: AppUserRole;
@@ -19,8 +21,11 @@ declare module "next-auth" {
 }
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
+  secret: authSecret,
   session: { strategy: "jwt" },
+  trustHost: true,
   pages: {
+    error: "/",
     signIn: "/",
   },
   providers: [
@@ -32,74 +37,79 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         mode: { label: "Mode", type: "text" },
       },
       async authorize(credentials) {
-        const email = normalizeEmail(credentials.email);
-        const password = normalizePassword(credentials.password);
-        const mode = credentials.mode === "register" ? "register" : "sign-in";
+        try {
+          const email = normalizeEmail(credentials.email);
+          const password = normalizePassword(credentials.password);
+          const mode = credentials.mode === "register" ? "register" : "sign-in";
 
-        if (!email || !password) {
-          return null;
-        }
-
-        const existingUser = await prisma.user.findUnique({
-          where: { email },
-          select: {
-            id: true,
-            email: true,
-            displayName: true,
-            passwordHash: true,
-            role: true,
-          },
-        });
-
-        if (mode === "register") {
-          if (existingUser?.passwordHash) {
+          if (!email || !password) {
             return null;
           }
 
-          const displayName = normalizeDisplayName(credentials.name) ?? defaultNameFromEmail(email);
-          const passwordHash = hashPassword(password);
-          const user = existingUser
-            ? await prisma.user.update({
-                where: { email },
-                data: { displayName, passwordHash },
-                select: { id: true, email: true, displayName: true, role: true },
-              })
-            : await prisma.user.create({
-                data: {
-                  email,
-                  displayName,
-                  passwordHash,
-                  preferredCurrency: "GBP",
-                  preferredRegion: "United Kingdom",
-                  subscriptions: {
-                    create: {
-                      provider: "local",
-                      plan: SubscriptionPlan.FREE,
-                      status: SubscriptionStatus.ACTIVE,
+          const existingUser = await prisma.user.findUnique({
+            where: { email },
+            select: {
+              id: true,
+              email: true,
+              displayName: true,
+              passwordHash: true,
+              role: true,
+            },
+          });
+
+          if (mode === "register") {
+            if (existingUser?.passwordHash) {
+              return null;
+            }
+
+            const displayName = normalizeDisplayName(credentials.name) ?? defaultNameFromEmail(email);
+            const passwordHash = hashPassword(password);
+            const user = existingUser
+              ? await prisma.user.update({
+                  where: { email },
+                  data: { displayName, passwordHash },
+                  select: { id: true, email: true, displayName: true, role: true },
+                })
+              : await prisma.user.create({
+                  data: {
+                    email,
+                    displayName,
+                    passwordHash,
+                    preferredCurrency: "GBP",
+                    preferredRegion: "United Kingdom",
+                    subscriptions: {
+                      create: {
+                        provider: "local",
+                        plan: SubscriptionPlan.FREE,
+                        status: SubscriptionStatus.ACTIVE,
+                      },
                     },
                   },
-                },
-                select: { id: true, email: true, displayName: true, role: true },
-              });
+                  select: { id: true, email: true, displayName: true, role: true },
+                });
+
+            return {
+              id: user.id,
+              email: user.email,
+              name: user.displayName ?? defaultNameFromEmail(user.email),
+              role: normalizeAppRole(user.role),
+            };
+          }
+
+          if (!existingUser?.passwordHash || !verifyPassword(password, existingUser.passwordHash)) {
+            return null;
+          }
 
           return {
-            id: user.id,
-            email: user.email,
-            name: user.displayName ?? defaultNameFromEmail(user.email),
-            role: normalizeAppRole(user.role),
+            id: existingUser.id,
+            email: existingUser.email,
+            name: existingUser.displayName ?? defaultNameFromEmail(existingUser.email),
+            role: normalizeAppRole(existingUser.role),
           };
-        }
-
-        if (!existingUser?.passwordHash || !verifyPassword(password, existingUser.passwordHash)) {
+        } catch (error) {
+          console.error("Credentials authentication failed.", error);
           return null;
         }
-
-        return {
-          id: existingUser.id,
-          email: existingUser.email,
-          name: existingUser.displayName ?? defaultNameFromEmail(existingUser.email),
-          role: normalizeAppRole(existingUser.role),
-        };
       },
     }),
   ],
