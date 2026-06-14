@@ -1,6 +1,6 @@
 # Mint Binder Production Deployment Runbook
 
-Last updated: 2026-06-13
+Last updated: 2026-06-14
 
 Mint Binder is not ready for a public production launch until production provider accounts, DNS, email, monitoring, and final legal details are complete. This runbook defines the deployment path so staging can be prepared without guessing.
 
@@ -106,7 +106,7 @@ Pricing:
 4. Run `npm run qa:production-env`; fix every blocker.
 5. Run `npm run db:deploy`.
 6. Deploy the app.
-   - Current 20i note: Git deploy pulls commits, but the deployment script is not visibly executing. Support ticket pending. Until fixed, verify every deploy by checking the expected route exists on `https://mintbinder.co.uk`.
+   - 20i Git Version Control should use `/home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/deploy-20i.sh` as the deployment script path. Verify each deploy by checking the expected route exists on `https://mintbinder.co.uk`.
 7. Run `npm run qa:beta` against the production URL.
 8. Run `npm run qa:admin` against production data.
 9. Run Square hosted-checkout browser smoke for monthly and yearly plans.
@@ -152,7 +152,7 @@ For `mintbinder.co.uk`:
 
 Status on 2026-06-13: local and production 20i SMTP smoke tests passed for `alerts@mintbinder.co.uk`; SPF, DKIM selector `s1`, and DMARC are visible publicly. A disposable fixture script is available for creating one safe Plus test user and alert when the live database has no eligible recipients. The controlled price-alert digest dry run and live send smoke both passed, and the disposable fixture rows were cleaned up afterwards.
 
-## 20i Deployment Script Issue
+## 20i Deployment Script Setup
 
 Observed on 2026-06-13:
 
@@ -161,7 +161,13 @@ Observed on 2026-06-13:
 - It does not show `npm ci`, `npm run db:generate`, `npm run build`, or Next.js build output.
 - New Next route handlers remained unavailable until a temporary `app.js` server-level fallback was added.
 
-20i support confirmed the Git Version Control field expects a path to a bash script, not inline shell commands. The deployment script is now in the repository at:
+Resolved on 2026-06-14:
+
+- 20i support confirmed the Git Version Control deployment script field expects a path to a bash script, not inline shell commands.
+- The path-based deployment script now runs successfully.
+- The temporary custom-server API fallbacks have been removed from `app.js`; the custom server now delegates API traffic to Next route handlers.
+
+The deployment script is in the repository at:
 
 ```sh
 scripts/deploy-20i.sh
@@ -186,7 +192,7 @@ Expected behaviour: after Git deploy, 20i should run the script from the reposit
 
 Note: the first successful script run auto-installed missing build-time dev dependencies because `NODE_ENV=production` had been set before `npm ci`, leaving `package.json` and `package-lock.json` modified on the server. The script now restores those files and uses `npm ci --include=dev` before building.
 
-Follow-up to confirm with support if needed: whether the script output appears in the Git deployment modal/history and whether the registered NodeJS app restarts automatically after the script completes.
+Follow-up to confirm with support if needed: whether the registered NodeJS app restarts automatically after the script completes when future deploys change runtime code.
 
 ## Monitoring And Recovery
 
@@ -202,9 +208,9 @@ Minimum beta monitoring:
 ## Current Open Items
 
 - Production Square app/webhook must be configured for `mintbinder.co.uk`.
-- 20i Git deployment script path needs to be updated to `/home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/deploy-20i.sh`, then tested with a fresh Git deploy.
+- Keep the 20i Git deployment script path set to `/home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/deploy-20i.sh` and verify runtime routes after future deploys.
 - Controlled live price-alert digest smoke is complete; decide the real digest schedule before enabling beta recipient emails.
-- `/api/health` and `npm run monitor:jobs` are available for first-pass uptime and job-run monitoring; schedule them after 20i deployment-script behaviour is confirmed.
+- `/api/health` and `npm run monitor:jobs` are available for first-pass uptime and job-run monitoring; schedule them before beta.
 - Legal pages are beta drafts and need final company/address review plus active support email verification.
 - 20i hosting and Neon database are active; Neon should be upgraded before real beta users.
 - Production monitoring and backup provider choices are still open.
