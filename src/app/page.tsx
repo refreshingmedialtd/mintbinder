@@ -1634,11 +1634,7 @@ export default function Home() {
     }
   }
 
-  if (status === "loading") {
-    return <AuthStatusScreen />;
-  }
-
-  if (status === "unauthenticated") {
+  if (status !== "authenticated") {
     return (
       <SignInScreen
         authMode={authMode}
@@ -1646,6 +1642,7 @@ export default function Home() {
         error={signInError}
         isSubmitting={isSigningIn}
         name={signInName}
+        notice={status === "loading" ? "Checking for an existing session. You can still sign in." : ""}
         password={signInPassword}
         onAuthModeChange={(mode) => {
           setAuthMode(mode);
@@ -1828,24 +1825,13 @@ function renderScreen(context: ScreenContext) {
   }
 }
 
-function AuthStatusScreen() {
-  return (
-    <main className="auth-shell">
-      <section className="auth-card">
-        <AuthBrand />
-        <h1>Checking session</h1>
-        <p className="muted">Preparing your collection workspace.</p>
-      </section>
-    </main>
-  );
-}
-
 function SignInScreen({
   authMode,
   email,
   error,
   isSubmitting,
   name,
+  notice,
   password,
   onAuthModeChange,
   onEmailChange,
@@ -1858,6 +1844,7 @@ function SignInScreen({
   error: string;
   isSubmitting: boolean;
   name: string;
+  notice: string;
   password: string;
   onAuthModeChange: (value: AuthMode) => void;
   onEmailChange: (value: string) => void;
@@ -1890,6 +1877,7 @@ function SignInScreen({
               Create account
             </button>
           </div>
+          {notice ? <p className="auth-notice">{notice}</p> : null}
           <Field label="Email">
             <input
               type="email"

@@ -714,6 +714,14 @@ h3 {
   font-weight: 850;
 }
 
+.auth-notice {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 850;
+  line-height: 1.35;
+}
+
 .auth-onboarding {
   display: grid;
   gap: 12px;
