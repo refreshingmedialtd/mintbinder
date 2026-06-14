@@ -870,12 +870,16 @@ function mapWishlistItem(item: {
 function mapSetProgress(set: {
   id: string;
   name: string;
+  series: string | null;
+  releaseDate: Date | null;
   total: number | null;
   cardPrintings: Array<{ id: string; collectionItems: Array<{ id: string }> }>;
 }): SetProgress {
   return {
     id: set.id,
     name: set.name,
+    series: set.series ?? undefined,
+    releaseDate: dateOnly(set.releaseDate),
     owned: set.cardPrintings.filter((card) => card.collectionItems.length > 0).length,
     total: set.total ?? set.cardPrintings.length,
   };
@@ -884,6 +888,7 @@ function mapSetProgress(set: {
 function mapStorageLocations(
   locations: Array<{ id: string; name: string; type: string; notes: string | null }>,
   collectionItems: Array<{
+    condition: string;
     storageLocationId: string | null;
     quantity: number;
     variantLabel: string | null;
@@ -901,6 +906,7 @@ function mapStorageLocations(
 function mapStorageLocation(
   location: { id: string; name: string; type: string; notes: string | null },
   items: Array<{
+    condition: string;
     quantity: number;
     variantLabel: string | null;
     currentValueOverrideMinor: number | null;
@@ -958,6 +964,7 @@ function mapCollectionEvent(event: {
 }
 
 function collectionItemValueMinor(item: {
+  condition: string;
   quantity: number;
   variantLabel: string | null;
   currentValueOverrideMinor: number | null;
@@ -976,7 +983,23 @@ function collectionItemValueMinor(item: {
     latestPricePoint(priceHistory)?.valueMinor ??
     0;
 
-  return unitValue * item.quantity;
+  return Math.round(unitValue * conditionValueMultiplier(enumLabel(item.condition))) * item.quantity;
+}
+
+function conditionValueMultiplier(condition: string) {
+  const normalized = condition.trim().toLowerCase();
+  const multipliers: Record<string, number> = {
+    mint: 1.05,
+    "near mint": 1,
+    excellent: 0.85,
+    "light played": 0.7,
+    played: 0.55,
+    poor: 0.35,
+    sealed: 1,
+    unknown: 1,
+  };
+
+  return multipliers[normalized] ?? 1;
 }
 
 const collectionItemInclude = {

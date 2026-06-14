@@ -912,12 +912,37 @@ h3 {
   width: 100%;
 }
 
+.add-search-sticky {
+  display: grid;
+  gap: 10px;
+}
+
 .catalogue-controls {
   align-items: stretch;
 }
 
 .catalogue-controls .sort-control {
   flex: 1 1 160px;
+  display: grid;
+  min-height: 58px;
+  align-content: center;
+  gap: 4px;
+  padding: 8px 10px;
+  border-color: var(--line-strong);
+  background: color-mix(in srgb, var(--control) 92%, var(--surface-soft));
+}
+
+.catalogue-controls .sort-control select {
+  width: 100%;
+  min-height: 30px;
+  padding: 0 22px 0 0;
+}
+
+.field select option,
+.sort-control select option,
+.sort-control select optgroup {
+  background: var(--surface);
+  color: var(--ink);
 }
 
 .result-meta,
@@ -1371,6 +1396,38 @@ h3 {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--control);
+}
+
+.valuation-preview {
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--theme-c) 11%, transparent), transparent 52%),
+    var(--control);
+}
+
+.valuation-preview span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.valuation-preview strong {
+  color: var(--ink);
+  font-size: 24px;
+  line-height: 1.1;
+}
+
+.valuation-preview small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.35;
 }
 
 .detail-layout {
@@ -2225,6 +2282,22 @@ h3 {
   .screen-split {
     grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
     align-items: start;
+  }
+
+  .add-search-sticky {
+    position: sticky;
+    top: 82px;
+    z-index: 9;
+    padding-bottom: 12px;
+    background:
+      linear-gradient(180deg, var(--body-start) 0, color-mix(in srgb, var(--body-end) 88%, transparent) 100%);
+  }
+
+  .add-details-panel {
+    position: sticky;
+    top: 82px;
+    max-height: calc(100vh - 98px);
+    overflow: auto;
   }
 
   .detail-layout {

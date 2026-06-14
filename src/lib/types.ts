@@ -61,6 +61,8 @@ export type WishlistItem = {
 export type SetProgress = {
   id: string;
   name: string;
+  series?: string;
+  releaseDate?: string;
   owned: number;
   total: number;
 };

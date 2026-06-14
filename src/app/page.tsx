@@ -111,6 +111,13 @@ type Viewer = {
 type AuthMode = "sign-in" | "register";
 type CatalogueSort = "set-number" | "value-desc" | "name" | "rarity";
 type SetDetailSort = "number" | "value-desc" | "name" | "rarity";
+type SetOptionGroup = {
+  label: string;
+  options: Array<{
+    name: string;
+    releaseDate?: string;
+  }>;
+};
 type ThemeId =
   | "light"
   | "dark"
@@ -2726,6 +2733,9 @@ function AddScreen({
   const [catalogueSetFilter, setCatalogueSetFilter] = useState("all");
   const [catalogueRarityFilter, setCatalogueRarityFilter] = useState("all");
   const [catalogueSort, setCatalogueSort] = useState<CatalogueSort>("set-number");
+  const [addCondition, setAddCondition] = useState("Near mint");
+  const [addQuantity, setAddQuantity] = useState(1);
+  const [addVariant, setAddVariant] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     setCatalogueSetFilter("all");
@@ -2734,7 +2744,7 @@ function AddScreen({
 
   const results = catalogueItems.filter((item) => item.type === appState.addType);
   const normalizedSearch = addSearch.trim().toLowerCase();
-  const setOptions = uniqueValues(results.map((item) => item.set)).sort((left, right) => left.localeCompare(right));
+  const setOptionGroups = groupedSetOptions(uniqueValues(results.map((item) => item.set)), sets);
   const rarityOptions = uniqueValues(results.map((item) => item.rarity)).sort((left, right) =>
     left.localeCompare(right),
   );
@@ -2755,6 +2765,18 @@ function AddScreen({
     storageLocations,
     selected ? defaultStorageLocation(storageLocations, selected.type) : undefined,
   );
+  const selectedVariant = selected ? selectedVariantLabel(selected, addVariant) : undefined;
+  const selectedAdjustedValue = selected
+    ? adjustedMarketValueMinor(selected, selectedVariant, addCondition, addQuantity)
+    : null;
+  const selectedBaseValue = selected ? catalogueMarketValueMinor(selected, selectedVariant) : null;
+  const selectedConditionMultiplier = conditionValueMultiplier(addCondition, selected?.type);
+
+  useEffect(() => {
+    setAddCondition(selected?.type === "sealed" ? "Sealed" : "Near mint");
+    setAddQuantity(1);
+    setAddVariant(undefined);
+  }, [selected?.id, selected?.type]);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -2779,66 +2801,74 @@ function AddScreen({
 
       <div className="screen-split">
         <section className="section-block">
-          <div className="segmented" aria-label="Item type">
-            <button
-              className={appState.addType === "card" ? "active" : ""}
-              onClick={() =>
-                setAppState((current) => ({
-                  ...current,
-                  addType: "card",
-                  selectedCatalogueId: catalogueItems.find((item) => item.type === "card")?.id ?? current.selectedCatalogueId,
-                }))
-              }
-            >
-              Card
-            </button>
-            <button
-              className={appState.addType === "sealed" ? "active" : ""}
-              onClick={() =>
-                setAppState((current) => ({
-                  ...current,
-                  addType: "sealed",
-                  selectedCatalogueId: catalogueItems.find((item) => item.type === "sealed")?.id ?? current.selectedCatalogueId,
-                }))
-              }
-            >
-              Sealed product
-            </button>
-          </div>
+          <div className="add-search-sticky">
+            <div className="segmented" aria-label="Item type">
+              <button
+                className={appState.addType === "card" ? "active" : ""}
+                onClick={() =>
+                  setAppState((current) => ({
+                    ...current,
+                    addType: "card",
+                    selectedCatalogueId: catalogueItems.find((item) => item.type === "card")?.id ?? current.selectedCatalogueId,
+                  }))
+                }
+              >
+                Card
+              </button>
+              <button
+                className={appState.addType === "sealed" ? "active" : ""}
+                onClick={() =>
+                  setAppState((current) => ({
+                    ...current,
+                    addType: "sealed",
+                    selectedCatalogueId: catalogueItems.find((item) => item.type === "sealed")?.id ?? current.selectedCatalogueId,
+                  }))
+                }
+              >
+                Sealed product
+              </button>
+            </div>
 
-          <label className="search-box">
-            <Search size={18} />
-            <input value={addSearch} onChange={(event) => setAddSearch(event.target.value)} placeholder="Search catalogue" />
-          </label>
+            <label className="search-box">
+              <Search size={18} />
+              <input value={addSearch} onChange={(event) => setAddSearch(event.target.value)} placeholder="Search catalogue" />
+            </label>
 
-          <div className="catalogue-controls">
-            <label className="sort-control">
-              Set
-              <select value={catalogueSetFilter} onChange={(event) => setCatalogueSetFilter(event.target.value)}>
-                <option value="all">All</option>
-                {setOptions.map((setName) => (
-                  <option key={setName} value={setName}>{setName}</option>
-                ))}
-              </select>
-            </label>
-            <label className="sort-control">
-              Rarity
-              <select value={catalogueRarityFilter} onChange={(event) => setCatalogueRarityFilter(event.target.value)}>
-                <option value="all">All</option>
-                {rarityOptions.map((rarity) => (
-                  <option key={rarity} value={rarity}>{rarity}</option>
-                ))}
-              </select>
-            </label>
-            <label className="sort-control">
-              Sort
-              <select value={catalogueSort} onChange={(event) => setCatalogueSort(event.target.value as CatalogueSort)}>
-                <option value="set-number">Set number</option>
-                <option value="value-desc">Value</option>
-                <option value="name">Name</option>
-                <option value="rarity">Rarity</option>
-              </select>
-            </label>
+            <div className="catalogue-controls">
+              <label className="sort-control">
+                Set
+                <select value={catalogueSetFilter} onChange={(event) => setCatalogueSetFilter(event.target.value)}>
+                  <option value="all">All sets</option>
+                  {setOptionGroups.map((group) => (
+                    <optgroup key={group.label} label={group.label}>
+                      {group.options.map((option) => (
+                        <option key={option.name} value={option.name}>
+                          {formatSetOptionLabel(option)}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+              </label>
+              <label className="sort-control">
+                Rarity
+                <select value={catalogueRarityFilter} onChange={(event) => setCatalogueRarityFilter(event.target.value)}>
+                  <option value="all">All rarities</option>
+                  {rarityOptions.map((rarity) => (
+                    <option key={rarity} value={rarity}>{rarity}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="sort-control">
+                Sort
+                <select value={catalogueSort} onChange={(event) => setCatalogueSort(event.target.value as CatalogueSort)}>
+                  <option value="set-number">Set number</option>
+                  <option value="value-desc">Value</option>
+                  <option value="name">Name</option>
+                  <option value="rarity">Rarity</option>
+                </select>
+              </label>
+            </div>
           </div>
 
           {appState.addType === "sealed" ? (
@@ -2877,14 +2907,27 @@ function AddScreen({
           ) : (
             <EmptyState title="No item selected" description="Choose a catalogue result to add owned-copy details." />
           )}
+          {selected ? (
+            <div className="valuation-preview">
+              <span>Estimated owned value</span>
+              <strong>{formatValuation(selectedAdjustedValue)}</strong>
+              <small>
+                {selectedBaseValue === null
+                  ? "No market estimate is available for this variant yet."
+                  : `${addQuantity} x ${selectedVariant ?? "Market"} at ${addCondition}. ${conditionAdjustmentLabel(selectedConditionMultiplier)}`}
+              </small>
+            </div>
+          ) : null}
           <form className="form-stack" key={selected?.id ?? "no-selection"} onSubmit={handleSubmit}>
             <div className="field-grid">
               <Field label="Condition">
-                <select name="condition" defaultValue={selected?.type === "sealed" ? "Sealed" : "Near mint"}>
+                <select name="condition" value={addCondition} onChange={(event) => setAddCondition(event.target.value)}>
                   <option>Near mint</option>
+                  <option>Mint</option>
                   <option>Excellent</option>
                   <option>Light played</option>
                   <option>Played</option>
+                  <option>Poor</option>
                   <option>Sealed</option>
                   <option>Unknown</option>
                 </select>
@@ -2899,7 +2942,13 @@ function AddScreen({
                 </select>
               </Field>
               <Field label="Quantity">
-                <input name="quantity" type="number" min={1} defaultValue={1} />
+                <input
+                  name="quantity"
+                  type="number"
+                  min={1}
+                  value={addQuantity}
+                  onChange={(event) => setAddQuantity(Math.max(1, Number(event.target.value) || 1))}
+                />
               </Field>
               <Field label="Paid">
                 <input name="paid" inputMode="decimal" placeholder="GBP 0.00" />
@@ -2918,7 +2967,11 @@ function AddScreen({
                 </select>
               </Field>
               <Field label="Variant">
-                {selected ? <VariantSelect item={selected} /> : <input name="variant" disabled />}
+                {selected ? (
+                  <VariantSelect item={selected} value={selectedVariant} onChange={setAddVariant} />
+                ) : (
+                  <input name="variant" disabled />
+                )}
               </Field>
             </div>
             <Field label="Valuation note">
@@ -6243,15 +6296,30 @@ function VariantSelect({
   defaultValue,
   item,
   name = "variant",
+  onChange,
+  value,
 }: {
   defaultValue?: string;
   item: CatalogueItem;
   name?: string;
+  onChange?: (value: string) => void;
+  value?: string;
 }) {
-  const options = catalogueVariantLabels(item, defaultValue);
+  const options = catalogueVariantLabels(item, value ?? defaultValue);
+  const selectedValue = value ?? defaultValue ?? options[0];
+
+  if (onChange) {
+    return (
+      <select name={name} value={selectedValue} onChange={(event) => onChange(event.target.value)}>
+        {options.map((option) => (
+          <option key={option}>{option}</option>
+        ))}
+      </select>
+    );
+  }
 
   return (
-    <select name={name} defaultValue={defaultValue ?? options[0]}>
+    <select name={name} defaultValue={selectedValue}>
       {options.map((option) => (
         <option key={option}>{option}</option>
       ))}
@@ -6440,8 +6508,24 @@ function ProgressBar({ value }: { value: number }) {
 }
 
 function renderItemImage(item: CatalogueItem) {
-  if (item.image) {
-    return <Image className="asset-image" src={item.image} alt={item.name} fill sizes="(min-width: 760px) 340px, 96px" />;
+  return <CatalogueItemImage item={item} />;
+}
+
+function CatalogueItemImage({ item }: { item: CatalogueItem }) {
+  const [failedImage, setFailedImage] = useState<string | undefined>(undefined);
+  const image = item.image && item.image !== failedImage ? item.image : undefined;
+
+  if (image) {
+    return (
+      <Image
+        className="asset-image"
+        src={image}
+        alt={item.name}
+        fill
+        sizes="(min-width: 760px) 340px, 96px"
+        onError={() => setFailedImage(image)}
+      />
+    );
   }
 
   if (item.type === "sealed") {
@@ -6461,9 +6545,8 @@ function getOwnedValue(item: CollectionItem, catalogueItem?: CatalogueItem) {
     return null;
   }
 
-  const marketValueMinor = catalogueMarketValueMinor(catalogueItem, item.variant);
-
-  return item.overrideValueMinor ?? (marketValueMinor === null ? null : marketValueMinor * item.quantity);
+  return item.overrideValueMinor ??
+    adjustedMarketValueMinor(catalogueItem, item.variant, item.condition, item.quantity);
 }
 
 function catalogueMarketValueMinor(item: CatalogueItem, variant?: string) {
@@ -6474,16 +6557,69 @@ function catalogueMarketValueMinor(item: CatalogueItem, variant?: string) {
   return catalogueValueMinorForVariant(item, variant);
 }
 
+function adjustedMarketValueMinor(
+  item: CatalogueItem,
+  variant: string | undefined,
+  condition: string,
+  quantity = 1,
+) {
+  const marketValueMinor = catalogueMarketValueMinor(item, variant);
+
+  if (marketValueMinor === null) {
+    return null;
+  }
+
+  const normalizedQuantity = Number.isFinite(quantity) ? Math.max(1, quantity) : 1;
+
+  return Math.round(marketValueMinor * conditionValueMultiplier(condition, item.type)) * normalizedQuantity;
+}
+
+function conditionValueMultiplier(condition: string, itemType?: ItemType) {
+  if (itemType === "sealed") {
+    return 1;
+  }
+
+  const normalized = condition.trim().toLowerCase();
+  const multipliers: Record<string, number> = {
+    mint: 1.05,
+    "near mint": 1,
+    excellent: 0.85,
+    "light played": 0.7,
+    played: 0.55,
+    poor: 0.35,
+    sealed: 1,
+    unknown: 1,
+  };
+
+  return multipliers[normalized] ?? 1;
+}
+
+function conditionAdjustmentLabel(multiplier: number) {
+  if (multiplier === 1) {
+    return "No condition adjustment.";
+  }
+
+  const percent = Math.round((multiplier - 1) * 100);
+
+  return `Condition adjustment ${percent > 0 ? "+" : ""}${percent}%.`;
+}
+
+function selectedVariantLabel(item: CatalogueItem, variant?: string) {
+  const options = catalogueVariantLabels(item, variant);
+
+  return variant && options.includes(variant) ? variant : options[0];
+}
+
 function formatValuation(valueMinor?: number | null) {
   return valueMinor === null || valueMinor === undefined ? "Needs estimate" : formatMoney(valueMinor);
 }
 
 function valuationStatusLabel(item: CatalogueItem, owned?: CollectionItem) {
   if (owned?.overrideValueMinor !== undefined) {
-    return "Manual";
+    return "Manual value";
   }
 
-  return item.hasPrice ? item.confidence : "Needs estimate";
+  return item.hasPrice ? `Price confidence: ${item.confidence}` : "Needs estimate";
 }
 
 function valuationPillClass(item: CatalogueItem, owned?: CollectionItem) {
@@ -6915,6 +7051,58 @@ function sortCatalogueItems(
   }
 
   return compareCatalogueNumbers(left.number, right.number);
+}
+
+function groupedSetOptions(setNames: string[], sets: SetProgress[]): SetOptionGroup[] {
+  const setByName = new Map(sets.map((set) => [set.name, set]));
+  const groups = new Map<string, SetOptionGroup["options"]>();
+
+  for (const setName of setNames) {
+    const set = setByName.get(setName);
+    const groupName = set?.series?.trim() || "Other sets";
+    const options = groups.get(groupName) ?? [];
+    options.push({
+      name: setName,
+      releaseDate: set?.releaseDate,
+    });
+    groups.set(groupName, options);
+  }
+
+  return [...groups.entries()]
+    .map(([label, options]) => ({
+      label,
+      options: options.sort(compareSetOptions),
+    }))
+    .sort((left, right) => newestSetTime(right.options) - newestSetTime(left.options) ||
+      left.label.localeCompare(right.label, undefined, { sensitivity: "base" }));
+}
+
+function compareSetOptions(
+  left: SetOptionGroup["options"][number],
+  right: SetOptionGroup["options"][number],
+) {
+  return releaseTime(right.releaseDate) - releaseTime(left.releaseDate) ||
+    left.name.localeCompare(right.name, undefined, { sensitivity: "base" });
+}
+
+function newestSetTime(options: SetOptionGroup["options"]) {
+  return Math.max(...options.map((option) => releaseTime(option.releaseDate)), Number.NEGATIVE_INFINITY);
+}
+
+function releaseTime(value?: string) {
+  if (!value) {
+    return Number.NEGATIVE_INFINITY;
+  }
+
+  const timestamp = Date.parse(value);
+
+  return Number.isFinite(timestamp) ? timestamp : Number.NEGATIVE_INFINITY;
+}
+
+function formatSetOptionLabel(option: SetOptionGroup["options"][number]) {
+  const year = option.releaseDate?.slice(0, 4);
+
+  return year ? `${year} - ${option.name}` : option.name;
 }
 
 function compareCatalogueNumbers(left: string, right: string) {
