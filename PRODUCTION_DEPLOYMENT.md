@@ -107,6 +107,7 @@ Pricing:
 5. Run `npm run db:deploy`.
 6. Deploy the app.
    - 20i Git Version Control should use `/home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/deploy-20i.sh` as the deployment script path. Verify each deploy by checking the expected route exists on `https://mintbinder.co.uk`.
+   - The script should rebuild the app and reload the registered PM2 process. If the deploy output does not show `Reloading Mint Binder runtime via PM2`, restart the registered NodeJS app manually before testing.
 7. Run `npm run qa:beta` against the production URL.
 8. Run `npm run qa:admin` against production data.
 9. Run Square hosted-checkout browser smoke for monthly and yearly plans.
@@ -239,13 +240,14 @@ npm ci --include=dev
 npm run db:generate
 npm run db:deploy
 npm run build
+pm2 reload <registered app> --update-env
 ```
 
 Expected behaviour: after Git deploy, 20i should run the script from the repository root, apply pending Prisma migrations, rebuild `.next`, and restart or refresh the registered NodeJS app so new Next routes are available.
 
 Note: the first successful script run auto-installed missing build-time dev dependencies because `NODE_ENV=production` had been set before `npm ci`, leaving `package.json` and `package-lock.json` modified on the server. The script now restores those files and uses `npm ci --include=dev` before building.
 
-Follow-up to confirm with support if needed: whether the registered NodeJS app restarts automatically after the script completes when future deploys change runtime code.
+Follow-up to confirm with support if needed: whether 20i exposes a preferred restart command if the PM2 reload fallback does not refresh the registered NodeJS app.
 
 ## Monitoring And Recovery
 
@@ -261,7 +263,7 @@ Minimum beta monitoring:
 ## Current Open Items
 
 - Production Square app/webhook must be configured for `mintbinder.co.uk`.
-- Keep the 20i Git deployment script path set to `/home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/deploy-20i.sh` and verify runtime routes after future deploys.
+- Keep the 20i Git deployment script path set to `/home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/deploy-20i.sh` and verify runtime routes after future deploys, including the PM2 reload output.
 - Controlled live price-alert digest smoke is complete; decide the real digest schedule before enabling beta recipient emails.
 - Production catalogue and pricing bootstrap is complete enough for beta; keep the new bootstrap helpers for future fresh databases and new-set refreshes.
 - `/api/health` and `npm run monitor:jobs` are available for first-pass uptime and job-run monitoring; schedule them before beta.

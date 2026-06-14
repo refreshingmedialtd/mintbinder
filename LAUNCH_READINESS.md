@@ -51,6 +51,7 @@ Completed on 2026-06-13:
 Completed on 2026-06-14:
 
 - Confirmed 20i Git Version Control expects the deployment script field to contain the script path, and that `scripts/deploy-20i.sh` now performs dependency install, Prisma generation/migration deployment, and `next build`.
+- Added a post-build PM2 reload step to `scripts/deploy-20i.sh` so fresh deploys try to restart the registered 20i Node app after rebuilding.
 - Removed the temporary custom-server API fallbacks from `app.js`; the 20i Node server now forwards requests to the real Next route handlers for `/api/health`, `/api/jobs/email-smoke`, and future API routes.
 - Added repeatable production catalogue bootstrap scripts for broad Pokemon TCG imports and targeted set-by-set imports/pricing.
 - Bootstrapped the live Neon catalogue to 20,359 cards across 173 sets, with 100% card image coverage, 0 set deficits, and 0 duplicate Pokemon TCG provider ID groups.
@@ -61,7 +62,7 @@ Known QA warnings:
 
 - Hosted Square checkout link creation has been smoke-tested in sandbox on the production URL, and webhook activation is validated. Do one final browser-based hosted checkout smoke before public beta, then switch to production Square credentials before paid launch.
 - 20i SMTP email delivery and controlled price-alert digest sending are production-verified. A first-pass job monitor now exists; remaining notification work is deciding the real daily/weekly digest schedule and enabling scheduled monitor alerts.
-- 20i support confirmed Git Version Control expects a path to a bash script rather than inline commands. The 20i deployment script field should remain set to `/home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/deploy-20i.sh`; fresh deploys should show the script running dependency install, Prisma generation/migrations, and `next build`.
+- 20i support confirmed Git Version Control expects a path to a bash script rather than inline commands. The 20i deployment script field should remain set to `/home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/deploy-20i.sh`; fresh deploys should show dependency install, Prisma generation/migrations, `next build`, and a PM2 app reload.
 - The production Operations gap report currently shows 814 card variant-metadata gaps, with 96% coverage overall. A controlled 50-card provider dry-run found 0 repairable rows, so the remaining gaps appear concentrated in cards where Pokemon TCG API does not expose TCGPlayer variant prices or newer provider metadata is sparse.
 - Production card pricing is strong enough for beta at 94.8% coverage. Remaining gaps are concentrated in older/legacy sets such as Expedition Base Set, XY base, HeartGold & SoulSilver, Base, and a small number of promo/special products where the current providers lack usable prices or matching needs more aliases.
 - Production sealed pricing is useful but still a data-depth gap at 75.3% coverage. The next substantial improvement requires PriceCharting or another sealed-price source, especially for booster boxes/decks/blisters where TCGCSV has products but no usable market price.
