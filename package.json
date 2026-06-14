@@ -49,6 +49,8 @@
     "db:deploy": "prisma migrate deploy",
     "db:seed": "prisma db seed",
     "job:catalogue-batch": "node scripts/run-catalogue-batch.mjs",
+    "job:production-bootstrap": "node scripts/bootstrap-production-catalogue.mjs",
+    "job:production-set-bootstrap": "node scripts/bootstrap-pokemon-sets.mjs",
     "job:price-alert-fixture": "node scripts/price-alert-smoke-fixture.mjs",
     "job:price-alerts": "node scripts/run-price-alert-digests.mjs",
     "job:pricing-batch": "node scripts/run-pricing-batch.mjs",

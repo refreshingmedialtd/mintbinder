@@ -58,6 +58,8 @@ npm run qa:operations
 npm run qa:production-env
 npm run qa:square-activation
 npm run job:price-alerts
+npm run job:production-bootstrap
+npm run job:production-set-bootstrap
 npm audit --audit-level=moderate
 ```
 
@@ -118,6 +120,16 @@ POKEMON_TCG_QUERY=""
 POKEMON_TCG_USD_TO_GBP_RATE=""
 POKEMON_TCG_EUR_TO_GBP_RATE=""
 POKEMON_TCG_PRICING_QUERIES=""
+BOOTSTRAP_PAGE_SIZE="50"
+BOOTSTRAP_MAX_PAGES_PER_JOB="10"
+BOOTSTRAP_MAX_JOBS="50"
+BOOTSTRAP_SET_LIMIT=""
+BOOTSTRAP_SET_PAGE_SIZE="250"
+BOOTSTRAP_SET_ONLY_MISSING="true"
+BOOTSTRAP_SET_ONLY_UNPRICED="false"
+BOOTSTRAP_SET_MIN_UNPRICED="1"
+BOOTSTRAP_SET_SKIP_CATALOGUE="false"
+BOOTSTRAP_SET_RUN_PRICING="false"
 CARD_IMAGE_REPAIR_LIMIT="500"
 CARD_IMAGE_REPAIR_DRY_RUN="false"
 SEALED_IMAGE_REPAIR_LIMIT="500"
@@ -134,6 +146,8 @@ TCGCSV_SEALED_WAIT_MS="120"
 TCGCSV_SEALED_WRITE_PRICES="true"
 TCGCSV_CARD_GROUP_IDS=""
 TCGCSV_CARD_GROUP_LIMIT=""
+TCGCSV_CARD_ONLY_UNPRICED_GROUPS="false"
+TCGCSV_CARD_MIN_UNPRICED="1"
 TCGCSV_CARD_PRICE_ONLY_UNPRICED="true"
 TCGCSV_CARD_WRITE_PRICES="true"
 PRICECHARTING_API_TOKEN=""
@@ -235,9 +249,11 @@ For broader catalogue backfills, leave the query blank or use a broad Pokemon TC
 
 For local command-line backfills, set `JOB_SECRET`, `POKEMON_TCG_IMPORT_PAGE`, `POKEMON_TCG_IMPORT_PAGE_SIZE`, and `POKEMON_TCG_IMPORT_MAX_PAGES`, then run `npm run job:catalogue-batch`. Use `POKEMON_TCG_IMPORT_PAGE=auto` to resume from the latest matching catalogue-status page. The helper starts the built app, runs one catalogue job, prints the JSON result, and stops the server.
 
+For fresh production catalogue bootstraps, use `npm run job:production-bootstrap` for broad Pokemon TCG pages, then `npm run job:production-set-bootstrap` for targeted set-by-set completion. The set bootstrap supports `BOOTSTRAP_SET_ONLY_MISSING=true` for missing/incomplete sets, and `BOOTSTRAP_SET_ONLY_UNPRICED=true` plus `BOOTSTRAP_SET_MIN_UNPRICED` for repeatable pricing passes that prioritise the largest unpriced set gaps first.
+
 Use `npm run report:catalogue-gaps` or the Operations export button to check local catalogue health, set-level count gaps, duplicate Pokemon TCG provider IDs, image coverage, variant metadata coverage, pricing-source mix, sealed product-type gaps, and recommended next actions. Operations can load a duplicate provider review showing each duplicate group, affected rows, and attached collection/wishlist/price usage before any manual merge decision. After review, use Prepare to fill the primary and duplicate card IDs, dry-run the plan, then execute it to move collection items, wishlist items, and price snapshots onto the primary card before deleting the duplicate card row. Pokemon TCG card image URLs can be repaired from provider IDs in Operations or from the command line with `npm run job:repair-card-images`; set `CARD_IMAGE_REPAIR_LIMIT` and `CARD_IMAGE_REPAIR_DRY_RUN=true` for a smaller or preview-only run. TCGCSV sealed product image URLs can be repaired with `npm run job:repair-sealed-images`; set `SEALED_IMAGE_REPAIR_LIMIT`, `SEALED_IMAGE_REPAIR_DRY_RUN=true`, and `SEALED_IMAGE_REPAIR_WAIT_MS` to tune the run. Pokemon TCG variant choices can be repaired with `npm run job:repair-variant-metadata`; set `VARIANT_METADATA_REPAIR_LIMIT`, `VARIANT_METADATA_REPAIR_DRY_RUN=true`, and `VARIANT_METADATA_REPAIR_WAIT_MS` to tune the API backfill. For command-line pricing refreshes, set `JOB_SECRET`, `POKEMON_TCG_USD_TO_GBP_RATE`, `POKEMON_TCG_PRICING_PAGE`, `POKEMON_TCG_PRICING_PAGE_SIZE`, `POKEMON_TCG_PRICING_MAX_PAGES`, and optionally `POKEMON_TCG_PRICING_QUERY`, then run `npm run job:pricing-batch`. For several known sparse sets, set `POKEMON_TCG_PRICING_QUERIES` to comma-separated queries such as `set.id:sm1,set.id:sm5` and run `npm run job:pricing-targets`; this starts one local job server and processes each one-page target sequentially. Set `POKEMON_TCG_EUR_TO_GBP_RATE` to enable Cardmarket fallback prices and `POKEMON_TCG_PRICE_ONLY_UNPRICED=true` when enriching sparse segments without duplicating existing snapshots.
 
-For TCGCSV card-pricing enrichment, run `npm run job:tcgcsv-card-pricing`. The importer reads TCGCSV's cached TCGplayer Pokemon groups/products/prices, matches groups to local card sets, matches card products by set/name/number, and writes card price snapshots with source `tcgcsv-card`. Set `TCGCSV_CARD_GROUP_IDS` to a comma-separated list of TCGplayer group IDs for a targeted run, `TCGCSV_USD_TO_GBP_RATE` to override the Pokemon USD rate, and `TCGCSV_CARD_PRICE_ONLY_UNPRICED=true` to enrich only cards without any existing price snapshot.
+For TCGCSV card-pricing enrichment, run `npm run job:tcgcsv-card-pricing`. The importer reads TCGCSV's cached TCGplayer Pokemon groups/products/prices, matches groups to local card sets, matches card products by set/name/number, and writes card price snapshots with source `tcgcsv-card`. Set `TCGCSV_CARD_GROUP_IDS` to a comma-separated list of TCGplayer group IDs for a targeted run, `TCGCSV_USD_TO_GBP_RATE` to override the Pokemon USD rate, and `TCGCSV_CARD_PRICE_ONLY_UNPRICED=true` to enrich only cards without any existing price snapshot. For large production catch-ups, set `TCGCSV_CARD_ONLY_UNPRICED_GROUPS=true` and `TCGCSV_CARD_MIN_UNPRICED=25` so repeat runs process matched sets with the largest remaining unpriced-card gaps first.
 
 For sealed product catalogue imports, run `npm run job:sealed-tcgcsv`. The importer reads TCGCSV's cached TCGplayer Pokemon groups/products/prices, matches groups to local card sets, filters sealed products, and writes sealed-product price snapshots. Set `TCGCSV_SEALED_GROUP_IDS` to a comma-separated list of TCGplayer group IDs for a smaller import, `TCGCSV_USD_TO_GBP_RATE` to override the Pokemon USD rate, and `TCGCSV_SEALED_PRICE_ONLY_UNPRICED=true` to enrich only products that do not already have sealed prices.
 

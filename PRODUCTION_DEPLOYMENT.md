@@ -122,6 +122,59 @@ Pricing:
 - Before public launch, confirm backups are enabled and run at least one restore test.
 - Never run destructive schema changes against production without a rollback plan and tested backup.
 
+## Production Catalogue Bootstrap
+
+Status on 2026-06-14:
+
+- Live card catalogue: 20,359 cards across 173 Pokemon TCG sets.
+- Card images: 100% coverage.
+- Set deficits: 0.
+- Duplicate Pokemon TCG provider groups: 0.
+- Card pricing: 19,302 priced cards, 94.8% coverage, using Pokemon TCG API plus TCGCSV.
+- Sealed catalogue: 1,936 sealed products, 100% image coverage.
+- Sealed pricing: 1,457 priced sealed products, 75.3% coverage from TCGCSV.
+
+Use the production bootstrap helpers when a fresh hosted database needs catalogue data:
+
+```sh
+npm run job:production-bootstrap
+npm run job:production-set-bootstrap
+```
+
+For set-by-set production card pricing, use the unpriced-set controls so repeat runs target the largest gaps first:
+
+```sh
+BOOTSTRAP_SET_ONLY_MISSING=false \
+BOOTSTRAP_SET_ONLY_UNPRICED=true \
+BOOTSTRAP_SET_MIN_UNPRICED=25 \
+BOOTSTRAP_SET_SKIP_CATALOGUE=true \
+BOOTSTRAP_SET_RUN_PRICING=true \
+npm run job:production-set-bootstrap
+```
+
+For high-volume TCGCSV card pricing enrichment, target only matched sets that still have unpriced cards:
+
+```sh
+TCGCSV_CARD_ONLY_UNPRICED_GROUPS=true \
+TCGCSV_CARD_MIN_UNPRICED=25 \
+TCGCSV_CARD_PRICE_ONLY_UNPRICED=true \
+npm run job:tcgcsv-card-pricing
+```
+
+For sealed product import and pricing:
+
+```sh
+TCGCSV_SEALED_PRICE_ONLY_UNPRICED=true npm run job:sealed-tcgcsv
+```
+
+After any production catalogue or pricing import, run:
+
+```sh
+npm run report:catalogue-gaps
+```
+
+Expected remaining gaps: older/legacy card pricing, selected promos, and sealed products without usable TCGCSV prices. Use PriceCharting or another sealed-price provider for the next major sealed-pricing lift.
+
 ## Square Domain Batch
 
 For `mintbinder.co.uk`:
@@ -210,6 +263,7 @@ Minimum beta monitoring:
 - Production Square app/webhook must be configured for `mintbinder.co.uk`.
 - Keep the 20i Git deployment script path set to `/home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/deploy-20i.sh` and verify runtime routes after future deploys.
 - Controlled live price-alert digest smoke is complete; decide the real digest schedule before enabling beta recipient emails.
+- Production catalogue and pricing bootstrap is complete enough for beta; keep the new bootstrap helpers for future fresh databases and new-set refreshes.
 - `/api/health` and `npm run monitor:jobs` are available for first-pass uptime and job-run monitoring; schedule them before beta.
 - Legal pages are beta drafts and need final company/address review plus active support email verification.
 - 20i hosting and Neon database are active; Neon should be upgraded before real beta users.

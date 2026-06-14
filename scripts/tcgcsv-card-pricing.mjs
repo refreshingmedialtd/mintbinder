@@ -42,6 +42,8 @@ export function cardPricingOptionsFromEnv(env = process.env) {
   return {
     groupIds: idList(env.TCGCSV_CARD_GROUP_IDS),
     groupLimit: positiveInteger(env.TCGCSV_CARD_GROUP_LIMIT, Number.POSITIVE_INFINITY),
+    minUnpricedCards: positiveInteger(env.TCGCSV_CARD_MIN_UNPRICED, 1),
+    onlyUnpricedGroups: booleanSetting(env.TCGCSV_CARD_ONLY_UNPRICED_GROUPS, false),
     priceOnlyUnpriced: booleanSetting(env.TCGCSV_CARD_PRICE_ONLY_UNPRICED, true),
     usdToGbpRate: conversionRate(env.TCGCSV_USD_TO_GBP_RATE) ?? conversionRate(env.POKEMON_TCG_USD_TO_GBP_RATE),
     writePrices: booleanSetting(env.TCGCSV_CARD_WRITE_PRICES, true),
@@ -54,6 +56,8 @@ export async function syncTcgcsvCardPrices(options = {}) {
   const fetchImpl = options.fetchImpl ?? fetch;
   const groupIds = idSet(options.groupIds);
   const groupLimit = positiveInteger(options.groupLimit, Number.POSITIVE_INFINITY);
+  const minUnpricedCards = positiveInteger(options.minUnpricedCards, 1);
+  const onlyUnpricedGroups = options.onlyUnpricedGroups ?? false;
   const priceOnlyUnpriced = options.priceOnlyUnpriced ?? true;
   const waitMs = nonNegativeInteger(options.waitMs, 120);
   const writePrices = options.writePrices ?? true;
@@ -71,11 +75,24 @@ export async function syncTcgcsvCardPrices(options = {}) {
           id: true,
           name: true,
           providerIds: true,
+          cardPrintings: {
+            select: {
+              _count: {
+                select: {
+                  priceSnapshots: true,
+                },
+              },
+            },
+          },
         },
       }),
     ]);
     const availableMatches = matchTcgcsvCardGroupsToSets(groups.results ?? [], sets)
-      .filter(({ group }) => groupIds.size === 0 || groupIds.has(String(group.groupId)));
+      .filter(({ group }) => groupIds.size === 0 || groupIds.has(String(group.groupId)))
+      .filter(({ set }) => !onlyUnpricedGroups || unpricedCardCount(set) >= minUnpricedCards)
+      .sort((a, b) => onlyUnpricedGroups
+        ? unpricedCardCount(b.set) - unpricedCardCount(a.set)
+        : 0);
     const matches = availableMatches.slice(0, groupLimit);
     const summary = {
       cardProductsMatched: 0,
@@ -84,6 +101,8 @@ export async function syncTcgcsvCardPrices(options = {}) {
       groupsAvailable: availableMatches.length,
       groupsMatched: matches.length,
       groupsProcessed: 0,
+      minUnpricedCards,
+      onlyUnpricedGroups,
       priceOnlyUnpriced,
       pricingSnapshotsCreated: 0,
       productsFetched: 0,
@@ -385,6 +404,14 @@ function setProviderId(set) {
   }
 
   return undefined;
+}
+
+function unpricedCardCount(set) {
+  if (!Array.isArray(set.cardPrintings)) {
+    return 0;
+  }
+
+  return set.cardPrintings.filter((card) => Number(card._count?.priceSnapshots ?? 0) === 0).length;
 }
 
 function conversionRate(value) {

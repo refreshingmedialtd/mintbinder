@@ -52,14 +52,19 @@ Completed on 2026-06-14:
 
 - Confirmed 20i Git Version Control expects the deployment script field to contain the script path, and that `scripts/deploy-20i.sh` now performs dependency install, Prisma generation/migration deployment, and `next build`.
 - Removed the temporary custom-server API fallbacks from `app.js`; the 20i Node server now forwards requests to the real Next route handlers for `/api/health`, `/api/jobs/email-smoke`, and future API routes.
+- Added repeatable production catalogue bootstrap scripts for broad Pokemon TCG imports and targeted set-by-set imports/pricing.
+- Bootstrapped the live Neon catalogue to 20,359 cards across 173 sets, with 100% card image coverage, 0 set deficits, and 0 duplicate Pokemon TCG provider ID groups.
+- Enriched production card pricing through Pokemon TCG API and TCGCSV. The live database now has 19,302 priced cards out of 20,359, or 94.8% card pricing coverage, with 20,759 total price snapshots across card and sealed products.
+- Imported the live sealed-product catalogue from TCGCSV. Production now has 1,936 sealed products, 100% sealed image coverage, 1,457 priced sealed products, and 75.3% sealed pricing coverage.
 
 Known QA warnings:
 
 - Hosted Square checkout link creation has been smoke-tested in sandbox on the production URL, and webhook activation is validated. Do one final browser-based hosted checkout smoke before public beta, then switch to production Square credentials before paid launch.
 - 20i SMTP email delivery and controlled price-alert digest sending are production-verified. A first-pass job monitor now exists; remaining notification work is deciding the real daily/weekly digest schedule and enabling scheduled monitor alerts.
 - 20i support confirmed Git Version Control expects a path to a bash script rather than inline commands. The 20i deployment script field should remain set to `/home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/deploy-20i.sh`; fresh deploys should show the script running dependency install, Prisma generation/migrations, and `next build`.
-- The Operations gap report currently shows 814 card variant-metadata gaps. A controlled 50-card provider dry-run found 0 repairable rows, so the remaining gaps may include cards where Pokemon TCG API does not expose TCGPlayer variant prices. Continue with measured batches before treating this as a data-quality blocker.
-- Sealed pricing remains the largest data-depth gap at 81.5% coverage. A full targeted TCGCSV sweep found no more usable prices for the remaining sealed products; the next substantial improvement requires PriceCharting or another sealed-price source.
+- The production Operations gap report currently shows 814 card variant-metadata gaps, with 96% coverage overall. A controlled 50-card provider dry-run found 0 repairable rows, so the remaining gaps appear concentrated in cards where Pokemon TCG API does not expose TCGPlayer variant prices or newer provider metadata is sparse.
+- Production card pricing is strong enough for beta at 94.8% coverage. Remaining gaps are concentrated in older/legacy sets such as Expedition Base Set, XY base, HeartGold & SoulSilver, Base, and a small number of promo/special products where the current providers lack usable prices or matching needs more aliases.
+- Production sealed pricing is useful but still a data-depth gap at 75.3% coverage. The next substantial improvement requires PriceCharting or another sealed-price source, especially for booster boxes/decks/blisters where TCGCSV has products but no usable market price.
 - Recent `fetch failed` job records are from sandbox-blocked provider calls before rerunning with network permission. The latest pricing, sealed-pricing, catalogue, and price-alert jobs have since succeeded.
 - `npm run db:generate` hit a Windows `EPERM` while replacing Prisma's existing query engine DLL. The migration, seed, build, admin QA, and beta QA all completed successfully, so this is currently a local Windows file-lock warning rather than a launch blocker.
 
@@ -87,11 +92,11 @@ Known QA warnings:
 
 2. Catalogue data completion
 
-   Backfill the broad Pokemon TCG card catalogue, then run status checks until catalogue coverage, image coverage, variant metadata coverage, and duplicate provider health are acceptable. Resolve duplicate groups through the new review/merge workflow.
+   Production card catalogue coverage is now beta-ready: 20,359 cards, 173 sets, 100% card images, 0 set deficits, and 0 duplicate provider groups. Remaining work is ongoing maintenance imports for new sets and measured variant metadata repair/alias improvements.
 
 3. Pricing data depth
 
-   Card pricing is now effectively complete at 99.9% coverage, with only provider/no-price edge cases remaining. Sealed pricing is 81.5% covered from TCGCSV; add PriceCharting or another sealed-price source for the next meaningful improvement.
+   Production card pricing is beta-ready at 94.8% coverage from Pokemon TCG API and TCGCSV. Sealed pricing is 75.3% covered from TCGCSV; add PriceCharting or another sealed-price source for the next meaningful improvement.
 
 4. Hosted checkout and billing browser QA
 
@@ -124,13 +129,12 @@ Known QA warnings:
 ## Recommended Order From Here
 
 1. Decide the price-alert digest schedule and keep real beta recipient emails disabled until the first beta group is approved.
-2. Run controlled catalogue and pricing backfills, including measured variant metadata repair batches, then review catalogue gap/status reports.
-3. Do a focused mobile UX polish pass on authenticated core flows.
-4. Review/finalize legal, privacy, brand/non-affiliation, and onboarding copy for `mintbinder.co.uk`.
-5. Complete a hosted Square checkout browser smoke on production.
-6. Schedule the job monitor, configure public uptime/error monitoring, backups, webhook alerts, and database backup checks.
-7. Run one final `npm run build`, `npm run qa:beta`, and `npm run qa:admin`.
-8. Invite a small beta group.
+2. Do a focused production QA pass against `https://mintbinder.co.uk`, including account creation, add-card/add-sealed flows, wishlist, storage, reports, Settings, and mobile layouts.
+3. Complete a hosted Square checkout browser smoke on production.
+4. Schedule the job monitor, configure public uptime/error monitoring, backups, webhook alerts, and database backup checks.
+5. Review/finalize legal, privacy, brand/non-affiliation, and onboarding copy for `mintbinder.co.uk`.
+6. Run one final `npm run build`, `npm run qa:beta`, and `npm run qa:admin`.
+7. Invite a small beta group.
 
 ## Launch Gates
 
@@ -140,8 +144,8 @@ Beta can start when:
 - `npm run qa:beta` passes against the production build or staging deployment. Completed locally on 2026-06-04.
 - `npm run qa:admin` passes without launch-blocking failures and any warnings are understood. Completed locally on 2026-06-04.
 - Users can sign up, add cards/sealed products, edit collection items, use wishlist, and view value/set progress without relying on sample data.
-- Catalogue coverage is broad enough for modern Pokemon TCG collections, or gaps are clearly handled.
-- Pricing refreshes produce useful values for common card variants and sealed products.
+- Catalogue coverage is broad enough for modern Pokemon TCG collections, or gaps are clearly handled. Production card catalogue coverage is beta-ready as of 2026-06-14.
+- Pricing refreshes produce useful values for common card variants and sealed products. Production card pricing is beta-ready at 94.8%; sealed pricing is useful at 75.3% but should be deepened before a wider public launch.
 - Plus gates, Square checkout link creation, billing management, and webhook entitlement updates work in sandbox mode. Backend activation completed locally on 2026-06-04; hosted-checkout browser smoke remains for staging/production.
 - Email notifications can be dry-run and sent safely. Production SMTP smoke and controlled price-alert digest smoke completed on 2026-06-13.
 - Operations status, exports, job history, and safe dry-run job controls pass protected API QA and browser UI click-through. Completed locally on 2026-06-04.

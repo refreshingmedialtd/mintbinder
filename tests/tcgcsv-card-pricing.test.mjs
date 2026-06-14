@@ -174,6 +174,8 @@ test("reads card pricing options from env", () => {
     cardPricingOptionsFromEnv({
       TCGCSV_CARD_GROUP_IDS: "3170, 6052",
       TCGCSV_CARD_GROUP_LIMIT: "2",
+      TCGCSV_CARD_MIN_UNPRICED: "25",
+      TCGCSV_CARD_ONLY_UNPRICED_GROUPS: "true",
       TCGCSV_CARD_PRICE_ONLY_UNPRICED: "false",
       TCGCSV_CARD_WRITE_PRICES: "true",
       TCGCSV_USD_TO_GBP_RATE: "0.8",
@@ -181,6 +183,8 @@ test("reads card pricing options from env", () => {
     {
       groupIds: ["3170", "6052"],
       groupLimit: 2,
+      minUnpricedCards: 25,
+      onlyUnpricedGroups: true,
       priceOnlyUnpriced: false,
       usdToGbpRate: 0.8,
       writePrices: true,
