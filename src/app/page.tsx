@@ -312,7 +312,7 @@ const initialState: AppState = {
   setFilter: "all",
   selectedItemId: "owned-charizard",
   selectedSetId: "set-151",
-  selectedCatalogueId: "",
+  selectedCatalogueId: "card-charizard-151",
   plus: false,
 };
 
@@ -558,7 +558,9 @@ export default function Home() {
         : data.collection[0]?.id ?? current.selectedItemId,
       selectedCatalogueId: data.catalogue.some((item) => item.id === current.selectedCatalogueId)
         ? current.selectedCatalogueId
-        : "",
+        : data.catalogue.find((item) => item.type === current.addType)?.id ??
+          data.catalogue[0]?.id ??
+          current.selectedCatalogueId,
       selectedSetId: data.sets.some((set) => set.id === current.selectedSetId)
         ? current.selectedSetId
         : data.sets[0]?.id ?? current.selectedSetId,
@@ -688,26 +690,16 @@ export default function Home() {
   }, [catalogueById, collection, collectionEvents, sets, storageLocations, wishlist]);
 
   function navigate(screen: Screen) {
-    if (screen === "add") {
-      setAddSearch("");
-      setAppState((current) => ({
-        ...current,
-        addType: "card",
-        screen,
-        selectedCatalogueId: "",
-      }));
-      return;
-    }
-
     setAppState((current) => ({ ...current, screen }));
   }
 
-  function startAdd(type: ItemType, catalogueId = "") {
+  function startAdd(type: ItemType) {
+    const firstItem = catalogueItems.find((item) => item.type === type);
     setAppState((current) => ({
       ...current,
       screen: "add",
       addType: type,
-      selectedCatalogueId: catalogueId,
+      selectedCatalogueId: firstItem?.id ?? current.selectedCatalogueId,
     }));
     setAddSearch("");
   }
@@ -1766,7 +1758,7 @@ type ScreenContext = {
   setSearch: string;
   setSetSearch: (value: string) => void;
   navigate: (screen: Screen) => void;
-  startAdd: (type: ItemType, catalogueId?: string) => void;
+  startAdd: (type: ItemType) => void;
   summary: {
     value: number;
     cost: number;
@@ -2728,7 +2720,7 @@ function AddScreen({
 }: ScreenContext) {
   const [catalogueSetFilter, setCatalogueSetFilter] = useState("all");
   const [catalogueRarityFilter, setCatalogueRarityFilter] = useState("all");
-  const [catalogueSort, setCatalogueSort] = useState<CatalogueSort>("value-desc");
+  const [catalogueSort, setCatalogueSort] = useState<CatalogueSort>("set-number");
   const [addCondition, setAddCondition] = useState("Near mint");
   const [addQuantity, setAddQuantity] = useState(1);
   const [addVariant, setAddVariant] = useState<string | undefined>(undefined);
@@ -2754,9 +2746,9 @@ function AddScreen({
   const hasNarrowedResults = Boolean(normalizedSearch) || catalogueSetFilter !== "all" || catalogueRarityFilter !== "all";
   const resultLimit = hasNarrowedResults ? 80 : 16;
   const visibleResults = filteredResults.slice(0, resultLimit);
-  const selected = appState.selectedCatalogueId
-    ? filteredResults.find((item) => item.id === appState.selectedCatalogueId && item.type === appState.addType)
-    : undefined;
+  const selected =
+    filteredResults.find((item) => item.id === appState.selectedCatalogueId && item.type === appState.addType) ??
+    filteredResults[0];
   const locationOptions = storageOptionNames(
     storageLocations,
     selected ? defaultStorageLocation(storageLocations, selected.type) : undefined,
@@ -2805,7 +2797,7 @@ function AddScreen({
                   setAppState((current) => ({
                     ...current,
                     addType: "card",
-                    selectedCatalogueId: "",
+                    selectedCatalogueId: catalogueItems.find((item) => item.type === "card")?.id ?? current.selectedCatalogueId,
                   }))
                 }
               >
@@ -2817,7 +2809,7 @@ function AddScreen({
                   setAppState((current) => ({
                     ...current,
                     addType: "sealed",
-                    selectedCatalogueId: "",
+                    selectedCatalogueId: catalogueItems.find((item) => item.type === "sealed")?.id ?? current.selectedCatalogueId,
                   }))
                 }
               >
@@ -2858,8 +2850,8 @@ function AddScreen({
               <label className="sort-control">
                 Sort
                 <select value={catalogueSort} onChange={(event) => setCatalogueSort(event.target.value as CatalogueSort)}>
-                  <option value="value-desc">Highest price</option>
                   <option value="set-number">Set number</option>
+                  <option value="value-desc">Value</option>
                   <option value="name">Name</option>
                   <option value="rarity">Rarity</option>
                 </select>
@@ -2901,7 +2893,7 @@ function AddScreen({
           {selected ? (
             <CataloguePreview item={selected} />
           ) : (
-            <EmptyState title="Select an item" description="Choose a catalogue result before adding owned-copy details." />
+            <EmptyState title="No item selected" description="Choose a catalogue result to add owned-copy details." />
           )}
           {selected ? (
             <div className="valuation-preview">
@@ -2914,8 +2906,7 @@ function AddScreen({
               </small>
             </div>
           ) : null}
-          {selected ? (
-          <form className="form-stack" key={selected.id} onSubmit={handleSubmit}>
+          <form className="form-stack" key={selected?.id ?? "no-selection"} onSubmit={handleSubmit}>
             <div className="field-grid">
               <Field label="Condition">
                 <select name="condition" value={addCondition} onChange={(event) => setAddCondition(event.target.value)}>
@@ -2978,17 +2969,16 @@ function AddScreen({
               <textarea name="notes" placeholder="Optional" />
             </Field>
             <div className="actions">
-              <button className="button primary" type="submit">
+              <button className="button primary" type="submit" disabled={!selected}>
                 <Check size={17} />
                 Save to collection
               </button>
-              <button className="button" type="button" onClick={() => void addToWishlist(selected.id)}>
+              <button className="button" type="button" disabled={!selected} onClick={() => selected && void addToWishlist(selected.id)}>
                 <Heart size={17} />
                 Add to wishlist
               </button>
             </div>
           </form>
-          ) : null}
         </section>
       </div>
     </section>
@@ -3436,7 +3426,6 @@ function SetDetailScreen({
   sets,
   wishlist,
   setAppState,
-  startAdd,
   addToWishlist,
   navigate,
 }: ScreenContext) {
@@ -3595,7 +3584,10 @@ function SetDetailScreen({
                   ) : (
                     <button
                       className="button primary"
-                      onClick={() => startAdd("card", item.id)}
+                      onClick={() => {
+                        setAppState((current) => ({ ...current, selectedCatalogueId: item.id, addType: "card" }));
+                        navigate("add");
+                      }}
                     >
                       <Plus size={17} />
                       Add
