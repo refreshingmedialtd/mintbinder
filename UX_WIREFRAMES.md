@@ -733,6 +733,33 @@ Avoid:
 
 - Blocking normal collection management.
 
+### Future Plus Binders
+
+Purpose: make collection organization feel tactile, personal, and worth upgrading for.
+
+Concept:
+
+- Add a Binders tab within Collection.
+- Lock Binders to Plus users, with a tasteful preview for free users.
+- Give every Plus user a default Full Collection binder.
+- Let users create custom binders using cards they already own.
+- Offer binder cover artwork choices, including clean, set-inspired, premium, and playful options.
+
+Interaction direction:
+
+- Binder grid/list should feel like choosing a real binder from a shelf.
+- Opening a binder should animate it forward and open in place.
+- Cards should sit in page-like slots rather than normal app cards.
+- Selecting a card should lift it out, enlarge/focus it, and dim or soften the page behind it.
+- Returning the card should animate it back into its slot.
+
+Open UX questions:
+
+- Can the same card appear in multiple custom binders?
+- Do custom binders support manual ordering, automatic sorting, or both?
+- Are binders purely presentation/organization, or do they also drive analytics and reports?
+- How much of the binder preview should free users see before upgrading?
+
 ### Import Errors
 
 Show:
@@ -840,4 +867,3 @@ The first clickable prototype should cover:
 8. Analytics Plus gate.
 
 This prototype can be built as static app screens before connecting auth, database, or pricing providers.
-

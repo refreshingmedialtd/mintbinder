@@ -152,6 +152,7 @@ The Plus tier should unlock advanced collector tools:
 - Advanced import/export.
 - Insurance-style reports.
 - Priority data refreshes.
+- Future custom binders experience: a Plus-only visual organization feature where users can group owned cards into binders, starting with a default Full Collection binder and later creating themed custom binders.
 
 Initial target price:
 
@@ -281,3 +282,12 @@ Scanning, marketplace selling, social features, and native apps are attractive b
 - Pricing source evaluation.
 - Feedback loop.
 - Mobile PWA polish.
+
+### Phase 6: Collector Delight And Retention
+
+- Plus-only Binders area under Collection.
+- Default Full Collection binder generated from the user's owned cards.
+- Custom binders that can contain cards already in the user's collection.
+- Binder cover artwork options, with room for seasonal, set-inspired, minimalist, and premium styles.
+- Animated binder interactions: clicking a binder opens it in front of the user; clicking a card lifts/focuses it; returning the card animates it back into the binder.
+- Open decisions for later design: whether cards can appear in multiple custom binders, whether binder ordering is manual or automatic, whether binders affect analytics, and how much of the experience should remain accessible as a Plus preview for free users.
