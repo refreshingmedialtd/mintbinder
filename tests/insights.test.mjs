@@ -184,12 +184,12 @@ test("explains wishlist and weak-confidence price alerts", () => {
     ],
   );
 
-  assert.equal(intelligence.priceAlerts[0].explanation, "GBP 2.00 below your target.");
+  assert.equal(intelligence.priceAlerts[0].explanation, "£2.00 below your target.");
   assert.equal(intelligence.priceAlerts[0].deltaMinor, -200);
   assert.equal(intelligence.priceAlerts[0].priceSource, "tcgcsv-card");
   assert.equal(
     intelligence.priceAlerts[1].explanation,
-    "GBP 0.50 above target, inside the 10% watch band.",
+    "£0.50 above target, inside the 10% watch band.",
   );
   assert.equal(intelligence.priceAlerts[1].watchBandMinor, 1045);
   assert.equal(

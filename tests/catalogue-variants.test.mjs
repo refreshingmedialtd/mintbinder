@@ -116,9 +116,25 @@ test("infers legacy Base Set variants without inventing prices", () => {
 
   assert.deepEqual(
     options.map((option) => option.label),
-    ["Holofoil", "1st Edition Holofoil", "Shadowless Holofoil", "Unlimited Holofoil"],
+    ["Unlimited Holofoil", "1st Edition Holofoil", "Shadowless Holofoil"],
   );
-  assert.equal(options[1].valueMinor, undefined);
+  assert.equal(options[0].valueMinor, undefined);
+});
+
+test("treats provider legacy Base Set prices as unlimited prints", () => {
+  const legacyPriceHistory = priceHistory.filter((point) => point.variantLabel === "Holofoil");
+  const options = buildCatalogueVariantOptions({
+    itemType: "card",
+    priceHistory: legacyPriceHistory,
+    rarity: "Rare Holo",
+    setName: "Base",
+  });
+
+  assert.deepEqual(
+    options.map((option) => option.label),
+    ["Unlimited Holofoil", "1st Edition Holofoil", "Shadowless Holofoil"],
+  );
+  assert.equal(options[0].valueMinor, 1200);
 });
 
 test("infers standard modern finishes when provider metadata is thin", () => {

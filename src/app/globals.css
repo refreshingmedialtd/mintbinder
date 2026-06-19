@@ -458,6 +458,62 @@ h3 {
   color: var(--accent-dark);
 }
 
+.preview-toggle {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 26%, var(--line));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-soft) 82%, transparent);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 850;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.preview-toggle input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.preview-switch {
+  position: relative;
+  width: 34px;
+  height: 18px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--surface-soft) 74%, transparent);
+}
+
+.preview-switch::after {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--muted);
+  content: "";
+  transition: transform 160ms ease, background 160ms ease;
+}
+
+.preview-toggle input:checked + .preview-switch {
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--line));
+  background: color-mix(in srgb, var(--accent) 24%, var(--surface));
+}
+
+.preview-toggle input:checked + .preview-switch::after {
+  background: var(--accent);
+  transform: translateX(15px);
+}
+
 .confidence-pill.manual {
   border-color: rgba(21, 128, 61, 0.2);
   background: var(--green-soft);
@@ -1394,7 +1450,6 @@ h3 {
   font-weight: 850;
 }
 
-.set-print-meta,
 .set-print-variants,
 .set-print-actions {
   display: flex;
@@ -1403,46 +1458,91 @@ h3 {
 }
 
 .set-print-meta {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  align-items: center;
 }
 
-.set-print-meta span {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-  padding: 8px 9px;
-  border: 1px solid color-mix(in srgb, var(--line) 84%, transparent);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--surface-soft) 76%, transparent);
-}
-
-.set-print-meta small,
-.set-print-kicker {
-  color: var(--muted);
-  font-size: 11px;
+.set-print-price {
+  position: relative;
+  display: inline-flex;
+  max-width: 100%;
+  min-height: 31px;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 8px;
+  border: 1px solid color-mix(in srgb, var(--green) 32%, var(--line));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--green) 14%, var(--surface));
+  color: var(--green);
+  font-size: 13px;
   font-weight: 900;
-  letter-spacing: 0;
-  text-transform: uppercase;
 }
 
-.set-print-meta strong {
+.set-print-price.missing {
+  border-color: color-mix(in srgb, var(--amber) 32%, var(--line));
+  background: color-mix(in srgb, var(--amber) 12%, var(--surface));
+  color: var(--amber);
+}
+
+.set-print-price strong {
+  min-width: 0;
   overflow: hidden;
-  color: var(--ink);
-  font-size: 14px;
-  line-height: 1.15;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.market-help {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.market-help summary {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  color: currentColor;
+  font-size: 12px;
+  line-height: 1;
+  list-style: none;
+}
+
+.market-help summary::-webkit-details-marker {
+  display: none;
+}
+
+.market-help-popover {
+  position: absolute;
+  right: -8px;
+  bottom: calc(100% + 8px);
+  z-index: 12;
+  width: min(260px, 72vw);
+  padding: 10px 11px;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line));
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.35;
+}
+
 .set-print-variants {
-  max-height: 76px;
+  max-height: 58px;
   overflow: hidden;
 }
 
-.set-print-kicker {
-  flex-basis: 100%;
+.set-print-variants .tag {
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .set-print-status {

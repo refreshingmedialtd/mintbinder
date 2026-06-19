@@ -16,13 +16,19 @@ export function buildCatalogueVariantOptions({
   setName,
 }: VariantOptionInput): CatalogueVariantOption[] {
   const options = new Map<string, CatalogueVariantOption>();
+  const specialLabels = inferredSpecialVariantLabels({ itemType, rarity, setName });
+  const legacyDefaultLabel = legacyDefaultVariantLabel({ itemType, rarity, setName });
 
   for (const point of priceHistory) {
     if (!point.variantLabel) {
       continue;
     }
 
-    const label = displayVariantLabel(point.variantLabel);
+    const label = displayVariantLabelForCatalogue({
+      label: point.variantLabel,
+      legacyDefaultLabel,
+      rarity,
+    });
     options.set(normalizeVariantLabel(label), {
       confidence: point.confidence,
       label,
@@ -33,22 +39,29 @@ export function buildCatalogueVariantOptions({
   }
 
   for (const label of variantLabelsFromMetadata(variantMetadata)) {
-    const normalized = normalizeVariantLabel(label);
+    const displayLabel = displayVariantLabelForCatalogue({
+      label,
+      legacyDefaultLabel,
+      rarity,
+    });
+    const normalized = normalizeVariantLabel(displayLabel);
 
     if (!options.has(normalized)) {
-      options.set(normalized, { label });
+      options.set(normalized, { label: displayLabel });
     }
   }
 
-  for (const label of inferredStandardVariantLabels({ itemType, rarity, setName })) {
-    const normalized = normalizeVariantLabel(label);
+  if (!legacyDefaultLabel) {
+    for (const label of inferredStandardVariantLabels({ itemType, rarity, setName })) {
+      const normalized = normalizeVariantLabel(label);
 
-    if (!options.has(normalized)) {
-      options.set(normalized, { label });
+      if (!options.has(normalized)) {
+        options.set(normalized, { label });
+      }
     }
   }
 
-  for (const label of inferredSpecialVariantLabels({ itemType, rarity, setName })) {
+  for (const label of specialLabels) {
     const normalized = normalizeVariantLabel(label);
 
     if (!options.has(normalized)) {
@@ -92,11 +105,24 @@ export function catalogueValueMinorForVariant(item: CatalogueItem, variant?: str
   const priceHistory = item.priceHistory ?? [];
 
   if (normalizedVariant) {
-    return latestPricePointForVariant(priceHistory, variant)?.valueMinor ??
+    return latestPricePointForCatalogueVariant(item, variant)?.valueMinor ??
       (hasVariantAwarePrices(priceHistory) ? undefined : item.valueMinor);
   }
 
   return item.valueMinor;
+}
+
+export function latestPricePointForCatalogueVariant(item: CatalogueItem, variant?: string | null) {
+  const priceHistory = item.priceHistory ?? [];
+  const exact = latestPricePointForVariant(priceHistory, variant);
+
+  if (exact) {
+    return exact;
+  }
+
+  const genericLegacyLabel = legacyGenericVariantLabelForSelection(item, variant);
+
+  return genericLegacyLabel ? latestPricePointForVariant(priceHistory, genericLegacyLabel) : undefined;
 }
 
 export function latestPricePointForVariant(history: PricePoint[], variant?: string | null) {
@@ -177,6 +203,62 @@ function variantLabelsFromMetadata(metadata: unknown) {
   }
 
   return uniqueLabels(labels);
+}
+
+function displayVariantLabelForCatalogue({
+  label,
+  legacyDefaultLabel,
+  rarity,
+}: {
+  label: string;
+  legacyDefaultLabel?: string;
+  rarity?: string;
+}) {
+  const displayLabel = displayVariantLabel(label);
+
+  if (!legacyDefaultLabel) {
+    return displayLabel;
+  }
+
+  const normalized = normalizeVariantLabel(displayLabel);
+  const finish = finishLabelFromRarity(rarity);
+
+  if (
+    normalized === normalizeVariantLabel(finish) ||
+    normalized === normalizeVariantLabel(defaultVariantLabel("card"))
+  ) {
+    return legacyDefaultLabel;
+  }
+
+  return displayLabel;
+}
+
+function legacyDefaultVariantLabel({
+  itemType,
+  rarity,
+  setName,
+}: Pick<VariantOptionInput, "itemType" | "rarity" | "setName">) {
+  if (itemType !== "card") {
+    return undefined;
+  }
+
+  return isLegacyNoReverseSet(normalizeSetName(setName))
+    ? editionVariantLabel("Unlimited", finishLabelFromRarity(rarity))
+    : undefined;
+}
+
+function legacyGenericVariantLabelForSelection(item: CatalogueItem, variant?: string | null) {
+  const legacyDefaultLabel = legacyDefaultVariantLabel({
+    itemType: item.type,
+    rarity: item.rarity,
+    setName: item.set,
+  });
+
+  if (!legacyDefaultLabel || normalizeVariantLabel(variant) !== normalizeVariantLabel(legacyDefaultLabel)) {
+    return undefined;
+  }
+
+  return finishLabelFromRarity(item.rarity);
 }
 
 function inferredSpecialVariantLabels({
@@ -347,6 +429,8 @@ function variantRank(value: string) {
   const ranks: Record<string, number> = {
     normal: 10,
     standard: 10,
+    unlimitedholofoil: 10,
+    unlimited: 10,
     holofoil: 20,
     reverseholo: 30,
     reverseholofoil: 30,
@@ -356,8 +440,6 @@ function variantRank(value: string) {
     firstedition: 40,
     shadowlessholofoil: 45,
     shadowless: 45,
-    unlimitedholofoil: 50,
-    unlimited: 50,
     stampedpromo: 55,
     prereleasestamp: 56,
     staffprereleasestamp: 57,

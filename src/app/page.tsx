@@ -45,7 +45,7 @@ import { canUseOperations, normalizeAppRole, type AppUserRole } from "@/lib/auth
 import {
   catalogueValueMinorForVariant,
   catalogueVariantLabels,
-  latestPricePointForVariant,
+  latestPricePointForCatalogueVariant,
 } from "@/lib/catalogue/variants";
 import {
   buildCollectionCsv,
@@ -552,6 +552,7 @@ export default function Home() {
   const [collectionSearch, setCollectionSearch] = useState("");
   const [addSearch, setAddSearch] = useState("");
   const [setSearch, setSetSearch] = useState("");
+  const [plusPreviewOverride, setPlusPreviewOverride] = useState<boolean | null>(null);
 
   const showToast = useCallback((message: string) => {
     setToast(message);
@@ -568,6 +569,13 @@ export default function Home() {
     role: normalizeAppRole(session?.user?.role),
   };
   const operationsEnabled = canUseOperations(viewer.role);
+  const effectivePlus = operationsEnabled && plusPreviewOverride !== null
+    ? plusPreviewOverride
+    : appState.plus;
+  const effectiveAppState = useMemo(
+    () => (effectivePlus === appState.plus ? appState : { ...appState, plus: effectivePlus }),
+    [appState, effectivePlus],
+  );
 
   useEffect(() => {
     const storedTheme = window.localStorage.getItem(themeStorageKey);
@@ -578,14 +586,14 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (!isThemeAllowed(themeId, appState.plus)) {
+    if (!isThemeAllowed(themeId, effectivePlus)) {
       setThemeId("light");
       return;
     }
 
     document.documentElement.dataset.theme = themeId;
     window.localStorage.setItem(themeStorageKey, themeId);
-  }, [appState.plus, themeId]);
+  }, [effectivePlus, themeId]);
 
   const applyAppData = useCallback((data: AppData) => {
     setCatalogueItems(data.catalogue);
@@ -1702,7 +1710,7 @@ export default function Home() {
   }
 
   const context = {
-    appState,
+    appState: effectiveAppState,
     viewer,
     catalogueItems,
     catalogueById,
@@ -1758,10 +1766,16 @@ export default function Home() {
     <div className="app-shell">
       <Header
         alertCount={intelligence.actionQueue.length}
-        plus={appState.plus}
+        canPreviewPlan={operationsEnabled}
+        plus={effectivePlus}
+        previewPlus={effectivePlus}
         userEmail={viewer.email}
         userName={viewer.name}
         onNavigate={navigate}
+        onTogglePreviewPlus={(nextPlus) => {
+          setPlusPreviewOverride(nextPlus);
+          showToast(`Previewing ${nextPlus ? "Plus" : "Free"} plan.`);
+        }}
         onSignOut={() => void signOut({ redirect: false })}
       />
       <div className="app-body">
@@ -2000,17 +2014,23 @@ function LegalFooter({ compact = false }: { compact?: boolean }) {
 
 function Header({
   alertCount,
+  canPreviewPlan,
   plus,
+  previewPlus,
   userEmail,
   userName,
   onNavigate,
+  onTogglePreviewPlus,
   onSignOut,
 }: {
   alertCount: number;
+  canPreviewPlan: boolean;
   plus: boolean;
+  previewPlus: boolean;
   userEmail: string;
   userName: string;
   onNavigate: (screen: Screen) => void;
+  onTogglePreviewPlus: (plus: boolean) => void;
   onSignOut: () => void;
 }) {
   return (
@@ -2026,6 +2046,17 @@ function Header({
           {plus ? <Sparkles size={17} /> : <Lock size={17} />}
           {plus ? "Plus" : "Upgrade"}
         </button>
+        {canPreviewPlan ? (
+          <label className="preview-toggle" title="Temporary tester-only Free/Plus preview">
+            <span>{previewPlus ? "Preview Plus" : "Preview Free"}</span>
+            <input
+              type="checkbox"
+              checked={previewPlus}
+              onChange={(event) => onTogglePreviewPlus(event.currentTarget.checked)}
+            />
+            <span className="preview-switch" aria-hidden="true" />
+          </label>
+        ) : null}
         <button
           className="status-pill alert-pill"
           onClick={() => onNavigate("alerts")}
@@ -2686,7 +2717,7 @@ function CollectionScreen({
                   <option value="all">All values</option>
                   <option value="profit">Gain</option>
                   <option value="loss">Loss</option>
-                  <option value="high">GBP 100+</option>
+                  <option value="high">£100+</option>
                   <option value="unvalued">Unknown value</option>
                   <option value="manual">Manual values</option>
                   <option value="weak">Weak confidence</option>
@@ -3008,10 +3039,10 @@ function AddScreen({
                   />
                 </Field>
                 <Field label="Paid">
-                  <input name="paid" inputMode="decimal" placeholder="GBP 0.00" />
+                  <input name="paid" inputMode="decimal" placeholder="£0.00" />
                 </Field>
                 <Field label="Manual value">
-                  <input name="overrideValue" inputMode="decimal" placeholder="GBP 0.00" />
+                  <input name="overrideValue" inputMode="decimal" placeholder="£0.00" />
                 </Field>
                 <Field label="Location">
                   <select name="location" defaultValue={defaultStorageLocation(storageLocations, selected.type)}>
@@ -3106,7 +3137,7 @@ function ManualSealedProductPanel({
               </select>
             </Field>
             <Field label="Estimated value">
-              <input name="estimatedValue" inputMode="decimal" placeholder="GBP 0.00" />
+              <input name="estimatedValue" inputMode="decimal" placeholder="£0.00" />
             </Field>
           </div>
           <Field label="Notes">
@@ -3308,7 +3339,7 @@ function ItemDetailScreen({
                       name="paid"
                       inputMode="decimal"
                       defaultValue={moneyInputValue(owned.purchasePriceMinor)}
-                      placeholder="GBP 0.00"
+                      placeholder="£0.00"
                     />
                   </Field>
                   <Field label="Manual value">
@@ -3316,7 +3347,7 @@ function ItemDetailScreen({
                       name="overrideValue"
                       inputMode="decimal"
                       defaultValue={moneyInputValue(owned.overrideValueMinor)}
-                      placeholder="GBP 0.00"
+                      placeholder="£0.00"
                     />
                   </Field>
                   {item.type === "card" ? (
@@ -3422,7 +3453,7 @@ function ItemDetailScreen({
                       name="amount"
                       inputMode="decimal"
                       defaultValue={moneyInputValue(value ?? undefined)}
-                      placeholder="GBP 0.00"
+                      placeholder="£0.00"
                     />
                   </Field>
                   <Field label="Sale date">
@@ -3651,9 +3682,9 @@ function SetDetailScreen({
           const wanted = wishlist.some((entry) => entry.catalogueId === item.id);
           const marketValue = catalogueMarketValueMinor(item);
           const variants = item.variantOptions ?? [];
+          const visibleVariants = variants.slice(0, 2);
           const statusLabel = owned ? "Owned" : wanted ? "Want" : "";
           const statusClass = owned ? "set-print-status owned" : wanted ? "set-print-status wanted" : "";
-          const pricedVariantCount = variants.filter((option) => option.valueMinor !== undefined).length;
 
           return (
             <article className={owned ? "set-print-card owned" : wanted ? "set-print-card wanted" : "set-print-card"} key={item.id}>
@@ -3672,27 +3703,23 @@ function SetDetailScreen({
                   ) : null}
                 </div>
                 <div className="set-print-meta">
-                  <span>
-                    <small>Rarity</small>
-                    <strong>{item.rarity}</strong>
-                  </span>
-                  <span>
-                    <small>Market</small>
+                  <span className="tag">{item.rarity}</span>
+                  <span className={marketValue === null ? "set-print-price missing" : "set-print-price"}>
                     <strong>{formatValuation(marketValue)}</strong>
+                    <details className="market-help">
+                      <summary aria-label={`Market confidence for ${item.name}`}>?</summary>
+                      <span className="market-help-popover">{marketConfidenceDescription(item, marketValue)}</span>
+                    </details>
                   </span>
                 </div>
                 {variants.length ? (
                   <div className="set-print-variants" aria-label={`${item.name} variants`}>
-                    <span className="set-print-kicker">
-                      {variants.length} finish{variants.length === 1 ? "" : "es"}
-                      {pricedVariantCount ? `, ${pricedVariantCount} priced` : ""}
-                    </span>
-                    {variants.slice(0, 4).map((option) => (
+                    {visibleVariants.map((option) => (
                       <span className="tag" key={option.label}>
-                        {option.label}
+                        {option.valueMinor === undefined ? option.label : `${option.label} ${formatMoney(option.valueMinor)}`}
                       </span>
                     ))}
-                    {variants.length > 4 ? <span className="tag">+{variants.length - 4}</span> : null}
+                    {variants.length > visibleVariants.length ? <span className="tag">+{variants.length - visibleVariants.length}</span> : null}
                   </div>
                 ) : null}
                 <div className="set-print-actions">
@@ -3886,7 +3913,7 @@ function WishlistScreen({
                             name="targetPrice"
                             inputMode="decimal"
                             defaultValue={moneyInputValue(item.targetPriceMinor)}
-                            placeholder="GBP 0.00"
+                            placeholder="£0.00"
                           />
                         </Field>
                       </div>
@@ -4209,7 +4236,7 @@ function AnalyticsScreen({
           <section className="tool-panel upgrade-panel">
             <div className="panel-title-row">
               <h2>Plus</h2>
-              <span className="tag green">GBP 19.99 yearly</span>
+              <span className="tag green">£19.99 yearly</span>
             </div>
             <p className="muted">
               Keep the free tracking tools. Add automation, richer analytics, and reports when the collection needs
@@ -4217,8 +4244,8 @@ function AnalyticsScreen({
             </p>
             <MetricList
               rows={[
-                ["Monthly", "GBP 2.49"],
-                ["Yearly", "GBP 19.99"],
+                ["Monthly", "£2.49"],
+                ["Yearly", "£19.99"],
                 ["Unlocks", "Trends, alerts, reports"],
               ]}
             />
@@ -5475,7 +5502,7 @@ function SettingsScreen({
             ["Name", viewer.name],
             ["Email", viewer.email],
             ["Role", viewer.role === "ADMIN" ? "Admin" : "User"],
-            ["Currency", "GBP"],
+            ["Currency", "GBP (£)"],
             ["Region", "United Kingdom"],
           ]}
         />
@@ -5985,7 +6012,7 @@ function PlanComparisonPanel({
           <div className="plan-card-head">
             <div>
               <span className="tag green">Plus</span>
-              <strong>GBP 2.49 monthly or GBP 19.99 yearly</strong>
+              <strong>£2.49 monthly or £19.99 yearly</strong>
             </div>
             {plus ? <span className="status-pill"><Sparkles size={16} />Active</span> : null}
           </div>
@@ -6052,7 +6079,7 @@ function BillingPanel({
         <article className="billing-plan">
           <div>
             <span className="tag">Monthly</span>
-            <strong>GBP 2.49</strong>
+            <strong>£2.49</strong>
           </div>
           <button className="button primary" onClick={() => void onStartCheckout("monthly")} disabled={plus}>
             <CreditCard size={17} />
@@ -6062,7 +6089,7 @@ function BillingPanel({
         <article className="billing-plan featured">
           <div>
             <span className="tag green">Best value</span>
-            <strong>GBP 19.99</strong>
+            <strong>£19.99</strong>
           </div>
           <button className="button" onClick={() => void onStartCheckout("yearly")} disabled={plus}>
             <Sparkles size={17} />
@@ -6772,6 +6799,18 @@ function formatValuation(valueMinor?: number | null) {
   return valueMinor === null || valueMinor === undefined ? "Needs estimate" : formatMoney(valueMinor);
 }
 
+function marketConfidenceDescription(item: CatalogueItem, marketValue?: number | null) {
+  if (marketValue === null || marketValue === undefined) {
+    return "No market price is available yet. Add a manual value or refresh pricing when a source supports this card.";
+  }
+
+  const confidence = item.confidence || "Unknown";
+  const source = item.priceSource ? ` from ${priceSourceLabel(item.priceSource)}` : "";
+  const observed = item.priceObservedAt ? ` Observed ${formatEventDate(item.priceObservedAt)}.` : "";
+
+  return `Market confidence: ${confidence}${source}.${observed}`;
+}
+
 function setInitials(name: string) {
   const words = name.match(/[A-Za-z0-9]+/g) ?? [];
   const initials = words.slice(0, 3).map((word) => word[0]).join("");
@@ -6788,7 +6827,7 @@ function valuationStatusLabel(item: CatalogueItem, owned?: CollectionItem) {
     return "Needs estimate";
   }
 
-  const variantPrice = owned ? latestPricePointForVariant(item.priceHistory ?? [], owned.variant) : undefined;
+  const variantPrice = owned ? latestPricePointForCatalogueVariant(item, owned.variant) : undefined;
 
   if (variantPrice?.confidence) {
     return `Market confidence: ${variantPrice.confidence}`;
@@ -6830,7 +6869,7 @@ function valuationSourceLabel(item: CatalogueItem, owned?: CollectionItem) {
     return "Needs estimate";
   }
 
-  const variantPrice = owned ? latestPricePointForVariant(item.priceHistory ?? [], owned.variant) : undefined;
+  const variantPrice = owned ? latestPricePointForCatalogueVariant(item, owned.variant) : undefined;
 
   if (variantPrice?.source) {
     return priceSourceLabel(variantPrice.source);
@@ -6848,7 +6887,7 @@ function valuationObservedLabel(item: CatalogueItem, owned?: CollectionItem) {
     return "Unknown";
   }
 
-  const variantPrice = owned ? latestPricePointForVariant(item.priceHistory ?? [], owned.variant) : undefined;
+  const variantPrice = owned ? latestPricePointForCatalogueVariant(item, owned.variant) : undefined;
 
   if (variantPrice?.observedAt) {
     return formatEventDate(variantPrice.observedAt);

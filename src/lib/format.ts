@@ -3,7 +3,7 @@ export function formatMoney(valueMinor?: number | null) {
     return "Unknown";
   }
 
-  return `GBP ${(valueMinor / 100).toLocaleString("en-GB", {
+  return `£${(valueMinor / 100).toLocaleString("en-GB", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
@@ -16,4 +16,3 @@ export function completionPercent(owned: number, total: number) {
 
   return Math.round((owned / total) * 100);
 }
-

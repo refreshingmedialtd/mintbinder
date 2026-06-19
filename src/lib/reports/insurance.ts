@@ -150,7 +150,7 @@ function formatMoney(valueMinor?: number | null) {
     return "Unknown";
   }
 
-  return `GBP ${(valueMinor / 100).toLocaleString("en-GB", {
+  return `£${(valueMinor / 100).toLocaleString("en-GB", {
     maximumFractionDigits: 2,
     minimumFractionDigits: 2,
   })}`;
