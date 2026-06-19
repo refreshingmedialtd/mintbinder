@@ -1945,7 +1945,7 @@ function AuthBrand() {
 function LegalFooter({ compact = false }: { compact?: boolean }) {
   return (
     <footer className={compact ? "legal-footer compact" : "legal-footer"} aria-label="Legal links">
-      <span>Independent collector app.</span>
+      <span>Independent collector beta.</span>
       <a href="/legal/privacy">Privacy</a>
       <a href="/legal/terms">Terms</a>
       <a href="/legal/non-affiliation">Non-affiliation</a>
