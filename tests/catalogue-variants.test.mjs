@@ -104,6 +104,23 @@ test("uses variant price when valuing a catalogue item", () => {
   assert.equal(catalogueValueMinorForVariant(item, "Normal"), undefined);
 });
 
+test("infers legacy Base Set variants without inventing prices", () => {
+  const options = buildCatalogueVariantOptions({
+    itemType: "card",
+    rarity: "Rare Holo",
+    setName: "Base",
+    variantMetadata: {
+      availablePrices: ["holofoil"],
+    },
+  });
+
+  assert.deepEqual(
+    options.map((option) => option.label),
+    ["Holofoil", "1st Edition Holofoil", "Shadowless Holofoil", "Unlimited Holofoil"],
+  );
+  assert.equal(options[1].valueMinor, undefined);
+});
+
 test("derives Pokemon TCG image URLs from provider IDs", () => {
   assert.equal(
     pokemonTcgImageUrlFromProviderIds({ pokemon_tcg_api: "sv3pt5-199" }),

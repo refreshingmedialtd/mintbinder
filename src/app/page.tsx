@@ -3497,9 +3497,12 @@ function SetDetailScreen({
       />
       <section className="tool-panel set-detail-panel">
         <div className="panel-title-row">
-          <div>
-            <h2>Set progress</h2>
-            <p className="muted">{set.owned} of {set.total} cards owned</p>
+          <div className="set-detail-heading">
+            <SetArtwork set={set} />
+            <div>
+              <h2>Set progress</h2>
+              <p className="muted">{set.owned} of {set.total} cards owned</p>
+            </div>
           </div>
           <span className={done === 100 ? "tag green" : "tag blue"}>{done === 100 ? "Complete" : `${done}%`}</span>
         </div>
@@ -3556,27 +3559,41 @@ function SetDetailScreen({
         </div>
       </section>
 
-      <div className="item-list">
+      <div className="set-card-grid">
         {visibleCards.length ? visibleCards.map((item) => {
           const owned = collection.find((entry) => entry.catalogueId === item.id);
           const wanted = wishlist.some((entry) => entry.catalogueId === item.id);
+          const marketValue = catalogueMarketValueMinor(item);
+          const variants = item.variantOptions ?? [];
 
           return (
-            <article className="item-card" key={item.id}>
-              <div className="item-image">{renderItemImage(item)}</div>
-              <div className="item-main">
-                <div className="item-title-row">
-                  <div>
+            <article className={owned ? "set-print-card owned" : wanted ? "set-print-card wanted" : "set-print-card"} key={item.id}>
+              <div className="item-image set-print-image">{renderItemImage(item)}</div>
+              <div className="set-print-body">
+                <div className="set-print-header">
+                  <div className="set-print-title">
                     <h3>{item.name}</h3>
-                    <p className="muted">{item.set} | {item.number}</p>
+                    <p>{item.number}</p>
                   </div>
                   <span className={owned ? "tag green" : wanted ? "tag amber" : "tag"}>{owned ? "Owned" : wanted ? "Want" : "Missing"}</span>
                 </div>
-                <div className="tag-row">
+                <div className="set-print-meta">
                   <span className="tag blue">{item.rarity}</span>
-                  <span className="tag">{formatValuation(catalogueMarketValueMinor(item))}</span>
+                  <span className={marketValue === null ? "tag amber" : "tag green"}>
+                    {formatValuation(marketValue)}
+                  </span>
                 </div>
-                <div className="actions item-action-grid">
+                {variants.length ? (
+                  <div className="set-print-variants" aria-label={`${item.name} variants`}>
+                    {variants.slice(0, 4).map((option) => (
+                      <span className="tag" key={option.label}>
+                        {option.valueMinor === undefined ? option.label : `${option.label} ${formatMoney(option.valueMinor)}`}
+                      </span>
+                    ))}
+                    {variants.length > 4 ? <span className="tag">+{variants.length - 4}</span> : null}
+                  </div>
+                ) : null}
+                <div className="set-print-actions">
                   {owned ? (
                     <button
                       className="button"
@@ -6536,6 +6553,7 @@ function CatalogueItemImage({ item }: { item: CatalogueItem }) {
     return (
       <Image
         className="asset-image"
+        data-item-type={item.type}
         src={image}
         alt={item.name}
         fill

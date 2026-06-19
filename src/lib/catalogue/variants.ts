@@ -2,6 +2,8 @@ import type { CatalogueItem, CatalogueVariantOption, ItemType, PricePoint } from
 
 type VariantOptionInput = {
   itemType: ItemType;
+  rarity?: string;
+  setName?: string;
   priceHistory?: PricePoint[];
   variantMetadata?: unknown;
 };
@@ -10,6 +12,8 @@ export function buildCatalogueVariantOptions({
   itemType,
   priceHistory = [],
   variantMetadata,
+  rarity,
+  setName,
 }: VariantOptionInput): CatalogueVariantOption[] {
   const options = new Map<string, CatalogueVariantOption>();
 
@@ -29,6 +33,14 @@ export function buildCatalogueVariantOptions({
   }
 
   for (const label of variantLabelsFromMetadata(variantMetadata)) {
+    const normalized = normalizeVariantLabel(label);
+
+    if (!options.has(normalized)) {
+      options.set(normalized, { label });
+    }
+  }
+
+  for (const label of inferredSpecialVariantLabels({ itemType, rarity, setName })) {
     const normalized = normalizeVariantLabel(label);
 
     if (!options.has(normalized)) {
@@ -159,6 +171,86 @@ function variantLabelsFromMetadata(metadata: unknown) {
   return uniqueLabels(labels);
 }
 
+function inferredSpecialVariantLabels({
+  itemType,
+  rarity,
+  setName,
+}: Pick<VariantOptionInput, "itemType" | "rarity" | "setName">) {
+  if (itemType !== "card") {
+    return [];
+  }
+
+  const setKey = normalizeSetName(setName);
+  const finish = finishLabelFromRarity(rarity);
+  const labels: string[] = [];
+
+  if (isBaseSet(setKey)) {
+    labels.push(
+      editionVariantLabel("1st Edition", finish),
+      editionVariantLabel("Shadowless", finish),
+      editionVariantLabel("Unlimited", finish),
+    );
+  } else if (isWotcFirstEditionSet(setKey)) {
+    labels.push(
+      editionVariantLabel("1st Edition", finish),
+      editionVariantLabel("Unlimited", finish),
+    );
+  }
+
+  if (isPromoSet(setKey)) {
+    labels.push("Stamped promo");
+  }
+
+  return uniqueLabels(labels);
+}
+
+function finishLabelFromRarity(rarity?: string) {
+  const normalized = String(rarity ?? "").toLowerCase();
+
+  if (normalized.includes("holo")) {
+    return "Holofoil";
+  }
+
+  if (normalized.includes("reverse")) {
+    return "Reverse Holofoil";
+  }
+
+  return "Normal";
+}
+
+function editionVariantLabel(edition: string, finish: string) {
+  return finish === "Normal" ? edition : `${edition} ${finish}`;
+}
+
+function normalizeSetName(value?: string) {
+  return String(value ?? "")
+    .toLowerCase()
+    .replace(/pokemon|tcg|set/g, "")
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+function isBaseSet(setKey: string) {
+  return setKey === "base";
+}
+
+function isWotcFirstEditionSet(setKey: string) {
+  return new Set([
+    "jungle",
+    "fossil",
+    "teamrocket",
+    "gymheroes",
+    "gymchallenge",
+    "neogenesis",
+    "neodiscovery",
+    "neorevelation",
+    "neodestiny",
+  ]).has(setKey);
+}
+
+function isPromoSet(setKey: string) {
+  return setKey.includes("blackstarpromos") || setKey.includes("promo");
+}
+
 function providerIdValue(providerIds: unknown, key: string) {
   if (!providerIds || typeof providerIds !== "object" || Array.isArray(providerIds)) {
     return undefined;
@@ -190,8 +282,17 @@ function variantRank(value: string) {
     holofoil: 20,
     reverseholo: 30,
     reverseholofoil: 30,
+    "1steditionholofoil": 40,
+    "1stedition": 40,
     firsteditionholofoil: 40,
+    firstedition: 40,
+    shadowlessholofoil: 45,
+    shadowless: 45,
     unlimitedholofoil: 50,
+    unlimited: 50,
+    stampedpromo: 55,
+    prereleasestamp: 56,
+    staffprereleasestamp: 57,
     factorysealed: 10,
   };
 

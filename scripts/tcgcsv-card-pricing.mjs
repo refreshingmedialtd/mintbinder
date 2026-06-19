@@ -5,7 +5,6 @@ import {
 } from "@prisma/client";
 import { booleanSetting, positiveInteger } from "./catalogue-batch-options.mjs";
 import {
-  bestTcgcsvPrice,
   extendedDataValue,
   isSealedProduct,
   matchTcgcsvGroupsToSets,
@@ -276,42 +275,50 @@ async function importCardGroup({
 
     summary.cardProductsMatched += 1;
 
-    if (!writePrices || !usdToGbp || (priceOnlyUnpriced && await hasCardPriceSnapshot(prisma, card.id))) {
+    if (!writePrices || !usdToGbp) {
       continue;
     }
 
-    const price = bestTcgcsvPrice(pricesByProductId.get(product.productId) ?? []);
+    const prices = usableTcgcsvPrices(pricesByProductId.get(product.productId) ?? []);
 
-    if (!price) {
+    if (!prices.length) {
       continue;
     }
 
-    await prisma.priceSnapshot.create({
-      data: {
-        cardPrintingId: card.id,
-        condition: ItemCondition.NEAR_MINT,
-        confidenceScore: price.confidenceScore,
-        currency: "GBP",
-        itemType: ItemType.CARD,
-        language: "en",
-        metadata: {
-          conversionRate: usdToGbp,
-          groupId: group.groupId,
-          groupName: group.name,
-          originalCurrency: "USD",
-          originalPrice: price.usd,
-          priceSource: "TCGCSV TCGplayer market",
-          subTypeName: price.subTypeName,
-          tcgplayerUrl: product.url,
+    for (const price of prices) {
+      const variantLabel = price.subTypeName ?? "Normal";
+
+      if (priceOnlyUnpriced && await hasCardVariantPriceSnapshot(prisma, card.id, variantLabel)) {
+        continue;
+      }
+
+      await prisma.priceSnapshot.create({
+        data: {
+          cardPrintingId: card.id,
+          condition: ItemCondition.NEAR_MINT,
+          confidenceScore: price.confidenceScore,
+          currency: "GBP",
+          itemType: ItemType.CARD,
+          language: "en",
+          metadata: {
+            conversionRate: usdToGbp,
+            groupId: group.groupId,
+            groupName: group.name,
+            originalCurrency: "USD",
+            originalPrice: price.usd,
+            priceSource: "TCGCSV TCGplayer market",
+            subTypeName: price.subTypeName,
+            tcgplayerUrl: product.url,
+          },
+          observedAt: new Date(),
+          priceMinor: Math.round(price.usd * usdToGbp * 100),
+          source: "tcgcsv-card",
+          sourceRef: String(product.productId),
+          variantLabel,
         },
-        observedAt: new Date(),
-        priceMinor: Math.round(price.usd * usdToGbp * 100),
-        source: "tcgcsv-card",
-        sourceRef: String(product.productId),
-        variantLabel: price.subTypeName ?? "Normal",
-      },
-    });
-    summary.pricingSnapshotsCreated += 1;
+      });
+      summary.pricingSnapshotsCreated += 1;
+    }
   }
 
   return summary;
@@ -333,16 +340,72 @@ async function fetchTcgcsv(url, fetchImpl) {
   return body;
 }
 
-async function hasCardPriceSnapshot(prisma, cardPrintingId) {
+async function hasCardVariantPriceSnapshot(prisma, cardPrintingId, variantLabel) {
   const snapshot = await prisma.priceSnapshot.findFirst({
     select: { id: true },
     where: {
       cardPrintingId,
       itemType: ItemType.CARD,
+      variantLabel,
     },
   });
 
   return Boolean(snapshot);
+}
+
+function usableTcgcsvPrices(prices) {
+  const bestBySubtype = new Map();
+
+  for (const price of prices) {
+    const usd = price.marketPrice ?? price.midPrice ?? price.lowPrice ?? price.directLowPrice ?? null;
+
+    if (!usd || usd <= 0) {
+      continue;
+    }
+
+    const subTypeName = price.subTypeName ?? "Normal";
+    const candidate = {
+      confidenceScore: price.marketPrice ? 76 : price.midPrice ? 66 : 56,
+      score: price.marketPrice ? 3 : price.midPrice ? 2 : 1,
+      subTypeName,
+      usd,
+    };
+    const existing = bestBySubtype.get(subTypeName);
+
+    if (!existing || candidate.score > existing.score) {
+      bestBySubtype.set(subTypeName, candidate);
+    }
+  }
+
+  return [...bestBySubtype.values()]
+    .map((price) => ({
+      confidenceScore: price.confidenceScore,
+      subTypeName: price.subTypeName,
+      usd: price.usd,
+    }))
+    .sort((left, right) => variantSortRank(left.subTypeName) - variantSortRank(right.subTypeName));
+}
+
+function variantSortRank(value) {
+  const normalized = String(value ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+  const ranks = {
+    normal: 10,
+    holofoil: 20,
+    reverseholofoil: 30,
+    reverseholo: 30,
+    "1stedition": 40,
+    "1steditionholofoil": 40,
+    firstedition: 40,
+    firsteditionholofoil: 40,
+    shadowless: 45,
+    shadowlessholofoil: 45,
+    unlimited: 50,
+    unlimitedholofoil: 50,
+  };
+
+  return ranks[normalized] ?? 60;
 }
 
 function normalizedCardNumber(value) {
@@ -360,6 +423,7 @@ function normalizedCardName(value) {
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\b(?:1st edition|first edition|shadowless|unlimited|holofoil|reverse holofoil|reverse holo|prerelease|pre release|stamped promo|stamped)\b/g, " ")
     .replace(/[^a-z0-9]+/g, " ")
     .trim()
     .replace(/\s+/g, " ");

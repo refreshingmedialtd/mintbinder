@@ -774,6 +774,8 @@ function mapCardPrintingToCatalogueItem(
     variantOptions: buildCatalogueVariantOptions({
       itemType: "card",
       priceHistory,
+      rarity: card.rarity ?? undefined,
+      setName: card.cardSet.name,
       variantMetadata: card.variantMetadata,
     }),
   };

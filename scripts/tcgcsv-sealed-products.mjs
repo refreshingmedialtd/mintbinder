@@ -91,7 +91,7 @@ export function sealedProductType(productName) {
 }
 
 export function normalizedSetName(value) {
-  return String(value ?? "")
+  const normalized = String(value ?? "")
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -101,6 +101,8 @@ export function normalizedSetName(value) {
     .replace(/[^a-z0-9]+/g, " ")
     .trim()
     .replace(/\s+/g, " ");
+
+  return normalized === "base set" ? "base" : normalized;
 }
 
 export function groupDisplayName(groupName) {

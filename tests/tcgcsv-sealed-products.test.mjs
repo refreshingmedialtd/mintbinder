@@ -48,6 +48,14 @@ test("matches TCGCSV group names to local set names", () => {
 
   assert.deepEqual(
     matchTcgcsvGroupsToSets(
+      [{ groupId: 604, name: "Base Set" }],
+      [{ id: "set-base", name: "Base" }],
+    ),
+    [{ group: { groupId: 604, name: "Base Set" }, set: { id: "set-base", name: "Base" } }],
+  );
+
+  assert.deepEqual(
+    matchTcgcsvGroupsToSets(
       [
         { groupId: 1919, name: "SM - Guardians Rising" },
         { groupId: 2364, name: "McDonald's Promos 2018" },

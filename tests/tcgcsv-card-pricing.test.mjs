@@ -29,6 +29,7 @@ test("matches TCGCSV card products to local cards by number and name", () => {
     { id: "card-2", name: "Lugia V", number: "138" },
     { id: "card-3", name: "Poke Pad", number: "81" },
     { id: "card-4", name: "Alakazam", number: "H1" },
+    { id: "card-5", name: "Blastoise", number: "2" },
   ];
 
   assert.deepEqual(
@@ -60,6 +61,16 @@ test("matches TCGCSV card products to local cards by number and name", () => {
       cards,
     ),
     cards[3],
+  );
+  assert.deepEqual(
+    matchTcgcsvCardProduct(
+      {
+        extendedData: [{ name: "Number", value: "2/102" }],
+        name: "Blastoise - 1st Edition Holofoil",
+      },
+      cards,
+    ),
+    cards[4],
   );
 });
 
@@ -145,6 +156,11 @@ test("imports card price snapshots from TCGCSV payloads", async () => {
             productId: 101,
             subTypeName: "Holofoil",
           },
+          {
+            marketPrice: 7,
+            productId: 101,
+            subTypeName: "Reverse Holofoil",
+          },
         ],
       };
     },
@@ -162,11 +178,13 @@ test("imports card price snapshots from TCGCSV payloads", async () => {
   assert.equal(summary.productsFetched, 2);
   assert.equal(summary.cardProductsMatched, 1);
   assert.equal(summary.cardProductsSkipped, 1);
-  assert.equal(summary.pricingSnapshotsCreated, 1);
+  assert.equal(summary.pricingSnapshotsCreated, 2);
   assert.equal(snapshots[0].cardPrintingId, "card-1");
   assert.equal(snapshots[0].priceMinor, 960);
   assert.equal(snapshots[0].source, "tcgcsv-card");
   assert.equal(snapshots[0].variantLabel, "Holofoil");
+  assert.equal(snapshots[1].priceMinor, 560);
+  assert.equal(snapshots[1].variantLabel, "Reverse Holofoil");
 });
 
 test("reads card pricing options from env", () => {
