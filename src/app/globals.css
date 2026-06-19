@@ -327,6 +327,13 @@ textarea {
 
 button {
   cursor: pointer;
+  color: inherit;
+}
+
+input,
+select,
+textarea {
+  color: var(--ink);
 }
 
 img {
@@ -497,6 +504,11 @@ h3 {
 
 .page {
   gap: 18px;
+}
+
+.set-list {
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  align-items: stretch;
 }
 
 .page-header,
@@ -1150,22 +1162,22 @@ h3 {
 
 .tag.green {
   background: var(--green-soft);
-  color: #166534;
+  color: var(--green);
 }
 
 .tag.amber {
   background: var(--amber-soft);
-  color: #92400e;
+  color: var(--amber);
 }
 
 .tag.red {
   background: var(--red-soft);
-  color: #991b1b;
+  color: var(--accent-dark);
 }
 
 .tag.blue {
   background: var(--blue-soft);
-  color: #1d4ed8;
+  color: var(--blue);
 }
 
 .item-card {
@@ -1174,6 +1186,7 @@ h3 {
   gap: 12px;
   min-height: 96px;
   padding: 10px;
+  color: var(--ink);
   text-align: left;
 }
 
@@ -1191,13 +1204,14 @@ h3 {
   height: 96px;
   overflow: hidden;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: 4px;
   background: var(--surface-soft);
 }
 
 .asset-image {
   width: 100%;
   height: 100%;
+  border-radius: inherit;
   object-fit: cover;
 }
 
@@ -1236,14 +1250,17 @@ h3 {
 }
 
 .image-fallback {
-  background: #e2e8f0;
-  color: var(--ink);
+  background: var(--surface-soft);
+  color: var(--muted);
 }
 
 .set-card {
   display: grid;
-  gap: 10px;
-  padding: 13px;
+  align-content: space-between;
+  gap: 12px;
+  min-height: 166px;
+  padding: 12px;
+  color: var(--ink);
   text-align: left;
 }
 
@@ -1258,12 +1275,37 @@ h3 {
   color: var(--teal);
 }
 
+.set-artwork {
+  position: relative;
+  display: grid;
+  height: 56px;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background:
+    radial-gradient(circle at 20% 20%, color-mix(in srgb, var(--theme-c) 18%, transparent), transparent 34%),
+    var(--surface-soft);
+}
+
+.set-artwork-image {
+  object-fit: contain;
+  padding: 7px;
+}
+
+.set-artwork-fallback {
+  color: var(--accent);
+  font-size: 20px;
+  font-weight: 900;
+  letter-spacing: 0;
+}
+
 .progress {
   width: 100%;
   height: 9px;
   overflow: hidden;
   border-radius: 999px;
-  background: #e5e7eb;
+  background: color-mix(in srgb, var(--line) 82%, var(--surface-soft));
 }
 
 .progress span {
@@ -1349,6 +1391,20 @@ h3 {
 .sort-control:focus-within {
   border-color: color-mix(in srgb, var(--accent) 58%, var(--line-strong));
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.form-note {
+  margin: -2px 0 0;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line));
+  border-radius: var(--radius);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent) 10%, transparent), transparent 60%),
+    var(--control);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 850;
+  line-height: 1.45;
 }
 
 .field select,

@@ -88,23 +88,20 @@ test("does not add generic standard labels when imported variants exist", () => 
 });
 
 test("uses variant price when valuing a catalogue item", () => {
-  assert.equal(
-    catalogueValueMinorForVariant(
-      {
-        id: "card-1",
-        type: "card",
-        name: "Test Card",
-        set: "Test Set",
-        number: "1/1",
-        rarity: "Rare",
-        valueMinor: 1200,
-        confidence: "Fair",
-        priceHistory,
-      },
-      "Reverse Holofoil",
-    ),
-    800,
-  );
+  const item = {
+    id: "card-1",
+    type: "card",
+    name: "Test Card",
+    set: "Test Set",
+    number: "1/1",
+    rarity: "Rare",
+    valueMinor: 1200,
+    confidence: "Fair",
+    priceHistory,
+  };
+
+  assert.equal(catalogueValueMinorForVariant(item, "Reverse Holofoil"), 800);
+  assert.equal(catalogueValueMinorForVariant(item, "Normal"), undefined);
 });
 
 test("derives Pokemon TCG image URLs from provider IDs", () => {

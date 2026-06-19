@@ -68,7 +68,15 @@ export function catalogueVariantLabels(item: CatalogueItem, current?: string) {
 }
 
 export function catalogueValueMinorForVariant(item: CatalogueItem, variant?: string) {
-  return latestPricePointForVariant(item.priceHistory ?? [], variant)?.valueMinor ?? item.valueMinor;
+  const normalizedVariant = normalizeVariantLabel(variant);
+  const priceHistory = item.priceHistory ?? [];
+
+  if (normalizedVariant) {
+    return latestPricePointForVariant(priceHistory, variant)?.valueMinor ??
+      (hasVariantAwarePrices(priceHistory) ? undefined : item.valueMinor);
+  }
+
+  return item.valueMinor;
 }
 
 export function latestPricePointForVariant(history: PricePoint[], variant?: string | null) {
@@ -198,6 +206,10 @@ function uniqueLabels(labels: string[]) {
   }
 
   return [...unique.values()];
+}
+
+function hasVariantAwarePrices(history: PricePoint[]) {
+  return history.some((point) => normalizeVariantLabel(point.variantLabel));
 }
 
 function startCase(value: string) {

@@ -872,6 +872,8 @@ function mapSetProgress(set: {
   name: string;
   series: string | null;
   releaseDate: Date | null;
+  logoImageUrl: string | null;
+  symbolImageUrl: string | null;
   total: number | null;
   cardPrintings: Array<{ id: string; collectionItems: Array<{ id: string }> }>;
 }): SetProgress {
@@ -880,6 +882,8 @@ function mapSetProgress(set: {
     name: set.name,
     series: set.series ?? undefined,
     releaseDate: dateOnly(set.releaseDate),
+    logoImage: set.logoImageUrl ?? undefined,
+    symbolImage: set.symbolImageUrl ?? undefined,
     owned: set.cardPrintings.filter((card) => card.collectionItems.length > 0).length,
     total: set.total ?? set.cardPrintings.length,
   };
@@ -978,12 +982,16 @@ function collectionItemValueMinor(item: {
   const priceHistory = buildPriceHistory(
     item.cardPrinting?.priceSnapshots ?? item.sealedProduct?.priceSnapshots ?? [],
   );
-  const unitValue =
-    latestPricePointForVariant(priceHistory, item.variantLabel)?.valueMinor ??
-    latestPricePoint(priceHistory)?.valueMinor ??
-    0;
+  const unitValue = item.variantLabel
+    ? latestPricePointForVariant(priceHistory, item.variantLabel)?.valueMinor ??
+      (hasVariantAwarePrices(priceHistory) ? 0 : latestPricePoint(priceHistory)?.valueMinor ?? 0)
+    : latestPricePoint(priceHistory)?.valueMinor ?? 0;
 
   return Math.round(unitValue * conditionValueMultiplier(enumLabel(item.condition))) * item.quantity;
+}
+
+function hasVariantAwarePrices(history: ReturnType<typeof buildPriceHistory>) {
+  return history.some((point) => point.variantLabel?.trim());
 }
 
 function conditionValueMultiplier(condition: string) {
@@ -1053,6 +1061,10 @@ function languageLabel(value?: string | null) {
     ja: "Japanese",
     de: "German",
     fr: "French",
+    it: "Italian",
+    es: "Spanish",
+    pt: "Portuguese",
+    other: "Other",
   };
 
   return value ? languages[value] ?? enumLabel(value) : "Unknown";
@@ -1064,6 +1076,10 @@ function languageToCode(value?: string) {
     Japanese: "ja",
     German: "de",
     French: "fr",
+    Italian: "it",
+    Spanish: "es",
+    Portuguese: "pt",
+    Other: "other",
   };
 
   return value ? languages[value] ?? value.toLowerCase() : "en";

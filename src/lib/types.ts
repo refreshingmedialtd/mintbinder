@@ -63,6 +63,8 @@ export type SetProgress = {
   name: string;
   series?: string;
   releaseDate?: string;
+  logoImage?: string;
+  symbolImage?: string;
   owned: number;
   total: number;
 };

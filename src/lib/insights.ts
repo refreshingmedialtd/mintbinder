@@ -654,7 +654,7 @@ function portfolioMarketSeries(item: CatalogueItem, variant: string) {
   const variantHistory = normalizedVariant
     ? history.filter((point) => normalizeVariantLabel(point.variantLabel) === normalizedVariant)
     : [];
-  const sourceHistory = variantHistory.length ? variantHistory : history;
+  const sourceHistory = normalizedVariant && hasVariantAwarePrices(history) ? variantHistory : history;
   const points = new Map<string, PortfolioPricePoint>();
 
   for (const point of sourceHistory) {
@@ -669,12 +669,15 @@ function portfolioMarketSeries(item: CatalogueItem, variant: string) {
 
   if (currentObservedAt) {
     const timestamp = Date.parse(`${currentObservedAt}T00:00:00.000Z`);
+    const currentValueMinor = catalogueValueMinorForVariant(item, variant);
 
-    points.set(currentObservedAt, {
-      dateKey: currentObservedAt,
-      timestamp,
-      valueMinor: catalogueValueMinorForVariant(item, variant),
-    });
+    if (currentValueMinor !== undefined) {
+      points.set(currentObservedAt, {
+        dateKey: currentObservedAt,
+        timestamp,
+        valueMinor: currentValueMinor,
+      });
+    }
   }
 
   return [...points.values()].sort((left, right) => left.timestamp - right.timestamp);
@@ -986,7 +989,15 @@ function catalogueMarketValueMinor(catalogueItem: CatalogueItem, variant?: strin
 }
 
 function catalogueValueMinorForVariant(catalogueItem: CatalogueItem, variant?: string) {
-  return latestPricePointForVariant(catalogueItem.priceHistory ?? [], variant)?.valueMinor ?? catalogueItem.valueMinor;
+  const normalizedVariant = normalizeVariantLabel(variant);
+  const priceHistory = catalogueItem.priceHistory ?? [];
+
+  if (normalizedVariant) {
+    return latestPricePointForVariant(priceHistory, variant)?.valueMinor ??
+      (hasVariantAwarePrices(priceHistory) ? undefined : catalogueItem.valueMinor);
+  }
+
+  return catalogueItem.valueMinor;
 }
 
 function latestPricePointForVariant(history: PricePoint[], variant?: string | null) {
@@ -999,6 +1010,10 @@ function latestPricePointForVariant(history: PricePoint[], variant?: string | nu
   return [...history]
     .reverse()
     .find((point) => normalizeVariantLabel(point.variantLabel) === normalizedVariant);
+}
+
+function hasVariantAwarePrices(history: PricePoint[]) {
+  return history.some((point) => normalizeVariantLabel(point.variantLabel));
 }
 
 function share(value: number, total: number) {

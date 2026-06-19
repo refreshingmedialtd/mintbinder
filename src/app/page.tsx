@@ -2721,6 +2721,7 @@ function AddScreen({
   const [addCondition, setAddCondition] = useState("Near mint");
   const [addQuantity, setAddQuantity] = useState(1);
   const [addVariant, setAddVariant] = useState<string | undefined>(undefined);
+  const [addLanguage, setAddLanguage] = useState("English");
 
   useEffect(() => {
     setCatalogueSetFilter("all");
@@ -2728,13 +2729,13 @@ function AddScreen({
   }, [appState.addType]);
 
   const results = catalogueItems.filter((item) => item.type === appState.addType);
-  const normalizedSearch = addSearch.trim().toLowerCase();
+  const normalizedSearch = normalizeSearchText(addSearch);
   const setOptionGroups = groupedSetOptions(uniqueValues(results.map((item) => item.set)), sets);
   const rarityOptions = uniqueValues(results.map((item) => item.rarity)).sort((left, right) =>
     left.localeCompare(right),
   );
   const filteredResults = results.filter((item) => {
-    const matchesSearch = `${item.name} ${item.set} ${item.number} ${item.rarity}`.toLowerCase().includes(normalizedSearch);
+    const matchesSearch = matchesCatalogueSearch(item, normalizedSearch);
     const matchesSet = catalogueSetFilter === "all" || item.set === catalogueSetFilter;
     const matchesRarity = catalogueRarityFilter === "all" || item.rarity === catalogueRarityFilter;
 
@@ -2755,11 +2756,13 @@ function AddScreen({
     : null;
   const selectedBaseValue = selected ? catalogueMarketValueMinor(selected, selectedVariant) : null;
   const selectedConditionMultiplier = conditionValueMultiplier(addCondition, selected?.type);
+  const usesEnglishMarketPricing = selected?.type === "card" && addLanguage !== "English";
 
   useEffect(() => {
     setAddCondition(selected?.type === "sealed" ? "Sealed" : "Near mint");
     setAddQuantity(1);
     setAddVariant(undefined);
+    setAddLanguage("English");
   }, [selected?.id, selected?.type]);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -2793,7 +2796,7 @@ function AddScreen({
                   setAppState((current) => ({
                     ...current,
                     addType: "card",
-                    selectedCatalogueId: catalogueItems.find((item) => item.type === "card")?.id ?? current.selectedCatalogueId,
+                    selectedCatalogueId: "",
                   }))
                 }
               >
@@ -2805,7 +2808,7 @@ function AddScreen({
                   setAppState((current) => ({
                     ...current,
                     addType: "sealed",
-                    selectedCatalogueId: catalogueItems.find((item) => item.type === "sealed")?.id ?? current.selectedCatalogueId,
+                    selectedCatalogueId: "",
                   }))
                 }
               >
@@ -2918,11 +2921,13 @@ function AddScreen({
                   </select>
                 </Field>
                 <Field label="Language">
-                  <select name="language" defaultValue="English">
+                  <select name="language" value={addLanguage} onChange={(event) => setAddLanguage(event.target.value)}>
                     <option>English</option>
-                    <option>Japanese</option>
                     <option>German</option>
                     <option>French</option>
+                    <option>Italian</option>
+                    <option>Spanish</option>
+                    <option>Portuguese</option>
                     <option>Other</option>
                   </select>
                 </Field>
@@ -2952,6 +2957,12 @@ function AddScreen({
                   <VariantSelect item={selected} value={selectedVariant} onChange={setAddVariant} />
                 </Field>
               </div>
+              {usesEnglishMarketPricing ? (
+                <p className="form-note">
+                  Pricing is based on English-market data for this catalogue item. Japanese and Chinese printings need
+                  their own separate catalogues and are not included in this language selector yet.
+                </p>
+              ) : null}
               <Field label="Valuation note">
                 <textarea name="valuationNote" placeholder="Source or reason for valuation" />
               </Field>
@@ -3213,9 +3224,12 @@ function ItemDetailScreen({
                   <Field label="Language">
                     <select name="language" defaultValue={owned.language}>
                       <option>English</option>
-                      <option>Japanese</option>
+                      {owned.language === "Japanese" ? <option>Japanese</option> : null}
                       <option>German</option>
                       <option>French</option>
+                      <option>Italian</option>
+                      <option>Spanish</option>
+                      <option>Portuguese</option>
                       <option>Other</option>
                     </select>
                   </Field>
@@ -3388,7 +3402,8 @@ function SetsScreen({
   setSetSearch,
   setAppState,
 }: ScreenContext) {
-  const filteredSets = sets.filter((set) => set.name.toLowerCase().includes(setSearch.toLowerCase()));
+  const normalizedSetSearch = normalizeSearchText(setSearch);
+  const filteredSets = sets.filter((set) => matchesSetSearch(set, normalizedSetSearch));
 
   return (
     <section className="page">
@@ -3431,7 +3446,7 @@ function SetDetailScreen({
 
   const setCards = catalogueItems.filter((item) => item.type === "card" && item.set === set.name);
   const done = completionPercent(set.owned, set.total);
-  const normalizedCardSearch = cardSearch.trim().toLowerCase();
+  const normalizedCardSearch = normalizeSearchText(cardSearch);
   const rarityOptions = uniqueValues(setCards.map((item) => item.rarity)).sort((left, right) =>
     left.localeCompare(right),
   );
@@ -3457,7 +3472,7 @@ function SetDetailScreen({
 
     return true;
   }).filter((item) => {
-    const matchesSearch = `${item.name} ${item.number} ${item.rarity}`.toLowerCase().includes(normalizedCardSearch);
+    const matchesSearch = matchesCatalogueSearch(item, normalizedCardSearch);
     const matchesRarity = rarityFilter === "all" || item.rarity === rarityFilter;
 
     return matchesSearch && matchesRarity;
@@ -6311,16 +6326,39 @@ function SetProgressCard({ set, onClick }: { set: SetProgress; onClick: () => vo
 
   return (
     <button className="set-card" onClick={onClick}>
+      <SetArtwork set={set} />
       <div className="set-card-header">
         <div>
           <strong>{set.name}</strong>
-          <span>{set.owned} / {set.total} owned</span>
+          <span>{set.series ?? "Pokemon TCG"}</span>
         </div>
         <b>{done}%</b>
       </div>
       <ProgressBar value={done} />
+      <span>{set.owned} / {set.total} owned</span>
     </button>
   );
+}
+
+function SetArtwork({ set }: { set: SetProgress }) {
+  const image = set.logoImage ?? set.symbolImage;
+
+  if (image) {
+    return (
+      <div className="set-artwork">
+        <Image
+          className="set-artwork-image"
+          src={image}
+          alt={`${set.name} logo`}
+          fill
+          sizes="(min-width: 980px) 220px, 50vw"
+          unoptimized
+        />
+      </div>
+    );
+  }
+
+  return <div className="set-artwork set-artwork-fallback">{setInitials(set.name)}</div>;
 }
 
 function PageHeader({ title, action }: { title: string; action?: ReactNode }) {
@@ -6534,7 +6572,7 @@ function catalogueMarketValueMinor(item: CatalogueItem, variant?: string) {
     return null;
   }
 
-  return catalogueValueMinorForVariant(item, variant);
+  return catalogueValueMinorForVariant(item, variant) ?? null;
 }
 
 function adjustedMarketValueMinor(
@@ -6592,6 +6630,13 @@ function selectedVariantLabel(item: CatalogueItem, variant?: string) {
 
 function formatValuation(valueMinor?: number | null) {
   return valueMinor === null || valueMinor === undefined ? "Needs estimate" : formatMoney(valueMinor);
+}
+
+function setInitials(name: string) {
+  const words = name.match(/[A-Za-z0-9]+/g) ?? [];
+  const initials = words.slice(0, 3).map((word) => word[0]).join("");
+
+  return initials.toUpperCase() || "SET";
 }
 
 function valuationStatusLabel(item: CatalogueItem, owned?: CollectionItem) {
@@ -7031,6 +7076,65 @@ function sortCatalogueItems(
   }
 
   return compareCatalogueNumbers(left.number, right.number);
+}
+
+function matchesCatalogueSearch(item: CatalogueItem, normalizedQuery: string) {
+  if (!normalizedQuery) {
+    return true;
+  }
+
+  const queryTokens = searchTokens(normalizedQuery);
+  const searchableTokens = catalogueSearchTokens(item);
+  const compactSearchable = searchableTokens.join("");
+
+  return queryTokens.every((queryToken) =>
+    compactSearchable.includes(queryToken) ||
+    searchableTokens.some((token) => token.includes(queryToken)),
+  );
+}
+
+function catalogueSearchTokens(item: CatalogueItem) {
+  return uniqueValues([
+    ...searchTokens(item.name),
+    ...searchTokens(item.set),
+    ...searchTokens(item.number),
+    ...searchTokens(item.rarity),
+    ...searchTokens(`${item.set} ${item.number}`),
+    ...(item.variantOptions ?? []).flatMap((option) => searchTokens(option.label)),
+  ]);
+}
+
+function matchesSetSearch(set: SetProgress, normalizedQuery: string) {
+  if (!normalizedQuery) {
+    return true;
+  }
+
+  const queryTokens = searchTokens(normalizedQuery);
+  const searchableTokens = uniqueValues([
+    ...searchTokens(set.name),
+    ...searchTokens(set.series ?? ""),
+    ...searchTokens(set.releaseDate?.slice(0, 4) ?? ""),
+  ]);
+  const compactSearchable = searchableTokens.join("");
+
+  return queryTokens.every((queryToken) =>
+    compactSearchable.includes(queryToken) ||
+    searchableTokens.some((token) => token.includes(queryToken)),
+  );
+}
+
+function normalizeSearchText(value: string) {
+  return value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/['’]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function searchTokens(value: string) {
+  return normalizeSearchText(value).split(" ").filter(Boolean);
 }
 
 function groupedSetOptions(setNames: string[], sets: SetProgress[]): SetOptionGroup[] {
