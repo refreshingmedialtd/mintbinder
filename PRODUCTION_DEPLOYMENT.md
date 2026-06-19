@@ -236,16 +236,16 @@ For the 20i deployment script field, use the absolute path:
 The script runs:
 
 ```sh
-npm ci --include=dev
+npm install --include=dev --no-audit --no-fund
 npm run db:generate
 npm run db:deploy
 npm run build
 pm2 reload <registered app> --update-env
 ```
 
-Expected behaviour: after Git deploy, 20i should run the script from the repository root, apply pending Prisma migrations, rebuild `.next`, and restart or refresh the registered NodeJS app so new Next routes are available.
+Expected behaviour: after Git deploy, 20i should run the script from the repository root, apply pending Prisma migrations, rebuild `.next`, and restart or refresh the registered NodeJS app so new Next routes are available. The custom `app.js` entrypoint pins Next's runtime directory to the repository folder so 20i's working directory cannot make the app read the wrong `.next` output.
 
-Note: the first successful script run auto-installed missing build-time dev dependencies because `NODE_ENV=production` had been set before `npm ci`, leaving `package.json` and `package-lock.json` modified on the server. The script now restores those files and uses `npm ci --include=dev` before building.
+Note: the first successful script run auto-installed missing build-time dev dependencies because `NODE_ENV=production` had been set before dependency installation, leaving `package.json` and `package-lock.json` modified on the server. The script now restores those files and installs with dev dependencies before building. Avoid `npm ci` or `rm -rf .next` in the live app directory: both can temporarily remove files that the currently running Node process may still need.
 
 Follow-up to confirm with support if needed: whether 20i exposes a preferred restart command if the PM2 reload fallback does not refresh the registered NodeJS app.
 
