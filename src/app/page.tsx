@@ -312,7 +312,7 @@ const initialState: AppState = {
   setFilter: "all",
   selectedItemId: "owned-charizard",
   selectedSetId: "set-151",
-  selectedCatalogueId: "card-charizard-151",
+  selectedCatalogueId: "",
   plus: false,
 };
 
@@ -558,9 +558,7 @@ export default function Home() {
         : data.collection[0]?.id ?? current.selectedItemId,
       selectedCatalogueId: data.catalogue.some((item) => item.id === current.selectedCatalogueId)
         ? current.selectedCatalogueId
-        : data.catalogue.find((item) => item.type === current.addType)?.id ??
-          data.catalogue[0]?.id ??
-          current.selectedCatalogueId,
+        : "",
       selectedSetId: data.sets.some((set) => set.id === current.selectedSetId)
         ? current.selectedSetId
         : data.sets[0]?.id ?? current.selectedSetId,
@@ -694,12 +692,11 @@ export default function Home() {
   }
 
   function startAdd(type: ItemType) {
-    const firstItem = catalogueItems.find((item) => item.type === type);
     setAppState((current) => ({
       ...current,
       screen: "add",
       addType: type,
-      selectedCatalogueId: firstItem?.id ?? current.selectedCatalogueId,
+      selectedCatalogueId: "",
     }));
     setAddSearch("");
   }
@@ -2720,7 +2717,7 @@ function AddScreen({
 }: ScreenContext) {
   const [catalogueSetFilter, setCatalogueSetFilter] = useState("all");
   const [catalogueRarityFilter, setCatalogueRarityFilter] = useState("all");
-  const [catalogueSort, setCatalogueSort] = useState<CatalogueSort>("set-number");
+  const [catalogueSort, setCatalogueSort] = useState<CatalogueSort>("value-desc");
   const [addCondition, setAddCondition] = useState("Near mint");
   const [addQuantity, setAddQuantity] = useState(1);
   const [addVariant, setAddVariant] = useState<string | undefined>(undefined);
@@ -2747,8 +2744,7 @@ function AddScreen({
   const resultLimit = hasNarrowedResults ? 80 : 16;
   const visibleResults = filteredResults.slice(0, resultLimit);
   const selected =
-    filteredResults.find((item) => item.id === appState.selectedCatalogueId && item.type === appState.addType) ??
-    filteredResults[0];
+    filteredResults.find((item) => item.id === appState.selectedCatalogueId && item.type === appState.addType);
   const locationOptions = storageOptionNames(
     storageLocations,
     selected ? defaultStorageLocation(storageLocations, selected.type) : undefined,
@@ -2826,7 +2822,7 @@ function AddScreen({
               <label className="sort-control">
                 Set
                 <select value={catalogueSetFilter} onChange={(event) => setCatalogueSetFilter(event.target.value)}>
-                  <option value="all">All sets</option>
+                  <option value="all">All sets by era</option>
                   {setOptionGroups.map((group) => (
                     <optgroup key={group.label} label={group.label}>
                       {group.options.map((option) => (
@@ -2850,8 +2846,8 @@ function AddScreen({
               <label className="sort-control">
                 Sort
                 <select value={catalogueSort} onChange={(event) => setCatalogueSort(event.target.value as CatalogueSort)}>
+                  <option value="value-desc">Highest value</option>
                   <option value="set-number">Set number</option>
-                  <option value="value-desc">Value</option>
                   <option value="name">Name</option>
                   <option value="rarity">Rarity</option>
                 </select>
@@ -2893,7 +2889,7 @@ function AddScreen({
           {selected ? (
             <CataloguePreview item={selected} />
           ) : (
-            <EmptyState title="No item selected" description="Choose a catalogue result to add owned-copy details." />
+            <EmptyState title="Choose an item" description="Search or select a catalogue result to add owned-copy details." />
           )}
           {selected ? (
             <div className="valuation-preview">
@@ -2906,79 +2902,74 @@ function AddScreen({
               </small>
             </div>
           ) : null}
-          <form className="form-stack" key={selected?.id ?? "no-selection"} onSubmit={handleSubmit}>
-            <div className="field-grid">
-              <Field label="Condition">
-                <select name="condition" value={addCondition} onChange={(event) => setAddCondition(event.target.value)}>
-                  <option>Near mint</option>
-                  <option>Mint</option>
-                  <option>Excellent</option>
-                  <option>Light played</option>
-                  <option>Played</option>
-                  <option>Poor</option>
-                  <option>Sealed</option>
-                  <option>Unknown</option>
-                </select>
-              </Field>
-              <Field label="Language">
-                <select name="language" defaultValue="English">
-                  <option>English</option>
-                  <option>Japanese</option>
-                  <option>German</option>
-                  <option>French</option>
-                  <option>Other</option>
-                </select>
-              </Field>
-              <Field label="Quantity">
-                <input
-                  name="quantity"
-                  type="number"
-                  min={1}
-                  value={addQuantity}
-                  onChange={(event) => setAddQuantity(Math.max(1, Number(event.target.value) || 1))}
-                />
-              </Field>
-              <Field label="Paid">
-                <input name="paid" inputMode="decimal" placeholder="GBP 0.00" />
-              </Field>
-              <Field label="Manual value">
-                <input name="overrideValue" inputMode="decimal" placeholder="GBP 0.00" />
-              </Field>
-              <Field label="Location">
-                <select
-                  name="location"
-                  defaultValue={selected ? defaultStorageLocation(storageLocations, selected.type) : "Unassigned"}
-                >
-                  {locationOptions.map((location) => (
-                    <option key={location}>{location}</option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="Variant">
-                {selected ? (
+          {selected ? (
+            <form className="form-stack" key={selected.id} onSubmit={handleSubmit}>
+              <div className="field-grid">
+                <Field label="Condition">
+                  <select name="condition" value={addCondition} onChange={(event) => setAddCondition(event.target.value)}>
+                    <option>Near mint</option>
+                    <option>Mint</option>
+                    <option>Excellent</option>
+                    <option>Light played</option>
+                    <option>Played</option>
+                    <option>Poor</option>
+                    <option>Sealed</option>
+                    <option>Unknown</option>
+                  </select>
+                </Field>
+                <Field label="Language">
+                  <select name="language" defaultValue="English">
+                    <option>English</option>
+                    <option>Japanese</option>
+                    <option>German</option>
+                    <option>French</option>
+                    <option>Other</option>
+                  </select>
+                </Field>
+                <Field label="Quantity">
+                  <input
+                    name="quantity"
+                    type="number"
+                    min={1}
+                    value={addQuantity}
+                    onChange={(event) => setAddQuantity(Math.max(1, Number(event.target.value) || 1))}
+                  />
+                </Field>
+                <Field label="Paid">
+                  <input name="paid" inputMode="decimal" placeholder="GBP 0.00" />
+                </Field>
+                <Field label="Manual value">
+                  <input name="overrideValue" inputMode="decimal" placeholder="GBP 0.00" />
+                </Field>
+                <Field label="Location">
+                  <select name="location" defaultValue={defaultStorageLocation(storageLocations, selected.type)}>
+                    {locationOptions.map((location) => (
+                      <option key={location}>{location}</option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Variant">
                   <VariantSelect item={selected} value={selectedVariant} onChange={setAddVariant} />
-                ) : (
-                  <input name="variant" disabled />
-                )}
+                </Field>
+              </div>
+              <Field label="Valuation note">
+                <textarea name="valuationNote" placeholder="Source or reason for valuation" />
               </Field>
-            </div>
-            <Field label="Valuation note">
-              <textarea name="valuationNote" placeholder="Source or reason for valuation" />
-            </Field>
-            <Field label="Notes">
-              <textarea name="notes" placeholder="Optional" />
-            </Field>
-            <div className="actions">
-              <button className="button primary" type="submit" disabled={!selected}>
-                <Check size={17} />
-                Save to collection
-              </button>
-              <button className="button" type="button" disabled={!selected} onClick={() => selected && void addToWishlist(selected.id)}>
-                <Heart size={17} />
-                Add to wishlist
-              </button>
-            </div>
-          </form>
+              <Field label="Notes">
+                <textarea name="notes" placeholder="Optional" />
+              </Field>
+              <div className="actions">
+                <button className="button primary" type="submit">
+                  <Check size={17} />
+                  Save to collection
+                </button>
+                <button className="button" type="button" onClick={() => void addToWishlist(selected.id)}>
+                  <Heart size={17} />
+                  Add to wishlist
+                </button>
+              </div>
+            </form>
+          ) : null}
         </section>
       </div>
     </section>
@@ -6511,6 +6502,7 @@ function CatalogueItemImage({ item }: { item: CatalogueItem }) {
         alt={item.name}
         fill
         sizes="(min-width: 760px) 340px, 96px"
+        unoptimized
         onError={() => setFailedImage(image)}
       />
     );
@@ -6607,7 +6599,7 @@ function valuationStatusLabel(item: CatalogueItem, owned?: CollectionItem) {
     return "Manual value";
   }
 
-  return item.hasPrice ? `Price confidence: ${item.confidence}` : "Needs estimate";
+  return item.hasPrice ? `Market confidence: ${item.confidence}` : "Needs estimate";
 }
 
 function valuationPillClass(item: CatalogueItem, owned?: CollectionItem) {
