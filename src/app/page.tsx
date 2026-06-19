@@ -14,6 +14,7 @@ import {
   Grid2X2,
   Heart,
   History,
+  Info,
   Layers3,
   List,
   LayoutDashboard,
@@ -3552,6 +3553,7 @@ function SetDetailScreen({
   const [cardSearch, setCardSearch] = useState("");
   const [rarityFilter, setRarityFilter] = useState("all");
   const [sort, setSort] = useState<SetDetailSort>("number-asc");
+  const [previewItemId, setPreviewItemId] = useState<string | null>(null);
   const set = sets.find((item) => item.id === appState.selectedSetId) ?? sets[0];
 
   if (!set) {
@@ -3567,6 +3569,9 @@ function SetDetailScreen({
   const setMarketValue = setCards.reduce((total, item) => total + (catalogueMarketValueMinor(item) ?? 0), 0);
   const missingCount = Math.max(set.total - set.owned, 0);
   const wantedCount = setCards.filter((item) => wishlist.some((entry) => entry.catalogueId === item.id)).length;
+  const previewItem = previewItemId ? catalogueItems.find((item) => item.id === previewItemId) : undefined;
+  const previewOwned = previewItem ? collection.find((entry) => entry.catalogueId === previewItem.id) : undefined;
+  const previewWanted = previewItem ? wishlist.some((entry) => entry.catalogueId === previewItem.id) : false;
 
   const visibleCards = setCards.filter((item) => {
     const owned = collection.some((entry) => entry.catalogueId === item.id);
@@ -3687,7 +3692,20 @@ function SetDetailScreen({
           const statusClass = owned ? "set-print-status owned" : wanted ? "set-print-status wanted" : "";
 
           return (
-            <article className={owned ? "set-print-card owned" : wanted ? "set-print-card wanted" : "set-print-card"} key={item.id}>
+            <article
+              aria-label={`View ${item.name}`}
+              className={owned ? "set-print-card owned" : wanted ? "set-print-card wanted" : "set-print-card"}
+              key={item.id}
+              onClick={() => setPreviewItemId(item.id)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  setPreviewItemId(item.id);
+                }
+              }}
+              role="button"
+              tabIndex={0}
+            >
               <div className="item-image set-print-image">{renderItemImage(item)}</div>
               <div className="set-print-body">
                 <div className="set-print-header">
@@ -3706,7 +3724,7 @@ function SetDetailScreen({
                   <span className="tag">{item.rarity}</span>
                   <span className={marketValue === null ? "set-print-price missing" : "set-print-price"}>
                     <strong>{formatValuation(marketValue)}</strong>
-                    <details className="market-help">
+                    <details className="market-help" onClick={(event) => event.stopPropagation()}>
                       <summary aria-label={`Market confidence for ${item.name}`}>?</summary>
                       <span className="market-help-popover">{marketConfidenceDescription(item, marketValue)}</span>
                     </details>
@@ -3716,7 +3734,7 @@ function SetDetailScreen({
                   <div className="set-print-variants" aria-label={`${item.name} variants`}>
                     {visibleVariants.map((option) => (
                       <span className="tag" key={option.label}>
-                        {option.valueMinor === undefined ? option.label : `${option.label} ${formatMoney(option.valueMinor)}`}
+                        {option.label}
                       </span>
                     ))}
                     {variants.length > visibleVariants.length ? <span className="tag">+{variants.length - visibleVariants.length}</span> : null}
@@ -3726,7 +3744,8 @@ function SetDetailScreen({
                   {owned ? (
                     <button
                       className="button"
-                      onClick={() => {
+                      onClick={(event) => {
+                        event.stopPropagation();
                         setAppState((current) => ({ ...current, selectedItemId: owned.id }));
                         navigate("item");
                       }}
@@ -3736,7 +3755,8 @@ function SetDetailScreen({
                   ) : (
                     <button
                       className="button primary"
-                      onClick={() => {
+                      onClick={(event) => {
+                        event.stopPropagation();
                         setAppState((current) => ({ ...current, selectedCatalogueId: item.id, addType: "card" }));
                         navigate("add");
                       }}
@@ -3745,7 +3765,15 @@ function SetDetailScreen({
                       Add
                     </button>
                   )}
-                  <button className="button" type="button" disabled={wanted} onClick={() => void addToWishlist(item.id)}>
+                  <button
+                    className="button"
+                    type="button"
+                    disabled={wanted}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void addToWishlist(item.id);
+                    }}
+                  >
                     <Heart size={17} />
                     {wanted ? "Wanted" : "Want"}
                   </button>
@@ -3765,7 +3793,157 @@ function SetDetailScreen({
           />
         )}
       </div>
+      {previewItem ? (
+        <CataloguePreviewModal
+          item={previewItem}
+          owned={previewOwned}
+          wanted={previewWanted}
+          onAdd={() => {
+            setPreviewItemId(null);
+            setAppState((current) => ({ ...current, selectedCatalogueId: previewItem.id, addType: "card" }));
+            navigate("add");
+          }}
+          onClose={() => setPreviewItemId(null)}
+          onOpenOwned={() => {
+            if (!previewOwned) {
+              return;
+            }
+
+            setPreviewItemId(null);
+            setAppState((current) => ({ ...current, selectedItemId: previewOwned.id }));
+            navigate("item");
+          }}
+          onWant={() => void addToWishlist(previewItem.id)}
+        />
+      ) : null}
     </section>
+  );
+}
+
+function CataloguePreviewModal({
+  item,
+  owned,
+  wanted,
+  onAdd,
+  onClose,
+  onOpenOwned,
+  onWant,
+}: {
+  item: CatalogueItem;
+  owned?: CollectionItem;
+  wanted: boolean;
+  onAdd: () => void;
+  onClose: () => void;
+  onOpenOwned: () => void;
+  onWant: () => void;
+}) {
+  const [showDetails, setShowDetails] = useState(false);
+  const marketValue = catalogueMarketValueMinor(item);
+  const variants = item.variantOptions ?? [];
+  const visibleVariants = variants.slice(0, 6);
+  const titleId = `catalogue-preview-${item.id}`;
+
+  useEffect(() => {
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    }
+
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [onClose]);
+
+  return (
+    <div className="catalogue-preview-backdrop" onClick={onClose} role="presentation">
+      <article
+        aria-labelledby={titleId}
+        aria-modal="true"
+        className="catalogue-preview-modal"
+        onClick={(event) => event.stopPropagation()}
+        role="dialog"
+      >
+        <button className="icon-button catalogue-preview-close" type="button" onClick={onClose} aria-label="Close preview">
+          <X size={18} />
+        </button>
+        <div className="catalogue-preview-media">
+          <div className="item-image catalogue-preview-image">{renderItemImage(item)}</div>
+        </div>
+        <div className="catalogue-preview-content">
+          <div className="catalogue-preview-title-row">
+            <div>
+              <h2 id={titleId}>{item.name}</h2>
+              <p>{item.set} | No. {item.number}</p>
+            </div>
+            <button
+              aria-pressed={showDetails}
+              className={showDetails ? "icon-button info active" : "icon-button info"}
+              onClick={() => setShowDetails((current) => !current)}
+              type="button"
+            >
+              <Info size={18} />
+              <span className="sr-only">Toggle card details</span>
+            </button>
+          </div>
+          <div className="set-print-meta">
+            <span className="tag">{item.rarity}</span>
+            <span className={marketValue === null ? "set-print-price missing" : "set-print-price"}>
+              <strong>{formatValuation(marketValue)}</strong>
+              <details className="market-help">
+                <summary aria-label={`Market confidence for ${item.name}`}>?</summary>
+                <span className="market-help-popover">{marketConfidenceDescription(item, marketValue)}</span>
+              </details>
+            </span>
+            {owned ? <span className="set-print-status owned"><Check size={14} />Owned</span> : null}
+            {!owned && wanted ? <span className="set-print-status wanted"><Heart size={14} />Want</span> : null}
+          </div>
+          {variants.length ? (
+            <div className="catalogue-preview-variants" aria-label={`${item.name} variants`}>
+              {visibleVariants.map((option) => (
+                <span className="tag" key={option.label}>{option.label}</span>
+              ))}
+              {variants.length > visibleVariants.length ? <span className="tag">+{variants.length - visibleVariants.length}</span> : null}
+            </div>
+          ) : null}
+          {showDetails ? (
+            <dl className="catalogue-preview-details">
+              <div>
+                <dt>Market note</dt>
+                <dd>{marketConfidenceDescription(item, marketValue)}</dd>
+              </div>
+              <div>
+                <dt>Source</dt>
+                <dd>{valuationSourceLabel(item)}</dd>
+              </div>
+              <div>
+                <dt>Observed</dt>
+                <dd>{valuationObservedLabel(item)}</dd>
+              </div>
+              <div>
+                <dt>Available finishes</dt>
+                <dd>{variants.length ? variants.map((option) => option.label).join(", ") : "None listed yet"}</dd>
+              </div>
+            </dl>
+          ) : null}
+          <div className="catalogue-preview-actions">
+            {owned ? (
+              <button className="button primary" type="button" onClick={onOpenOwned}>
+                Open owned lot
+              </button>
+            ) : (
+              <button className="button primary" type="button" onClick={onAdd}>
+                <Plus size={17} />
+                Add
+              </button>
+            )}
+            <button className="button" type="button" disabled={wanted} onClick={onWant}>
+              <Heart size={17} />
+              {wanted ? "Wanted" : "Want"}
+            </button>
+          </div>
+        </div>
+      </article>
+    </div>
   );
 }
 
@@ -6441,9 +6619,7 @@ function CataloguePreview({ item }: { item: CatalogueItem }) {
         {variants.length ? (
           <div className="tag-row">
             {variants.slice(0, 3).map((option) => (
-              <span className="tag" key={option.label}>
-                {option.valueMinor === undefined ? option.label : `${option.label} ${formatMoney(option.valueMinor)}`}
-              </span>
+              <span className="tag" key={option.label}>{option.label}</span>
             ))}
           </div>
         ) : null}
