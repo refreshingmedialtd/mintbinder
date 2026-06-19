@@ -10,6 +10,11 @@ const appDir = __dirname;
 const port = Number(cliArg("port") || process.env.PORT || process.env.NODE_PORT || 3000);
 const hostname = cliArg("hostname") || process.env.APP_HOST || process.env.HOST || "127.0.0.1";
 const dev = process.env.NODE_ENV === "development";
+const noStoreHeaders = {
+  "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+  Pragma: "no-cache",
+  Expires: "0",
+};
 
 const app = next({ dev, dir: appDir, hostname, port });
 const handle = app.getRequestHandler();
@@ -18,6 +23,7 @@ app.prepare().then(() => {
   createServer((request, response) => {
     const parsedUrl = parse(request.url || "/", true);
 
+    applyNoStoreHeaders(response, parsedUrl.pathname || "/");
     handle(request, response, parsedUrl);
   }).listen(port, hostname, () => {
     console.log(`Mint Binder listening on http://${hostname}:${port}`);
@@ -45,4 +51,29 @@ function cliArg(name) {
   }
 
   return undefined;
+}
+
+function applyNoStoreHeaders(response, pathname) {
+  if (isCacheableNextAsset(pathname)) {
+    return;
+  }
+
+  setNoStoreHeaders(response);
+
+  const writeHead = response.writeHead.bind(response);
+
+  response.writeHead = (...args) => {
+    setNoStoreHeaders(response);
+    return writeHead(...args);
+  };
+}
+
+function setNoStoreHeaders(response) {
+  Object.entries(noStoreHeaders).forEach(([key, value]) => {
+    response.setHeader(key, value);
+  });
+}
+
+function isCacheableNextAsset(pathname) {
+  return pathname.startsWith("/_next/static/");
 }
