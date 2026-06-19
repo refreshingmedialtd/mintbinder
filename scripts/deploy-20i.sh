@@ -25,8 +25,6 @@ npm run db:generate
 npm run db:deploy
 
 export NODE_ENV=production
-echo "Removing previous Next build output..."
-rm -rf .next
 npm run build
 
 restart_app() {

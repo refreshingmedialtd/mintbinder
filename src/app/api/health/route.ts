@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { getDeploymentInfo } from "@/lib/deployment/build-info";
 import { prisma } from "@/lib/db/prisma";
 
 export const dynamic = "force-dynamic";
@@ -9,7 +8,6 @@ export async function GET() {
   const startedAt = Date.now();
   const checkedAt = new Date().toISOString();
   const environment = environmentChecks();
-  const deployment = await getDeploymentInfo();
 
   try {
     await prisma.$queryRaw`SELECT 1`;
@@ -21,7 +19,6 @@ export async function GET() {
           database: "ok",
         },
         durationMs: Date.now() - startedAt,
-        deployment,
         ok: true,
         service: "mintbinder",
         status: "ok",
@@ -41,7 +38,6 @@ export async function GET() {
           database: "failed",
         },
         durationMs: Date.now() - startedAt,
-        deployment,
         error: error instanceof Error ? error.message : "Health check failed.",
         ok: false,
         service: "mintbinder",
