@@ -40,6 +40,14 @@ export function buildCatalogueVariantOptions({
     }
   }
 
+  for (const label of inferredStandardVariantLabels({ itemType, rarity, setName })) {
+    const normalized = normalizeVariantLabel(label);
+
+    if (!options.has(normalized)) {
+      options.set(normalized, { label });
+    }
+  }
+
   for (const label of inferredSpecialVariantLabels({ itemType, rarity, setName })) {
     const normalized = normalizeVariantLabel(label);
 
@@ -204,6 +212,62 @@ function inferredSpecialVariantLabels({
   return uniqueLabels(labels);
 }
 
+function inferredStandardVariantLabels({
+  itemType,
+  rarity,
+  setName,
+}: Pick<VariantOptionInput, "itemType" | "rarity" | "setName">) {
+  if (itemType !== "card") {
+    return [];
+  }
+
+  const normalized = String(rarity ?? "").toLowerCase();
+  const setKey = normalizeSetName(setName);
+
+  if (isPremiumSingleFinishRarity(normalized)) {
+    return ["Holofoil"];
+  }
+
+  if (isLegacyNoReverseSet(setKey)) {
+    return [finishLabelFromRarity(rarity)];
+  }
+
+  if (normalized.includes("holo")) {
+    return ["Holofoil", "Reverse Holofoil"];
+  }
+
+  if (["common", "uncommon", "rare"].includes(normalized.trim())) {
+    return ["Normal", "Reverse Holofoil"];
+  }
+
+  return ["Normal"];
+}
+
+function isPremiumSingleFinishRarity(normalizedRarity: string) {
+  return [
+    "amazing rare",
+    "ace spec rare",
+    "double rare",
+    "hyper rare",
+    "illustration rare",
+    "rare ace",
+    "rare holo ex",
+    "rare holo gx",
+    "rare holo lv.x",
+    "rare holo star",
+    "rare holo v",
+    "rare holo vmax",
+    "rare holo vstar",
+    "rare prime",
+    "secret rare",
+    "shiny rare",
+    "shiny ultra rare",
+    "special illustration rare",
+    "trainer gallery rare holo",
+    "ultra rare",
+  ].some((needle) => normalizedRarity.includes(needle));
+}
+
 function finishLabelFromRarity(rarity?: string) {
   const normalized = String(rarity ?? "").toLowerCase();
 
@@ -245,6 +309,10 @@ function isWotcFirstEditionSet(setKey: string) {
     "neorevelation",
     "neodestiny",
   ]).has(setKey);
+}
+
+function isLegacyNoReverseSet(setKey: string) {
+  return isBaseSet(setKey) || isWotcFirstEditionSet(setKey);
 }
 
 function isPromoSet(setKey: string) {

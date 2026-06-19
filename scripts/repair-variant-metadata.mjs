@@ -4,6 +4,7 @@ import { startJobServer, stopServer, waitForServer } from "./job-server-runner.m
 
 const port = positiveInteger(process.env.JOB_SERVER_PORT, 3020);
 const limit = positiveInteger(process.env.VARIANT_METADATA_REPAIR_LIMIT, 500);
+const fetchTimeoutMs = positiveInteger(process.env.VARIANT_METADATA_REPAIR_FETCH_TIMEOUT_MS, 10000);
 const waitMs = nonNegativeInteger(process.env.VARIANT_METADATA_REPAIR_WAIT_MS, 120);
 const dryRun = booleanSetting(process.env.VARIANT_METADATA_REPAIR_DRY_RUN);
 const secret = process.env.JOB_SECRET?.trim();
@@ -23,7 +24,7 @@ try {
       authorization: `Bearer ${secret}`,
       "content-type": "application/json",
     },
-    body: JSON.stringify({ dryRun, limit, waitMs }),
+    body: JSON.stringify({ dryRun, fetchTimeoutMs, limit, waitMs }),
   });
   const result = await response.json();
 

@@ -8,6 +8,7 @@ export const runtime = "nodejs";
 
 type VariantMetadataRepairBody = {
   dryRun?: boolean;
+  fetchTimeoutMs?: number | string;
   limit?: number | string;
   waitMs?: number | string;
 };
@@ -35,11 +36,13 @@ export async function POST(request: Request) {
 }
 
 function variantMetadataRepairInput(body: VariantMetadataRepairBody) {
+  const fetchTimeoutMs = optionalPositiveInteger(body.fetchTimeoutMs);
   const limit = optionalPositiveInteger(body.limit);
   const waitMs = optionalNonNegativeInteger(body.waitMs);
 
   return {
     dryRun: typeof body.dryRun === "boolean" ? body.dryRun : false,
+    fetchTimeoutMs: fetchTimeoutMs ?? undefined,
     limit: limit ?? undefined,
     waitMs: waitMs ?? undefined,
   };

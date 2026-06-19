@@ -42,7 +42,11 @@ import { signIn, signOut, useSession } from "next-auth/react";
 import type { ChangeEvent, CSSProperties, Dispatch, FormEvent, ReactNode, SetStateAction } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { canUseOperations, normalizeAppRole, type AppUserRole } from "@/lib/auth/roles";
-import { catalogueValueMinorForVariant, catalogueVariantLabels } from "@/lib/catalogue/variants";
+import {
+  catalogueValueMinorForVariant,
+  catalogueVariantLabels,
+  latestPricePointForVariant,
+} from "@/lib/catalogue/variants";
 import {
   buildCollectionCsv,
   buildCollectionImportTemplateCsv,
@@ -93,7 +97,16 @@ type AppState = {
   collectionLanguageFilter: string;
   collectionLocationFilter: string;
   collectionValueFilter: "all" | "profit" | "loss" | "unvalued" | "manual" | "weak" | "high";
-  collectionSort: "value-desc" | "value-asc" | "name" | "set" | "gain-desc" | "quantity-desc" | "recent";
+  collectionSort:
+    | "value-desc"
+    | "value-asc"
+    | "name"
+    | "name-desc"
+    | "set"
+    | "set-desc"
+    | "gain-desc"
+    | "quantity-desc"
+    | "recent";
   collectionView: "list" | "grid";
   setFilter: "all" | "owned" | "missing" | "want";
   selectedItemId: string;
@@ -109,8 +122,43 @@ type Viewer = {
 };
 
 type AuthMode = "sign-in" | "register";
-type CatalogueSort = "set-number" | "value-desc" | "name" | "rarity";
-type SetDetailSort = "number" | "value-desc" | "name" | "rarity";
+type CatalogueSort =
+  | "set-number"
+  | "set-number-asc"
+  | "set-number-desc"
+  | "value-desc"
+  | "value-asc"
+  | "name"
+  | "name-asc"
+  | "name-desc"
+  | "rarity";
+type SetDetailSort =
+  | "number"
+  | "number-asc"
+  | "number-desc"
+  | "value-desc"
+  | "value-asc"
+  | "name"
+  | "name-asc"
+  | "name-desc"
+  | "rarity";
+type SetListSort =
+  | "release-desc"
+  | "release-asc"
+  | "name-asc"
+  | "name-desc"
+  | "completion-desc"
+  | "completion-asc";
+type WishlistSort =
+  | "priority-desc"
+  | "target-desc"
+  | "target-asc"
+  | "market-desc"
+  | "market-asc"
+  | "set-number-asc"
+  | "set-number-desc"
+  | "name-asc"
+  | "name-desc";
 type SetOptionGroup = {
   label: string;
   options: Array<{
@@ -2111,7 +2159,7 @@ function DashboardScreen({
   wishlistTotal,
   setAppState,
 }: ScreenContext) {
-  const recent = collection.slice(-3).reverse();
+  const recent = collection.slice(-6).reverse();
   const focusSets = sets
     .filter((set) => set.owned > 0)
     .sort((left, right) => completionPercent(right.owned, right.total) - completionPercent(left.owned, left.total))
@@ -2375,9 +2423,23 @@ function CollectionScreen({
         });
       }
 
+      if (appState.collectionSort === "name-desc") {
+        return (right.catalogueItem?.name ?? "").localeCompare(left.catalogueItem?.name ?? "", undefined, {
+          numeric: true,
+        });
+      }
+
       if (appState.collectionSort === "set") {
         return `${left.catalogueItem?.set ?? ""} ${left.catalogueItem?.number ?? ""}`.localeCompare(
           `${right.catalogueItem?.set ?? ""} ${right.catalogueItem?.number ?? ""}`,
+          undefined,
+          { numeric: true },
+        );
+      }
+
+      if (appState.collectionSort === "set-desc") {
+        return `${right.catalogueItem?.set ?? ""} ${right.catalogueItem?.number ?? ""}`.localeCompare(
+          `${left.catalogueItem?.set ?? ""} ${left.catalogueItem?.number ?? ""}`,
           undefined,
           { numeric: true },
         );
@@ -2540,8 +2602,10 @@ function CollectionScreen({
               <option value="value-asc">Value low to high</option>
               <option value="gain-desc">Gain/loss</option>
               <option value="quantity-desc">Quantity</option>
-              <option value="name">Name</option>
-              <option value="set">Set number</option>
+              <option value="name">Name A-Z</option>
+              <option value="name-desc">Name Z-A</option>
+              <option value="set">Set number low to high</option>
+              <option value="set-desc">Set number high to low</option>
               <option value="recent">Recently added</option>
             </select>
           </label>
@@ -2850,8 +2914,11 @@ function AddScreen({
                 Sort
                 <select value={catalogueSort} onChange={(event) => setCatalogueSort(event.target.value as CatalogueSort)}>
                   <option value="value-desc">Highest value</option>
-                  <option value="set-number">Set number</option>
-                  <option value="name">Name</option>
+                  <option value="value-asc">Lowest value</option>
+                  <option value="set-number-asc">Set number low to high</option>
+                  <option value="set-number-desc">Set number high to low</option>
+                  <option value="name-asc">Name A-Z</option>
+                  <option value="name-desc">Name Z-A</option>
                   <option value="rarity">Rarity</option>
                 </select>
               </label>
@@ -3402,16 +3469,32 @@ function SetsScreen({
   setSetSearch,
   setAppState,
 }: ScreenContext) {
+  const [sort, setSort] = useState<SetListSort>("release-desc");
   const normalizedSetSearch = normalizeSearchText(setSearch);
-  const filteredSets = sets.filter((set) => matchesSetSearch(set, normalizedSetSearch));
+  const filteredSets = sets
+    .filter((set) => matchesSetSearch(set, normalizedSetSearch))
+    .sort((left, right) => sortSets(left, right, sort));
 
   return (
     <section className="page">
       <PageHeader title="Sets" />
-      <label className="search-box">
-        <Search size={18} />
-        <input value={setSearch} onChange={(event) => setSetSearch(event.target.value)} placeholder="Search sets" />
-      </label>
+      <section className="catalogue-toolbar">
+        <label className="search-box">
+          <Search size={18} />
+          <input value={setSearch} onChange={(event) => setSetSearch(event.target.value)} placeholder="Search sets" />
+        </label>
+        <label className="sort-control">
+          Sort
+          <select value={sort} onChange={(event) => setSort(event.target.value as SetListSort)}>
+            <option value="release-desc">Newest first</option>
+            <option value="release-asc">Oldest first</option>
+            <option value="name-asc">Name A-Z</option>
+            <option value="name-desc">Name Z-A</option>
+            <option value="completion-desc">Completion high to low</option>
+            <option value="completion-asc">Completion low to high</option>
+          </select>
+        </label>
+      </section>
       <div className="set-list">
         {filteredSets.map((set) => (
           <SetProgressCard
@@ -3437,7 +3520,7 @@ function SetDetailScreen({
 }: ScreenContext) {
   const [cardSearch, setCardSearch] = useState("");
   const [rarityFilter, setRarityFilter] = useState("all");
-  const [sort, setSort] = useState<SetDetailSort>("number");
+  const [sort, setSort] = useState<SetDetailSort>("number-asc");
   const set = sets.find((item) => item.id === appState.selectedSetId) ?? sets[0];
 
   if (!set) {
@@ -3550,9 +3633,12 @@ function SetDetailScreen({
           <label className="sort-control">
             Sort
             <select value={sort} onChange={(event) => setSort(event.target.value as SetDetailSort)}>
-              <option value="number">Number</option>
-              <option value="value-desc">Value</option>
-              <option value="name">Name</option>
+              <option value="number-asc">Set number low to high</option>
+              <option value="number-desc">Set number high to low</option>
+              <option value="value-desc">Highest value</option>
+              <option value="value-asc">Lowest value</option>
+              <option value="name-asc">Name A-Z</option>
+              <option value="name-desc">Name Z-A</option>
               <option value="rarity">Rarity</option>
             </select>
           </label>
@@ -3565,6 +3651,9 @@ function SetDetailScreen({
           const wanted = wishlist.some((entry) => entry.catalogueId === item.id);
           const marketValue = catalogueMarketValueMinor(item);
           const variants = item.variantOptions ?? [];
+          const statusLabel = owned ? "Owned" : wanted ? "Want" : "";
+          const statusClass = owned ? "set-print-status owned" : wanted ? "set-print-status wanted" : "";
+          const pricedVariantCount = variants.filter((option) => option.valueMinor !== undefined).length;
 
           return (
             <article className={owned ? "set-print-card owned" : wanted ? "set-print-card wanted" : "set-print-card"} key={item.id}>
@@ -3573,21 +3662,34 @@ function SetDetailScreen({
                 <div className="set-print-header">
                   <div className="set-print-title">
                     <h3>{item.name}</h3>
-                    <p>{item.number}</p>
+                    <p>No. {item.number}</p>
                   </div>
-                  <span className={owned ? "tag green" : wanted ? "tag amber" : "tag"}>{owned ? "Owned" : wanted ? "Want" : "Missing"}</span>
+                  {statusLabel ? (
+                    <span className={statusClass}>
+                      {owned ? <Check size={14} /> : <Heart size={14} />}
+                      {statusLabel}
+                    </span>
+                  ) : null}
                 </div>
                 <div className="set-print-meta">
-                  <span className="tag blue">{item.rarity}</span>
-                  <span className={marketValue === null ? "tag amber" : "tag green"}>
-                    {formatValuation(marketValue)}
+                  <span>
+                    <small>Rarity</small>
+                    <strong>{item.rarity}</strong>
+                  </span>
+                  <span>
+                    <small>Market</small>
+                    <strong>{formatValuation(marketValue)}</strong>
                   </span>
                 </div>
                 {variants.length ? (
                   <div className="set-print-variants" aria-label={`${item.name} variants`}>
+                    <span className="set-print-kicker">
+                      {variants.length} finish{variants.length === 1 ? "" : "es"}
+                      {pricedVariantCount ? `, ${pricedVariantCount} priced` : ""}
+                    </span>
                     {variants.slice(0, 4).map((option) => (
                       <span className="tag" key={option.label}>
-                        {option.valueMinor === undefined ? option.label : `${option.label} ${formatMoney(option.valueMinor)}`}
+                        {option.label}
                       </span>
                     ))}
                     {variants.length > 4 ? <span className="tag">+{variants.length - 4}</span> : null}
@@ -3651,6 +3753,7 @@ function WishlistScreen({
 }: ScreenContext) {
   const [editingId, setEditingId] = useState("");
   const [savingId, setSavingId] = useState("");
+  const [sort, setSort] = useState<WishlistSort>("priority-desc");
   const wishlistInsight = wishlist.reduce(
     (summary, item) => {
       const catalogueItem = catalogueById.get(item.catalogueId);
@@ -3673,6 +3776,7 @@ function WishlistScreen({
     },
     { grailCount: 0, pricedCount: 0, targetHits: 0 },
   );
+  const sortedWishlist = [...wishlist].sort((left, right) => sortWishlistItems(left, right, catalogueById, sort));
 
   async function handleUpdate(event: FormEvent<HTMLFormElement>, itemId: string) {
     event.preventDefault();
@@ -3701,6 +3805,24 @@ function WishlistScreen({
         <StatCard label="Target total" value={formatMoney(wishlistTotal)} note="Based on target prices" />
       </div>
       {wishlist.length ? (
+        <section className="catalogue-toolbar">
+          <label className="sort-control">
+            Sort
+            <select value={sort} onChange={(event) => setSort(event.target.value as WishlistSort)}>
+              <option value="priority-desc">Priority</option>
+              <option value="target-desc">Target high to low</option>
+              <option value="target-asc">Target low to high</option>
+              <option value="market-desc">Market high to low</option>
+              <option value="market-asc">Market low to high</option>
+              <option value="set-number-asc">Set number low to high</option>
+              <option value="set-number-desc">Set number high to low</option>
+              <option value="name-asc">Name A-Z</option>
+              <option value="name-desc">Name Z-A</option>
+            </select>
+          </label>
+        </section>
+      ) : null}
+      {wishlist.length ? (
         <section className="tool-panel wishlist-summary-panel">
           <div className="panel-title-row">
             <div>
@@ -3722,8 +3844,8 @@ function WishlistScreen({
       ) : null}
 
       <div className="item-list">
-        {wishlist.length ? (
-          wishlist.map((item) => {
+        {sortedWishlist.length ? (
+          sortedWishlist.map((item) => {
             const catalogueItem = catalogueById.get(item.catalogueId);
             if (!catalogueItem) {
               return null;
@@ -6662,12 +6784,26 @@ function valuationStatusLabel(item: CatalogueItem, owned?: CollectionItem) {
     return "Manual value";
   }
 
+  if (owned && catalogueMarketValueMinor(item, owned.variant) === null) {
+    return "Needs estimate";
+  }
+
+  const variantPrice = owned ? latestPricePointForVariant(item.priceHistory ?? [], owned.variant) : undefined;
+
+  if (variantPrice?.confidence) {
+    return `Market confidence: ${variantPrice.confidence}`;
+  }
+
   return item.hasPrice ? `Market confidence: ${item.confidence}` : "Needs estimate";
 }
 
 function valuationPillClass(item: CatalogueItem, owned?: CollectionItem) {
   if (owned?.overrideValueMinor !== undefined) {
     return "confidence-pill manual";
+  }
+
+  if (owned && catalogueMarketValueMinor(item, owned.variant) === null) {
+    return "confidence-pill missing";
   }
 
   return item.hasPrice ? "confidence-pill" : "confidence-pill missing";
@@ -6678,6 +6814,10 @@ function valuationTagClass(item: CatalogueItem, owned?: CollectionItem) {
     return "tag green";
   }
 
+  if (owned && catalogueMarketValueMinor(item, owned.variant) === null) {
+    return "tag amber";
+  }
+
   return item.hasPrice ? "tag blue" : "tag amber";
 }
 
@@ -6686,12 +6826,32 @@ function valuationSourceLabel(item: CatalogueItem, owned?: CollectionItem) {
     return "Manual estimate";
   }
 
+  if (owned && catalogueMarketValueMinor(item, owned.variant) === null) {
+    return "Needs estimate";
+  }
+
+  const variantPrice = owned ? latestPricePointForVariant(item.priceHistory ?? [], owned.variant) : undefined;
+
+  if (variantPrice?.source) {
+    return priceSourceLabel(variantPrice.source);
+  }
+
   return item.hasPrice ? priceSourceLabel(item.priceSource) : "Needs estimate";
 }
 
 function valuationObservedLabel(item: CatalogueItem, owned?: CollectionItem) {
   if (owned?.overrideValueMinor !== undefined) {
     return "Manual estimate";
+  }
+
+  if (owned && catalogueMarketValueMinor(item, owned.variant) === null) {
+    return "Unknown";
+  }
+
+  const variantPrice = owned ? latestPricePointForVariant(item.priceHistory ?? [], owned.variant) : undefined;
+
+  if (variantPrice?.observedAt) {
+    return formatEventDate(variantPrice.observedAt);
   }
 
   return item.priceObservedAt ? formatEventDate(item.priceObservedAt) : "Unknown";
@@ -7077,8 +7237,19 @@ function sortCatalogueItems(
       compareCatalogueNumbers(left.number, right.number);
   }
 
-  if (sort === "name") {
+  if (sort === "value-asc") {
+    return compareNullableNumbers(catalogueMarketValueMinor(left), catalogueMarketValueMinor(right), "asc") ||
+      compareCatalogueNumbers(left.number, right.number);
+  }
+
+  if (sort === "name" || sort === "name-asc") {
     return left.name.localeCompare(right.name, undefined, { sensitivity: "base" }) ||
+      left.set.localeCompare(right.set, undefined, { sensitivity: "base" }) ||
+      compareCatalogueNumbers(left.number, right.number);
+  }
+
+  if (sort === "name-desc") {
+    return right.name.localeCompare(left.name, undefined, { sensitivity: "base" }) ||
       left.set.localeCompare(right.set, undefined, { sensitivity: "base" }) ||
       compareCatalogueNumbers(left.number, right.number);
   }
@@ -7088,12 +7259,118 @@ function sortCatalogueItems(
       compareCatalogueNumbers(left.number, right.number);
   }
 
-  if (sort === "set-number") {
+  if (sort === "set-number" || sort === "set-number-asc") {
     return left.set.localeCompare(right.set, undefined, { sensitivity: "base" }) ||
       compareCatalogueNumbers(left.number, right.number);
   }
 
+  if (sort === "set-number-desc") {
+    return right.set.localeCompare(left.set, undefined, { sensitivity: "base" }) ||
+      compareCatalogueNumbers(right.number, left.number);
+  }
+
+  if (sort === "number-desc") {
+    return compareCatalogueNumbers(right.number, left.number);
+  }
+
   return compareCatalogueNumbers(left.number, right.number);
+}
+
+function sortSets(left: SetProgress, right: SetProgress, sort: SetListSort) {
+  if (sort === "release-asc") {
+    return releaseTime(left.releaseDate) - releaseTime(right.releaseDate) ||
+      left.name.localeCompare(right.name, undefined, { sensitivity: "base" });
+  }
+
+  if (sort === "name-asc") {
+    return left.name.localeCompare(right.name, undefined, { sensitivity: "base" });
+  }
+
+  if (sort === "name-desc") {
+    return right.name.localeCompare(left.name, undefined, { sensitivity: "base" });
+  }
+
+  if (sort === "completion-desc") {
+    return completionPercent(right.owned, right.total) - completionPercent(left.owned, left.total) ||
+      right.owned - left.owned ||
+      left.name.localeCompare(right.name, undefined, { sensitivity: "base" });
+  }
+
+  if (sort === "completion-asc") {
+    return completionPercent(left.owned, left.total) - completionPercent(right.owned, right.total) ||
+      left.owned - right.owned ||
+      left.name.localeCompare(right.name, undefined, { sensitivity: "base" });
+  }
+
+  return releaseTime(right.releaseDate) - releaseTime(left.releaseDate) ||
+    left.name.localeCompare(right.name, undefined, { sensitivity: "base" });
+}
+
+function sortWishlistItems(
+  left: WishlistItem,
+  right: WishlistItem,
+  catalogueById: Map<string, CatalogueItem>,
+  sort: WishlistSort,
+) {
+  const leftItem = catalogueById.get(left.catalogueId);
+  const rightItem = catalogueById.get(right.catalogueId);
+  const leftMarket = leftItem ? catalogueMarketValueMinor(leftItem) : null;
+  const rightMarket = rightItem ? catalogueMarketValueMinor(rightItem) : null;
+  const leftTarget = left.targetPriceMinor ?? leftMarket;
+  const rightTarget = right.targetPriceMinor ?? rightMarket;
+
+  if (sort === "target-desc") {
+    return compareNullableNumbers(rightTarget, leftTarget, "desc") || compareWishlistNames(leftItem, rightItem);
+  }
+
+  if (sort === "target-asc") {
+    return compareNullableNumbers(leftTarget, rightTarget, "asc") || compareWishlistNames(leftItem, rightItem);
+  }
+
+  if (sort === "market-desc") {
+    return compareNullableNumbers(rightMarket, leftMarket, "desc") || compareWishlistNames(leftItem, rightItem);
+  }
+
+  if (sort === "market-asc") {
+    return compareNullableNumbers(leftMarket, rightMarket, "asc") || compareWishlistNames(leftItem, rightItem);
+  }
+
+  if (sort === "set-number-asc") {
+    return compareWishlistSetOrder(leftItem, rightItem, "asc");
+  }
+
+  if (sort === "set-number-desc") {
+    return compareWishlistSetOrder(leftItem, rightItem, "desc");
+  }
+
+  if (sort === "name-asc") {
+    return compareWishlistNames(leftItem, rightItem);
+  }
+
+  if (sort === "name-desc") {
+    return compareWishlistNames(rightItem, leftItem);
+  }
+
+  return priorityRank(right.priority) - priorityRank(left.priority) || compareWishlistNames(leftItem, rightItem);
+}
+
+function compareWishlistNames(left?: CatalogueItem, right?: CatalogueItem) {
+  return (left?.name ?? "").localeCompare(right?.name ?? "", undefined, { sensitivity: "base" }) ||
+    (left?.set ?? "").localeCompare(right?.set ?? "", undefined, { sensitivity: "base" }) ||
+    compareCatalogueNumbers(left?.number ?? "", right?.number ?? "");
+}
+
+function compareWishlistSetOrder(left: CatalogueItem | undefined, right: CatalogueItem | undefined, direction: "asc" | "desc") {
+  const first = direction === "asc" ? left : right;
+  const second = direction === "asc" ? right : left;
+
+  return (first?.set ?? "").localeCompare(second?.set ?? "", undefined, { sensitivity: "base" }) ||
+    compareCatalogueNumbers(first?.number ?? "", second?.number ?? "") ||
+    compareWishlistNames(left, right);
+}
+
+function priorityRank(priority: WishlistItem["priority"]) {
+  return { Low: 1, Medium: 2, High: 3, Grail: 4 }[priority] ?? 0;
 }
 
 function matchesCatalogueSearch(item: CatalogueItem, normalizedQuery: string) {

@@ -1323,10 +1323,10 @@ h3 {
 
 .set-print-card {
   display: grid;
-  grid-template-columns: 82px minmax(0, 1fr);
-  gap: 13px;
-  min-height: 176px;
-  padding: 12px;
+  grid-template-columns: 86px minmax(0, 1fr);
+  gap: 14px;
+  min-height: 190px;
+  padding: 13px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background:
@@ -1345,8 +1345,8 @@ h3 {
 }
 
 .set-print-image {
-  width: 82px;
-  height: 116px;
+  width: 86px;
+  height: 120px;
   align-self: start;
   border-radius: 5px;
   background:
@@ -1402,9 +1402,72 @@ h3 {
   gap: 7px;
 }
 
-.set-print-variants {
-  max-height: 68px;
+.set-print-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.set-print-meta span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px 9px;
+  border: 1px solid color-mix(in srgb, var(--line) 84%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-soft) 76%, transparent);
+}
+
+.set-print-meta small,
+.set-print-kicker {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.set-print-meta strong {
   overflow: hidden;
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.set-print-variants {
+  max-height: 76px;
+  overflow: hidden;
+}
+
+.set-print-kicker {
+  flex-basis: 100%;
+}
+
+.set-print-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.set-print-status.owned {
+  border-color: color-mix(in srgb, var(--green) 46%, var(--line));
+  background: color-mix(in srgb, var(--green) 14%, var(--surface));
+  color: var(--green);
+}
+
+.set-print-status.wanted {
+  border-color: color-mix(in srgb, var(--amber) 42%, var(--line));
+  background: color-mix(in srgb, var(--amber) 12%, var(--surface));
+  color: var(--amber);
 }
 
 .set-print-actions {

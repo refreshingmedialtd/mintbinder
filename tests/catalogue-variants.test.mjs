@@ -121,6 +121,26 @@ test("infers legacy Base Set variants without inventing prices", () => {
   assert.equal(options[1].valueMinor, undefined);
 });
 
+test("infers standard modern finishes when provider metadata is thin", () => {
+  assert.deepEqual(
+    buildCatalogueVariantOptions({
+      itemType: "card",
+      rarity: "Common",
+      setName: "Chaos Rising",
+    }).map((option) => option.label),
+    ["Normal", "Reverse Holofoil"],
+  );
+
+  assert.deepEqual(
+    buildCatalogueVariantOptions({
+      itemType: "card",
+      rarity: "Double Rare",
+      setName: "Ascended Heroes",
+    }).map((option) => option.label),
+    ["Holofoil"],
+  );
+});
+
 test("derives Pokemon TCG image URLs from provider IDs", () => {
   assert.equal(
     pokemonTcgImageUrlFromProviderIds({ pokemon_tcg_api: "sv3pt5-199" }),
