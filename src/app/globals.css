@@ -1504,29 +1504,34 @@ h3 {
 .set-print-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 7px;
+  gap: 9px 13px;
   align-items: center;
+}
+
+.set-print-rarity {
+  display: inline-flex;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1.2;
+  text-transform: uppercase;
 }
 
 .set-print-price {
   position: relative;
   display: inline-flex;
   max-width: 100%;
-  min-height: 31px;
   align-items: center;
-  gap: 7px;
-  padding: 6px 8px;
-  border: 1px solid color-mix(in srgb, var(--green) 32%, var(--line));
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--green) 14%, var(--surface));
+  gap: 6px;
+  min-height: 0;
   color: var(--green);
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 900;
+  line-height: 1.2;
 }
 
 .set-print-price.missing {
-  border-color: color-mix(in srgb, var(--amber) 32%, var(--line));
-  background: color-mix(in srgb, var(--amber) 12%, var(--surface));
   color: var(--amber);
 }
 
@@ -1535,6 +1540,10 @@ h3 {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.item-meta-row {
+  gap: 9px 12px;
 }
 
 .market-help {
@@ -1553,6 +1562,11 @@ h3 {
   font-size: 12px;
   line-height: 1;
   list-style: none;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.market-help summary:hover {
+  background: color-mix(in srgb, currentColor 14%, transparent);
 }
 
 .market-help summary::-webkit-details-marker {
@@ -1708,6 +1722,14 @@ h3 {
   margin-top: 7px;
   color: var(--muted);
   font-weight: 850;
+}
+
+.catalogue-preview-modal .set-print-rarity {
+  font-size: 13px;
+}
+
+.catalogue-preview-modal .set-print-price {
+  font-size: 22px;
 }
 
 .catalogue-preview-variants {

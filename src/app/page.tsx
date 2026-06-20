@@ -3721,7 +3721,7 @@ function SetDetailScreen({
                   ) : null}
                 </div>
                 <div className="set-print-meta">
-                  <span className="tag">{item.rarity}</span>
+                  <span className="set-print-rarity">{item.rarity}</span>
                   <span className={marketValue === null ? "set-print-price missing" : "set-print-price"}>
                     <strong>{formatValuation(marketValue)}</strong>
                     <details className="market-help" onClick={(event) => event.stopPropagation()}>
@@ -3886,7 +3886,7 @@ function CataloguePreviewModal({
             </button>
           </div>
           <div className="set-print-meta">
-            <span className="tag">{item.rarity}</span>
+            <span className="set-print-rarity">{item.rarity}</span>
             <span className={marketValue === null ? "set-print-price missing" : "set-print-price"}>
               <strong>{formatValuation(marketValue)}</strong>
               <details className="market-help">
@@ -6588,7 +6588,7 @@ function CatalogueResult({
             <h3>{item.name}</h3>
             <p className="muted">{item.set} | {item.number}</p>
           </div>
-          <span className={selected ? "tag green" : "tag"}>{selected ? "Selected" : item.rarity}</span>
+          {selected ? <span className="set-print-status owned">Selected</span> : <span className="set-print-rarity">{item.rarity}</span>}
         </div>
         <p className="item-value">{formatValuation(catalogueMarketValueMinor(item))}</p>
         {item.variantOptions?.length ? (
@@ -6612,8 +6612,8 @@ function CataloguePreview({ item }: { item: CatalogueItem }) {
       <div>
         <h3>{item.name}</h3>
         <p className="muted">{item.set} | {item.number}</p>
-        <div className="tag-row">
-          <span className="tag">{item.rarity}</span>
+        <div className="tag-row item-meta-row">
+          <span className="set-print-rarity">{item.rarity}</span>
           <span className={valuationTagClass(item)}>{valuationStatusLabel(item)}</span>
         </div>
         {variants.length ? (
