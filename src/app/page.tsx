@@ -395,6 +395,7 @@ const plusPlanFeatures = [
   "Priority access to future advanced reporting tools",
 ];
 const themeStorageKey = "mintbinder-theme";
+const plusPreviewEmails = new Set(["liam@example.com", "liam@refreshing.media"]);
 const themeOptions: ThemeOption[] = [
   {
     access: "free",
@@ -570,7 +571,8 @@ export default function Home() {
     role: normalizeAppRole(session?.user?.role),
   };
   const operationsEnabled = canUseOperations(viewer.role);
-  const effectivePlus = operationsEnabled && plusPreviewOverride !== null
+  const canPreviewPlan = operationsEnabled || canPreviewSubscription(viewer.email);
+  const effectivePlus = canPreviewPlan && plusPreviewOverride !== null
     ? plusPreviewOverride
     : appState.plus;
   const effectiveAppState = useMemo(
@@ -1767,7 +1769,7 @@ export default function Home() {
     <div className="app-shell">
       <Header
         alertCount={intelligence.actionQueue.length}
-        canPreviewPlan={operationsEnabled}
+        canPreviewPlan={canPreviewPlan}
         plus={effectivePlus}
         previewPlus={effectivePlus}
         userEmail={viewer.email}
@@ -5673,7 +5675,7 @@ function SettingsScreen({
   return (
     <section className="page">
       <PageHeader title="Settings" />
-      <div className="screen-split">
+      <div className="settings-masonry">
         <MetricPanel
           title="Profile"
           rows={[
@@ -6548,23 +6550,33 @@ function OwnedItemCard({
     return null;
   }
 
+  const ownedValue = getOwnedValue(item, catalogueItem);
+  const variantLabel = item.variant && item.variant !== "Standard" ? item.variant : "";
+  const gradeLabel = item.grade && item.grade !== "Raw" && item.grade !== "N/A" ? item.grade : "";
+  const confidenceLabel = valuationStatusLabel(catalogueItem, item).replace("Market confidence: ", "");
+  const confidenceClass = valuationPillClass(catalogueItem, item).replace("confidence-pill", "owned-confidence");
+
   return (
-    <button className="item-card clickable" onClick={onClick}>
-      <div className="item-image">{renderItemImage(catalogueItem)}</div>
-      <div className="item-main">
-        <div className="item-title-row">
+    <button className="owned-card clickable" onClick={onClick}>
+      <div className="item-image owned-card-image">{renderItemImage(catalogueItem)}</div>
+      <div className="owned-card-body">
+        <div className="owned-card-head">
           <div>
             <h3>{catalogueItem.name}</h3>
-            <p className="muted">{catalogueItem.set} | {catalogueItem.number}</p>
+            <p>{catalogueItem.set} | {catalogueItem.number}</p>
           </div>
-          <span className={valuationPillClass(catalogueItem, item)}>{valuationStatusLabel(catalogueItem, item)}</span>
+          <strong>{formatValuation(ownedValue)}</strong>
         </div>
-        <div className="tag-row">
+        <div className="owned-card-meta">
           <span className="tag">{item.condition}</span>
-          <span className="tag">{item.language}</span>
+          {variantLabel ? <span className="tag">{variantLabel}</span> : null}
+          {gradeLabel ? <span className="tag">{gradeLabel}</span> : null}
           <span className="tag blue">Qty {item.quantity}</span>
         </div>
-        <p className="item-value">{formatValuation(getOwnedValue(item, catalogueItem))}</p>
+        <div className="owned-card-footer">
+          <span className={confidenceClass}>{confidenceLabel}</span>
+          <span>{item.language}</span>
+        </div>
       </div>
     </button>
   );
@@ -7914,6 +7926,10 @@ function isThemeId(value: unknown): value is ThemeId {
 
 function isThemeAllowed(themeId: ThemeId, plus: boolean) {
   return plus || freeThemeIds.has(themeId);
+}
+
+function canPreviewSubscription(email: string) {
+  return plusPreviewEmails.has(email.trim().toLowerCase());
 }
 
 function capitalize(value: string) {
