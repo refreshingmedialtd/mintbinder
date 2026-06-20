@@ -10,7 +10,7 @@ Mint Binder is not ready for a public production launch until production provide
 - Database: Neon PostgreSQL in Europe/London region for deployment testing, upgraded before real beta users.
 - Payments: Square production app, production access token, production location, production subscription plan variations, and a production webhook URL.
 - Email: 20i SMTP mailbox with SPF/DKIM/DMARC configured, or Resend/equivalent transactional email if SMTP deliverability is not good enough.
-- Jobs: protected app routes triggered manually from Operations at first, then scheduled later by a trusted scheduler using `JOB_SECRET`.
+- Jobs: protected app routes triggered manually from Operations at first, then scheduled by 20i or another trusted scheduler using `JOB_SECRET`.
 - Monitoring: error tracking, uptime checks, job/webhook failure alerts, and database backup monitoring.
 
 ## Environment Validation
@@ -41,6 +41,7 @@ Core app:
 - `AUTH_TRUST_HOST=true`.
 - `NEXT_PUBLIC_APP_URL`: same HTTPS origin as `AUTH_URL`.
 - `JOB_SECRET`: high-entropy secret for protected Operations/job routes.
+- `SCHEDULED_JOB_APP_URL=https://mintbinder.co.uk` for live scheduled job helpers.
 
 Billing:
 
@@ -176,6 +177,8 @@ npm run report:catalogue-gaps
 
 Expected remaining gaps: older/legacy card pricing, selected promos, and sealed products without usable TCGCSV prices. Use PriceCharting or another sealed-price provider for the next major sealed-pricing lift.
 
+For recurring pricing maintenance, use [SCHEDULED_JOBS.md](SCHEDULED_JOBS.md). The preferred card-pricing schedule calls `npm run job:live-pricing`, which posts to `/api/jobs/scheduled-pricing`; that route selects the next pricing page from recent successful `pricing_refresh` runs, writes new snapshots, and cycles back to page 1 after a full pass.
+
 ## Square Domain Batch
 
 For `mintbinder.co.uk`:
@@ -258,7 +261,7 @@ Minimum beta monitoring:
 - Public uptime check for `/api/health`.
 - Error monitoring for app/API exceptions.
 - Alert when Square webhook failures occur.
-- Run `npm run monitor:jobs` on a schedule to alert when `job_runs` records fail or stall. Keep `JOB_MONITOR_DRY_RUN=true` for the first dry run, then set it to `false` when alert emails are approved.
+- Run `npm run monitor:jobs` on a schedule to alert when `job_runs` records fail or stall. Keep `JOB_MONITOR_DRY_RUN=true` for the first dry run, then set it to `false` when alert emails are approved. Schedule the live pricing helpers from [SCHEDULED_JOBS.md](SCHEDULED_JOBS.md) once the first manual run passes.
 - Daily database backup completion alert.
 - Manual runbook for disabling checkout, pausing email digests, and reverting a deployment.
 
@@ -268,7 +271,7 @@ Minimum beta monitoring:
 - Keep the 20i Git deployment script path set to `/home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/deploy-20i.sh` and verify runtime routes after future deploys, including the PM2 reload output.
 - Controlled live price-alert digest smoke is complete; decide the real digest schedule before enabling beta recipient emails.
 - Production catalogue and pricing bootstrap is complete enough for beta; keep the new bootstrap helpers for future fresh databases and new-set refreshes.
-- `/api/health` and `npm run monitor:jobs` are available for first-pass uptime and job-run monitoring; schedule them before beta.
+- `/api/health`, `/api/jobs/scheduled-pricing`, the live job helpers, and `npm run monitor:jobs` are available for first-pass uptime, pricing history, and job-run monitoring; schedule them before beta.
 - Legal pages are beta drafts and need final company/address review plus active support email verification.
 - 20i hosting and Neon database are active; Neon should be upgraded before real beta users.
 - Production monitoring and backup provider choices are still open.
