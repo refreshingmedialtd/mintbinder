@@ -396,6 +396,7 @@ const plusPlanFeatures = [
 ];
 const themeStorageKey = "mintbinder-theme";
 const plusPreviewEmails = new Set(["liam@example.com", "liam@refreshing.media"]);
+const plusPreviewDomains = new Set(["refreshing.media"]);
 const themeOptions: ThemeOption[] = [
   {
     access: "free",
@@ -571,7 +572,7 @@ export default function Home() {
     role: normalizeAppRole(session?.user?.role),
   };
   const operationsEnabled = canUseOperations(viewer.role);
-  const canPreviewPlan = operationsEnabled || canPreviewSubscription(viewer.email);
+  const canPreviewPlan = operationsEnabled || canPreviewSubscription(viewer.email, viewer.name);
   const effectivePlus = canPreviewPlan && plusPreviewOverride !== null
     ? plusPreviewOverride
     : appState.plus;
@@ -2050,15 +2051,23 @@ function Header({
           {plus ? "Plus" : "Upgrade"}
         </button>
         {canPreviewPlan ? (
-          <label className="preview-toggle" title="Temporary tester-only Free/Plus preview">
-            <span>{previewPlus ? "Preview Plus" : "Preview Free"}</span>
-            <input
-              type="checkbox"
-              checked={previewPlus}
-              onChange={(event) => onTogglePreviewPlus(event.currentTarget.checked)}
-            />
-            <span className="preview-switch" aria-hidden="true" />
-          </label>
+          <div className="plan-preview-control" aria-label="Temporary tester-only plan preview">
+            <span>Test plan</span>
+            <button
+              className={!previewPlus ? "active" : ""}
+              type="button"
+              onClick={() => onTogglePreviewPlus(false)}
+            >
+              Free
+            </button>
+            <button
+              className={previewPlus ? "active" : ""}
+              type="button"
+              onClick={() => onTogglePreviewPlus(true)}
+            >
+              Plus
+            </button>
+          </div>
         ) : null}
         <button
           className="status-pill alert-pill"
@@ -5675,67 +5684,71 @@ function SettingsScreen({
   return (
     <section className="page">
       <PageHeader title="Settings" />
-      <div className="settings-masonry">
-        <MetricPanel
-          title="Profile"
-          rows={[
-            ["Name", viewer.name],
-            ["Email", viewer.email],
-            ["Role", viewer.role === "ADMIN" ? "Admin" : "User"],
-            ["Currency", "GBP (£)"],
-            ["Region", "United Kingdom"],
-          ]}
-        />
-        <MetricPanel
-          title="Subscription"
-          rows={[
-            ["Plan", appState.plus ? "Plus" : "Free"],
-            ["Billing", billingStatusLabel(subscription)],
-          ]}
-        />
-        <ThemePanel
-          plus={appState.plus}
-          selectedThemeId={themeId}
-          onSelectTheme={setThemeId}
-          onStartCheckout={startPlusCheckout}
-        />
-        <BillingPanel
-          plus={appState.plus}
-          subscription={subscription}
-          onCancelSubscription={cancelPlusSubscription}
-          onOpenBillingPortal={openBillingPortal}
-          onStartCheckout={startPlusCheckout}
-        />
-        <PlanComparisonPanel
-          plus={appState.plus}
-          onStartCheckout={startPlusCheckout}
-        />
-        <NotificationPreferencesPanel
-          plus={appState.plus}
-          preferences={notificationPreferences}
-          onUpdate={updateNotificationPreferences}
-        />
-        {canUseOperations(viewer.role) ? <OperationsEntryPanel onOpen={() => navigate("ops")} /> : null}
-        <MetricPanel
-          title="Data source"
-          rows={[
-            ["Mode", isLoadingData ? "Loading" : dataSource === "database" ? "Prisma database" : "Sample fallback"],
-            ["Status", dataNotice || "Connected"],
-          ]}
-        />
-        <DataPanel
-          plus={appState.plus}
-          onExportCollection={exportCollectionCsv}
-          onExportInsuranceReport={exportInsuranceReport}
-          onDownloadTemplate={downloadImportTemplate}
-          onImportCollection={importCollectionCsv}
-          onResetSampleData={resetSampleData}
-        />
-        <StoragePanel
-          locations={storageLocations}
-          onCreate={createStorageLocation}
-          onDelete={deleteStorageLocation}
-        />
+      <div className="settings-columns">
+        <div className="settings-stack">
+          <MetricPanel
+            title="Profile"
+            rows={[
+              ["Name", viewer.name],
+              ["Email", viewer.email],
+              ["Role", viewer.role === "ADMIN" ? "Admin" : "User"],
+              ["Currency", "\u00a3"],
+              ["Region", "United Kingdom"],
+            ]}
+          />
+          <ThemePanel
+            plus={appState.plus}
+            selectedThemeId={themeId}
+            onSelectTheme={setThemeId}
+            onStartCheckout={startPlusCheckout}
+          />
+          <PlanComparisonPanel
+            plus={appState.plus}
+            onStartCheckout={startPlusCheckout}
+          />
+          {canUseOperations(viewer.role) ? <OperationsEntryPanel onOpen={() => navigate("ops")} /> : null}
+          <DataPanel
+            plus={appState.plus}
+            onExportCollection={exportCollectionCsv}
+            onExportInsuranceReport={exportInsuranceReport}
+            onDownloadTemplate={downloadImportTemplate}
+            onImportCollection={importCollectionCsv}
+            onResetSampleData={resetSampleData}
+          />
+        </div>
+        <div className="settings-stack">
+          <MetricPanel
+            title="Subscription"
+            rows={[
+              ["Plan", appState.plus ? "Plus" : "Free"],
+              ["Billing", billingStatusLabel(subscription)],
+            ]}
+          />
+          <BillingPanel
+            plus={appState.plus}
+            subscription={subscription}
+            onCancelSubscription={cancelPlusSubscription}
+            onOpenBillingPortal={openBillingPortal}
+            onStartCheckout={startPlusCheckout}
+          />
+          <NotificationPreferencesPanel
+            plus={appState.plus}
+            preferences={notificationPreferences}
+            onUpdate={updateNotificationPreferences}
+          />
+          <MetricPanel
+            title="Data source"
+            rows={[
+              ["Mode", isLoadingData ? "Loading" : dataSource === "database" ? "Prisma database" : "Sample fallback"],
+              ["Status", dataNotice || "Connected"],
+            ]}
+          />
+          <StoragePanel
+            locations={storageLocations}
+            onCreate={createStorageLocation}
+            onDelete={deleteStorageLocation}
+          />
+        </div>
       </div>
     </section>
   );
@@ -6553,28 +6566,28 @@ function OwnedItemCard({
   const ownedValue = getOwnedValue(item, catalogueItem);
   const variantLabel = item.variant && item.variant !== "Standard" ? item.variant : "";
   const gradeLabel = item.grade && item.grade !== "Raw" && item.grade !== "N/A" ? item.grade : "";
-  const confidenceLabel = valuationStatusLabel(catalogueItem, item).replace("Market confidence: ", "");
+  const confidenceLabel = valuationStatusLabel(catalogueItem, item)
+    .replace("Market confidence: ", "")
+    .replace("Price confidence: ", "");
   const confidenceClass = valuationPillClass(catalogueItem, item).replace("confidence-pill", "owned-confidence");
 
   return (
-    <button className="owned-card clickable" onClick={onClick}>
-      <div className="item-image owned-card-image">{renderItemImage(catalogueItem)}</div>
-      <div className="owned-card-body">
-        <div className="owned-card-head">
-          <div>
-            <h3>{catalogueItem.name}</h3>
-            <p>{catalogueItem.set} | {catalogueItem.number}</p>
-          </div>
+    <button className="collection-lot-card clickable" onClick={onClick}>
+      <div className="item-image collection-lot-image">{renderItemImage(catalogueItem)}</div>
+      <div className="collection-lot-body">
+        <div className="collection-lot-head">
+          <h3>{catalogueItem.name}</h3>
           <strong>{formatValuation(ownedValue)}</strong>
         </div>
-        <div className="owned-card-meta">
+        <p className="collection-lot-set">{catalogueItem.set} | {catalogueItem.number}</p>
+        <div className="collection-lot-meta">
           <span className="tag">{item.condition}</span>
           {variantLabel ? <span className="tag">{variantLabel}</span> : null}
           {gradeLabel ? <span className="tag">{gradeLabel}</span> : null}
           <span className="tag blue">Qty {item.quantity}</span>
         </div>
-        <div className="owned-card-footer">
-          <span className={confidenceClass}>{confidenceLabel}</span>
+        <div className="collection-lot-footer">
+          <span className={confidenceClass}>{confidenceLabel} confidence</span>
           <span>{item.language}</span>
         </div>
       </div>
@@ -7928,8 +7941,13 @@ function isThemeAllowed(themeId: ThemeId, plus: boolean) {
   return plus || freeThemeIds.has(themeId);
 }
 
-function canPreviewSubscription(email: string) {
-  return plusPreviewEmails.has(email.trim().toLowerCase());
+function canPreviewSubscription(email: string, name: string) {
+  const normalizedEmail = email.trim().toLowerCase();
+  const domain = normalizedEmail.split("@")[1] ?? "";
+
+  return plusPreviewEmails.has(normalizedEmail)
+    || plusPreviewDomains.has(domain)
+    || name.trim().toLowerCase() === "liamb";
 }
 
 function capitalize(value: string) {

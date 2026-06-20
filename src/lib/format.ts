@@ -3,7 +3,7 @@ export function formatMoney(valueMinor?: number | null) {
     return "Unknown";
   }
 
-  return `£${(valueMinor / 100).toLocaleString("en-GB", {
+  return `\u00a3${(valueMinor / 100).toLocaleString("en-GB", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
