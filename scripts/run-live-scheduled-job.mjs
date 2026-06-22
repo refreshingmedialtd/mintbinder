@@ -72,7 +72,8 @@ export function protectedJobRequest(kind, env = process.env) {
 async function runPricingJobBatches({ baseUrl, env, fetchImpl, secret }) {
   const request = protectedJobRequest("pricing", env);
   const totalMaxPages = optionalPositiveInteger(request.body.maxPages);
-  const requestMaxPages = optionalPositiveInteger(env.POKEMON_TCG_PRICING_REQUEST_MAX_PAGES) ?? 2;
+  const requestMaxPages = optionalPositiveInteger(env.POKEMON_TCG_PRICING_REQUEST_MAX_PAGES) ?? 1;
+  const batchWaitMs = optionalNonNegativeInteger(env.POKEMON_TCG_PRICING_BATCH_WAIT_MS) ?? 1500;
   const shouldSplit =
     totalMaxPages &&
     totalMaxPages > requestMaxPages &&
@@ -115,6 +116,10 @@ async function runPricingJobBatches({ baseUrl, env, fetchImpl, secret }) {
 
     if (batch.response?.complete === true) {
       break;
+    }
+
+    if (pagesRemaining > 0) {
+      await wait(batchWaitMs);
     }
   }
 
@@ -333,6 +338,26 @@ function optionalPositiveInteger(value) {
   }
 
   return Math.floor(number);
+}
+
+function optionalNonNegativeInteger(value) {
+  const number = Number(value);
+
+  if (!Number.isFinite(number) || number < 0) {
+    return undefined;
+  }
+
+  return Math.floor(number);
+}
+
+async function wait(ms) {
+  if (ms <= 0) {
+    return;
+  }
+
+  await new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 function sumResponses(responses, key) {

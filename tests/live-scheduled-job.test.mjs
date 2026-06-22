@@ -13,6 +13,7 @@ test("live pricing requests are split into timeout-safe batches", async () => {
     env: {
       JOB_SECRET: "secret",
       POKEMON_TCG_PRICING_MAX_PAGES: "5",
+      POKEMON_TCG_PRICING_BATCH_WAIT_MS: "0",
       POKEMON_TCG_PRICING_PAGE: "auto",
       POKEMON_TCG_PRICING_PAGE_SIZE: "250",
       SCHEDULED_JOB_APP_URL: "https://mintbinder.co.uk",
@@ -47,10 +48,10 @@ test("live pricing requests are split into timeout-safe batches", async () => {
     job: "pricing",
   });
 
-  assert.deepEqual(calls.map((call) => call.body.maxPages), [2, 2, 1]);
+  assert.deepEqual(calls.map((call) => call.body.maxPages), [1, 1, 1, 1, 1]);
   assert.equal(result.ok, true);
   assert.equal(result.response.batched, true);
-  assert.equal(result.response.batchCount, 3);
+  assert.equal(result.response.batchCount, 5);
   assert.equal(result.response.cardsFetched, 1250);
   assert.equal(result.response.nextPage, 11);
   assert.equal(result.response.pagesProcessed, 5);

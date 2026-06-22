@@ -82,6 +82,16 @@ export class PricingProviderConfigError extends Error {
   }
 }
 
+class PokemonTcgApiRequestError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "PokemonTcgApiRequestError";
+    this.status = status;
+  }
+}
+
 export class PokemonTcgPartialSyncError extends Error {
   originalError: unknown;
   resultPayload: ReturnType<typeof summarizePokemonTcgPageResults> & {
@@ -300,6 +310,36 @@ async function fetchPokemonCards({
   pageSize: number;
   q: string;
 }) {
+  const retryAttempts = optionalPositiveInteger(process.env.POKEMON_TCG_API_RETRY_ATTEMPTS) ?? 3;
+  const retryWaitMs = optionalNonNegativeInteger(process.env.POKEMON_TCG_API_RETRY_WAIT_MS) ?? 1500;
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= retryAttempts; attempt += 1) {
+    try {
+      return await fetchPokemonCardsOnce({ page, pageSize, q });
+    } catch (error) {
+      lastError = error;
+
+      if (!isRetryablePokemonTcgError(error) || attempt >= retryAttempts) {
+        throw error;
+      }
+
+      await wait(retryWaitMs * attempt);
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error("Pokemon TCG API request failed.");
+}
+
+async function fetchPokemonCardsOnce({
+  page,
+  pageSize,
+  q,
+}: {
+  page: number;
+  pageSize: number;
+  q: string;
+}) {
   const url = new URL("https://api.pokemontcg.io/v2/cards");
   const apiKey = process.env.POKEMON_TCG_API_KEY;
 
@@ -325,10 +365,51 @@ async function fetchPokemonCards({
   };
 
   if (!response.ok || !Array.isArray(data.data)) {
-    throw new Error(data.error?.message ?? `Pokemon TCG API request failed with ${response.status}.`);
+    throw new PokemonTcgApiRequestError(
+      data.error?.message ?? `Pokemon TCG API request failed with ${response.status}.`,
+      response.status,
+    );
   }
 
   return data as PokemonTcgSearchResponse;
+}
+
+function isRetryablePokemonTcgError(error: unknown) {
+  if (error instanceof PokemonTcgApiRequestError) {
+    return error.status === 429 || error.status >= 500;
+  }
+
+  return false;
+}
+
+function optionalPositiveInteger(value: unknown) {
+  const number = Number(value);
+
+  if (!Number.isFinite(number) || number <= 0) {
+    return undefined;
+  }
+
+  return Math.floor(number);
+}
+
+function optionalNonNegativeInteger(value: unknown) {
+  const number = Number(value);
+
+  if (!Number.isFinite(number) || number < 0) {
+    return undefined;
+  }
+
+  return Math.floor(number);
+}
+
+async function wait(ms: number) {
+  if (ms <= 0) {
+    return;
+  }
+
+  await new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 async function pokemonPricingRates(): Promise<PokemonPricingRates> {

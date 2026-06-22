@@ -21,7 +21,7 @@ Pricing jobs fetch fresh GBP exchange rates from Frankfurter by default. Keep `P
 
 Use `POKEMON_TCG_PRICING_PAGE="auto"` or leave it unset. Auto mode lets the scheduled pricing route inspect recent successful `pricing_refresh` runs and choose the next page. If a full pass completes, the next run starts back at page 1 so historical snapshots continue to build.
 
-Use `POKEMON_TCG_PRICING_MAX_PAGES="5"` with an hourly schedule for normal card-pricing maintenance. Keep `POKEMON_TCG_PRICING_REQUEST_MAX_PAGES="2"` so the live cron helper splits the hourly target into smaller API calls, avoiding 20i gateway timeouts. With `POKEMON_TCG_PRICING_PAGE_SIZE="250"`, that refreshes up to 1,250 cards per scheduled run, or about 30,000 card records per day, which is enough to sweep the current 20,359-card catalogue daily with recovery room for failed runs.
+Use `POKEMON_TCG_PRICING_MAX_PAGES="5"` with an hourly schedule for normal card-pricing maintenance. Keep `POKEMON_TCG_PRICING_REQUEST_MAX_PAGES="1"` so the live cron helper splits the hourly target into one-page API calls, avoiding 20i gateway timeouts. With `POKEMON_TCG_PRICING_PAGE_SIZE="250"`, that still refreshes up to 1,250 cards per scheduled run, or about 30,000 card records per day, which is enough to sweep the current 20,359-card catalogue daily with recovery room for failed runs. Keep `POKEMON_TCG_PRICING_BATCH_WAIT_MS="1500"` and `POKEMON_TCG_API_RETRY_ATTEMPTS="3"` unless provider stability changes.
 
 ## First Manual Checks
 
@@ -102,6 +102,6 @@ They use the same `Authorization: Bearer <JOB_SECRET>` header. Keep the request 
 ## Operating Notes
 
 - Scheduled card pricing writes new snapshots over time, so price history charts become more useful the longer the job runs.
-- `POKEMON_TCG_PRICING_MAX_PAGES` defaults to `5` for scheduled runs. `POKEMON_TCG_PRICING_REQUEST_MAX_PAGES` defaults to `2` in the live helper so one scheduled task can make several smaller API calls instead of one long-running request. Keep the hourly job history clean before raising it further; the app caps scheduled route runs at 20 pages per API call.
+- `POKEMON_TCG_PRICING_MAX_PAGES` defaults to `5` for scheduled runs. `POKEMON_TCG_PRICING_REQUEST_MAX_PAGES` defaults to `1` in the live helper so one scheduled task can make several one-page API calls instead of one long-running request. `POKEMON_TCG_PRICING_BATCH_WAIT_MS` pauses between those calls, and `POKEMON_TCG_API_RETRY_ATTEMPTS` retries transient Pokemon TCG API `429`/`5xx` responses before the job is marked failed. Keep the hourly job history clean before raising batch sizes further; the app caps scheduled route runs at 20 pages per API call.
 - Keep `TCGCSV_SEALED_GROUP_LIMIT` small at first. Sealed pricing can become expensive in provider calls if run too broadly.
 - Review Operations job history after the first few scheduled runs. Do not enable live recipient emails until pricing and monitor jobs are consistently clean.
