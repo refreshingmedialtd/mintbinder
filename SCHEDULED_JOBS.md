@@ -25,10 +25,10 @@ Run these once from the deployed repository path before adding recurring schedul
 
 ```sh
 cd /home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder
-npm run job:live-health
-npm run job:live-pricing
-npm run job:live-sealed-pricing
-npm run monitor:jobs
+/usr/bin/bash scripts/cron-live-health.sh
+/usr/bin/bash scripts/cron-live-pricing.sh
+/usr/bin/bash scripts/cron-live-sealed-pricing.sh
+/usr/bin/bash scripts/cron-monitor-jobs.sh
 ```
 
 Expected results:
@@ -44,28 +44,28 @@ Start conservative while beta data volume is small:
 
 | Job | Command | Suggested cadence |
 | --- | --- | --- |
-| Health smoke | `npm run job:live-health` | Every 30 minutes |
-| Card pricing history | `npm run job:live-pricing` | Daily around 02:10 UK time |
-| Sealed pricing history | `npm run job:live-sealed-pricing` | Daily around 03:10 UK time |
-| Job monitor | `npm run monitor:jobs` | Hourly |
-| Price alert digest dry run | `npm run job:live-price-alerts` | Daily around 08:00 UK time |
+| Health smoke | `/usr/bin/bash /home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/cron-live-health.sh` | Every 30 minutes |
+| Card pricing history | `/usr/bin/bash /home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/cron-live-pricing.sh` | Daily around 02:10 UK time |
+| Sealed pricing history | `/usr/bin/bash /home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/cron-live-sealed-pricing.sh` | Daily around 03:10 UK time |
+| Job monitor | `/usr/bin/bash /home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/cron-monitor-jobs.sh` | Hourly |
+| Price alert digest dry run | `/usr/bin/bash /home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/cron-live-price-alerts.sh` | Daily around 08:00 UK time |
 
 Keep `PRICE_ALERT_DIGEST_DRY_RUN=true` until beta recipients are approved. When ready, do one controlled live send with `PRICE_ALERT_DIGEST_TEST_RECIPIENT` before enabling `PRICE_ALERT_DIGEST_ALLOW_LIVE_RECIPIENTS=true`.
 
 ## 20i Scheduled Task Command Shape
 
-If 20i provides a scheduled task or cron command field, use one command per schedule:
+If 20i provides a scheduled task or cron command field, use one command per schedule. Prefer the wrapper scripts below because some hosting control panels do not reliably save shell chains such as `cd ... && npm ...`.
 
 ```sh
-cd /home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder && npm run job:live-pricing
+/usr/bin/bash /home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/cron-live-pricing.sh
 ```
 
 Use the same shape for the other commands:
 
 ```sh
-cd /home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder && npm run job:live-sealed-pricing
-cd /home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder && npm run monitor:jobs
-cd /home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder && npm run job:live-price-alerts
+/usr/bin/bash /home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/cron-live-sealed-pricing.sh
+/usr/bin/bash /home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/cron-monitor-jobs.sh
+/usr/bin/bash /home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/cron-live-price-alerts.sh
 ```
 
 If 20i does not expose scheduled shell commands for this package, use an HTTPS scheduler that can send headers. The card pricing endpoint is:
