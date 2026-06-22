@@ -20,6 +20,16 @@ export async function runLiveScheduledJob({
   }
 
   const secret = required(env.JOB_SECRET, "JOB_SECRET must be set before running a protected scheduled job.");
+
+  if (kind === "pricing") {
+    return runPricingJobBatches({
+      baseUrl,
+      env,
+      fetchImpl,
+      secret,
+    });
+  }
+
   const request = protectedJobRequest(kind, env);
 
   return requestJson({
@@ -57,6 +67,107 @@ export function protectedJobRequest(kind, env = process.env) {
   }
 
   throw new Error(`Unsupported scheduled job "${kind}".`);
+}
+
+async function runPricingJobBatches({ baseUrl, env, fetchImpl, secret }) {
+  const request = protectedJobRequest("pricing", env);
+  const totalMaxPages = optionalPositiveInteger(request.body.maxPages);
+  const requestMaxPages = optionalPositiveInteger(env.POKEMON_TCG_PRICING_REQUEST_MAX_PAGES) ?? 2;
+  const shouldSplit =
+    totalMaxPages &&
+    totalMaxPages > requestMaxPages &&
+    requestMaxPages > 0 &&
+    request.body.page === undefined;
+  const url = new URL(request.path, baseUrl);
+  const headers = {
+    authorization: `Bearer ${secret}`,
+    "content-type": "application/json",
+  };
+
+  if (!shouldSplit) {
+    return requestJson({
+      body: request.body,
+      fetchImpl,
+      headers,
+      method: "POST",
+      url,
+    });
+  }
+
+  const batches = [];
+  let pagesRemaining = totalMaxPages;
+
+  while (pagesRemaining > 0) {
+    const maxPages = Math.min(requestMaxPages, pagesRemaining);
+    const batch = await requestJson({
+      body: {
+        ...request.body,
+        maxPages,
+      },
+      fetchImpl,
+      headers,
+      method: "POST",
+      url,
+    });
+
+    batches.push(batch);
+    pagesRemaining -= optionalPositiveInteger(batch.response?.pagesProcessed) ?? maxPages;
+
+    if (batch.response?.complete === true) {
+      break;
+    }
+  }
+
+  const response = combinedPricingBatchResponse({
+    batches,
+    requestedBody: request.body,
+  });
+
+  return {
+    body: request.body,
+    ok: batches.every((batch) => batch.ok),
+    response,
+    status: batches.at(-1)?.status ?? 200,
+    url: url.toString(),
+  };
+}
+
+function combinedPricingBatchResponse({ batches, requestedBody }) {
+  const responses = batches.map((batch) => batch.response ?? {});
+  const first = responses[0] ?? {};
+  const last = responses.at(-1) ?? {};
+
+  return {
+    batched: true,
+    batchCount: batches.length,
+    batches: responses.map((response) => ({
+      cardsFetched: response.cardsFetched,
+      cardsUpserted: response.cardsUpserted,
+      complete: response.complete,
+      jobRunId: response.jobRun?.id,
+      maxPages: response.maxPages,
+      nextPage: response.nextPage,
+      page: response.page,
+      pagesProcessed: response.pagesProcessed,
+      pricingSnapshotsCreated: response.pricingSnapshotsCreated,
+      selectedPage: response.selectedPage,
+      setsUpserted: response.setsUpserted,
+    })),
+    cardsFetched: sumResponses(responses, "cardsFetched"),
+    cardsUpserted: sumResponses(responses, "cardsUpserted"),
+    complete: last.complete === true,
+    maxPages: requestedBody.maxPages,
+    nextPage: last.nextPage,
+    page: first.page,
+    pageSize: last.pageSize ?? first.pageSize ?? requestedBody.pageSize,
+    pagesProcessed: sumResponses(responses, "pagesProcessed"),
+    pricingSnapshotsCreated: sumResponses(responses, "pricingSnapshotsCreated"),
+    query: last.query ?? first.query,
+    scheduled: true,
+    selectedPage: first.selectedPage,
+    setsUpserted: sumResponses(responses, "setsUpserted"),
+    totalCount: last.totalCount ?? first.totalCount,
+  };
 }
 
 export function appBaseUrl(env = process.env) {
@@ -222,6 +333,10 @@ function optionalPositiveInteger(value) {
   }
 
   return Math.floor(number);
+}
+
+function sumResponses(responses, key) {
+  return responses.reduce((total, response) => total + (optionalPositiveInteger(response?.[key]) ?? 0), 0);
 }
 
 function optionalRate(value) {

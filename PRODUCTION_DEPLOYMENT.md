@@ -180,7 +180,7 @@ npm run report:catalogue-gaps
 
 Expected remaining gaps: older/legacy card pricing, selected promos, and sealed products without usable TCGCSV prices. Use PriceCharting or another sealed-price provider for the next major sealed-pricing lift.
 
-For recurring pricing maintenance, use [SCHEDULED_JOBS.md](SCHEDULED_JOBS.md). The preferred card-pricing schedule calls `npm run job:live-pricing` hourly with `POKEMON_TCG_PRICING_MAX_PAGES=5`, which posts to `/api/jobs/scheduled-pricing`; that route selects the next pricing page from recent successful `pricing_refresh` runs, writes new snapshots, and cycles back to page 1 after a full pass.
+For recurring pricing maintenance, use [SCHEDULED_JOBS.md](SCHEDULED_JOBS.md). The preferred card-pricing schedule calls `npm run job:live-pricing` hourly with `POKEMON_TCG_PRICING_MAX_PAGES=5` and `POKEMON_TCG_PRICING_REQUEST_MAX_PAGES=2`, which posts to `/api/jobs/scheduled-pricing` in timeout-safe batches; that route selects the next pricing page from recent successful `pricing_refresh` runs, writes new snapshots, and cycles back to page 1 after a full pass.
 
 ## Square Domain Batch
 
