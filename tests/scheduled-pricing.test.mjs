@@ -77,7 +77,7 @@ test("scheduled pricing input uses safe production defaults and auto page rotati
       ],
     }),
     {
-      maxPages: 2,
+      maxPages: 5,
       page: 4,
       pageSize: 250,
       priceOnlyUnpriced: false,

@@ -21,6 +21,8 @@ Pricing jobs fetch fresh GBP exchange rates from Frankfurter by default. Keep `P
 
 Use `POKEMON_TCG_PRICING_PAGE="auto"` or leave it unset. Auto mode lets the scheduled pricing route inspect recent successful `pricing_refresh` runs and choose the next page. If a full pass completes, the next run starts back at page 1 so historical snapshots continue to build.
 
+Use `POKEMON_TCG_PRICING_MAX_PAGES="5"` with an hourly schedule for normal card-pricing maintenance. With `POKEMON_TCG_PRICING_PAGE_SIZE="250"`, that refreshes up to 1,250 cards per run, or about 30,000 card records per day, which is enough to sweep the current 20,359-card catalogue daily with recovery room for failed runs.
+
 ## First Manual Checks
 
 Run these once from the deployed repository path before adding recurring schedules:
@@ -47,7 +49,7 @@ Start conservative while beta data volume is small:
 | Job | Command | Suggested cadence |
 | --- | --- | --- |
 | Health smoke | `/usr/bin/bash /home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/cron-live-health.sh` | Every 30 minutes |
-| Card pricing history | `/usr/bin/bash /home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/cron-live-pricing.sh` | Daily around 02:10 UK time |
+| Card pricing history | `/usr/bin/bash /home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/cron-live-pricing.sh` | Hourly, with `POKEMON_TCG_PRICING_MAX_PAGES=5` |
 | Sealed pricing history | `/usr/bin/bash /home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/cron-live-sealed-pricing.sh` | Daily around 03:10 UK time |
 | Job monitor | `/usr/bin/bash /home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/cron-monitor-jobs.sh` | Hourly |
 | Price alert digest dry run | `/usr/bin/bash /home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/cron-live-price-alerts.sh` | Daily around 08:00 UK time |
@@ -100,6 +102,6 @@ They use the same `Authorization: Bearer <JOB_SECRET>` header. Keep the request 
 ## Operating Notes
 
 - Scheduled card pricing writes new snapshots over time, so price history charts become more useful the longer the job runs.
-- `POKEMON_TCG_PRICING_MAX_PAGES` defaults to `2` for scheduled runs to avoid long jobs. Increase slowly after the job history is clean.
+- `POKEMON_TCG_PRICING_MAX_PAGES` defaults to `5` for scheduled runs. Keep the hourly job history clean before raising it further; the app caps scheduled runs at 20 pages per job.
 - Keep `TCGCSV_SEALED_GROUP_LIMIT` small at first. Sealed pricing can become expensive in provider calls if run too broadly.
 - Review Operations job history after the first few scheduled runs. Do not enable live recipient emails until pricing and monitor jobs are consistently clean.

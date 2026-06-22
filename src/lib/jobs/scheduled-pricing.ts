@@ -21,7 +21,7 @@ export type ScheduledPricingInput = {
   q?: string;
 };
 
-const defaultMaxPages = 2;
+const defaultMaxPages = 5;
 const defaultPageSize = 250;
 
 export function scheduledPricingInputFromSources({
