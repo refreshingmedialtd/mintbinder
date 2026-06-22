@@ -17,6 +17,11 @@ export type PokemonTcgCardPriceInput = {
 
 export type PokemonPricingRates = {
   eurToGbp?: number;
+  metadata?: Partial<Record<"EUR" | "USD", {
+    observedAt: string;
+    provider: string;
+    sourceDate?: string;
+  }>>;
   usdToGbp: number;
 };
 

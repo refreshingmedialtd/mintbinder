@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { ItemCondition, ItemType, type Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
+import { ExchangeRateConfigError, resolvePokemonPricingRates } from "@/lib/pricing/exchange-rates";
 import {
   normalizePokemonTcgPaging,
   pokemonTcgCardsOrderBy,
@@ -65,6 +66,7 @@ type SyncPokemonCardsInput = {
   page?: number;
   pageSize?: number;
   priceOnlyUnpriced?: boolean;
+  pricingRates?: PokemonPricingRates;
   q?: string;
   writePrices?: boolean;
 };
@@ -119,6 +121,7 @@ export async function syncPokemonTcgCardPages({
 }: SyncPokemonCardPagesInput = {}) {
   const paging = normalizePokemonTcgPaging({ maxPages, page, pageSize });
   const pages: PokemonTcgPageResult[] = [];
+  const pricingRates = writePrices ? await pokemonPricingRates() : undefined;
 
   for (let offset = 0; offset < paging.maxPages; offset += 1) {
     const currentPage = paging.page + offset;
@@ -129,6 +132,7 @@ export async function syncPokemonTcgCardPages({
         page: currentPage,
         pageSize: paging.pageSize,
         priceOnlyUnpriced,
+        pricingRates,
         q,
         writePrices,
       });
@@ -158,6 +162,7 @@ export async function syncPokemonTcgCards({
   page = 1,
   pageSize = 50,
   priceOnlyUnpriced = false,
+  pricingRates,
   q = process.env.POKEMON_TCG_QUERY ?? "",
   writePrices = true,
 }: SyncPokemonCardsInput = {}) {
@@ -167,7 +172,7 @@ export async function syncPokemonTcgCards({
     pageSize: paging.pageSize,
     q,
   });
-  const pricingRates = writePrices ? pokemonPricingRates() : null;
+  const resolvedPricingRates = writePrices ? pricingRates ?? await pokemonPricingRates() : null;
   const setIds = new Set<string>();
   let snapshotsCreated = 0;
 
@@ -239,8 +244,8 @@ export async function syncPokemonTcgCards({
       },
     });
 
-    if (writePrices && pricingRates && (!priceOnlyUnpriced || !(await hasCardPriceSnapshot(cardId)))) {
-      const price = bestPokemonTcgCardPrice(card, pricingRates);
+    if (writePrices && resolvedPricingRates && (!priceOnlyUnpriced || !(await hasCardPriceSnapshot(cardId)))) {
+      const price = bestPokemonTcgCardPrice(card, resolvedPricingRates);
 
       if (price) {
         await prisma.priceSnapshot.create({
@@ -256,6 +261,9 @@ export async function syncPokemonTcgCards({
               originalPrice: price.originalPrice,
               providerUpdatedAt: price.providerUpdatedAt,
               conversionRate: price.conversionRate,
+              exchangeRateObservedAt: resolvedPricingRates.metadata?.[price.originalCurrency]?.observedAt,
+              exchangeRateProvider: resolvedPricingRates.metadata?.[price.originalCurrency]?.provider,
+              exchangeRateSourceDate: resolvedPricingRates.metadata?.[price.originalCurrency]?.sourceDate,
               priceSource: price.sourceLabel,
             }),
             observedAt: new Date(),
@@ -323,27 +331,16 @@ async function fetchPokemonCards({
   return data as PokemonTcgSearchResponse;
 }
 
-function pokemonPricingRates(): PokemonPricingRates {
-  const usdToGbp = requiredConversionRate("POKEMON_TCG_USD_TO_GBP_RATE");
-  const eurToGbp = optionalConversionRate("POKEMON_TCG_EUR_TO_GBP_RATE");
+async function pokemonPricingRates(): Promise<PokemonPricingRates> {
+  try {
+    return await resolvePokemonPricingRates();
+  } catch (error) {
+    if (error instanceof ExchangeRateConfigError) {
+      throw new PricingProviderConfigError(error.message);
+    }
 
-  return { eurToGbp, usdToGbp };
-}
-
-function requiredConversionRate(envKey: string) {
-  const rate = Number(process.env[envKey]);
-
-  if (!Number.isFinite(rate) || rate <= 0) {
-    throw new PricingProviderConfigError(`${envKey} must be configured for pricing refreshes.`);
+    throw error;
   }
-
-  return rate;
-}
-
-function optionalConversionRate(envKey: string) {
-  const rate = Number(process.env[envKey]);
-
-  return Number.isFinite(rate) && rate > 0 ? rate : undefined;
 }
 
 async function hasCardPriceSnapshot(cardId: string) {

@@ -9,13 +9,15 @@ Confirm these values exist in the production `.env` file before scheduling anyth
 ```sh
 SCHEDULED_JOB_APP_URL="https://mintbinder.co.uk"
 JOB_SECRET="..."
-POKEMON_TCG_USD_TO_GBP_RATE="..."
-POKEMON_TCG_EUR_TO_GBP_RATE="..."
-TCGCSV_USD_TO_GBP_RATE="..."
+EXCHANGE_RATES_PROVIDER="frankfurter"
+EXCHANGE_RATES_AUTO="true"
+EXCHANGE_RATES_ALLOW_ENV_FALLBACK="true"
 PRICE_ALERT_DIGEST_DRY_RUN="true"
 PRICE_ALERT_DIGEST_ALLOW_LIVE_RECIPIENTS="false"
 JOB_MONITOR_DRY_RUN="true"
 ```
+
+Pricing jobs fetch fresh GBP exchange rates from Frankfurter by default. Keep `POKEMON_TCG_USD_TO_GBP_RATE`, `POKEMON_TCG_EUR_TO_GBP_RATE`, and `TCGCSV_USD_TO_GBP_RATE` only as optional fallback values in case the exchange-rate provider is temporarily unavailable. Set `EXCHANGE_RATES_PROVIDER="manual"` only if you deliberately want to disable automatic exchange rates.
 
 Use `POKEMON_TCG_PRICING_PAGE="auto"` or leave it unset. Auto mode lets the scheduled pricing route inspect recent successful `pricing_refresh` runs and choose the next page. If a full pass completes, the next run starts back at page 1 so historical snapshots continue to build.
 

@@ -21,7 +21,7 @@ Run this before staging, before public beta, and after changing provider credent
 npm run qa:production-env
 ```
 
-The validator intentionally fails against local/sandbox values. It checks for production-grade app URLs, Auth.js secret, job secret, database URL, Square configuration, webhook URL/signature, email sender, and pricing conversion-rate readiness.
+The validator intentionally fails against local/sandbox values. It checks for production-grade app URLs, Auth.js secret, job secret, database URL, Square configuration, webhook URL/signature, email sender, and pricing exchange-rate readiness.
 
 Use JSON output for automation:
 
@@ -79,9 +79,12 @@ Email and alerts:
 
 Pricing:
 
-- `POKEMON_TCG_USD_TO_GBP_RATE`: positive current conversion rate.
-- `POKEMON_TCG_EUR_TO_GBP_RATE`: positive current conversion rate for Cardmarket fallback.
-- `TCGCSV_USD_TO_GBP_RATE`: positive current conversion rate for TCGCSV imports.
+- `EXCHANGE_RATES_PROVIDER`: `frankfurter` for automatic live GBP rates, or `manual` only if rates will be maintained in `.env`.
+- `EXCHANGE_RATES_AUTO`: `true` for automatic live GBP rates.
+- `EXCHANGE_RATES_ALLOW_ENV_FALLBACK`: `true` so optional `.env` rates can keep pricing jobs running during provider outages.
+- `POKEMON_TCG_USD_TO_GBP_RATE`: optional fallback USD conversion rate.
+- `POKEMON_TCG_EUR_TO_GBP_RATE`: optional fallback EUR conversion rate for Cardmarket fallback.
+- `TCGCSV_USD_TO_GBP_RATE`: optional fallback USD conversion rate for TCGCSV imports.
 - `PRICECHARTING_API_TOKEN`: optional until that paid source is available.
 - `PRICECHARTING_USD_TO_GBP_RATE`: positive current conversion rate when PriceCharting is active.
 

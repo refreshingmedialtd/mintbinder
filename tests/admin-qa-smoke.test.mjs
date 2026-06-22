@@ -6,6 +6,7 @@ import {
   catalogueWarnings,
   conversionRateWarnings,
   countWarnings,
+  exchangeRateStatus,
   jobRunWarnings,
 } from "../scripts/admin-qa-smoke.mjs";
 
@@ -66,17 +67,43 @@ test("summarizes catalogue coverage warnings conservatively", () => {
   );
 });
 
-test("warns on missing conversion rates, audit rows, and job runs", () => {
+test("treats manual conversion rates as optional when automatic exchange rates are enabled", () => {
+  assert.deepEqual(
+    exchangeRateStatus({
+      EXCHANGE_RATES_PROVIDER: "frankfurter",
+      EXCHANGE_RATES_AUTO: "true",
+    }),
+    {
+      allowEnvFallback: true,
+      automatic: true,
+      endpoint: "https://api.frankfurter.app/latest",
+      provider: "frankfurter",
+    },
+  );
   assert.deepEqual(
     conversionRateWarnings([
       { key: "POKEMON_TCG_USD_TO_GBP_RATE", valid: false },
       { key: "POKEMON_TCG_EUR_TO_GBP_RATE", valid: false },
       { key: "TCGCSV_USD_TO_GBP_RATE", valid: false },
     ]),
+    [],
+  );
+});
+
+test("warns on missing manual conversion rates, audit rows, and job runs", () => {
+  assert.deepEqual(
+    conversionRateWarnings(
+      [
+        { key: "POKEMON_TCG_USD_TO_GBP_RATE", valid: false },
+        { key: "POKEMON_TCG_EUR_TO_GBP_RATE", valid: false },
+        { key: "TCGCSV_USD_TO_GBP_RATE", valid: false },
+      ],
+      { automaticExchangeRates: false },
+    ),
     [
-      "POKEMON_TCG_USD_TO_GBP_RATE is not configured with a positive number; Pokemon card pricing jobs will fail.",
+      "POKEMON_TCG_USD_TO_GBP_RATE is not configured with a positive number while automatic exchange rates are disabled; Pokemon card pricing jobs will fail.",
       "POKEMON_TCG_EUR_TO_GBP_RATE is not configured with a positive number; Cardmarket fallback pricing is disabled.",
-      "TCGCSV_USD_TO_GBP_RATE is not configured and no Pokemon USD fallback is available; sealed pricing jobs will fail.",
+      "TCGCSV_USD_TO_GBP_RATE is not configured and no Pokemon USD fallback is available while automatic exchange rates are disabled; sealed pricing jobs will fail.",
     ],
   );
   assert.deepEqual(

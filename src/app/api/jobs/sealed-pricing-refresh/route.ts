@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { jobErrorStatus, requireJobSecret } from "@/lib/jobs/auth";
 import { JobRunExecutionError, runTrackedJob } from "@/lib/jobs/runs";
+import { ExchangeRateConfigError, resolveGbpRates } from "@/lib/pricing/exchange-rates";
 import {
   sealedImportOptionsFromEnv,
   syncTcgcsvSealedProducts,
@@ -25,7 +26,7 @@ export async function POST(request: Request) {
     requireJobSecret(request);
 
     const body = (await request.json().catch(() => ({}))) as SealedPricingBody;
-    const input = sealedPricingInput(body);
+    const input = await sealedPricingInput(body);
     const { jobRun, result } = await runTrackedJob({
       input,
       type: "sealed_pricing_refresh",
@@ -43,11 +44,16 @@ export async function POST(request: Request) {
     const message = originalError instanceof Error ? originalError.message : "Unable to refresh sealed pricing.";
     const jobRun = error instanceof JobRunExecutionError ? error.jobRun : undefined;
 
-    return NextResponse.json({ error: message, jobRun }, { status: jobErrorStatus(originalError) });
+    return NextResponse.json({
+      error: message,
+      jobRun,
+    }, {
+      status: originalError instanceof ExchangeRateConfigError ? 501 : jobErrorStatus(originalError),
+    });
   }
 }
 
-function sealedPricingInput(body: SealedPricingBody): TcgcsvSealedImportOptions {
+async function sealedPricingInput(body: SealedPricingBody): Promise<TcgcsvSealedImportOptions> {
   const input: TcgcsvSealedImportOptions = {};
   const groupIds = optionalGroupIds(body.groupIds);
   const groupLimit = optionalPositiveInteger(body.groupLimit);
@@ -68,6 +74,23 @@ function sealedPricingInput(body: SealedPricingBody): TcgcsvSealedImportOptions 
 
   if (usdToGbpRate !== undefined) {
     input.usdToGbpRate = usdToGbpRate;
+  }
+
+  if (input.usdToGbpRate === undefined && body.writePrices !== false) {
+    const rates = await resolveGbpRates({
+      env: {
+        ...process.env,
+        TCGCSV_USD_TO_GBP_RATE: process.env.TCGCSV_USD_TO_GBP_RATE || process.env.POKEMON_TCG_USD_TO_GBP_RATE,
+      },
+      fallbackEnvKeys: {
+        EUR: "POKEMON_TCG_EUR_TO_GBP_RATE",
+        USD: "TCGCSV_USD_TO_GBP_RATE",
+      },
+      optionalCurrencies: [],
+      requiredCurrencies: ["USD"],
+    });
+
+    input.usdToGbpRate = rates.USD?.rate;
   }
 
   if (waitMs !== undefined) {

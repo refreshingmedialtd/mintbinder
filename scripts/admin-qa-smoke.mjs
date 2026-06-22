@@ -31,6 +31,7 @@ export async function runAdminQaSmoke({
 } = {}) {
   try {
     const env = envStatus(requiredEnv);
+    const exchangeRates = exchangeRateStatus(process.env);
     const conversionRates = conversionRateStatus(conversionRateEnv);
     const [
       adminUser,
@@ -78,7 +79,7 @@ export async function runAdminQaSmoke({
       ...adminWarnings(adminEmail, adminUser),
       ...countWarnings(counts),
       ...catalogueWarnings(catalogueHealth),
-      ...conversionRateWarnings(conversionRates),
+      ...conversionRateWarnings(conversionRates, { automaticExchangeRates: exchangeRates.automatic }),
       ...jobRunWarnings({ recentFailedJobRunReport, latestJobRunsByType }),
       ...(duplicateGroups > 0
         ? [`${duplicateGroups} duplicate Pokemon TCG provider ID group${duplicateGroups === 1 ? "" : "s"} need review.`]
@@ -92,6 +93,7 @@ export async function runAdminQaSmoke({
       conversionRates,
       duplicateProviderGroups: duplicateGroups,
       env,
+      exchangeRates,
       failures,
       generatedAt: now.toISOString(),
       latestJobRun: latestJobRun ? mapJobRun(latestJobRun) : null,
@@ -125,6 +127,18 @@ export function conversionRateStatus(keys) {
       valid: Number.isFinite(number) && number > 0,
     };
   });
+}
+
+export function exchangeRateStatus(env = process.env) {
+  const provider = env.EXCHANGE_RATES_PROVIDER?.trim() || "frankfurter";
+  const auto = optionalBoolean(env.EXCHANGE_RATES_AUTO);
+
+  return {
+    allowEnvFallback: optionalBoolean(env.EXCHANGE_RATES_ALLOW_ENV_FALLBACK) ?? true,
+    automatic: provider !== "manual" && auto !== false,
+    endpoint: env.EXCHANGE_RATES_API_URL?.trim() || "https://api.frankfurter.app/latest",
+    provider,
+  };
 }
 
 export function adminFailures(adminEmail, adminUser) {
@@ -188,17 +202,21 @@ export function countWarnings(counts) {
   ];
 }
 
-export function conversionRateWarnings(conversionRates) {
+export function conversionRateWarnings(conversionRates, { automaticExchangeRates = exchangeRateStatus().automatic } = {}) {
+  if (automaticExchangeRates) {
+    return [];
+  }
+
   const byKey = new Map(conversionRates.map((entry) => [entry.key, entry]));
   const pokemonUsd = byKey.get("POKEMON_TCG_USD_TO_GBP_RATE");
   const pokemonEur = byKey.get("POKEMON_TCG_EUR_TO_GBP_RATE");
   const tcgcsvUsd = byKey.get("TCGCSV_USD_TO_GBP_RATE");
 
   return [
-    ...(!pokemonUsd?.valid ? ["POKEMON_TCG_USD_TO_GBP_RATE is not configured with a positive number; Pokemon card pricing jobs will fail."] : []),
+    ...(!pokemonUsd?.valid ? ["POKEMON_TCG_USD_TO_GBP_RATE is not configured with a positive number while automatic exchange rates are disabled; Pokemon card pricing jobs will fail."] : []),
     ...(!pokemonEur?.valid ? ["POKEMON_TCG_EUR_TO_GBP_RATE is not configured with a positive number; Cardmarket fallback pricing is disabled."] : []),
     ...(!tcgcsvUsd?.valid && !pokemonUsd?.valid
-      ? ["TCGCSV_USD_TO_GBP_RATE is not configured and no Pokemon USD fallback is available; sealed pricing jobs will fail."]
+      ? ["TCGCSV_USD_TO_GBP_RATE is not configured and no Pokemon USD fallback is available while automatic exchange rates are disabled; sealed pricing jobs will fail."]
       : []),
   ];
 }
@@ -497,6 +515,24 @@ function firstRow(rows) {
 
 function percent(value, total) {
   return total > 0 ? Math.round((value / total) * 100) : 0;
+}
+
+function optionalBoolean(value) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+
+  if (!normalized) {
+    return undefined;
+  }
+
+  if (["1", "true", "yes", "y", "on"].includes(normalized)) {
+    return true;
+  }
+
+  if (["0", "false", "no", "n", "off"].includes(normalized)) {
+    return false;
+  }
+
+  return undefined;
 }
 
 function jobTypeLabel(type) {

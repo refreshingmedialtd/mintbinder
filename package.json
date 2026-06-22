@@ -17,6 +17,7 @@
     "test:csv": "node --experimental-strip-types --test tests/csv.test.mjs",
     "test:duplicate-merge": "node --experimental-strip-types --test tests/duplicate-card-merge.test.mjs",
     "test:duplicates": "node --experimental-strip-types --test tests/duplicate-provider-review.test.mjs",
+    "test:exchange-rates": "node --experimental-strip-types --test tests/exchange-rates.test.mjs",
     "test:insights": "node --experimental-strip-types --test tests/insights.test.mjs",
     "test:jobs": "node --experimental-strip-types --test tests/job-runs.test.mjs",
     "test:monitor": "node --test tests/job-monitor.test.mjs",

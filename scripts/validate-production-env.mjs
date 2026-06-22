@@ -92,13 +92,39 @@ warnIf(
   "Live beta digests will not email real users until this is explicitly true.",
 );
 
-positiveNumber("POKEMON_TCG_USD_TO_GBP_RATE", "Set a positive USD-to-GBP rate for Pokemon TCG card pricing.");
-warnPositiveNumber("POKEMON_TCG_EUR_TO_GBP_RATE", "Cardmarket fallback pricing is disabled without a positive EUR-to-GBP rate.");
-warnIf(
-  !positiveNumberValue("TCGCSV_USD_TO_GBP_RATE") && !positiveNumberValue("POKEMON_TCG_USD_TO_GBP_RATE"),
-  "TCGCSV_USD_TO_GBP_RATE",
-  "Sealed/card TCGCSV pricing needs TCGCSV_USD_TO_GBP_RATE or the Pokemon USD fallback.",
-);
+oneOf("EXCHANGE_RATES_PROVIDER", ["frankfurter", "manual", ""], "EXCHANGE_RATES_PROVIDER should be frankfurter or manual. Empty defaults to frankfurter.");
+const manualExchangeRates =
+  normalized("EXCHANGE_RATES_PROVIDER") === "manual" || optionalBoolean("EXCHANGE_RATES_AUTO") === false;
+
+if (normalized("EXCHANGE_RATES_API_URL")) {
+  httpsUrl("EXCHANGE_RATES_API_URL", "EXCHANGE_RATES_API_URL should be an HTTPS Frankfurter-compatible endpoint.");
+}
+
+if (manualExchangeRates) {
+  positiveNumber("POKEMON_TCG_USD_TO_GBP_RATE", "Set a positive USD-to-GBP rate when automatic exchange rates are disabled.");
+  warnPositiveNumber("POKEMON_TCG_EUR_TO_GBP_RATE", "Cardmarket fallback pricing is disabled without a positive EUR-to-GBP rate.");
+  warnIf(
+    !positiveNumberValue("TCGCSV_USD_TO_GBP_RATE") && !positiveNumberValue("POKEMON_TCG_USD_TO_GBP_RATE"),
+    "TCGCSV_USD_TO_GBP_RATE",
+    "Sealed/card TCGCSV pricing needs TCGCSV_USD_TO_GBP_RATE or the Pokemon USD fallback when automatic exchange rates are disabled.",
+  );
+} else {
+  warnIf(
+    !positiveNumberValue("POKEMON_TCG_USD_TO_GBP_RATE"),
+    "POKEMON_TCG_USD_TO_GBP_RATE",
+    "Automatic exchange rates are enabled; add this only as a USD fallback for provider outages.",
+  );
+  warnIf(
+    !positiveNumberValue("POKEMON_TCG_EUR_TO_GBP_RATE"),
+    "POKEMON_TCG_EUR_TO_GBP_RATE",
+    "Automatic exchange rates are enabled; add this only as an EUR fallback for Cardmarket provider outages.",
+  );
+  warnIf(
+    !positiveNumberValue("TCGCSV_USD_TO_GBP_RATE") && !positiveNumberValue("POKEMON_TCG_USD_TO_GBP_RATE"),
+    "TCGCSV_USD_TO_GBP_RATE",
+    "Automatic exchange rates are enabled; add this only as a TCGCSV USD fallback for provider outages.",
+  );
+}
 warnIf(
   !normalized("PRICECHARTING_API_TOKEN"),
   "PRICECHARTING_API_TOKEN",
@@ -234,6 +260,24 @@ function warnPositiveNumber(key, message) {
 function positiveNumberValue(key) {
   const number = Number(normalized(key));
   return Number.isFinite(number) && number > 0;
+}
+
+function optionalBoolean(key) {
+  const value = normalized(key).toLowerCase();
+
+  if (!value) {
+    return undefined;
+  }
+
+  if (["1", "true", "yes", "y", "on"].includes(value)) {
+    return true;
+  }
+
+  if (["0", "false", "no", "n", "off"].includes(value)) {
+    return false;
+  }
+
+  return undefined;
 }
 
 function warnIf(condition, key, message) {
