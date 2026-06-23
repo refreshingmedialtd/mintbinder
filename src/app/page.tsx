@@ -361,10 +361,27 @@ const initialState: AppState = {
   collectionView: "list",
   wishlistView: "list",
   setFilter: "all",
-  selectedItemId: "owned-charizard",
-  selectedSetId: "set-151",
+  selectedItemId: "",
+  selectedSetId: "",
   selectedCatalogueId: "",
   plus: false,
+};
+
+const emptySubscription: AppSubscription = {
+  cancelAtPeriodEnd: false,
+  plan: "free",
+  entitlements: {
+    "billing.portal": false,
+    "exports.insurance_report": false,
+    "pricing.alerts": false,
+  },
+};
+
+const emptyNotificationPreferences: NotificationPreferences = {
+  digestFrequency: "Off",
+  priceAlertsEnabled: false,
+  weakPriceAlertsEnabled: false,
+  wishlistTargetAlertsEnabled: false,
 };
 
 const storageTypes: StorageLocation["type"][] = ["Binder", "Box", "Display", "Safe", "Other"];
@@ -535,16 +552,17 @@ const importPresets: ImportPreset[] = [
 export default function Home() {
   const { data: session, status } = useSession();
   const [appState, setAppState] = useState(initialState);
-  const [catalogueItems, setCatalogueItems] = useState<CatalogueItem[]>(sampleAppData.catalogue);
-  const [collection, setCollection] = useState<CollectionItem[]>(sampleAppData.collection);
-  const [wishlist, setWishlist] = useState<WishlistItem[]>(sampleAppData.wishlist);
-  const [sets, setSets] = useState<SetProgress[]>(sampleAppData.sets);
-  const [storageLocations, setStorageLocations] = useState<StorageLocation[]>(sampleAppData.storageLocations);
-  const [collectionEvents, setCollectionEvents] = useState<CollectionEvent[]>(sampleAppData.events);
-  const [notificationPreferences, setNotificationPreferences] = useState<NotificationPreferences>(sampleAppData.notificationPreferences);
-  const [subscription, setSubscription] = useState<AppSubscription>(sampleAppData.subscription);
-  const [dataSource, setDataSource] = useState<AppDataSource>(sampleAppData.source);
-  const [dataNotice, setDataNotice] = useState(sampleAppData.notice ?? "");
+  const [catalogueItems, setCatalogueItems] = useState<CatalogueItem[]>([]);
+  const [collection, setCollection] = useState<CollectionItem[]>([]);
+  const [wishlist, setWishlist] = useState<WishlistItem[]>([]);
+  const [sets, setSets] = useState<SetProgress[]>([]);
+  const [storageLocations, setStorageLocations] = useState<StorageLocation[]>([]);
+  const [collectionEvents, setCollectionEvents] = useState<CollectionEvent[]>([]);
+  const [notificationPreferences, setNotificationPreferences] =
+    useState<NotificationPreferences>(emptyNotificationPreferences);
+  const [subscription, setSubscription] = useState<AppSubscription>(emptySubscription);
+  const [dataSource, setDataSource] = useState<AppDataSource>("database");
+  const [dataNotice, setDataNotice] = useState("");
   const [themeId, setThemeId] = useState<ThemeId>("light");
   const [isLoadingData, setIsLoadingData] = useState(true);
   const [toast, setToast] = useState("");
@@ -617,13 +635,33 @@ export default function Home() {
       plus: data.subscription.plan === "plus",
       selectedItemId: data.collection.some((item) => item.id === current.selectedItemId)
         ? current.selectedItemId
-        : data.collection[0]?.id ?? current.selectedItemId,
+        : data.collection[0]?.id ?? "",
       selectedCatalogueId: data.catalogue.some((item) => item.id === current.selectedCatalogueId)
         ? current.selectedCatalogueId
         : "",
       selectedSetId: data.sets.some((set) => set.id === current.selectedSetId)
         ? current.selectedSetId
-        : data.sets[0]?.id ?? current.selectedSetId,
+        : data.sets[0]?.id ?? "",
+    }));
+  }, []);
+
+  const applyEmptyAppData = useCallback((notice: string) => {
+    setCatalogueItems([]);
+    setCollection([]);
+    setWishlist([]);
+    setSets([]);
+    setStorageLocations([]);
+    setCollectionEvents([]);
+    setNotificationPreferences(emptyNotificationPreferences);
+    setSubscription(emptySubscription);
+    setDataSource("database");
+    setDataNotice(notice);
+    setAppState((current) => ({
+      ...current,
+      plus: false,
+      selectedCatalogueId: "",
+      selectedItemId: "",
+      selectedSetId: "",
     }));
   }, []);
 
@@ -649,12 +687,9 @@ export default function Home() {
         applyAppData(data);
         return true;
       } catch (error) {
-        console.warn("Using sample app data after API load failed.", error);
+        console.warn("App data API load failed.", error);
         if (!options?.isCancelled?.()) {
-          applyAppData({
-            ...sampleAppData,
-            notice: "Using sample data because the app data API could not be reached.",
-          });
+          applyEmptyAppData("Could not load your Mint Binder data yet. Refresh the page or try again shortly.");
         }
         return false;
       } finally {
@@ -663,7 +698,7 @@ export default function Home() {
         }
       }
     },
-    [applyAppData],
+    [applyAppData, applyEmptyAppData],
   );
 
   useEffect(() => {
@@ -4125,7 +4160,7 @@ function WishlistScreen({
       <article className="collection-lot-card wishlist-lot-card" key={row.item.id}>
         <div className="item-image collection-lot-image">{renderItemImage(row.catalogueItem)}</div>
         <div className="collection-lot-body">
-          <div className="collection-lot-head">
+          <div className="collection-lot-head wishlist-card-head">
             <div>
               <h3>{row.catalogueItem.name}</h3>
               <p className="collection-lot-set">{row.catalogueItem.set} | {row.catalogueItem.number}</p>
@@ -4136,21 +4171,20 @@ function WishlistScreen({
             renderWishlistEditForm(row.item)
           ) : (
             <>
-              <div className="wishlist-value-strip">
-                <span>
+              <div className="wishlist-card-meta">
+                <span className="wishlist-card-price">
                   <small>Target</small>
                   <strong>{formatValuation(row.targetValue)}</strong>
                 </span>
-                <span>
+                <span className="wishlist-card-market">
                   <small>Market</small>
                   <strong>{formatValuation(row.currentValue)}</strong>
                 </span>
                 <span className={statusClass}>
-                  <small>Status</small>
-                  <strong>{statusText}</strong>
+                  {statusText}
                 </span>
               </div>
-              {row.item.notes ? <p className="wishlist-note">{row.item.notes}</p> : null}
+              {row.item.notes ? <p className="wishlist-note compact">{row.item.notes}</p> : null}
               {renderWishlistActions(row, "card")}
             </>
           )}
