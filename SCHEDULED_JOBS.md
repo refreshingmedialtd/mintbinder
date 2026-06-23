@@ -19,9 +19,23 @@ JOB_MONITOR_DRY_RUN="true"
 
 Pricing jobs fetch fresh GBP exchange rates from Frankfurter by default. Keep `POKEMON_TCG_USD_TO_GBP_RATE`, `POKEMON_TCG_EUR_TO_GBP_RATE`, and `TCGCSV_USD_TO_GBP_RATE` only as optional fallback values in case the exchange-rate provider is temporarily unavailable. Set `EXCHANGE_RATES_PROVIDER="manual"` only if you deliberately want to disable automatic exchange rates.
 
-Use `POKEMON_TCG_PRICING_PAGE="auto"` or leave it unset. Auto mode lets the scheduled pricing route inspect recent successful `pricing_refresh` runs and choose the next page. If a full pass completes, the next run starts back at page 1 so historical snapshots continue to build.
+Use `POKEMON_TCG_PRICING_STRATEGY="sets"` or leave it unset. Set rotation is the default because the Pokemon TCG API can reject deep full-catalogue page requests once the scheduler reaches later pages. The live helper asks Mint Binder to select the least-recently refreshed Pokemon TCG sets from the local database and refreshes those sets in small batches.
 
-Use `POKEMON_TCG_PRICING_MAX_PAGES="5"` with an hourly schedule for normal card-pricing maintenance. Keep `POKEMON_TCG_PRICING_REQUEST_MAX_PAGES="1"` so the live cron helper splits the hourly target into one-page API calls, avoiding 20i gateway timeouts. With `POKEMON_TCG_PRICING_PAGE_SIZE="250"`, that still refreshes up to 1,250 cards per scheduled run, or about 30,000 card records per day, which is enough to sweep the current 20,359-card catalogue daily with recovery room for failed runs. Keep `POKEMON_TCG_PRICING_BATCH_WAIT_MS="1500"` and `POKEMON_TCG_API_RETRY_ATTEMPTS="3"` unless provider stability changes.
+Use `POKEMON_TCG_SET_PRICING_LIMIT="8"` with an hourly schedule for normal card-pricing maintenance. The live helper splits this into one-set HTTP calls by default with `POKEMON_TCG_SET_PRICING_REQUEST_LIMIT="1"`, avoiding 20i gateway timeouts and provider deep-page failures. With roughly 173 Pokemon TCG sets in production, eight sets per hour is enough to touch the full set list in about a day. Keep `POKEMON_TCG_PRICING_BATCH_WAIT_MS="1500"` and `POKEMON_TCG_API_RETRY_ATTEMPTS="3"` unless provider stability changes.
+
+Keep these values in production unless there is a specific reason to change them:
+
+```sh
+POKEMON_TCG_PRICING_STRATEGY="sets"
+POKEMON_TCG_SET_PRICING_LIMIT="8"
+POKEMON_TCG_SET_PRICING_REQUEST_LIMIT="1"
+POKEMON_TCG_SET_PRICING_MAX_PAGES_PER_SET="4"
+POKEMON_TCG_SET_PRICING_PAGE_SIZE="250"
+POKEMON_TCG_PRICING_BATCH_WAIT_MS="1500"
+POKEMON_TCG_API_RETRY_ATTEMPTS="3"
+```
+
+For one-off manual recovery/debugging only, set `POKEMON_TCG_PRICING_STRATEGY="pages"` and optionally `POKEMON_TCG_PRICING_PAGE`. Do not use full-catalogue page rotation as the normal recurring schedule.
 
 ## First Manual Checks
 
@@ -38,7 +52,7 @@ cd /home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder
 Expected results:
 
 - `job:live-health` returns `ok: true`.
-- `job:live-pricing` calls `/api/jobs/scheduled-pricing`, creates a `pricing_refresh` job run, and reports `selectedPage`.
+- `job:live-pricing` calls `/api/jobs/scheduled-set-pricing`, creates `pricing_refresh` job runs, and reports `strategy: "set-rotation"` plus the selected sets.
 - `job:live-sealed-pricing` creates a `sealed_pricing_refresh` job run.
 - `monitor:jobs` prints a report. It can return a non-zero exit code when recent job failures exist, which is useful for alerting.
 
@@ -49,7 +63,7 @@ Start conservative while beta data volume is small:
 | Job | Command | Suggested cadence |
 | --- | --- | --- |
 | Health smoke | `/usr/bin/bash /home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/cron-live-health.sh` | Every 30 minutes |
-| Card pricing history | `/usr/bin/bash /home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/cron-live-pricing.sh` | Hourly, with `POKEMON_TCG_PRICING_MAX_PAGES=5` |
+| Card pricing history | `/usr/bin/bash /home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/cron-live-pricing.sh` | Hourly, with `POKEMON_TCG_SET_PRICING_LIMIT=8` |
 | Sealed pricing history | `/usr/bin/bash /home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/cron-live-sealed-pricing.sh` | Daily around 03:10 UK time |
 | Job monitor | `/usr/bin/bash /home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/cron-monitor-jobs.sh` | Hourly |
 | Price alert digest dry run | `/usr/bin/bash /home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/cron-live-price-alerts.sh` | Daily around 08:00 UK time |
@@ -72,14 +86,20 @@ Use the same shape for the other commands:
 /usr/bin/bash /home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/cron-live-price-alerts.sh
 ```
 
-If 20i does not expose scheduled shell commands for this package, use an HTTPS scheduler that can send headers. The card pricing endpoint is:
+If 20i does not expose scheduled shell commands for this package, use an HTTPS scheduler that can send headers. The preferred card pricing endpoint is:
 
 ```text
-POST https://mintbinder.co.uk/api/jobs/scheduled-pricing
+POST https://mintbinder.co.uk/api/jobs/scheduled-set-pricing
 Authorization: Bearer <JOB_SECRET>
 Content-Type: application/json
 
-{}
+{"limit":1}
+```
+
+The legacy full-catalogue page endpoint remains available for manual debugging only:
+
+```text
+POST https://mintbinder.co.uk/api/jobs/scheduled-pricing
 ```
 
 The sealed pricing and price-alert endpoints are:
@@ -102,6 +122,6 @@ They use the same `Authorization: Bearer <JOB_SECRET>` header. Keep the request 
 ## Operating Notes
 
 - Scheduled card pricing writes new snapshots over time, so price history charts become more useful the longer the job runs.
-- `POKEMON_TCG_PRICING_MAX_PAGES` defaults to `5` for scheduled runs. `POKEMON_TCG_PRICING_REQUEST_MAX_PAGES` defaults to `1` in the live helper so one scheduled task can make several one-page API calls instead of one long-running request. `POKEMON_TCG_PRICING_BATCH_WAIT_MS` pauses between those calls, and `POKEMON_TCG_API_RETRY_ATTEMPTS` retries transient Pokemon TCG API `429`/`5xx` responses before the job is marked failed. Keep the hourly job history clean before raising batch sizes further; the app caps scheduled route runs at 20 pages per API call.
+- `POKEMON_TCG_SET_PRICING_LIMIT` controls how many sets a live pricing run refreshes. `POKEMON_TCG_SET_PRICING_REQUEST_LIMIT` defaults to `1`, so the live helper sends several small set-refresh requests rather than one long request. `POKEMON_TCG_PRICING_BATCH_WAIT_MS` pauses between those calls, and `POKEMON_TCG_API_RETRY_ATTEMPTS` retries transient Pokemon TCG API `429`/`5xx` responses before an individual set attempt is marked failed. Keep the hourly job history clean before raising set batch sizes further.
 - Keep `TCGCSV_SEALED_GROUP_LIMIT` small at first. Sealed pricing can become expensive in provider calls if run too broadly.
 - Review Operations job history after the first few scheduled runs. Do not enable live recipient emails until pricing and monitor jobs are consistently clean.

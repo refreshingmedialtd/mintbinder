@@ -57,7 +57,7 @@ Completed on 2026-06-14:
 - Bootstrapped the live Neon catalogue to 20,359 cards across 173 sets, with 100% card image coverage, 0 set deficits, and 0 duplicate Pokemon TCG provider ID groups.
 - Enriched production card pricing through Pokemon TCG API and TCGCSV. The live database now has 19,302 priced cards out of 20,359, or 94.8% card pricing coverage, with 20,759 total price snapshots across card and sealed products.
 - Imported the live sealed-product catalogue from TCGCSV. Production now has 1,936 sealed products, 100% sealed image coverage, 1,457 priced sealed products, and 75.3% sealed pricing coverage.
-- Added a protected `/api/jobs/scheduled-pricing` route, live scheduler helpers, and `SCHEDULED_JOBS.md` so production pricing snapshots can run automatically and rotate through pages without manual page tracking.
+- Added protected `/api/jobs/scheduled-set-pricing` and `/api/jobs/scheduled-pricing` routes, live scheduler helpers, and `SCHEDULED_JOBS.md` so production pricing snapshots can run automatically by least-recently refreshed set without manual page tracking or deep provider paging.
 
 Known QA warnings:
 
@@ -122,7 +122,7 @@ Known QA warnings:
 
 9. Monitoring and operations
 
-   `/api/health`, `/api/jobs/scheduled-pricing`, live scheduled job helpers, and `npm run monitor:jobs` are in place for first-pass uptime, pricing-history refreshes, and job-run failure/stale-run monitoring. Remaining operations work: configure the 20i/external schedules, choose the uptime/error-monitoring provider, add webhook failure alerts, database backup checks, and a small runbook for catalogue/pricing job recovery.
+   `/api/health`, `/api/jobs/scheduled-set-pricing`, `/api/jobs/scheduled-pricing`, live scheduled job helpers, and `npm run monitor:jobs` are in place for first-pass uptime, pricing-history refreshes, and job-run failure/stale-run monitoring. Remaining operations work: configure the 20i/external schedules, choose the uptime/error-monitoring provider, add webhook failure alerts, database backup checks, and a small runbook for catalogue/pricing job recovery.
 
 10. Beta launch
 

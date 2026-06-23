@@ -180,7 +180,7 @@ npm run report:catalogue-gaps
 
 Expected remaining gaps: older/legacy card pricing, selected promos, and sealed products without usable TCGCSV prices. Use PriceCharting or another sealed-price provider for the next major sealed-pricing lift.
 
-For recurring pricing maintenance, use [SCHEDULED_JOBS.md](SCHEDULED_JOBS.md). The preferred card-pricing schedule calls `npm run job:live-pricing` hourly with `POKEMON_TCG_PRICING_MAX_PAGES=5` and `POKEMON_TCG_PRICING_REQUEST_MAX_PAGES=1`, which posts to `/api/jobs/scheduled-pricing` in one-page timeout-safe batches; that route selects the next pricing page from recent successful `pricing_refresh` runs, writes new snapshots, and cycles back to page 1 after a full pass.
+For recurring pricing maintenance, use [SCHEDULED_JOBS.md](SCHEDULED_JOBS.md). The preferred card-pricing schedule calls `npm run job:live-pricing` hourly with `POKEMON_TCG_PRICING_STRATEGY=sets` and `POKEMON_TCG_SET_PRICING_LIMIT=8`, which posts to `/api/jobs/scheduled-set-pricing` in one-set timeout-safe batches; that route selects the least-recently refreshed Pokemon TCG sets from the production database, writes new snapshots, and avoids deep full-catalogue provider pages.
 
 ## Square Domain Batch
 
@@ -274,7 +274,7 @@ Minimum beta monitoring:
 - Keep the 20i Git deployment script path set to `/home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/deploy-20i.sh` and verify runtime routes after future deploys, including the PM2 reload output.
 - Controlled live price-alert digest smoke is complete; decide the real digest schedule before enabling beta recipient emails.
 - Production catalogue and pricing bootstrap is complete enough for beta; keep the new bootstrap helpers for future fresh databases and new-set refreshes.
-- `/api/health`, `/api/jobs/scheduled-pricing`, the live job helpers, and `npm run monitor:jobs` are available for first-pass uptime, pricing history, and job-run monitoring; schedule them before beta.
+- `/api/health`, `/api/jobs/scheduled-set-pricing`, `/api/jobs/scheduled-pricing`, the live job helpers, and `npm run monitor:jobs` are available for first-pass uptime, pricing history, and job-run monitoring; schedule them before beta.
 - Legal pages are beta drafts and need final company/address review plus active support email verification.
 - 20i hosting and Neon database are active; Neon should be upgraded before real beta users.
 - Production monitoring and backup provider choices are still open.

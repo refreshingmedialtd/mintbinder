@@ -16,6 +16,7 @@ test("live pricing requests are split into timeout-safe batches", async () => {
       POKEMON_TCG_PRICING_BATCH_WAIT_MS: "0",
       POKEMON_TCG_PRICING_PAGE: "auto",
       POKEMON_TCG_PRICING_PAGE_SIZE: "250",
+      POKEMON_TCG_PRICING_STRATEGY: "pages",
       SCHEDULED_JOB_APP_URL: "https://mintbinder.co.uk",
     },
     fetchImpl: async (url, init) => {
@@ -56,6 +57,78 @@ test("live pricing requests are split into timeout-safe batches", async () => {
   assert.equal(result.response.nextPage, 11);
   assert.equal(result.response.pagesProcessed, 5);
   assert.equal(result.response.pricingSnapshotsCreated, 500);
+});
+
+test("live pricing defaults to set rotation and splits set batches", async () => {
+  const calls = [];
+
+  const result = await runLiveScheduledJob({
+    env: {
+      JOB_SECRET: "secret",
+      POKEMON_TCG_PRICING_BATCH_WAIT_MS: "0",
+      POKEMON_TCG_PRICING_MAX_PAGES: "3",
+      POKEMON_TCG_SET_PRICING_REQUEST_LIMIT: "1",
+      SCHEDULED_JOB_APP_URL: "https://mintbinder.co.uk",
+    },
+    fetchImpl: async (url, init) => {
+      const body = JSON.parse(init.body);
+      const runNumber = calls.length + 1;
+
+      calls.push({ body, url: String(url) });
+
+      return jsonResponse({
+        cardsFetched: 120,
+        cardsUpserted: 120,
+        complete: false,
+        failedSets: 0,
+        jobRun: {
+          id: `set-run-${runNumber}`,
+        },
+        maxPagesPerSet: 4,
+        pageSize: 250,
+        pagesProcessed: 1,
+        priceOnlyUnpriced: false,
+        pricingSnapshotsCreated: 100,
+        query: "set-rotation",
+        scheduled: true,
+        selectedSets: [
+          {
+            name: `Set ${runNumber}`,
+            providerId: `set${runNumber}`,
+          },
+        ],
+        setLimit: 1,
+        setResults: [
+          {
+            cardsFetched: 120,
+            name: `Set ${runNumber}`,
+            pricingSnapshotsCreated: 100,
+            providerId: `set${runNumber}`,
+            status: "succeeded",
+          },
+        ],
+        setsProcessed: 1,
+        strategy: "set-rotation",
+        succeededSets: 1,
+        totalCount: 120,
+      });
+    },
+    job: "pricing",
+  });
+
+  assert.deepEqual(calls.map((call) => call.url), [
+    "https://mintbinder.co.uk/api/jobs/scheduled-set-pricing",
+    "https://mintbinder.co.uk/api/jobs/scheduled-set-pricing",
+    "https://mintbinder.co.uk/api/jobs/scheduled-set-pricing",
+  ]);
+  assert.deepEqual(calls.map((call) => call.body.limit), [1, 1, 1]);
+  assert.equal(result.ok, true);
+  assert.equal(result.response.batched, true);
+  assert.equal(result.response.batchCount, 3);
+  assert.equal(result.response.cardsFetched, 360);
+  assert.equal(result.response.pricingSnapshotsCreated, 300);
+  assert.equal(result.response.setsProcessed, 3);
+  assert.equal(result.response.strategy, "set-rotation");
 });
 
 test("explicit live pricing page requests remain single requests", async () => {

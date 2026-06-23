@@ -46,9 +46,18 @@ export async function runLiveScheduledJob({
 
 export function protectedJobRequest(kind, env = process.env) {
   if (kind === "pricing") {
+    if (pricingStrategy(env) === "sets") {
+      return {
+        body: scheduledSetPricingBody(env),
+        path: "/api/jobs/scheduled-set-pricing",
+        strategy: "sets",
+      };
+    }
+
     return {
       body: scheduledPricingBody(env),
       path: "/api/jobs/scheduled-pricing",
+      strategy: "pages",
     };
   }
 
@@ -71,6 +80,22 @@ export function protectedJobRequest(kind, env = process.env) {
 
 async function runPricingJobBatches({ baseUrl, env, fetchImpl, secret }) {
   const request = protectedJobRequest("pricing", env);
+  const headers = {
+    authorization: `Bearer ${secret}`,
+    "content-type": "application/json",
+  };
+  const url = new URL(request.path, baseUrl);
+
+  if (request.strategy === "sets") {
+    return runSetPricingJobBatches({
+      env,
+      fetchImpl,
+      headers,
+      request,
+      url,
+    });
+  }
+
   const totalMaxPages = optionalPositiveInteger(request.body.maxPages);
   const requestMaxPages = optionalPositiveInteger(env.POKEMON_TCG_PRICING_REQUEST_MAX_PAGES) ?? 1;
   const batchWaitMs = optionalNonNegativeInteger(env.POKEMON_TCG_PRICING_BATCH_WAIT_MS) ?? 1500;
@@ -79,12 +104,6 @@ async function runPricingJobBatches({ baseUrl, env, fetchImpl, secret }) {
     totalMaxPages > requestMaxPages &&
     requestMaxPages > 0 &&
     request.body.page === undefined;
-  const url = new URL(request.path, baseUrl);
-  const headers = {
-    authorization: `Bearer ${secret}`,
-    "content-type": "application/json",
-  };
-
   if (!shouldSplit) {
     return requestJson({
       body: request.body,
@@ -134,6 +153,97 @@ async function runPricingJobBatches({ baseUrl, env, fetchImpl, secret }) {
     response,
     status: batches.at(-1)?.status ?? 200,
     url: url.toString(),
+  };
+}
+
+async function runSetPricingJobBatches({ env, fetchImpl, headers, request, url }) {
+  const totalSetLimit = optionalPositiveInteger(request.body.limit) ?? 1;
+  const requestSetLimit = optionalPositiveInteger(env.POKEMON_TCG_SET_PRICING_REQUEST_LIMIT) ?? 1;
+  const batchWaitMs =
+    optionalNonNegativeInteger(env.POKEMON_TCG_SET_PRICING_BATCH_WAIT_MS) ??
+    optionalNonNegativeInteger(env.POKEMON_TCG_PRICING_BATCH_WAIT_MS) ??
+    1500;
+  const shouldSplit = totalSetLimit > requestSetLimit && requestSetLimit > 0;
+
+  if (!shouldSplit) {
+    return requestJson({
+      body: request.body,
+      fetchImpl,
+      headers,
+      method: "POST",
+      url,
+    });
+  }
+
+  const batches = [];
+  let setsRemaining = totalSetLimit;
+
+  while (setsRemaining > 0) {
+    const limit = Math.min(requestSetLimit, setsRemaining);
+    const batch = await requestJson({
+      body: {
+        ...request.body,
+        limit,
+      },
+      fetchImpl,
+      headers,
+      method: "POST",
+      url,
+    });
+    const setsProcessed = optionalPositiveInteger(batch.response?.setsProcessed) ?? 0;
+
+    batches.push(batch);
+    setsRemaining -= setsProcessed || limit;
+
+    if (batch.response?.complete === true || setsProcessed === 0) {
+      break;
+    }
+
+    if (setsRemaining > 0) {
+      await wait(batchWaitMs);
+    }
+  }
+
+  const response = combinedSetPricingBatchResponse({
+    batches,
+    requestedBody: request.body,
+  });
+
+  return {
+    body: request.body,
+    ok: batches.every((batch) => batch.ok),
+    response,
+    status: batches.at(-1)?.status ?? 200,
+    url: url.toString(),
+  };
+}
+
+function combinedSetPricingBatchResponse({ batches, requestedBody }) {
+  const responses = batches.map((batch) => batch.response ?? {});
+  const selectedSets = responses.flatMap((response) => response.selectedSets ?? []);
+  const setResults = responses.flatMap((response) => response.setResults ?? []);
+
+  return {
+    batched: true,
+    batchCount: batches.length,
+    cardsFetched: sumResponses(responses, "cardsFetched"),
+    cardsUpserted: sumResponses(responses, "cardsUpserted"),
+    complete: responses.at(-1)?.complete === true,
+    failedSets: sumResponses(responses, "failedSets"),
+    maxPagesPerSet: responses.at(-1)?.maxPagesPerSet ?? requestedBody.maxPagesPerSet,
+    pageSize: responses.at(-1)?.pageSize ?? requestedBody.pageSize,
+    pagesProcessed: sumResponses(responses, "pagesProcessed"),
+    priceOnlyUnpriced: responses.at(-1)?.priceOnlyUnpriced ?? requestedBody.priceOnlyUnpriced,
+    pricingSnapshotsCreated: sumResponses(responses, "pricingSnapshotsCreated"),
+    query: "set-rotation",
+    scheduled: true,
+    selectedSets,
+    setLimit: requestedBody.limit,
+    setResults,
+    setsProcessed: sumResponses(responses, "setsProcessed"),
+    strategy: "set-rotation",
+    succeededSets: sumResponses(responses, "succeededSets"),
+    totalCount: sumResponses(responses, "totalCount"),
   };
 }
 
@@ -223,6 +333,59 @@ function scheduledPricingBody(env) {
   }
 
   return body;
+}
+
+function scheduledSetPricingBody(env) {
+  const body = {};
+  const limit =
+    optionalPositiveInteger(env.POKEMON_TCG_SET_PRICING_LIMIT) ??
+    optionalPositiveInteger(env.POKEMON_TCG_PRICING_MAX_PAGES);
+  const maxPagesPerSet = optionalPositiveInteger(env.POKEMON_TCG_SET_PRICING_MAX_PAGES_PER_SET);
+  const pageSize =
+    optionalPositiveInteger(env.POKEMON_TCG_SET_PRICING_PAGE_SIZE) ??
+    optionalPositiveInteger(env.POKEMON_TCG_PRICING_PAGE_SIZE);
+  const priceOnlyUnpriced =
+    optionalBoolean(env.POKEMON_TCG_SET_PRICING_PRICE_ONLY_UNPRICED) ??
+    optionalBoolean(env.POKEMON_TCG_PRICE_ONLY_UNPRICED);
+  const waitMs = optionalNonNegativeInteger(env.POKEMON_TCG_SET_PRICING_WAIT_MS);
+
+  body.limit = limit ?? 8;
+
+  if (maxPagesPerSet) {
+    body.maxPagesPerSet = maxPagesPerSet;
+  }
+
+  if (pageSize) {
+    body.pageSize = pageSize;
+  }
+
+  if (priceOnlyUnpriced !== undefined) {
+    body.priceOnlyUnpriced = priceOnlyUnpriced;
+  }
+
+  if (waitMs !== undefined) {
+    body.waitMs = waitMs;
+  }
+
+  return body;
+}
+
+function pricingStrategy(env) {
+  const explicit = optionalString(env.POKEMON_TCG_PRICING_STRATEGY)?.toLowerCase();
+
+  if (["page", "pages", "catalogue-pages"].includes(explicit)) {
+    return "pages";
+  }
+
+  if (["set", "sets", "set-rotation"].includes(explicit)) {
+    return "sets";
+  }
+
+  if (optionalPositiveInteger(env.POKEMON_TCG_PRICING_PAGE) || optionalString(env.POKEMON_TCG_PRICING_QUERY)) {
+    return "pages";
+  }
+
+  return "sets";
 }
 
 function sealedPricingBody(env) {
