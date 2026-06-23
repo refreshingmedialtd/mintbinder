@@ -1533,7 +1533,7 @@ h3 {
   grid-template-columns: 76px minmax(0, 1fr);
   gap: 12px;
   min-height: 132px;
-  overflow: hidden;
+  overflow: visible;
   padding: 12px;
   border-color: color-mix(in srgb, var(--line) 82%, var(--theme-c));
   background:
@@ -1567,6 +1567,10 @@ h3 {
   background:
     linear-gradient(135deg, color-mix(in srgb, var(--theme-b) 11%, transparent), transparent 58%),
     var(--surface);
+}
+
+.collection-lot-card:has(.collection-price-help[open]) {
+  z-index: 4;
 }
 
 .collection-lot-image {
