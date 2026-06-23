@@ -150,7 +150,11 @@ export async function nextPokemonTcgSetPricingTargets(
       COUNT(cp.id)::int AS "cardCount",
       COUNT(DISTINCT ps.card_printing_id)::int AS "pricedCardCount",
       MAX(ps.observed_at) AS "latestSnapshotAt",
-      COALESCE(MAX(ps.observed_at), MAX(cp.updated_at), cs.updated_at) AS "latestAttemptAt"
+      GREATEST(
+        COALESCE(MAX(ps.observed_at), cs.updated_at),
+        COALESCE(MAX(cp.updated_at), cs.updated_at),
+        cs.updated_at
+      ) AS "latestAttemptAt"
     FROM card_sets cs
     LEFT JOIN card_printings cp ON cp.card_set_id = cs.id
     LEFT JOIN price_snapshots ps
@@ -160,7 +164,11 @@ export async function nextPokemonTcgSetPricingTargets(
       AND NOT (cs.provider_ids->>'pokemon_tcg_api' = ANY(${excludedProviderIds}::text[]))
     GROUP BY cs.id
     ORDER BY
-      COALESCE(MAX(ps.observed_at), MAX(cp.updated_at), cs.updated_at) ASC NULLS FIRST,
+      GREATEST(
+        COALESCE(MAX(ps.observed_at), cs.updated_at),
+        COALESCE(MAX(cp.updated_at), cs.updated_at),
+        cs.updated_at
+      ) ASC NULLS FIRST,
       cs.release_date DESC NULLS LAST,
       cs.name ASC
     LIMIT ${input.limit}
