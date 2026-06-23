@@ -41,7 +41,7 @@ import {
 import Image from "next/image";
 import { signIn, signOut, useSession } from "next-auth/react";
 import type { ChangeEvent, CSSProperties, Dispatch, FormEvent, ReactNode, SetStateAction } from "react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { canUseOperations, normalizeAppRole, type AppUserRole } from "@/lib/auth/roles";
 import {
   catalogueValueMinorForVariant,
@@ -109,6 +109,7 @@ type AppState = {
     | "quantity-desc"
     | "recent";
   collectionView: "list" | "grid";
+  wishlistView: "list" | "grid";
   setFilter: "all" | "owned" | "missing" | "want";
   selectedItemId: string;
   selectedSetId: string;
@@ -358,6 +359,7 @@ const initialState: AppState = {
   collectionValueFilter: "all",
   collectionSort: "value-desc",
   collectionView: "list",
+  wishlistView: "list",
   setFilter: "all",
   selectedItemId: "owned-charizard",
   selectedSetId: "set-151",
@@ -3959,17 +3961,29 @@ function CataloguePreviewModal({
 }
 
 function WishlistScreen({
+  appState,
   catalogueById,
   wishlist,
   wishlistTotal,
   addToCollection,
   removeWishlistItem,
+  setAppState,
   startAdd,
   updateWishlistItem,
 }: ScreenContext) {
   const [editingId, setEditingId] = useState("");
   const [savingId, setSavingId] = useState("");
   const [sort, setSort] = useState<WishlistSort>("priority-desc");
+  const [wishlistSearch, setWishlistSearch] = useState("");
+  type WishlistRow = {
+    catalogueItem: CatalogueItem;
+    currentValue: number | null;
+    delta: number | null;
+    isEditing: boolean;
+    item: WishlistItem;
+    targetValue: number | null;
+  };
+
   const wishlistInsight = wishlist.reduce(
     (summary, item) => {
       const catalogueItem = catalogueById.get(item.catalogueId);
@@ -3993,6 +4007,42 @@ function WishlistScreen({
     { grailCount: 0, pricedCount: 0, targetHits: 0 },
   );
   const sortedWishlist = [...wishlist].sort((left, right) => sortWishlistItems(left, right, catalogueById, sort));
+  const normalizedWishlistSearch = wishlistSearch.trim().toLowerCase();
+  const wishlistRows = sortedWishlist
+    .map<WishlistRow | null>((item) => {
+      const catalogueItem = catalogueById.get(item.catalogueId);
+
+      if (!catalogueItem) {
+        return null;
+      }
+
+      const currentValue = catalogueMarketValueMinor(catalogueItem);
+      const targetValue = item.targetPriceMinor ?? currentValue;
+      const delta = currentValue === null || targetValue === null ? null : targetValue - currentValue;
+
+      return {
+        catalogueItem,
+        currentValue,
+        delta,
+        isEditing: editingId === item.id,
+        item,
+        targetValue,
+      };
+    })
+    .filter((row): row is WishlistRow => row !== null)
+    .filter((row) => {
+      if (!normalizedWishlistSearch) {
+        return true;
+      }
+
+      return [
+        row.catalogueItem.name,
+        row.catalogueItem.set,
+        row.catalogueItem.number,
+        row.item.priority,
+        row.item.notes ?? "",
+      ].join(" ").toLowerCase().includes(normalizedWishlistSearch);
+    });
 
   async function handleUpdate(event: FormEvent<HTMLFormElement>, itemId: string) {
     event.preventDefault();
@@ -4005,15 +4055,122 @@ function WishlistScreen({
     }
   }
 
+  function renderWishlistEditForm(item: WishlistItem) {
+    return (
+      <form className="form-stack wishlist-edit-form" onSubmit={(event) => void handleUpdate(event, item.id)}>
+        <div className="panel-title-row compact-row">
+          <strong>Edit target</strong>
+          <span className={`priority-pill priority-${item.priority.toLowerCase()}`}>{item.priority}</span>
+        </div>
+        <div className="field-grid">
+          <Field label="Priority">
+            <select name="priority" defaultValue={item.priority}>
+              <option>Low</option>
+              <option>Medium</option>
+              <option>High</option>
+              <option>Grail</option>
+            </select>
+          </Field>
+          <Field label="Target price">
+            <input
+              name="targetPrice"
+              inputMode="decimal"
+              defaultValue={moneyInputValue(item.targetPriceMinor)}
+              placeholder="£0.00"
+            />
+          </Field>
+        </div>
+        <Field label="Notes">
+          <textarea name="notes" defaultValue={item.notes ?? ""} placeholder="Optional buying notes" />
+        </Field>
+        <div className="actions item-action-grid">
+          <button className="button primary" type="submit" disabled={savingId === item.id}>
+            <Check size={17} />
+            {savingId === item.id ? "Saving" : "Save target"}
+          </button>
+          <button className="button" type="button" onClick={() => setEditingId("")}>
+            <X size={17} />
+            Cancel
+          </button>
+        </div>
+      </form>
+    );
+  }
+
+  function renderWishlistActions(row: WishlistRow, mode: "card" | "table") {
+    return (
+      <div className={mode === "table" ? "wishlist-table-actions" : "wishlist-card-actions"}>
+        <button className="button primary" type="button" onClick={() => void addToCollection(row.item.catalogueId)}>
+          <Check size={17} />
+          Move
+        </button>
+        <button className="button" type="button" onClick={() => setEditingId(row.item.id)}>
+          <Settings size={17} />
+          Edit
+        </button>
+        <button className="button" type="button" onClick={() => void removeWishlistItem(row.item.id)}>
+          <Trash2 size={17} />
+          Remove
+        </button>
+      </div>
+    );
+  }
+
+  function renderWishlistCard(row: WishlistRow) {
+    const statusText = row.delta === null ? "Needs estimate" : wishlistDeltaText(row.delta);
+    const statusClass =
+      row.delta === null ? "wishlist-status neutral" : row.delta >= 0 ? "wishlist-status ready" : "wishlist-status watch";
+
+    return (
+      <article className="collection-lot-card wishlist-lot-card" key={row.item.id}>
+        <div className="item-image collection-lot-image">{renderItemImage(row.catalogueItem)}</div>
+        <div className="collection-lot-body">
+          <div className="collection-lot-head">
+            <div>
+              <h3>{row.catalogueItem.name}</h3>
+              <p className="collection-lot-set">{row.catalogueItem.set} | {row.catalogueItem.number}</p>
+            </div>
+            <span className={`priority-pill priority-${row.item.priority.toLowerCase()}`}>{row.item.priority}</span>
+          </div>
+          {row.isEditing ? (
+            renderWishlistEditForm(row.item)
+          ) : (
+            <>
+              <div className="wishlist-value-strip">
+                <span>
+                  <small>Target</small>
+                  <strong>{formatValuation(row.targetValue)}</strong>
+                </span>
+                <span>
+                  <small>Market</small>
+                  <strong>{formatValuation(row.currentValue)}</strong>
+                </span>
+                <span className={statusClass}>
+                  <small>Status</small>
+                  <strong>{statusText}</strong>
+                </span>
+              </div>
+              {row.item.notes ? <p className="wishlist-note">{row.item.notes}</p> : null}
+              {renderWishlistActions(row, "card")}
+            </>
+          )}
+        </div>
+      </article>
+    );
+  }
+
   return (
     <section className="page">
       <PageHeader
         title="Wishlist"
         action={
-          <button className="button primary" onClick={() => startAdd("card")}>
-            <Plus size={17} />
-            Add target
-          </button>
+          <div className="actions">
+            {wishlist.length ? <span className="status-pill">{wishlistRows.length} shown</span> : null}
+            <button className="button primary" onClick={() => startAdd("card")}>
+              <Plus size={17} />
+              Add target
+            </button>
+          </div>
         }
       />
       <div className="stats-grid compact">
@@ -4021,22 +4178,58 @@ function WishlistScreen({
         <StatCard label="Target total" value={formatMoney(wishlistTotal)} note="Based on target prices" />
       </div>
       {wishlist.length ? (
-        <section className="catalogue-toolbar">
-          <label className="sort-control">
-            Sort
-            <select value={sort} onChange={(event) => setSort(event.target.value as WishlistSort)}>
-              <option value="priority-desc">Priority</option>
-              <option value="target-desc">Target high to low</option>
-              <option value="target-asc">Target low to high</option>
-              <option value="market-desc">Market high to low</option>
-              <option value="market-asc">Market low to high</option>
-              <option value="set-number-asc">Set number low to high</option>
-              <option value="set-number-desc">Set number high to low</option>
-              <option value="name-asc">Name A-Z</option>
-              <option value="name-desc">Name Z-A</option>
-            </select>
-          </label>
-        </section>
+        <div className="toolbar wishlist-toolbar">
+          <div className="collection-toolbar-head">
+            <label className="search-box">
+              <Search size={17} />
+              <input
+                value={wishlistSearch}
+                onChange={(event) => setWishlistSearch(event.target.value)}
+                placeholder="Search name, set, notes"
+              />
+            </label>
+            <div className="toolbar-actions">
+              <div className="segmented compact" aria-label="Wishlist view">
+                <button
+                  className={appState.wishlistView === "list" ? "active" : ""}
+                  type="button"
+                  onClick={() => setAppState((current) => ({ ...current, wishlistView: "list" }))}
+                  aria-label="Table view"
+                >
+                  <List size={16} />
+                </button>
+                <button
+                  className={appState.wishlistView === "grid" ? "active" : ""}
+                  type="button"
+                  onClick={() => setAppState((current) => ({ ...current, wishlistView: "grid" }))}
+                  aria-label="Cards view"
+                >
+                  <Grid2X2 size={16} />
+                </button>
+              </div>
+            </div>
+          </div>
+          <div className="collection-sort-row">
+            <p className="muted">
+              {wishlistRows.length} of {wishlist.length} targets | {wishlistInsight.targetHits} at target
+            </p>
+            <label className="sort-control">
+              <ArrowDownUp size={16} />
+              Sort
+              <select value={sort} onChange={(event) => setSort(event.target.value as WishlistSort)}>
+                <option value="priority-desc">Priority</option>
+                <option value="target-desc">Target high to low</option>
+                <option value="target-asc">Target low to high</option>
+                <option value="market-desc">Market high to low</option>
+                <option value="market-asc">Market low to high</option>
+                <option value="set-number-asc">Set number low to high</option>
+                <option value="set-number-desc">Set number high to low</option>
+                <option value="name-asc">Name A-Z</option>
+                <option value="name-desc">Name Z-A</option>
+              </select>
+            </label>
+          </div>
+        </div>
       ) : null}
       {wishlist.length ? (
         <section className="tool-panel wishlist-summary-panel">
@@ -4059,111 +4252,84 @@ function WishlistScreen({
         </section>
       ) : null}
 
-      <div className="item-list">
-        {sortedWishlist.length ? (
-          sortedWishlist.map((item) => {
-            const catalogueItem = catalogueById.get(item.catalogueId);
-            if (!catalogueItem) {
-              return null;
-            }
-            const isEditing = editingId === item.id;
-            const currentValue = catalogueMarketValueMinor(catalogueItem);
-            const targetValue = item.targetPriceMinor ?? currentValue;
-            const delta = currentValue === null || targetValue === null ? null : targetValue - currentValue;
-
-            return (
-              <article className="item-card wishlist-card" key={item.id}>
-                <div className="item-image">{renderItemImage(catalogueItem)}</div>
-                <div className="item-main">
-                  <div className="item-title-row">
-                    <div>
-                      <h3>{catalogueItem.name}</h3>
-                      <p className="muted">{catalogueItem.set} | {catalogueItem.number}</p>
-                    </div>
-                    <span className="priority-pill">{item.priority}</span>
-                  </div>
-                  {isEditing ? (
-                    <form className="form-stack" onSubmit={(event) => void handleUpdate(event, item.id)}>
-                      <div className="panel-title-row compact-row">
-                        <strong>Edit target</strong>
-                        <span className="tag">{item.priority}</span>
-                      </div>
-                      <div className="field-grid">
-                        <Field label="Priority">
-                          <select name="priority" defaultValue={item.priority}>
-                            <option>Low</option>
-                            <option>Medium</option>
-                            <option>High</option>
-                            <option>Grail</option>
-                          </select>
-                        </Field>
-                        <Field label="Target price">
-                          <input
-                            name="targetPrice"
-                            inputMode="decimal"
-                            defaultValue={moneyInputValue(item.targetPriceMinor)}
-                            placeholder="£0.00"
-                          />
-                        </Field>
-                      </div>
-                      <Field label="Notes">
-                        <textarea name="notes" defaultValue={item.notes ?? ""} placeholder="Optional" />
-                      </Field>
-                      <div className="actions item-action-grid">
-                        <button className="button primary" type="submit" disabled={savingId === item.id}>
-                          <Check size={17} />
-                          {savingId === item.id ? "Saving" : "Save target"}
-                        </button>
-                        <button className="button" type="button" onClick={() => setEditingId("")}>
-                          <X size={17} />
-                          Cancel
-                        </button>
-                      </div>
-                    </form>
-                  ) : (
-                    <>
-                      <div className="wishlist-target-grid">
-                        <span className="wishlist-target-metric">
-                          <small>Target</small>
-                          <strong>{formatValuation(targetValue)}</strong>
-                        </span>
-                        <span className="wishlist-market-metric">
-                          <small>Market</small>
-                          <strong>{formatValuation(currentValue)}</strong>
-                        </span>
-                        <span className={delta !== null && delta >= 0 ? "wishlist-status-metric target-hit" : "wishlist-status-metric"}>
-                          <small>Status</small>
-                          <strong>{delta === null ? "Needs estimate" : wishlistDeltaText(delta)}</strong>
-                        </span>
-                      </div>
-                      {item.notes ? <p className="muted wishlist-note">{item.notes}</p> : null}
-                      <div className="actions item-action-grid">
-                        <button className="button primary" onClick={() => void addToCollection(item.catalogueId)}>
-                          <Check size={17} />
-                          Move to collection
-                        </button>
-                        <button className="button" onClick={() => setEditingId(item.id)}>
-                          <Settings size={17} />
-                          Edit target
-                        </button>
-                        <button
-                          className="button"
-                          onClick={() => void removeWishlistItem(item.id)}
-                        >
-                          <Trash2 size={17} />
-                          Remove
-                        </button>
-                      </div>
-                    </>
-                  )}
-                </div>
-              </article>
-            );
-          })
+      <div className="wishlist-results">
+        {wishlistRows.length ? (
+          appState.wishlistView === "grid" ? (
+            <div className="collection-grid wishlist-grid">
+              {wishlistRows.map((row) => renderWishlistCard(row))}
+            </div>
+          ) : (
+            <>
+              <div className="mobile-list wishlist-mobile-list">
+                {wishlistRows.map((row) => renderWishlistCard(row))}
+              </div>
+              <div className="table-wrap wishlist-table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Target</th>
+                      <th>Priority</th>
+                      <th>Buy price</th>
+                      <th>Market</th>
+                      <th>Status</th>
+                      <th>Notes</th>
+                      <th />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {wishlistRows.map((row) => (
+                      <Fragment key={row.item.id}>
+                        <tr className="wishlist-table-row">
+                          <td>
+                            <div className="table-item wishlist-table-item">
+                              <div className="table-thumb">{renderItemImage(row.catalogueItem)}</div>
+                              <div>
+                                <strong>{row.catalogueItem.name}</strong>
+                                <span>{row.catalogueItem.set} | {row.catalogueItem.number}</span>
+                              </div>
+                            </div>
+                          </td>
+                          <td>
+                            <span className={`priority-pill priority-${row.item.priority.toLowerCase()}`}>
+                              {row.item.priority}
+                            </span>
+                          </td>
+                          <td><strong>{formatValuation(row.targetValue)}</strong></td>
+                          <td className="wishlist-market-cell"><strong>{formatValuation(row.currentValue)}</strong></td>
+                          <td>
+                            <span className={
+                              row.delta === null
+                                ? "wishlist-table-status neutral"
+                                : row.delta >= 0
+                                  ? "wishlist-table-status ready"
+                                  : "wishlist-table-status watch"
+                            }>
+                              {row.delta === null ? "Needs estimate" : wishlistDeltaText(row.delta)}
+                            </span>
+                          </td>
+                          <td className="wishlist-table-note">{row.item.notes || "No notes"}</td>
+                          <td>{renderWishlistActions(row, "table")}</td>
+                        </tr>
+                        {row.isEditing ? (
+                          <tr className="wishlist-edit-row">
+                            <td colSpan={7}>{renderWishlistEditForm(row.item)}</td>
+                          </tr>
+                        ) : null}
+                      </Fragment>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )
         ) : (
           <EmptyState
-            title="No wishlist items"
-            description="Add cards or sealed products you want to track before buying."
+            title={wishlist.length ? "No matching wishlist targets" : "No wishlist items"}
+            description={
+              wishlist.length
+                ? "Try a different search or sort your full target list."
+                : "Add cards or sealed products you want to track before buying."
+            }
             action={
               <button className="button primary" type="button" onClick={() => startAdd("card")}>
                 <Plus size={17} />
