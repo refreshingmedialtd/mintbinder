@@ -4123,15 +4123,15 @@ function WishlistScreen({
                   ) : (
                     <>
                       <div className="wishlist-target-grid">
-                        <span>
+                        <span className="wishlist-target-metric">
                           <small>Target</small>
                           <strong>{formatValuation(targetValue)}</strong>
                         </span>
-                        <span>
+                        <span className="wishlist-market-metric">
                           <small>Market</small>
                           <strong>{formatValuation(currentValue)}</strong>
                         </span>
-                        <span className={delta !== null && delta >= 0 ? "target-hit" : ""}>
+                        <span className={delta !== null && delta >= 0 ? "wishlist-status-metric target-hit" : "wishlist-status-metric"}>
                           <small>Status</small>
                           <strong>{delta === null ? "Needs estimate" : wishlistDeltaText(delta)}</strong>
                         </span>
