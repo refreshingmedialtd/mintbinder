@@ -4133,19 +4133,33 @@ function WishlistScreen({
   }
 
   function renderWishlistActions(row: WishlistRow, mode: "card" | "table") {
+    const isCard = mode === "card";
+
     return (
-      <div className={mode === "table" ? "wishlist-table-actions" : "wishlist-card-actions"}>
+      <div className={isCard ? "wishlist-card-actions" : "wishlist-table-actions"}>
         <button className="button primary" type="button" onClick={() => void addToCollection(row.item.catalogueId)}>
           <Check size={17} />
-          Move
+          {isCard ? "Move to collection" : "Move"}
         </button>
-        <button className="button" type="button" onClick={() => setEditingId(row.item.id)}>
+        <button
+          className="button wishlist-icon-action"
+          type="button"
+          onClick={() => setEditingId(row.item.id)}
+          aria-label="Edit target"
+          title="Edit target"
+        >
           <Settings size={17} />
-          Edit
+          {isCard ? <span className="sr-only">Edit target</span> : "Edit"}
         </button>
-        <button className="button" type="button" onClick={() => void removeWishlistItem(row.item.id)}>
+        <button
+          className="button wishlist-icon-action danger"
+          type="button"
+          onClick={() => void removeWishlistItem(row.item.id)}
+          aria-label="Remove target"
+          title="Remove target"
+        >
           <Trash2 size={17} />
-          Remove
+          {isCard ? <span className="sr-only">Remove target</span> : "Remove"}
         </button>
       </div>
     );
@@ -4158,15 +4172,15 @@ function WishlistScreen({
 
     return (
       <article className="collection-lot-card wishlist-lot-card" key={row.item.id}>
-        <div className="item-image collection-lot-image">{renderItemImage(row.catalogueItem)}</div>
-        <div className="collection-lot-body">
-          <div className="collection-lot-head wishlist-card-head">
-            <div>
-              <h3>{row.catalogueItem.name}</h3>
-              <p className="collection-lot-set">{row.catalogueItem.set} | {row.catalogueItem.number}</p>
-            </div>
-            <span className={`priority-pill priority-${row.item.priority.toLowerCase()}`}>{row.item.priority}</span>
+        <div className="wishlist-card-top">
+          <div className="item-image collection-lot-image">{renderItemImage(row.catalogueItem)}</div>
+          <div className="wishlist-card-copy">
+            <h3>{row.catalogueItem.name}</h3>
+            <p className="collection-lot-set">{row.catalogueItem.set} | {row.catalogueItem.number}</p>
           </div>
+          <span className={`priority-pill priority-${row.item.priority.toLowerCase()}`}>{row.item.priority}</span>
+        </div>
+        <div className="wishlist-card-body">
           {row.isEditing ? (
             renderWishlistEditForm(row.item)
           ) : (
@@ -4180,11 +4194,8 @@ function WishlistScreen({
                   <small>Market</small>
                   <strong>{formatValuation(row.currentValue)}</strong>
                 </span>
-                <span className={statusClass}>
-                  {statusText}
-                </span>
+                <span className={statusClass}>{statusText}</span>
               </div>
-              {row.item.notes ? <p className="wishlist-note compact">{row.item.notes}</p> : null}
               {renderWishlistActions(row, "card")}
             </>
           )}
