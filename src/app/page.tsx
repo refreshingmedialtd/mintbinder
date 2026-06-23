@@ -453,6 +453,7 @@ const plusPlanFeatures = [
   "Richer price-confidence and collection health insights",
   "Priority access to future advanced reporting tools",
 ];
+const betaSetupDismissedStorageKey = "mintbinder-beta-setup-dismissed";
 const themeStorageKey = "mintbinder-theme";
 const plusPreviewEmails = new Set(["liam@example.com", "liam@refreshing.media"]);
 const plusPreviewDomains = new Set(["refreshing.media"]);
@@ -1103,7 +1104,7 @@ export default function Home() {
         id: `want-${Date.now()}`,
         catalogueId,
         priority: marketValueMinor !== null && marketValueMinor > 10000 ? "Grail" : "High",
-        targetPriceMinor: marketValueMinor ?? undefined,
+        targetPriceMinor: defaultWishlistTargetMinor(marketValueMinor),
         notes: "Added from set progress.",
       },
     ]);
@@ -2602,6 +2603,21 @@ function OnboardingChecklist({
   ];
   const completed = steps.filter((step) => step.done).length;
   const nextStep = steps.find((step) => !step.done);
+  const isComplete = completed === steps.length;
+  const [isDismissed, setIsDismissed] = useState(false);
+
+  useEffect(() => {
+    setIsDismissed(window.localStorage.getItem(betaSetupDismissedStorageKey) === "1");
+  }, []);
+
+  function dismissSetup() {
+    window.localStorage.setItem(betaSetupDismissedStorageKey, "1");
+    setIsDismissed(true);
+  }
+
+  if (isComplete && isDismissed) {
+    return null;
+  }
 
   return (
     <section className="tool-panel onboarding-panel">
@@ -2610,9 +2626,16 @@ function OnboardingChecklist({
           <h2>Beta setup</h2>
           <p className="muted">{completed} of {steps.length} complete</p>
         </div>
-        <span className={completed === steps.length ? "tag green" : "tag blue"}>
-          {completed === steps.length ? "Ready" : "Setup"}
-        </span>
+        <div className="actions setup-panel-actions">
+          <span className={isComplete ? "tag green" : "tag blue"}>
+            {isComplete ? "Ready" : "Setup"}
+          </span>
+          {isComplete ? (
+            <button className="icon-button setup-dismiss-button" type="button" onClick={dismissSetup} aria-label="Hide beta setup">
+              <X size={16} />
+            </button>
+          ) : null}
+        </div>
       </div>
       <div className="setup-checklist-list">
         {steps.map((step) => (
@@ -3187,7 +3210,11 @@ function AddScreen({
     storageLocations,
     selected ? defaultStorageLocation(storageLocations, selected.type) : undefined,
   );
-  const selectedVariant = selected ? selectedVariantLabel(selected, addVariant) : undefined;
+  const selectedVariant = selected
+    ? selected.type === "sealed"
+      ? undefined
+      : selectedVariantLabel(selected, addVariant)
+    : undefined;
   const selectedAdjustedValue = selected
     ? adjustedMarketValueMinor(selected, selectedVariant, addCondition, addQuantity)
     : null;
@@ -3275,9 +3302,9 @@ function AddScreen({
                 </select>
               </label>
               <label className="sort-control">
-                Rarity
+                {appState.addType === "sealed" ? "Product type" : "Rarity"}
                 <select value={catalogueRarityFilter} onChange={(event) => setCatalogueRarityFilter(event.target.value)}>
-                  <option value="all">All rarities</option>
+                  <option value="all">{appState.addType === "sealed" ? "All product types" : "All rarities"}</option>
                   {rarityOptions.map((rarity) => (
                     <option key={rarity} value={rarity}>{rarity}</option>
                   ))}
@@ -3347,8 +3374,12 @@ function AddScreen({
               <strong>{formatValuation(selectedAdjustedValue)}</strong>
               <small>
                 {selectedBaseValue === null
-                  ? "No market estimate is available for this variant yet."
-                  : `${addQuantity} x ${selectedVariant ?? "Market"} at ${addCondition}. ${conditionAdjustmentLabel(selectedConditionMultiplier)}`}
+                  ? selected.type === "sealed"
+                    ? "No market estimate is available for this product yet."
+                    : "No market estimate is available for this variant yet."
+                  : selected.type === "sealed"
+                    ? `${addQuantity} x ${selected.rarity} at sealed market. No condition adjustment.`
+                    : `${addQuantity} x ${selectedVariant ?? "Market"} at ${addCondition}. ${conditionAdjustmentLabel(selectedConditionMultiplier)}`}
               </small>
             </div>
           ) : null}
@@ -3400,9 +3431,16 @@ function AddScreen({
                     ))}
                   </select>
                 </Field>
-                <Field label="Variant">
-                  <VariantSelect item={selected} value={selectedVariant} onChange={setAddVariant} />
-                </Field>
+                {selected.type === "sealed" ? (
+                  <Field label="Product type">
+                    <input value={selected.rarity} readOnly />
+                    <input name="variant" type="hidden" value="Factory sealed" />
+                  </Field>
+                ) : (
+                  <Field label="Variant">
+                    <VariantSelect item={selected} value={selectedVariant} onChange={setAddVariant} />
+                  </Field>
+                )}
               </div>
               {usesEnglishMarketPricing ? (
                 <p className="form-note">
@@ -3733,9 +3771,16 @@ function ItemDetailScreen({
                       ))}
                     </select>
                   </Field>
-                  <Field label="Variant">
-                    <VariantSelect item={item} defaultValue={owned.variant} />
-                  </Field>
+                  {item.type === "sealed" ? (
+                    <Field label="Product type">
+                      <input value={item.rarity} readOnly />
+                      <input name="variant" type="hidden" value="Factory sealed" />
+                    </Field>
+                  ) : (
+                    <Field label="Variant">
+                      <VariantSelect item={item} defaultValue={owned.variant} />
+                    </Field>
+                  )}
                 </div>
                 <Field label="Valuation note">
                   <textarea
@@ -4103,7 +4148,9 @@ function SetDetailScreen({
                     <strong>{formatValuation(marketValue)}</strong>
                     <details className="market-help" onClick={(event) => event.stopPropagation()}>
                       <summary aria-label={`Market confidence for ${item.name}`}>?</summary>
-                      <span className="market-help-popover">{marketConfidenceDescription(item, marketValue)}</span>
+                      <span className="market-help-popover">
+                        <MarketConfidencePopover item={item} marketValue={marketValue} />
+                      </span>
                     </details>
                   </span>
                 </div>
@@ -4268,7 +4315,9 @@ function CataloguePreviewModal({
               <strong>{formatValuation(marketValue)}</strong>
               <details className="market-help">
                 <summary aria-label={`Market confidence for ${item.name}`}>?</summary>
-                <span className="market-help-popover">{marketConfidenceDescription(item, marketValue)}</span>
+                <span className="market-help-popover">
+                  <MarketConfidencePopover item={item} marketValue={marketValue} />
+                </span>
               </details>
             </span>
             {owned ? <span className="set-print-status owned"><Check size={14} />Owned</span> : null}
@@ -5939,6 +5988,7 @@ function OperationsScreen({
             <h2>Catalogue status</h2>
             <Database size={18} />
           </div>
+          <p className="muted">Catalogue-wide import coverage. Your owned collection value gaps are tracked separately on Dashboard and Collection.</p>
           {catalogueStatus?.coveragePercent !== null && catalogueStatus?.coveragePercent !== undefined ? (
             <ProgressBar value={catalogueStatus.coveragePercent} />
           ) : null}
@@ -6314,6 +6364,7 @@ function PricingSeriesGapPanel({ rows }: { rows: PricingBySeriesGap[] }) {
         <h2>Card pricing gaps</h2>
         <BarChart3 size={18} />
       </div>
+      <p className="muted">Catalogue-wide card printings without an imported price snapshot yet.</p>
       {visibleRows.length ? (
         <div className="gap-list">
           {visibleRows.map((row) => (
@@ -7371,13 +7422,10 @@ function OwnedItemCard({
   }
 
   const ownedValue = getOwnedValue(item, catalogueItem);
-  const variantLabel = item.variant && item.variant !== "Standard" ? item.variant : "";
+  const variantLabel = catalogueItem.type === "card" && item.variant && item.variant !== "Standard" ? item.variant : "";
   const gradeLabel = item.grade && item.grade !== "Raw" && item.grade !== "N/A" ? item.grade : "";
   const marketValue = catalogueMarketValueMinor(catalogueItem, item.variant);
-  const confidenceDescription =
-    marketValue === null && item.overrideValueMinor !== undefined
-      ? "This value is based on your manual override rather than a live market price."
-      : marketConfidenceDescription(catalogueItem, marketValue);
+  const usesManualValue = item.overrideValueMinor !== undefined;
 
   return (
     <article
@@ -7404,7 +7452,9 @@ function OwnedItemCard({
               onKeyDown={(event) => event.stopPropagation()}
             >
               <summary aria-label={`Price confidence for ${catalogueItem.name}`}>?</summary>
-              <span className="market-help-popover">{confidenceDescription}</span>
+              <span className="market-help-popover">
+                <MarketConfidencePopover item={catalogueItem} manualOverride={usesManualValue} marketValue={marketValue} />
+              </span>
             </details>
           </div>
         </div>
@@ -7442,7 +7492,7 @@ function CatalogueResult({
           {selected ? <span className="set-print-status owned">Selected</span> : <span className="set-print-rarity">{item.rarity}</span>}
         </div>
         <p className="item-value">{formatValuation(catalogueMarketValueMinor(item))}</p>
-        {item.variantOptions?.length ? (
+        {item.type === "card" && item.variantOptions?.length ? (
           <div className="tag-row">
             {item.variantOptions.slice(0, 3).map((option) => (
               <span className="tag" key={option.label}>{option.label}</span>
@@ -7455,7 +7505,7 @@ function CatalogueResult({
 }
 
 function CataloguePreview({ item }: { item: CatalogueItem }) {
-  const variants = item.variantOptions ?? [];
+  const variants = item.type === "card" ? item.variantOptions ?? [] : [];
 
   return (
     <div className="selected-preview">
@@ -7834,14 +7884,93 @@ function marketConfidenceDescription(item: CatalogueItem, marketValue?: number |
   const confidence = item.confidence || "Unknown";
   const source = priceSourceLabel(item.priceSource);
   const observed = item.priceObservedAt ? formatEventDate(item.priceObservedAt) : "unknown date";
-  const reason =
-    confidence.toLowerCase() === "high"
-      ? "The latest imported value is considered usable for normal tracking."
-      : confidence.toLowerCase() === "medium"
-        ? "Check the source before buying or insuring higher-value items."
-        : "Treat this as a guide only until a stronger or newer source is available.";
+  const reason = marketConfidenceReason(confidence);
 
   return `Market confidence: ${confidence}. Source: ${source}. Observed: ${observed}. ${reason}`;
+}
+
+function MarketConfidencePopover({
+  item,
+  manualOverride = false,
+  marketValue,
+}: {
+  item: CatalogueItem;
+  manualOverride?: boolean;
+  marketValue?: number | null;
+}) {
+  if (manualOverride) {
+    return (
+      <span className="market-help-content">
+        <span className="market-help-heading">
+          Value source <strong className="market-confidence-badge manual">Manual</strong>
+        </span>
+        <span>This value uses your manual override rather than a live market price.</span>
+      </span>
+    );
+  }
+
+  if (marketValue === null || marketValue === undefined) {
+    return (
+      <span className="market-help-content">
+        <span className="market-help-heading">
+          Value source <strong className="market-confidence-badge missing">Missing</strong>
+        </span>
+        <span>Use a manual value with a note, or refresh pricing when a source supports this item.</span>
+      </span>
+    );
+  }
+
+  const confidence = item.confidence || "Unknown";
+
+  return (
+    <span className="market-help-content">
+      <span className="market-help-heading">
+        Market confidence
+        <strong className={marketConfidenceBadgeClass(confidence)}>{confidence}</strong>
+      </span>
+      <span className="market-help-row">
+        <span>Source</span>
+        <strong>{priceSourceLabel(item.priceSource)}</strong>
+      </span>
+      <span className="market-help-row">
+        <span>Observed</span>
+        <strong>{item.priceObservedAt ? formatEventDate(item.priceObservedAt) : "Unknown"}</strong>
+      </span>
+      <span>{marketConfidenceReason(confidence)}</span>
+    </span>
+  );
+}
+
+function marketConfidenceReason(confidence: string) {
+  const normalized = confidence.trim().toLowerCase();
+
+  if (normalized === "strong" || normalized === "high") {
+    return "The latest imported value is considered usable for normal tracking.";
+  }
+
+  if (normalized === "fair" || normalized === "medium") {
+    return "Check the source before buying or insuring higher-value items.";
+  }
+
+  return "Treat this as a guide only until a stronger or newer source is available.";
+}
+
+function marketConfidenceBadgeClass(confidence: string) {
+  const normalized = confidence.trim().toLowerCase();
+
+  if (normalized === "strong" || normalized === "high") {
+    return "market-confidence-badge strong";
+  }
+
+  if (normalized === "fair" || normalized === "medium") {
+    return "market-confidence-badge fair";
+  }
+
+  if (normalized === "weak") {
+    return "market-confidence-badge weak";
+  }
+
+  return "market-confidence-badge missing";
 }
 
 function setInitials(name: string) {
@@ -8769,6 +8898,14 @@ function moneyInputToMinor(value?: string) {
   }
 
   return Math.round(amount * 100);
+}
+
+function defaultWishlistTargetMinor(marketValueMinor: number | null) {
+  if (marketValueMinor === null || !Number.isFinite(marketValueMinor) || marketValueMinor <= 0) {
+    return undefined;
+  }
+
+  return Math.max(1, Math.round(marketValueMinor * 0.9));
 }
 
 function normalizePriority(value: string): WishlistItem["priority"] {

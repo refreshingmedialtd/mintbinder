@@ -61,6 +61,10 @@ type NormalizedCatalogueSearchInput = {
   type: ItemType;
 };
 
+type OrderedCatalogueId = {
+  id: string;
+};
+
 type AppDataOptions = {
   catalogueScope?: CatalogueScope;
 };
@@ -392,6 +396,10 @@ async function getCatalogueItems(userId: string): Promise<CatalogueItem[]> {
 }
 
 async function searchCardPrintings(query: NormalizedCatalogueSearchInput): Promise<CatalogueItem[]> {
+  if (isCatalogueValueSort(query.sort)) {
+    return searchCardPrintingsByValue(query);
+  }
+
   const filters: Prisma.CardPrintingWhereInput[] = [];
 
   if (query.q) {
@@ -435,6 +443,10 @@ async function searchSealedProducts(
   userId: string,
   query: NormalizedCatalogueSearchInput,
 ): Promise<CatalogueItem[]> {
+  if (isCatalogueValueSort(query.sort)) {
+    return searchSealedProductsByValue(userId, query);
+  }
+
   const filters: Prisma.SealedProductWhereInput[] = [
     {
       OR: [
@@ -480,6 +492,106 @@ async function searchSealedProducts(
   );
 
   return sortCatalogueSearchResults(catalogue, query.sort);
+}
+
+async function searchCardPrintingsByValue(query: NormalizedCatalogueSearchInput): Promise<CatalogueItem[]> {
+  const rows = await prisma.$queryRaw<OrderedCatalogueId[]>(Prisma.sql`
+    WITH latest_prices AS (
+      SELECT DISTINCT ON (card_printing_id)
+        card_printing_id,
+        price_minor
+      FROM price_snapshots
+      WHERE card_printing_id IS NOT NULL
+        AND item_type = 'card'::item_type
+      ORDER BY card_printing_id, observed_at DESC, created_at DESC
+    )
+    SELECT cp.id
+    FROM card_printings cp
+    JOIN card_sets cs ON cs.id = cp.card_set_id
+    LEFT JOIN latest_prices lp ON lp.card_printing_id = cp.id
+    ${cardCatalogueSearchWhere(query)}
+    ORDER BY
+      CASE WHEN lp.price_minor IS NULL THEN 1 ELSE 0 END ASC,
+      lp.price_minor ${catalogueValueSortDirection(query.sort)},
+      cp.name ASC,
+      cp.number ASC
+    LIMIT ${catalogueSearchFetchLimit(query)}
+  `);
+
+  return hydrateCardPrintingsByOrderedIds(rows.map((row) => row.id));
+}
+
+async function searchSealedProductsByValue(
+  userId: string,
+  query: NormalizedCatalogueSearchInput,
+): Promise<CatalogueItem[]> {
+  const rows = await prisma.$queryRaw<OrderedCatalogueId[]>(Prisma.sql`
+    WITH latest_prices AS (
+      SELECT DISTINCT ON (sealed_product_id)
+        sealed_product_id,
+        price_minor
+      FROM price_snapshots
+      WHERE sealed_product_id IS NOT NULL
+        AND item_type = 'sealed_product'::item_type
+      ORDER BY sealed_product_id, observed_at DESC, created_at DESC
+    )
+    SELECT sp.id
+    FROM sealed_products sp
+    LEFT JOIN card_sets cs ON cs.id = sp.related_card_set_id
+    LEFT JOIN latest_prices lp ON lp.sealed_product_id = sp.id
+    ${sealedCatalogueSearchWhere(userId, query)}
+    ORDER BY
+      CASE WHEN lp.price_minor IS NULL THEN 1 ELSE 0 END ASC,
+      lp.price_minor ${catalogueValueSortDirection(query.sort)},
+      sp.name ASC
+    LIMIT ${catalogueSearchFetchLimit(query)}
+  `);
+
+  return hydrateSealedProductsByOrderedIds(rows.map((row) => row.id));
+}
+
+async function hydrateCardPrintingsByOrderedIds(ids: string[]): Promise<CatalogueItem[]> {
+  if (!ids.length) {
+    return [];
+  }
+
+  const order = new Map(ids.map((id, index) => [id, index]));
+  const cards = await prisma.cardPrinting.findMany({
+    where: { id: { in: ids } },
+    include: {
+      cardSet: true,
+      priceSnapshots: {
+        orderBy: [{ observedAt: "desc" }, { createdAt: "desc" }],
+        take: PRICE_HISTORY_LIMIT,
+      },
+    },
+  });
+
+  return cards
+    .map((card) => mapCardPrintingToCatalogueItem(card, card.priceSnapshots))
+    .sort((left, right) => (order.get(left.id) ?? 0) - (order.get(right.id) ?? 0));
+}
+
+async function hydrateSealedProductsByOrderedIds(ids: string[]): Promise<CatalogueItem[]> {
+  if (!ids.length) {
+    return [];
+  }
+
+  const order = new Map(ids.map((id, index) => [id, index]));
+  const products = await prisma.sealedProduct.findMany({
+    where: { id: { in: ids } },
+    include: {
+      relatedCardSet: true,
+      priceSnapshots: {
+        orderBy: [{ observedAt: "desc" }, { createdAt: "desc" }],
+        take: PRICE_HISTORY_LIMIT,
+      },
+    },
+  });
+
+  return products
+    .map((product) => mapSealedProductToCatalogueItem(product, product.priceSnapshots))
+    .sort((left, right) => (order.get(left.id) ?? 0) - (order.get(right.id) ?? 0));
 }
 
 function referencedCatalogueItems(
@@ -567,6 +679,69 @@ function catalogueSearchFetchLimit(query: NormalizedCatalogueSearchInput) {
     : 3;
 
   return Math.min(CATALOGUE_SEARCH_MAX_LIMIT * CATALOGUE_SEARCH_FETCH_MULTIPLIER, query.limit * multiplier);
+}
+
+function isCatalogueValueSort(sort: string) {
+  return sort === "value-asc" || sort === "value-desc";
+}
+
+function catalogueValueSortDirection(sort: string) {
+  return sort === "value-asc" ? Prisma.raw("ASC") : Prisma.raw("DESC");
+}
+
+function cardCatalogueSearchWhere(query: NormalizedCatalogueSearchInput) {
+  const filters: Prisma.Sql[] = [];
+
+  if (query.q) {
+    const pattern = `%${query.q}%`;
+    filters.push(Prisma.sql`(
+      cp.search_text ILIKE ${pattern}
+      OR cp.name ILIKE ${pattern}
+      OR cp.number ILIKE ${pattern}
+      OR cp.rarity ILIKE ${pattern}
+      OR cs.name ILIKE ${pattern}
+    )`);
+  }
+
+  if (query.set !== "all") {
+    filters.push(Prisma.sql`cs.name = ${query.set}`);
+  }
+
+  if (query.rarity !== "all") {
+    filters.push(Prisma.sql`cp.rarity = ${query.rarity}`);
+  }
+
+  return filters.length ? Prisma.sql`WHERE ${Prisma.join(filters, " AND ")}` : Prisma.empty;
+}
+
+function sealedCatalogueSearchWhere(userId: string, query: NormalizedCatalogueSearchInput) {
+  const filters: Prisma.Sql[] = [
+    Prisma.sql`(
+      sp.visibility = 'global'::catalogue_visibility
+      OR sp.created_by_user_id = ${userId}::uuid
+    )`,
+  ];
+
+  if (query.q) {
+    const pattern = `%${query.q}%`;
+    const productType = sealedProductTypeFromSearchTerm(query.q);
+
+    filters.push(Prisma.sql`(
+      sp.name ILIKE ${pattern}
+      OR cs.name ILIKE ${pattern}
+      ${productType ? Prisma.sql`OR sp.product_type = ${sealedProductTypeDbValue(productType)}::sealed_product_type` : Prisma.empty}
+    )`);
+  }
+
+  if (query.set !== "all") {
+    filters.push(Prisma.sql`cs.name = ${query.set}`);
+  }
+
+  if (query.rarity !== "all") {
+    filters.push(Prisma.sql`sp.product_type = ${sealedProductTypeDbValue(sealedProductTypeToEnum(query.rarity))}::sealed_product_type`);
+  }
+
+  return Prisma.sql`WHERE ${Prisma.join(filters, " AND ")}`;
 }
 
 function filterAndSortCatalogue(
@@ -1119,6 +1294,7 @@ export async function createWishlistItem(userId: string, catalogueId: string): P
   }
 
   const priceSnapshot = cardPrinting?.priceSnapshots[0] ?? sealedProduct?.priceSnapshots[0];
+  const targetPriceMinor = defaultWishlistTargetPriceMinor(priceSnapshot?.priceMinor);
 
   const created = await prisma.wishlistItem.upsert({
     where: cardPrinting
@@ -1130,8 +1306,8 @@ export async function createWishlistItem(userId: string, catalogueId: string): P
       itemType: cardPrinting ? PrismaItemType.CARD : PrismaItemType.SEALED_PRODUCT,
       cardPrintingId: cardPrinting?.id,
       sealedProductId: sealedProduct?.id,
-      targetPriceMinor: priceSnapshot?.priceMinor,
-      targetCurrency: priceSnapshot ? priceSnapshot.currency : undefined,
+      targetPriceMinor,
+      targetCurrency: targetPriceMinor === undefined ? undefined : priceSnapshot?.currency ?? "GBP",
       priority:
         (priceSnapshot?.priceMinor ?? 0) > 10000
           ? WishlistPriority.GRAIL
@@ -1668,6 +1844,22 @@ function sealedProductTypeToEnum(value?: string) {
   return map[normalized] ?? SealedProductType.OTHER;
 }
 
+function sealedProductTypeDbValue(value: SealedProductType) {
+  const map: Record<SealedProductType, string> = {
+    [SealedProductType.BOOSTER_BOX]: "booster_box",
+    [SealedProductType.BOOSTER_PACK]: "booster_pack",
+    [SealedProductType.ELITE_TRAINER_BOX]: "elite_trainer_box",
+    [SealedProductType.COLLECTION_BOX]: "collection_box",
+    [SealedProductType.TIN]: "tin",
+    [SealedProductType.BLISTER]: "blister",
+    [SealedProductType.DECK]: "deck",
+    [SealedProductType.CASE]: "case",
+    [SealedProductType.OTHER]: "other",
+  };
+
+  return map[value];
+}
+
 function sealedProductTypeFromSearchTerm(value?: string) {
   const normalized = value?.trim().toLowerCase().replace(/[\s-]+/g, "_") ?? "";
   const map: Record<string, SealedProductType> = {
@@ -1723,6 +1915,14 @@ function gradeCompanyLabel(value: string) {
   };
 
   return labels[value] ?? enumLabel(value);
+}
+
+function defaultWishlistTargetPriceMinor(priceMinor?: number | null) {
+  if (typeof priceMinor !== "number" || !Number.isFinite(priceMinor) || priceMinor <= 0) {
+    return undefined;
+  }
+
+  return Math.max(1, Math.round(priceMinor * 0.9));
 }
 
 function parseMoneyToMinor(value?: string) {

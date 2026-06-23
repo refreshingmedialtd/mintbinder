@@ -737,6 +737,16 @@ h3 {
   gap: 14px;
 }
 
+.setup-panel-actions {
+  justify-content: flex-end;
+}
+
+.setup-dismiss-button {
+  width: 32px;
+  height: 32px;
+  color: var(--muted);
+}
+
 .setup-checklist-list {
   display: grid;
   gap: 8px;
@@ -2304,8 +2314,8 @@ h3 {
   right: -8px;
   bottom: calc(100% + 8px);
   z-index: 12;
-  width: min(260px, 72vw);
-  padding: 10px 11px;
+  width: min(310px, 78vw);
+  padding: 12px;
   border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line));
   border-radius: 8px;
   background: var(--surface);
@@ -2314,6 +2324,71 @@ h3 {
   font-size: 12px;
   font-weight: 750;
   line-height: 1.35;
+}
+
+.market-help-content {
+  display: grid;
+  gap: 8px;
+}
+
+.market-help-heading,
+.market-help-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.market-help-heading {
+  color: var(--ink);
+  font-weight: 900;
+}
+
+.market-help-row {
+  color: var(--muted);
+}
+
+.market-help-row strong {
+  color: var(--ink);
+}
+
+.market-confidence-badge {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--control);
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 950;
+  line-height: 1;
+}
+
+.market-confidence-badge.strong {
+  border-color: color-mix(in srgb, var(--green) 42%, var(--line));
+  background: color-mix(in srgb, var(--green) 15%, var(--surface));
+  color: var(--green);
+}
+
+.market-confidence-badge.fair {
+  border-color: color-mix(in srgb, var(--amber) 46%, var(--line));
+  background: color-mix(in srgb, var(--amber) 15%, var(--surface));
+  color: var(--amber);
+}
+
+.market-confidence-badge.weak,
+.market-confidence-badge.missing {
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--line));
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  color: var(--accent);
+}
+
+.market-confidence-badge.manual {
+  border-color: color-mix(in srgb, var(--green) 36%, var(--line));
+  background: color-mix(in srgb, var(--green) 13%, var(--surface));
+  color: var(--green);
 }
 
 .set-print-card .market-help-popover {
@@ -2606,6 +2681,12 @@ h3 {
 .field textarea {
   min-height: 84px;
   resize: vertical;
+}
+
+.field input[readonly] {
+  border-color: color-mix(in srgb, var(--line) 80%, transparent);
+  background: color-mix(in srgb, var(--surface-soft) 78%, var(--control));
+  color: var(--muted);
 }
 
 .field input:focus,

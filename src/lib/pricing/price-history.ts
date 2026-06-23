@@ -10,9 +10,13 @@ export type PriceHistoryInput = {
 
 export function buildPriceHistory(prices: PriceHistoryInput[]): PricePoint[] {
   return prices
-    .map(normalizePricePoint)
-    .filter((point): point is PricePoint => point !== null)
-    .sort((left, right) => Date.parse(left.observedAt) - Date.parse(right.observedAt));
+    .map((price, index) => ({ index, point: normalizePricePoint(price) }))
+    .filter((entry): entry is { index: number; point: PricePoint } => entry.point !== null)
+    .sort((left, right) =>
+      Date.parse(left.point.observedAt) - Date.parse(right.point.observedAt) ||
+      right.index - left.index,
+    )
+    .map((entry) => entry.point);
 }
 
 export function latestPricePoint(history: PricePoint[]) {

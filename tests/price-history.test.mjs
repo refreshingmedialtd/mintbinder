@@ -54,6 +54,25 @@ test("maps confidence score thresholds", () => {
   assert.equal(priceConfidenceFromScore(null), "Weak");
 });
 
+test("keeps newest input as latest when observed timestamps tie", () => {
+  const history = buildPriceHistory([
+    {
+      priceMinor: 2000,
+      confidenceScore: 80,
+      source: "newer-import",
+      observedAt: "2026-05-02T10:00:00.000Z",
+    },
+    {
+      priceMinor: 1500,
+      confidenceScore: 80,
+      source: "older-import",
+      observedAt: "2026-05-02T10:00:00.000Z",
+    },
+  ]);
+
+  assert.equal(latestPricePoint(history)?.valueMinor, 2000);
+});
+
 test("ignores impossible prices and handles empty ranges", () => {
   assert.deepEqual(
     buildPriceHistory([
