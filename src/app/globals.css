@@ -1403,10 +1403,17 @@ h3 {
 
 .wishlist-card-top {
   display: grid;
-  grid-template-columns: 74px minmax(0, 1fr) auto;
-  gap: 12px;
+  grid-template-columns: 74px minmax(0, 1fr);
+  grid-template-areas:
+    "image copy"
+    "image priority";
+  gap: 8px 12px;
   align-items: start;
   min-width: 0;
+}
+
+.wishlist-card-top .collection-lot-image {
+  grid-area: image;
 }
 
 .wishlist-lot-card .collection-lot-image {
@@ -1415,6 +1422,7 @@ h3 {
 }
 
 .wishlist-card-copy {
+  grid-area: copy;
   min-width: 0;
 }
 
@@ -1443,6 +1451,11 @@ h3 {
   background: color-mix(in srgb, var(--amber) 12%, var(--control));
   color: var(--amber);
   font-size: 12px;
+}
+
+.wishlist-card-top .priority-pill {
+  grid-area: priority;
+  justify-self: start;
 }
 
 .priority-grail {
@@ -1827,6 +1840,18 @@ h3 {
 
 .collection-lot-card:has(.collection-price-help[open]) {
   z-index: 4;
+}
+
+.collection-lot-card.wishlist-lot-card {
+  grid-template-columns: 1fr;
+  gap: 12px;
+  min-height: 0;
+  padding: 14px;
+}
+
+.collection-lot-card.wishlist-lot-card .wishlist-card-top,
+.collection-lot-card.wishlist-lot-card .wishlist-card-body {
+  min-width: 0;
 }
 
 .collection-lot-image {

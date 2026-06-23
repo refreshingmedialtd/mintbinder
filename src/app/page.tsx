@@ -4139,7 +4139,7 @@ function WishlistScreen({
       <div className={isCard ? "wishlist-card-actions" : "wishlist-table-actions"}>
         <button className="button primary" type="button" onClick={() => void addToCollection(row.item.catalogueId)}>
           <Check size={17} />
-          {isCard ? "Move to collection" : "Move"}
+          Move
         </button>
         <button
           className="button wishlist-icon-action"
