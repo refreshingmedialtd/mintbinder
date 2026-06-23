@@ -7,7 +7,7 @@ echo "Mint Binder deployment started at $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 echo "Working directory: $(pwd)"
 
 export NEXT_TELEMETRY_DISABLED=1
-export MINTBINDER_DEPLOY_SCRIPT_VERSION="2026-06-19.2"
+export MINTBINDER_DEPLOY_SCRIPT_VERSION="2026-06-23.1"
 export MINTBINDER_COMMIT="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
 export MINTBINDER_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
 
@@ -25,6 +25,8 @@ npm run db:generate
 npm run db:deploy
 
 export NODE_ENV=production
+echo "Clearing stale Next build cache..."
+rm -rf .next/cache
 npm run build
 
 restart_app() {

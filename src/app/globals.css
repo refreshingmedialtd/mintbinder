@@ -333,7 +333,10 @@ button {
 input,
 select,
 textarea {
+  border-color: var(--line-strong);
+  background: var(--control);
   color: var(--ink);
+  accent-color: var(--accent);
 }
 
 img {
@@ -1278,7 +1281,7 @@ h3 {
   width: 100%;
   min-width: 0;
   border: 0;
-  background: transparent;
+  background: transparent !important;
   color: var(--ink);
   font: inherit;
   font-weight: 850;
@@ -1502,6 +1505,10 @@ h3 {
   align-items: center;
   gap: 5px;
   color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
 }
 
 .owned-confidence::before {
@@ -1521,11 +1528,17 @@ h3 {
 }
 
 .collection-lot-card {
+  position: relative;
   display: grid;
-  grid-template-columns: 88px minmax(0, 1fr);
-  gap: 14px;
-  min-height: 150px;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 12px;
+  min-height: 132px;
+  overflow: hidden;
   padding: 12px;
+  border-color: color-mix(in srgb, var(--line) 82%, var(--theme-c));
+  background:
+    linear-gradient(145deg, color-mix(in srgb, var(--surface-soft) 60%, transparent), transparent 135%),
+    var(--surface);
   color: var(--ink);
   text-align: left;
 }
@@ -1534,16 +1547,25 @@ h3 {
   width: 100%;
 }
 
+.collection-lot-card::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: linear-gradient(180deg, var(--accent), var(--teal));
+  content: "";
+  opacity: 0.84;
+}
+
 .collection-lot-card:hover {
-  border-color: var(--line-strong);
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--line-strong));
   background:
-    linear-gradient(135deg, color-mix(in srgb, var(--theme-b) 8%, transparent), transparent 54%),
+    linear-gradient(135deg, color-mix(in srgb, var(--theme-b) 11%, transparent), transparent 58%),
     var(--surface);
 }
 
 .collection-lot-image {
-  width: 88px;
-  height: 124px;
+  width: 76px;
+  height: 106px;
   align-self: start;
   border-radius: 4px;
 }
@@ -1551,28 +1573,33 @@ h3 {
 .collection-lot-body {
   display: grid;
   min-width: 0;
-  gap: 9px;
+  gap: 8px;
   align-content: start;
 }
 
 .collection-lot-head {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 5px;
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
 }
 
 .collection-lot-head h3 {
   margin: 0;
   color: var(--ink);
-  font-size: 18px;
+  font-size: 17px;
   line-height: 1.15;
   overflow-wrap: anywhere;
 }
 
 .collection-lot-head strong {
-  color: var(--ink);
-  font-size: 18px;
+  flex: 0 0 auto;
+  color: var(--green);
+  font-size: 16px;
   line-height: 1.15;
+  text-align: right;
+  white-space: nowrap;
 }
 
 .collection-lot-set {
@@ -1599,14 +1626,30 @@ h3 {
   font-weight: 850;
 }
 
+.collection-lot-footer > span:last-child {
+  color: var(--muted);
+}
+
 .set-card {
+  position: relative;
   display: grid;
   align-content: space-between;
   gap: 12px;
-  min-height: 166px;
-  padding: 12px;
+  min-height: 184px;
+  overflow: hidden;
+  padding: 14px;
+  border-color: color-mix(in srgb, var(--line) 82%, var(--theme-c));
+  background:
+    radial-gradient(circle at 16% 0, color-mix(in srgb, var(--theme-c) 15%, transparent), transparent 36%),
+    linear-gradient(145deg, color-mix(in srgb, var(--surface-soft) 58%, transparent), transparent 132%),
+    var(--surface);
   color: var(--ink);
   text-align: left;
+}
+
+.set-card:hover {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--line-strong));
+  transform: translateY(-1px);
 }
 
 .set-card span {
@@ -1614,22 +1657,24 @@ h3 {
   margin-top: 4px;
   color: var(--muted);
   font-size: 13px;
+  font-weight: 780;
 }
 
 .set-card b {
   color: var(--teal);
+  font-size: 19px;
 }
 
 .set-artwork {
   position: relative;
   display: grid;
-  height: 56px;
+  height: 62px;
   place-items: center;
   overflow: hidden;
-  border: 1px solid var(--line);
+  border: 1px solid color-mix(in srgb, var(--line) 82%, var(--theme-c));
   border-radius: var(--radius);
   background:
-    radial-gradient(circle at 20% 20%, color-mix(in srgb, var(--theme-c) 18%, transparent), transparent 34%),
+    radial-gradient(circle at 20% 20%, color-mix(in srgb, var(--theme-c) 22%, transparent), transparent 36%),
     var(--surface-soft);
 }
 
@@ -1646,15 +1691,18 @@ h3 {
 }
 
 .set-print-card {
+  position: relative;
   display: grid;
-  grid-template-columns: 86px minmax(0, 1fr);
-  gap: 14px;
-  min-height: 190px;
-  padding: 13px;
-  border: 1px solid var(--line);
+  grid-template-columns: 78px minmax(0, 1fr);
+  gap: 12px;
+  min-height: 172px;
+  overflow: hidden;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--line) 84%, var(--theme-c));
   border-radius: var(--radius);
   background:
-    linear-gradient(145deg, color-mix(in srgb, var(--surface-soft) 82%, transparent), transparent 120%),
+    radial-gradient(circle at 0 0, color-mix(in srgb, var(--theme-c) 10%, transparent), transparent 34%),
+    linear-gradient(145deg, color-mix(in srgb, var(--surface-soft) 66%, transparent), transparent 128%),
     var(--surface);
   box-shadow: var(--shadow);
   color: var(--ink);
@@ -1684,8 +1732,8 @@ h3 {
 }
 
 .set-print-image {
-  width: 86px;
-  height: 120px;
+  width: 78px;
+  height: 109px;
   align-self: start;
   border-radius: 5px;
   background:
@@ -1700,7 +1748,7 @@ h3 {
 
 .set-print-body {
   display: grid;
-  gap: 10px;
+  gap: 9px;
   align-content: start;
 }
 
@@ -1750,11 +1798,10 @@ h3 {
 .set-print-rarity {
   display: inline-flex;
   min-width: 0;
-  color: var(--muted);
-  font-size: 12px;
+  color: var(--ink);
+  font-size: 13px;
   font-weight: 900;
   line-height: 1.2;
-  text-transform: uppercase;
 }
 
 .set-print-price {
@@ -1830,7 +1877,7 @@ h3 {
 }
 
 .set-print-variants {
-  max-height: 58px;
+  max-height: 33px;
   overflow: hidden;
 }
 
@@ -1875,7 +1922,7 @@ h3 {
 
 .set-print-actions .button {
   width: 100%;
-  min-height: 38px;
+  min-height: 36px;
 }
 
 .catalogue-preview-backdrop {
@@ -3017,6 +3064,7 @@ h3 {
 
 .collection-grid {
   display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 14px;
 }
 
@@ -3202,7 +3250,7 @@ h3 {
   }
 
   .collection-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(280px, 1fr));
   }
 
   .mobile-list {
@@ -3282,7 +3330,7 @@ h3 {
   }
 
   .collection-grid {
-    grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
   }
 
   .main {

@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { prisma } from "@/lib/db/prisma";
 
 export const dynamic = "force-dynamic";
@@ -18,6 +20,7 @@ export async function GET() {
           auth: environment,
           database: "ok",
         },
+        build: buildInfo(),
         durationMs: Date.now() - startedAt,
         ok: true,
         service: "mintbinder",
@@ -37,6 +40,7 @@ export async function GET() {
           auth: environment,
           database: "failed",
         },
+        build: buildInfo(),
         durationMs: Date.now() - startedAt,
         error: error instanceof Error ? error.message : "Health check failed.",
         ok: false,
@@ -61,4 +65,25 @@ function environmentChecks() {
     authUrlConfigured: Boolean(process.env.AUTH_URL || process.env.NEXTAUTH_URL),
     nextPublicAppUrlConfigured: Boolean(process.env.NEXT_PUBLIC_APP_URL),
   };
+}
+
+function buildInfo() {
+  const fallback = {
+    branch: process.env.MINTBINDER_BRANCH || "unknown",
+    commit: process.env.MINTBINDER_COMMIT || "unknown",
+    deployScriptVersion: process.env.MINTBINDER_DEPLOY_SCRIPT_VERSION || "unknown",
+  };
+
+  try {
+    const file = JSON.parse(readFileSync(join(process.cwd(), ".mintbinder-build.json"), "utf8")) as Partial<
+      typeof fallback & { generatedAt: string; nodeVersion: string }
+    >;
+
+    return {
+      ...fallback,
+      ...file,
+    };
+  } catch {
+    return fallback;
+  }
 }
