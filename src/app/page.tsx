@@ -6566,32 +6566,51 @@ function OwnedItemCard({
   const ownedValue = getOwnedValue(item, catalogueItem);
   const variantLabel = item.variant && item.variant !== "Standard" ? item.variant : "";
   const gradeLabel = item.grade && item.grade !== "Raw" && item.grade !== "N/A" ? item.grade : "";
-  const confidenceLabel = valuationStatusLabel(catalogueItem, item)
-    .replace("Market confidence: ", "")
-    .replace("Price confidence: ", "");
-  const confidenceClass = valuationPillClass(catalogueItem, item).replace("confidence-pill", "owned-confidence");
+  const marketValue = catalogueMarketValueMinor(catalogueItem, item.variant);
+  const confidenceDescription =
+    marketValue === null && item.overrideValueMinor !== undefined
+      ? "This value is based on your manual override rather than a live market price."
+      : marketConfidenceDescription(catalogueItem, marketValue);
 
   return (
-    <button className="collection-lot-card clickable" onClick={onClick}>
+    <article
+      className="collection-lot-card clickable"
+      role="button"
+      tabIndex={0}
+      onClick={onClick}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onClick();
+        }
+      }}
+    >
       <div className="item-image collection-lot-image">{renderItemImage(catalogueItem)}</div>
       <div className="collection-lot-body">
         <div className="collection-lot-head">
           <h3>{catalogueItem.name}</h3>
-          <strong>{formatValuation(ownedValue)}</strong>
+          <div className="collection-lot-price">
+            <strong>{formatValuation(ownedValue)}</strong>
+            <details
+              className="market-help collection-price-help"
+              onClick={(event) => event.stopPropagation()}
+              onKeyDown={(event) => event.stopPropagation()}
+            >
+              <summary aria-label={`Price confidence for ${catalogueItem.name}`}>?</summary>
+              <span className="market-help-popover">{confidenceDescription}</span>
+            </details>
+          </div>
         </div>
         <p className="collection-lot-set">{catalogueItem.set} | {catalogueItem.number}</p>
         <div className="collection-lot-meta">
           <span className="tag">{item.condition}</span>
           {variantLabel ? <span className="tag">{variantLabel}</span> : null}
           {gradeLabel ? <span className="tag">{gradeLabel}</span> : null}
+          <span className="tag">{item.language}</span>
           <span className="tag blue">Qty {item.quantity}</span>
         </div>
-        <div className="collection-lot-footer">
-          <span className={confidenceClass}>{confidenceLabel} confidence</span>
-          <span>{item.language}</span>
-        </div>
       </div>
-    </button>
+    </article>
   );
 }
 

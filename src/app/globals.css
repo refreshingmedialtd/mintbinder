@@ -1545,6 +1545,12 @@ h3 {
 
 .collection-lot-card.clickable {
   width: 100%;
+  cursor: pointer;
+}
+
+.collection-lot-card.clickable:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 76%, white);
+  outline-offset: 3px;
 }
 
 .collection-lot-card::before {
@@ -1600,6 +1606,37 @@ h3 {
   line-height: 1.15;
   text-align: right;
   white-space: nowrap;
+}
+
+.collection-lot-price {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+  color: var(--green);
+  white-space: nowrap;
+}
+
+.collection-lot-price strong {
+  color: currentColor;
+}
+
+.collection-price-help {
+  color: color-mix(in srgb, var(--green) 82%, var(--ink));
+}
+
+.collection-price-help summary {
+  width: 17px;
+  height: 17px;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.collection-price-help .market-help-popover {
+  right: 0;
+  bottom: calc(100% + 9px);
+  white-space: normal;
 }
 
 .collection-lot-set {
