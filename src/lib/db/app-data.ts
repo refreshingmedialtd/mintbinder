@@ -18,6 +18,7 @@ import { getEntitlements } from "@/lib/entitlements";
 import { getNotificationPreferences } from "@/lib/notifications/preferences";
 import { buildPriceHistory, latestPricePoint } from "@/lib/pricing/price-history";
 import type {
+  AppCatalogueData,
   AppData,
   CatalogueItem,
   CollectionEvent as ClientCollectionEvent,
@@ -35,6 +36,39 @@ type PriceLike = {
   source: string;
   observedAt: Date;
   variantLabel: string | null;
+};
+
+type CatalogueScope = "full" | "referenced";
+
+type AppDataOptions = {
+  catalogueScope?: CatalogueScope;
+};
+
+type CardPrintingWithPrices = {
+  id: string;
+  name: string;
+  number: string;
+  rarity: string | null;
+  imageLargeUrl: string | null;
+  imageSmallUrl: string | null;
+  providerIds: unknown;
+  variantMetadata: unknown;
+  cardSet: { name: string };
+  priceSnapshots: PriceLike[];
+};
+
+type SealedProductWithPrices = {
+  id: string;
+  name: string;
+  productType: string;
+  imageUrl: string | null;
+  relatedCardSet: { name: string } | null;
+  priceSnapshots: PriceLike[];
+};
+
+type CatalogueReferenceRecord = {
+  cardPrinting: CardPrintingWithPrices | null;
+  sealedProduct: SealedProductWithPrices | null;
 };
 
 const PRICE_HISTORY_LIMIT = 8;
@@ -88,11 +122,14 @@ export type UpdateWishlistItemInput = {
 export function sampleDataFallback(notice: string): AppData {
   return {
     ...sampleAppData,
+    catalogueComplete: true,
     notice,
   };
 }
 
-export async function getAppData(userId: string): Promise<AppData> {
+export async function getAppData(userId: string, options: AppDataOptions = {}): Promise<AppData> {
+  const catalogueScope = options.catalogueScope ?? "full";
+
   if (!process.env.DATABASE_URL) {
     return sampleDataFallback("Using sample data because DATABASE_URL is not configured.");
   }
@@ -101,43 +138,19 @@ export async function getAppData(userId: string): Promise<AppData> {
     const [
       subscription,
       notificationPreferences,
-      cardPrintings,
-      sealedProducts,
+      fullCatalogue,
       collectionItems,
       wishlistItems,
       cardSets,
+      cardSetCounts,
+      ownedCardRows,
       storageLocations,
       collectionEvents,
     ] =
       await Promise.all([
         getEntitlements(userId),
         getNotificationPreferences(userId),
-        prisma.cardPrinting.findMany({
-          include: {
-            cardSet: true,
-            priceSnapshots: {
-              orderBy: { observedAt: "desc" },
-              take: PRICE_HISTORY_LIMIT,
-            },
-          },
-          orderBy: [{ cardSet: { releaseDate: "desc" } }, { number: "asc" }],
-        }),
-        prisma.sealedProduct.findMany({
-          where: {
-            OR: [
-              { visibility: CatalogueVisibility.GLOBAL },
-              { createdByUserId: userId },
-            ],
-          },
-          include: {
-            relatedCardSet: true,
-            priceSnapshots: {
-              orderBy: { observedAt: "desc" },
-              take: PRICE_HISTORY_LIMIT,
-            },
-          },
-          orderBy: { name: "asc" },
-        }),
+        catalogueScope === "full" ? getCatalogueItems(userId) : Promise.resolve([]),
         prisma.collectionItem.findMany({
           where: {
             userId,
@@ -171,21 +184,24 @@ export async function getAppData(userId: string): Promise<AppData> {
           orderBy: { createdAt: "asc" },
         }),
         prisma.cardSet.findMany({
-          include: {
-            cardPrintings: {
-              select: {
-                id: true,
-                collectionItems: {
-                  where: {
-                    userId,
-                    archivedAt: null,
-                  },
-                  select: { id: true },
-                },
-              },
+          orderBy: { releaseDate: "desc" },
+        }),
+        prisma.cardPrinting.groupBy({
+          by: ["cardSetId"],
+          _count: { _all: true },
+        }),
+        prisma.collectionItem.findMany({
+          where: {
+            userId,
+            archivedAt: null,
+            cardPrintingId: { not: null },
+          },
+          select: {
+            cardPrintingId: true,
+            cardPrinting: {
+              select: { cardSetId: true },
             },
           },
-          orderBy: { releaseDate: "desc" },
         }),
         prisma.storageLocation.findMany({
           where: { userId },
@@ -199,20 +215,24 @@ export async function getAppData(userId: string): Promise<AppData> {
         }),
       ]);
 
-    const catalogue: CatalogueItem[] = [
-      ...cardPrintings.map((card) =>
-        mapCardPrintingToCatalogueItem(card, card.priceSnapshots),
-      ),
-      ...sealedProducts.map((product) =>
-        mapSealedProductToCatalogueItem(product, product.priceSnapshots),
-      ),
-    ];
+    const cardSetTotals = new Map(cardSetCounts.map((row) => [row.cardSetId, row._count._all]));
+    const ownedCardsBySet = ownedCardCountsBySet(ownedCardRows);
+    const catalogue =
+      catalogueScope === "full"
+        ? fullCatalogue
+        : referencedCatalogueItems(collectionItems, wishlistItems);
 
     return {
       catalogue,
+      catalogueComplete: catalogueScope === "full",
       collection: collectionItems.map(mapCollectionItem),
       wishlist: wishlistItems.map(mapWishlistItem),
-      sets: cardSets.map(mapSetProgress),
+      sets: cardSets.map((set) =>
+        mapSetProgress(set, {
+          owned: ownedCardsBySet.get(set.id) ?? 0,
+          total: cardSetTotals.get(set.id) ?? 0,
+        }),
+      ),
       storageLocations: mapStorageLocations(storageLocations, collectionItems),
       events: collectionEvents.map(mapCollectionEvent),
       source: "database",
@@ -223,6 +243,112 @@ export async function getAppData(userId: string): Promise<AppData> {
     console.warn("Falling back to sample data after Prisma read failed.", error);
     return sampleDataFallback("Using sample data because the database could not be reached.");
   }
+}
+
+export async function getCatalogueData(userId: string): Promise<AppCatalogueData> {
+  if (!process.env.DATABASE_URL) {
+    return {
+      catalogue: sampleAppData.catalogue,
+      notice: "Using sample data because DATABASE_URL is not configured.",
+      source: sampleAppData.source,
+    };
+  }
+
+  try {
+    return {
+      catalogue: await getCatalogueItems(userId),
+      source: "database",
+    };
+  } catch (error) {
+    console.warn("Falling back to sample catalogue after Prisma read failed.", error);
+    return {
+      catalogue: sampleAppData.catalogue,
+      notice: "Using sample data because the database catalogue could not be reached.",
+      source: sampleAppData.source,
+    };
+  }
+}
+
+async function getCatalogueItems(userId: string): Promise<CatalogueItem[]> {
+  const [cardPrintings, sealedProducts] = await Promise.all([
+    prisma.cardPrinting.findMany({
+      include: {
+        cardSet: true,
+        priceSnapshots: {
+          orderBy: { observedAt: "desc" },
+          take: PRICE_HISTORY_LIMIT,
+        },
+      },
+      orderBy: [{ cardSet: { releaseDate: "desc" } }, { number: "asc" }],
+    }),
+    prisma.sealedProduct.findMany({
+      where: {
+        OR: [
+          { visibility: CatalogueVisibility.GLOBAL },
+          { createdByUserId: userId },
+        ],
+      },
+      include: {
+        relatedCardSet: true,
+        priceSnapshots: {
+          orderBy: { observedAt: "desc" },
+          take: PRICE_HISTORY_LIMIT,
+        },
+      },
+      orderBy: { name: "asc" },
+    }),
+  ]);
+
+  return [
+    ...cardPrintings.map((card) =>
+      mapCardPrintingToCatalogueItem(card, card.priceSnapshots),
+    ),
+    ...sealedProducts.map((product) =>
+      mapSealedProductToCatalogueItem(product, product.priceSnapshots),
+    ),
+  ];
+}
+
+function referencedCatalogueItems(
+  collectionItems: CatalogueReferenceRecord[],
+  wishlistItems: CatalogueReferenceRecord[],
+): CatalogueItem[] {
+  const byId = new Map<string, CatalogueItem>();
+
+  for (const record of [...collectionItems, ...wishlistItems]) {
+    const item = record.cardPrinting
+      ? mapCardPrintingToCatalogueItem(record.cardPrinting, record.cardPrinting.priceSnapshots)
+      : record.sealedProduct
+        ? mapSealedProductToCatalogueItem(record.sealedProduct, record.sealedProduct.priceSnapshots)
+        : null;
+
+    if (item) {
+      byId.set(item.id, item);
+    }
+  }
+
+  return Array.from(byId.values());
+}
+
+function ownedCardCountsBySet(
+  rows: Array<{
+    cardPrintingId: string | null;
+    cardPrinting: { cardSetId: string } | null;
+  }>,
+) {
+  const countedPrintings = new Set<string>();
+  const counts = new Map<string, number>();
+
+  for (const row of rows) {
+    if (!row.cardPrintingId || !row.cardPrinting || countedPrintings.has(row.cardPrintingId)) {
+      continue;
+    }
+
+    countedPrintings.add(row.cardPrintingId);
+    counts.set(row.cardPrinting.cardSetId, (counts.get(row.cardPrinting.cardSetId) ?? 0) + 1);
+  }
+
+  return counts;
 }
 
 export async function createCollectionItem(
@@ -877,8 +1003,7 @@ function mapSetProgress(set: {
   logoImageUrl: string | null;
   symbolImageUrl: string | null;
   total: number | null;
-  cardPrintings: Array<{ id: string; collectionItems: Array<{ id: string }> }>;
-}): SetProgress {
+}, counts: { owned: number; total: number }): SetProgress {
   return {
     id: set.id,
     name: set.name,
@@ -886,8 +1011,8 @@ function mapSetProgress(set: {
     releaseDate: dateOnly(set.releaseDate),
     logoImage: set.logoImageUrl ?? undefined,
     symbolImage: set.symbolImageUrl ?? undefined,
-    owned: set.cardPrintings.filter((card) => card.collectionItems.length > 0).length,
-    total: set.total ?? set.cardPrintings.length,
+    owned: counts.owned,
+    total: set.total ?? counts.total,
   };
 }
 

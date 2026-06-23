@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { getAppData } from "@/lib/db/app-data";
+import { getCatalogueData } from "@/lib/db/app-data";
 
 export const dynamic = "force-dynamic";
 
@@ -11,7 +11,7 @@ export async function GET() {
     return NextResponse.json({ error: "Authentication required." }, { status: 401 });
   }
 
-  const data = await getAppData(session.user.id, { catalogueScope: "referenced" });
+  const data = await getCatalogueData(session.user.id);
 
   return NextResponse.json(data);
 }

@@ -118,6 +118,7 @@ export type NotificationPreferences = {
 
 export type AppData = {
   catalogue: CatalogueItem[];
+  catalogueComplete?: boolean;
   collection: CollectionItem[];
   wishlist: WishlistItem[];
   sets: SetProgress[];
@@ -126,6 +127,12 @@ export type AppData = {
   source: AppDataSource;
   subscription: AppSubscription;
   notificationPreferences: NotificationPreferences;
+  notice?: string;
+};
+
+export type AppCatalogueData = {
+  catalogue: CatalogueItem[];
+  source: AppDataSource;
   notice?: string;
 };
 

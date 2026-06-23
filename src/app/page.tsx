@@ -75,6 +75,7 @@ import {
 } from "@/lib/insights";
 import { sampleAppData } from "@/lib/sample-data";
 import type {
+  AppCatalogueData,
   AppData,
   AppDataSource,
   AppSubscription,
@@ -553,6 +554,7 @@ export default function Home() {
   const { data: session, status } = useSession();
   const [appState, setAppState] = useState(initialState);
   const [catalogueItems, setCatalogueItems] = useState<CatalogueItem[]>([]);
+  const [catalogueComplete, setCatalogueComplete] = useState(false);
   const [collection, setCollection] = useState<CollectionItem[]>([]);
   const [wishlist, setWishlist] = useState<WishlistItem[]>([]);
   const [sets, setSets] = useState<SetProgress[]>([]);
@@ -565,6 +567,7 @@ export default function Home() {
   const [dataNotice, setDataNotice] = useState("");
   const [themeId, setThemeId] = useState<ThemeId>("light");
   const [isLoadingData, setIsLoadingData] = useState(true);
+  const [isLoadingCatalogue, setIsLoadingCatalogue] = useState(false);
   const [toast, setToast] = useState("");
   const [authMode, setAuthMode] = useState<AuthMode>("sign-in");
   const [signInEmail, setSignInEmail] = useState("liam@example.com");
@@ -620,7 +623,10 @@ export default function Home() {
   }, [effectivePlus, themeId]);
 
   const applyAppData = useCallback((data: AppData) => {
-    setCatalogueItems(data.catalogue);
+    setCatalogueItems((current) =>
+      data.catalogueComplete === false ? mergeCatalogueItems(current, data.catalogue) : data.catalogue,
+    );
+    setCatalogueComplete((current) => (data.catalogueComplete === false ? current : true));
     setCollection(data.collection);
     setWishlist(data.wishlist);
     setSets(data.sets);
@@ -636,9 +642,12 @@ export default function Home() {
       selectedItemId: data.collection.some((item) => item.id === current.selectedItemId)
         ? current.selectedItemId
         : data.collection[0]?.id ?? "",
-      selectedCatalogueId: data.catalogue.some((item) => item.id === current.selectedCatalogueId)
-        ? current.selectedCatalogueId
-        : "",
+      selectedCatalogueId:
+        data.catalogueComplete === false
+          ? current.selectedCatalogueId
+          : data.catalogue.some((item) => item.id === current.selectedCatalogueId)
+            ? current.selectedCatalogueId
+            : "",
       selectedSetId: data.sets.some((set) => set.id === current.selectedSetId)
         ? current.selectedSetId
         : data.sets[0]?.id ?? "",
@@ -647,6 +656,7 @@ export default function Home() {
 
   const applyEmptyAppData = useCallback((notice: string) => {
     setCatalogueItems([]);
+    setCatalogueComplete(false);
     setCollection([]);
     setWishlist([]);
     setSets([]);
@@ -701,6 +711,48 @@ export default function Home() {
     [applyAppData, applyEmptyAppData],
   );
 
+  const loadCatalogueData = useCallback(
+    async (options?: { force?: boolean; quiet?: boolean }) => {
+      if (catalogueComplete && !options?.force) {
+        return catalogueItems;
+      }
+
+      if (isLoadingCatalogue) {
+        return null;
+      }
+
+      setIsLoadingCatalogue(true);
+
+      try {
+        const response = await fetch("/api/catalogue", { cache: "no-store" });
+
+        if (!response.ok) {
+          throw new Error(`Catalogue request failed with ${response.status}`);
+        }
+
+        const data = (await response.json()) as AppCatalogueData;
+
+        setCatalogueItems(data.catalogue);
+        setCatalogueComplete(true);
+        setDataSource(data.source);
+        setDataNotice(data.notice ?? "");
+
+        return data.catalogue;
+      } catch (error) {
+        console.warn("Catalogue API load failed.", error);
+
+        if (!options?.quiet) {
+          showToast("Could not load the full catalogue yet.");
+        }
+
+        return null;
+      } finally {
+        setIsLoadingCatalogue(false);
+      }
+    },
+    [catalogueComplete, catalogueItems, isLoadingCatalogue, showToast],
+  );
+
   useEffect(() => {
     if (status !== "authenticated" || !session?.user?.id) {
       setIsLoadingData(status === "loading");
@@ -714,6 +766,16 @@ export default function Home() {
       cancelled = true;
     };
   }, [refreshAppData, session?.user?.id, status]);
+
+  useEffect(() => {
+    if (status !== "authenticated") {
+      return;
+    }
+
+    if (appState.screen === "add" || appState.screen === "setDetail" || appState.screen === "ops") {
+      void loadCatalogueData({ quiet: true });
+    }
+  }, [appState.screen, loadCatalogueData, status]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -1265,6 +1327,7 @@ export default function Home() {
 
   function resetSampleData() {
     setCatalogueItems(sampleAppData.catalogue);
+    setCatalogueComplete(true);
     setCollection(sampleAppData.collection);
     setWishlist(sampleAppData.wishlist);
     setSets(sampleAppData.sets);
@@ -1635,7 +1698,9 @@ export default function Home() {
   async function importCollectionCsv(file: File) {
     try {
       const rows = parseCollectionImportCsv(await file.text());
-      const importableRows = rows.filter((row) => catalogueById.has(row.catalogueId));
+      const fullCatalogue = catalogueComplete ? catalogueItems : await loadCatalogueData({ quiet: true });
+      const catalogueLookup = new Map((fullCatalogue ?? catalogueItems).map((item) => [item.id, item]));
+      const importableRows = rows.filter((row) => catalogueLookup.has(row.catalogueId));
       const skipped = rows.length - importableRows.length;
 
       if (!rows.length) {
@@ -1671,7 +1736,7 @@ export default function Home() {
       } else {
         const importedAt = Date.now();
         const importedItems = importableRows.map((row, index) => {
-          const catalogueItem = catalogueById.get(row.catalogueId);
+          const catalogueItem = catalogueLookup.get(row.catalogueId);
           const paidValue = moneyInputToMinor(row.paid);
           const overrideValue = moneyInputToMinor(row.overrideValue);
 
@@ -1755,6 +1820,7 @@ export default function Home() {
     viewer,
     catalogueItems,
     catalogueById,
+    catalogueComplete,
     collection,
     storageLocations,
     collectionEvents,
@@ -1764,6 +1830,7 @@ export default function Home() {
     dataSource,
     dataNotice,
     isLoadingData,
+    isLoadingCatalogue,
     collectionSearch,
     setCollectionSearch,
     addSearch,
@@ -1800,6 +1867,7 @@ export default function Home() {
     showToast,
     resetSampleData,
     refreshAppData,
+    loadCatalogueData,
     themeId,
   };
 
@@ -1842,6 +1910,7 @@ type ScreenContext = {
   viewer: Viewer;
   catalogueItems: CatalogueItem[];
   catalogueById: Map<string, CatalogueItem>;
+  catalogueComplete: boolean;
   collection: CollectionItem[];
   storageLocations: StorageLocation[];
   collectionEvents: CollectionEvent[];
@@ -1851,6 +1920,7 @@ type ScreenContext = {
   dataSource: AppDataSource;
   dataNotice: string;
   isLoadingData: boolean;
+  isLoadingCatalogue: boolean;
   collectionSearch: string;
   setCollectionSearch: (value: string) => void;
   addSearch: string;
@@ -1894,6 +1964,7 @@ type ScreenContext = {
   showToast: (message: string) => void;
   resetSampleData: () => void;
   refreshAppData: (options?: { quiet?: boolean }) => Promise<boolean>;
+  loadCatalogueData: (options?: { force?: boolean; quiet?: boolean }) => Promise<CatalogueItem[] | null>;
   themeId: ThemeId;
 };
 
@@ -2849,14 +2920,17 @@ function CollectionScreen({
 function AddScreen({
   appState,
   catalogueItems,
+  catalogueComplete,
   sets,
   storageLocations,
   addSearch,
+  isLoadingCatalogue,
   setAddSearch,
   setAppState,
   addToCollection,
   createManualSealedProduct,
   addToWishlist,
+  loadCatalogueData,
   navigate,
 }: ScreenContext) {
   const [catalogueSetFilter, setCatalogueSetFilter] = useState("all");
@@ -2916,6 +2990,32 @@ function AddScreen({
     }
 
     void addToCollection(selected.id, new FormData(event.currentTarget));
+  }
+
+  if (!catalogueComplete) {
+    return (
+      <section className="page">
+        <PageHeader
+          title="Add item"
+          action={
+            <button className="button" onClick={() => navigate("collection")}>
+              <X size={17} />
+              Cancel
+            </button>
+          }
+        />
+        <EmptyState
+          title={isLoadingCatalogue ? "Loading catalogue" : "Catalogue not loaded"}
+          description="Opening the searchable card and sealed product catalogue."
+          action={
+            <button className="button primary" onClick={() => void loadCatalogueData()} disabled={isLoadingCatalogue}>
+              <Search size={17} />
+              {isLoadingCatalogue ? "Loading" : "Load catalogue"}
+            </button>
+          }
+        />
+      </section>
+    );
   }
 
   return (
@@ -3591,7 +3691,10 @@ function SetsScreen({
 function SetDetailScreen({
   appState,
   catalogueItems,
+  catalogueComplete,
   collection,
+  isLoadingCatalogue,
+  loadCatalogueData,
   sets,
   wishlist,
   setAppState,
@@ -3606,6 +3709,32 @@ function SetDetailScreen({
 
   if (!set) {
     return <EmptyState title="No sets found" />;
+  }
+
+  if (!catalogueComplete) {
+    return (
+      <section className="page">
+        <PageHeader
+          title={set.name}
+          action={
+            <button className="button" onClick={() => navigate("sets")}>
+              <ArrowLeft size={17} />
+              Sets
+            </button>
+          }
+        />
+        <EmptyState
+          title={isLoadingCatalogue ? "Loading set cards" : "Set cards not loaded"}
+          description="Opening card printings, prices, and variants for this set."
+          action={
+            <button className="button primary" onClick={() => void loadCatalogueData()} disabled={isLoadingCatalogue}>
+              <Search size={17} />
+              {isLoadingCatalogue ? "Loading" : "Load cards"}
+            </button>
+          }
+        />
+      </section>
+    );
   }
 
   const setCards = catalogueItems.filter((item) => item.type === "card" && item.set === set.name);
@@ -4734,6 +4863,7 @@ function OperationsLockedScreen() {
 
 function OperationsScreen({
   catalogueItems,
+  loadCatalogueData,
   refreshAppData,
   showToast,
 }: ScreenContext) {
@@ -5002,6 +5132,7 @@ function OperationsScreen({
 
       if (kind !== "alerts") {
         await refreshAppData({ quiet: true });
+        void loadCatalogueData({ force: true, quiet: true });
         void loadCatalogueStatus({ quiet: true });
       }
       return true;
@@ -5127,6 +5258,7 @@ function OperationsScreen({
 
       if (execute) {
         void loadCatalogueStatus({ quiet: true });
+        void loadCatalogueData({ force: true, quiet: true });
         void refreshAppData();
       }
 
@@ -7994,6 +8126,16 @@ function upsertCatalogueItem(items: CatalogueItem[], nextItem: CatalogueItem) {
   return [
     nextItem,
     ...items.filter((item) => item.id !== nextItem.id),
+  ];
+}
+
+function mergeCatalogueItems(items: CatalogueItem[], nextItems: CatalogueItem[]) {
+  const nextById = new Map(nextItems.map((item) => [item.id, item]));
+  const existingIds = new Set(items.map((item) => item.id));
+
+  return [
+    ...nextItems.filter((item) => !existingIds.has(item.id)),
+    ...items.map((item) => nextById.get(item.id) ?? item),
   ];
 }
 
