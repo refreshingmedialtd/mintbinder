@@ -176,6 +176,7 @@ async function runSetPricingJobBatches({ env, fetchImpl, headers, request, url }
   }
 
   const batches = [];
+  const excludedProviderIds = new Set();
   let setsRemaining = totalSetLimit;
 
   while (setsRemaining > 0) {
@@ -183,6 +184,7 @@ async function runSetPricingJobBatches({ env, fetchImpl, headers, request, url }
     const batch = await requestJson({
       body: {
         ...request.body,
+        excludeProviderIds: [...excludedProviderIds],
         limit,
       },
       fetchImpl,
@@ -193,6 +195,9 @@ async function runSetPricingJobBatches({ env, fetchImpl, headers, request, url }
     const setsProcessed = optionalPositiveInteger(batch.response?.setsProcessed) ?? 0;
 
     batches.push(batch);
+    for (const providerId of responseProviderIds(batch.response)) {
+      excludedProviderIds.add(providerId);
+    }
     setsRemaining -= setsProcessed || limit;
 
     if (batch.response?.complete === true || setsProcessed === 0) {
@@ -245,6 +250,15 @@ function combinedSetPricingBatchResponse({ batches, requestedBody }) {
     succeededSets: sumResponses(responses, "succeededSets"),
     totalCount: sumResponses(responses, "totalCount"),
   };
+}
+
+function responseProviderIds(response) {
+  const selectedSets = Array.isArray(response?.selectedSets) ? response.selectedSets : [];
+  const setResults = Array.isArray(response?.setResults) ? response.setResults : [];
+
+  return [...selectedSets, ...setResults]
+    .map((set) => optionalString(set?.providerId))
+    .filter(Boolean);
 }
 
 function combinedPricingBatchResponse({ batches, requestedBody }) {

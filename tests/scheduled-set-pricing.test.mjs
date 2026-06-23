@@ -4,6 +4,7 @@ import { scheduledSetPricingInputFromSources } from "../src/lib/jobs/scheduled-s
 
 test("scheduled set pricing uses safe set-rotation defaults", () => {
   assert.deepEqual(scheduledSetPricingInputFromSources({ env: {} }), {
+    excludeProviderIds: [],
     limit: 8,
     maxPagesPerSet: 4,
     pageSize: 250,
@@ -16,6 +17,7 @@ test("scheduled set pricing accepts env and body overrides", () => {
   assert.deepEqual(
     scheduledSetPricingInputFromSources({
       body: {
+        excludeProviderIds: ["base1", "base2", "base1"],
         limit: 3,
         priceOnlyUnpriced: false,
       },
@@ -28,6 +30,7 @@ test("scheduled set pricing accepts env and body overrides", () => {
       },
     }),
     {
+      excludeProviderIds: ["base1", "base2"],
       limit: 3,
       maxPagesPerSet: 6,
       pageSize: 200,

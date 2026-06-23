@@ -103,6 +103,7 @@ export async function runScheduledSetPricing(input: ScheduledSetPricingInput) {
     cardsFetched: sumResults(setResults, "cardsFetched"),
     cardsUpserted: sumResults(setResults, "cardsUpserted"),
     complete: targets.length === 0,
+    excludedProviderIds: input.excludeProviderIds,
     failedSets: failedSets.length,
     maxPagesPerSet: input.maxPagesPerSet,
     pageSize: input.pageSize,
@@ -131,7 +132,13 @@ export async function runScheduledSetPricing(input: ScheduledSetPricingInput) {
   };
 }
 
-export async function nextPokemonTcgSetPricingTargets(input: Pick<ScheduledSetPricingInput, "limit" | "pageSize">) {
+export async function nextPokemonTcgSetPricingTargets(
+  input: Pick<ScheduledSetPricingInput, "excludeProviderIds" | "limit" | "pageSize">,
+) {
+  const excludedProviderIds = input.excludeProviderIds.length
+    ? input.excludeProviderIds
+    : ["__mintbinder_no_excluded_provider_ids__"];
+
   const rows = await prisma.$queryRaw<DbSetPricingTarget[]>`
     SELECT
       cs.id,
@@ -150,6 +157,7 @@ export async function nextPokemonTcgSetPricingTargets(input: Pick<ScheduledSetPr
       ON ps.card_printing_id = cp.id
       AND ps.item_type = 'card'::item_type
     WHERE cs.provider_ids->>'pokemon_tcg_api' IS NOT NULL
+      AND NOT (cs.provider_ids->>'pokemon_tcg_api' = ANY(${excludedProviderIds}::text[]))
     GROUP BY cs.id
     ORDER BY
       COALESCE(MAX(ps.observed_at), MAX(cp.updated_at), cs.updated_at) ASC NULLS FIRST,

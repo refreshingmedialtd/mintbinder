@@ -122,6 +122,11 @@ test("live pricing defaults to set rotation and splits set batches", async () =>
     "https://mintbinder.co.uk/api/jobs/scheduled-set-pricing",
   ]);
   assert.deepEqual(calls.map((call) => call.body.limit), [1, 1, 1]);
+  assert.deepEqual(calls.map((call) => call.body.excludeProviderIds), [
+    [],
+    ["set1"],
+    ["set1", "set2"],
+  ]);
   assert.equal(result.ok, true);
   assert.equal(result.response.batched, true);
   assert.equal(result.response.batchCount, 3);

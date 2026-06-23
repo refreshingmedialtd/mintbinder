@@ -1,4 +1,5 @@
 export type ScheduledSetPricingBody = {
+  excludeProviderIds?: unknown;
   limit?: unknown;
   maxPagesPerSet?: unknown;
   pageSize?: unknown;
@@ -8,6 +9,7 @@ export type ScheduledSetPricingBody = {
 };
 
 export type ScheduledSetPricingInput = {
+  excludeProviderIds: string[];
   limit: number;
   maxPagesPerSet: number;
   pageSize: number;
@@ -28,6 +30,9 @@ export function scheduledSetPricingInputFromSources({
   env?: Record<string, string | undefined>;
 } = {}): ScheduledSetPricingInput {
   return {
+    excludeProviderIds: stringList(
+      body.excludeProviderIds ?? env.POKEMON_TCG_SET_PRICING_EXCLUDE_PROVIDER_IDS,
+    ),
     limit: positiveInteger(
       body.setLimit ?? body.limit ?? env.POKEMON_TCG_SET_PRICING_LIMIT,
       defaultLimit,
@@ -54,6 +59,25 @@ export function scheduledSetPricingInputFromSources({
       60_000,
     ),
   };
+}
+
+function stringList(value: unknown) {
+  const rawValues = Array.isArray(value) ? value : String(value ?? "").split(/[,\s]+/);
+  const seen = new Set<string>();
+  const values: string[] = [];
+
+  for (const rawValue of rawValues) {
+    const normalized = String(rawValue ?? "").trim();
+
+    if (!normalized || seen.has(normalized)) {
+      continue;
+    }
+
+    seen.add(normalized);
+    values.push(normalized);
+  }
+
+  return values;
 }
 
 function positiveInteger(value: unknown, fallback: number, max = Number.POSITIVE_INFINITY) {
