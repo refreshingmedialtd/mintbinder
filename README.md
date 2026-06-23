@@ -202,8 +202,11 @@ Creating an account from the sign-in screen creates a new collector profile with
 
 ## API Routes
 
-- `GET /api/app-data`: returns dashboard data with only catalogue items referenced by the signed-in user's collection or wishlist.
+- `GET /api/app-data`: returns app data; newer dashboard loads should prefer `/api/dashboard`.
+- `GET /api/dashboard`: returns the lightweight signed-in dashboard payload with only referenced catalogue items.
 - `GET /api/catalogue`: returns the full searchable card and sealed-product catalogue for add, set-detail, and admin workflows.
+- `GET /api/catalogue/search`: searches, filters, sorts, and limits catalogue results server-side for Add Item.
+- `GET /api/admin/beta-status`: returns logged-in admin/owner beta readiness checks, environment safety, catalogue status, and recent job runs.
 - `POST /api/collection-items`: creates a collection item and matching collection event for the signed-in user.
 - `PATCH /api/collection-items/:id`: updates owned item details and records an edit event for the signed-in user.
 - `DELETE /api/collection-items/:id`: archives an owned item and records a remove event for the signed-in user.

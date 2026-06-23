@@ -1,6 +1,6 @@
 # Mint Binder Launch Readiness
 
-Last updated: 2026-06-14
+Last updated: 2026-06-23
 
 ## Overall Progress
 
@@ -59,6 +59,15 @@ Completed on 2026-06-14:
 - Imported the live sealed-product catalogue from TCGCSV. Production now has 1,936 sealed products, 100% sealed image coverage, 1,457 priced sealed products, and 75.3% sealed pricing coverage.
 - Added protected `/api/jobs/scheduled-set-pricing` and `/api/jobs/scheduled-pricing` routes, live scheduler helpers, and `SCHEDULED_JOBS.md` so production pricing snapshots can run automatically by least-recently refreshed set without manual page tracking or deep provider paging.
 
+Completed on 2026-06-23:
+
+- Split the first-load app payload so the dashboard loads only catalogue rows referenced by the user's collection or wishlist, while Add, set detail, and Operations lazy-load or search catalogue data only when needed.
+- Added `/api/dashboard` for the lightweight authenticated dashboard payload and `/api/catalogue/search` for server-side catalogue search, filtering, sorting, and result limits.
+- Added a beta setup checklist to the dashboard so new testers are guided through first item, wishlist target, storage, set focus, and unvalued-lot review.
+- Upgraded the Wishlist with buying signals that identify targets at or below buy price, near-target watch items, and targets needing estimates.
+- Added a logged-in admin/owner beta status panel in Operations for `liam@refreshing.media`, covering launch checks, environment safety, catalogue/pricing coverage, and recent job runs without requiring the job secret.
+- Improved price-source transparency copy so market values explain source, observation date, confidence level, and whether a value should be treated as a guide only.
+
 Known QA warnings:
 
 - Hosted Square checkout link creation has been smoke-tested in sandbox on the production URL, and webhook activation is validated. Do one final browser-based hosted checkout smoke before public beta, then switch to production Square credentials before paid launch.
@@ -98,7 +107,7 @@ Known QA warnings:
 
 3. Pricing data depth
 
-   Production card pricing is beta-ready at 94.8% coverage from Pokemon TCG API and TCGCSV. Sealed pricing is 75.3% covered from TCGCSV; add PriceCharting or another sealed-price source for the next meaningful improvement.
+   Production card pricing is beta-ready at 94.8% coverage from Pokemon TCG API and TCGCSV. Sealed pricing is 75.3% covered from TCGCSV; add PriceCharting or another sealed-price source for the next meaningful improvement. Coverage can also improve through UPC/EAN metadata, a sealed product alias table, conservative product-name matching, and an admin review queue for high-value manual prices.
 
 4. Hosted checkout and billing browser QA
 
@@ -110,7 +119,7 @@ Known QA warnings:
 
 6. UX polish and beta fit-and-finish
 
-   Review mobile layouts, loading states, empty states, error messages, accessibility, button text, and first-run flows. The first passes have clarified Free vs Plus messaging, Analytics upgrade actions, free-user alert states, theme selection, collection/add-flow mobile scanning, first-run empty states, item-detail edit/sale flows, set detail, and wishlist targets; continue with onboarding copy and real-device QA.
+   Review mobile layouts, loading states, empty states, error messages, accessibility, button text, and first-run flows. The first passes have clarified Free vs Plus messaging, Analytics upgrade actions, free-user alert states, theme selection, collection/add-flow mobile scanning, first-run empty states, item-detail edit/sale flows, set detail, wishlist targets, dashboard setup, and buying signals; continue with real-device QA.
 
 7. Legal, privacy, and brand safety
 
@@ -128,15 +137,26 @@ Known QA warnings:
 
    Invite a small group, import enough catalogue/pricing data for their likely collections, gather feedback, and fix the highest-friction issues before a wider release.
 
+## Pre-Beta / Pre-Launch Product Backlog
+
+- CSV import preview: add a review step before committing imported rows. It should show matched catalogue item, quantity, condition, storage, target value, rows that will be skipped, and clear row-level reasons.
+- Manual value review queue: add an admin/user review surface for items that should have a manual value because the market price is missing, weak, stale, variant-mismatched, high-value, or user-overridden without a valuation note.
+- Set-builder mode: this is not a duplicate of the Sets menu. The idea is a focused set-detail workflow that lets a collector choose one set as an active goal, filter missing/wanted cards, add targets in bulk, and track "next best card to chase".
+- Plus Binders: promote this to a pre-beta signature feature. Plus users should get tactile custom binders for owned cards, with cover choices, page slots, manual ordering, and a polished open-card interaction; free users can see a tasteful preview.
+- Mobile QA pass: test the live app on real phones, using screenshots from account creation, dashboard, Add, item detail, set detail, wishlist, Settings, and checkout/Plus surfaces.
+- Sealed/value coverage: pursue PriceCharting sealed enrichment first, then add UPC/EAN metadata capture, alias management, and manual/admin price review for important products that no provider prices reliably.
+- Operations schema follow-up: the repair jobs currently record under existing tracked job types. If we want first-class run history for card image repair, sealed image repair, and variant metadata repair, add a database enum migration and update the job-run type list.
+
 ## Recommended Order From Here
 
 1. Decide the price-alert digest schedule and keep real beta recipient emails disabled until the first beta group is approved.
-2. Do a focused production QA pass against `https://mintbinder.co.uk`, including account creation, add-card/add-sealed flows, wishlist, storage, reports, Settings, and mobile layouts.
+2. Do a focused production QA pass against `https://mintbinder.co.uk`, including account creation, dashboard setup, add-card/add-sealed flows, wishlist buying signals, storage, reports, Settings, and mobile layouts.
 3. Complete a hosted Square checkout browser smoke on production.
-4. Schedule card/sealed pricing jobs, schedule the job monitor, configure public uptime/error monitoring, backups, webhook alerts, and database backup checks.
-5. Review/finalize legal, privacy, brand/non-affiliation, and onboarding copy for `mintbinder.co.uk`.
-6. Run one final `npm run build`, `npm run qa:beta`, and `npm run qa:admin`.
-7. Invite a small beta group.
+4. Build the CSV import preview, manual value review queue, and Plus Binders if they are kept in the beta scope.
+5. Schedule card/sealed pricing jobs, schedule the job monitor, configure public uptime/error monitoring, backups, webhook alerts, and database backup checks.
+6. Review/finalize legal, privacy, brand/non-affiliation, and onboarding copy for `mintbinder.co.uk`.
+7. Run one final `npm run build`, `npm run qa:beta`, and `npm run qa:admin`.
+8. Invite a small beta group.
 
 ## Launch Gates
 

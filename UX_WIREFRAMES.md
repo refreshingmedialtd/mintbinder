@@ -733,7 +733,7 @@ Avoid:
 
 - Blocking normal collection management.
 
-### Future Plus Binders
+### Pre-Beta Plus Binders
 
 Purpose: make collection organization feel tactile, personal, and worth upgrading for.
 
@@ -744,6 +744,7 @@ Concept:
 - Give every Plus user a default Full Collection binder.
 - Let users create custom binders using cards they already own.
 - Offer binder cover artwork choices, including clean, set-inspired, premium, and playful options.
+- Treat this as a pre-beta signature feature rather than a distant future idea.
 
 Interaction direction:
 
@@ -759,6 +760,20 @@ Open UX questions:
 - Do custom binders support manual ordering, automatic sorting, or both?
 - Are binders purely presentation/organization, or do they also drive analytics and reports?
 - How much of the binder preview should free users see before upgrading?
+
+### Focused Set Builder
+
+Purpose: complement the existing Sets menu with a goal-driven mode inside one set detail view.
+
+This is not a replacement for the Sets menu. The Sets menu remains the full catalogue of sets. Set Builder is a focused collector workflow once a user has chosen a set.
+
+Concept:
+
+- Let the user mark one set as active.
+- Show missing, owned, and wanted cards with fast filters.
+- Offer bulk wishlist actions for missing cards.
+- Highlight the next practical chase card based on target price, market value, rarity, and existing progress.
+- Keep normal set-detail browsing available for users who just want the list.
 
 ### Import Errors
 

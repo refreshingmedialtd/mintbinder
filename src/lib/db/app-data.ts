@@ -4,6 +4,7 @@ import {
   GradingCompany,
   ItemCondition,
   ItemType as PrismaItemType,
+  Prisma,
   SealedProductType,
   StorageLocationType,
   WishlistPriority,
@@ -19,7 +20,9 @@ import { getNotificationPreferences } from "@/lib/notifications/preferences";
 import { buildPriceHistory, latestPricePoint } from "@/lib/pricing/price-history";
 import type {
   AppCatalogueData,
+  AppCatalogueSearchData,
   AppData,
+  AppDashboardData,
   CatalogueItem,
   CollectionEvent as ClientCollectionEvent,
   CollectionItem,
@@ -39,6 +42,24 @@ type PriceLike = {
 };
 
 type CatalogueScope = "full" | "referenced";
+
+type CatalogueSearchInput = {
+  limit?: number;
+  q?: string;
+  rarity?: string;
+  set?: string;
+  sort?: string;
+  type?: string;
+};
+
+type NormalizedCatalogueSearchInput = {
+  limit: number;
+  q: string;
+  rarity: string;
+  set: string;
+  sort: string;
+  type: ItemType;
+};
 
 type AppDataOptions = {
   catalogueScope?: CatalogueScope;
@@ -72,6 +93,8 @@ type CatalogueReferenceRecord = {
 };
 
 const PRICE_HISTORY_LIMIT = 8;
+const CATALOGUE_SEARCH_MAX_LIMIT = 100;
+const CATALOGUE_SEARCH_FETCH_MULTIPLIER = 6;
 
 export type CreateCollectionItemInput = {
   catalogueId: string;
@@ -269,6 +292,65 @@ export async function getCatalogueData(userId: string): Promise<AppCatalogueData
   }
 }
 
+export async function getDashboardData(userId: string): Promise<AppDashboardData> {
+  const data = await getAppData(userId, { catalogueScope: "referenced" });
+
+  return {
+    ...data,
+    dashboard: {
+      generatedAt: new Date().toISOString(),
+      summary: dashboardSummary(data),
+    },
+  };
+}
+
+export async function searchCatalogueData(
+  userId: string,
+  input: CatalogueSearchInput,
+): Promise<AppCatalogueSearchData> {
+  const query = normalizeCatalogueSearchInput(input);
+
+  if (!process.env.DATABASE_URL) {
+    const catalogue = filterAndSortCatalogue(sampleAppData.catalogue, query);
+
+    return {
+      catalogue: catalogue.slice(0, query.limit),
+      hasMore: catalogue.length > query.limit,
+      query,
+      resultCount: catalogue.length,
+      source: sampleAppData.source,
+      notice: "Using sample data because DATABASE_URL is not configured.",
+    };
+  }
+
+  try {
+    const catalogue =
+      query.type === "sealed"
+        ? await searchSealedProducts(userId, query)
+        : await searchCardPrintings(query);
+
+    return {
+      catalogue: catalogue.slice(0, query.limit),
+      hasMore: catalogue.length > query.limit,
+      query,
+      resultCount: catalogue.length,
+      source: "database",
+    };
+  } catch (error) {
+    console.warn("Falling back to sample catalogue search after Prisma read failed.", error);
+    const catalogue = filterAndSortCatalogue(sampleAppData.catalogue, query);
+
+    return {
+      catalogue: catalogue.slice(0, query.limit),
+      hasMore: catalogue.length > query.limit,
+      query,
+      resultCount: catalogue.length,
+      source: sampleAppData.source,
+      notice: "Using sample data because the database catalogue search could not be reached.",
+    };
+  }
+}
+
 async function getCatalogueItems(userId: string): Promise<CatalogueItem[]> {
   const [cardPrintings, sealedProducts] = await Promise.all([
     prisma.cardPrinting.findMany({
@@ -307,6 +389,97 @@ async function getCatalogueItems(userId: string): Promise<CatalogueItem[]> {
       mapSealedProductToCatalogueItem(product, product.priceSnapshots),
     ),
   ];
+}
+
+async function searchCardPrintings(query: NormalizedCatalogueSearchInput): Promise<CatalogueItem[]> {
+  const filters: Prisma.CardPrintingWhereInput[] = [];
+
+  if (query.q) {
+    filters.push({
+      OR: [
+        { searchText: { contains: query.q, mode: "insensitive" } },
+        { name: { contains: query.q, mode: "insensitive" } },
+        { number: { contains: query.q, mode: "insensitive" } },
+        { rarity: { contains: query.q, mode: "insensitive" } },
+        { cardSet: { name: { contains: query.q, mode: "insensitive" } } },
+      ],
+    });
+  }
+
+  if (query.set !== "all") {
+    filters.push({ cardSet: { name: query.set } });
+  }
+
+  if (query.rarity !== "all") {
+    filters.push({ rarity: query.rarity });
+  }
+
+  const cards = await prisma.cardPrinting.findMany({
+    where: filters.length ? { AND: filters } : undefined,
+    include: {
+      cardSet: true,
+      priceSnapshots: {
+        orderBy: { observedAt: "desc" },
+        take: PRICE_HISTORY_LIMIT,
+      },
+    },
+    orderBy: [{ cardSet: { releaseDate: "desc" } }, { number: "asc" }],
+    take: catalogueSearchFetchLimit(query),
+  });
+  const catalogue = cards.map((card) => mapCardPrintingToCatalogueItem(card, card.priceSnapshots));
+
+  return sortCatalogueSearchResults(catalogue, query.sort);
+}
+
+async function searchSealedProducts(
+  userId: string,
+  query: NormalizedCatalogueSearchInput,
+): Promise<CatalogueItem[]> {
+  const filters: Prisma.SealedProductWhereInput[] = [
+    {
+      OR: [
+        { visibility: CatalogueVisibility.GLOBAL },
+        { createdByUserId: userId },
+      ],
+    },
+  ];
+
+  if (query.q) {
+    const productType = sealedProductTypeFromSearchTerm(query.q);
+    filters.push({
+      OR: [
+        { name: { contains: query.q, mode: "insensitive" } },
+        { relatedCardSet: { name: { contains: query.q, mode: "insensitive" } } },
+        ...(productType ? [{ productType: { equals: productType } }] : []),
+      ],
+    });
+  }
+
+  if (query.set !== "all") {
+    filters.push({ relatedCardSet: { name: query.set } });
+  }
+
+  if (query.rarity !== "all") {
+    filters.push({ productType: sealedProductTypeToEnum(query.rarity) });
+  }
+
+  const products = await prisma.sealedProduct.findMany({
+    where: { AND: filters },
+    include: {
+      relatedCardSet: true,
+      priceSnapshots: {
+        orderBy: { observedAt: "desc" },
+        take: PRICE_HISTORY_LIMIT,
+      },
+    },
+    orderBy: { name: "asc" },
+    take: catalogueSearchFetchLimit(query),
+  });
+  const catalogue = products.map((product) =>
+    mapSealedProductToCatalogueItem(product, product.priceSnapshots),
+  );
+
+  return sortCatalogueSearchResults(catalogue, query.sort);
 }
 
 function referencedCatalogueItems(
@@ -349,6 +522,192 @@ function ownedCardCountsBySet(
   }
 
   return counts;
+}
+
+function normalizeCatalogueSearchInput(input: CatalogueSearchInput): NormalizedCatalogueSearchInput {
+  const limit = Number(input.limit);
+
+  return {
+    limit:
+      Number.isFinite(limit) && limit > 0
+        ? Math.min(Math.floor(limit), CATALOGUE_SEARCH_MAX_LIMIT)
+        : 40,
+    q: normalizeOptionalText(input.q) ?? "",
+    rarity: normalizeCatalogueFacet(input.rarity),
+    set: normalizeCatalogueFacet(input.set),
+    sort: normalizeCatalogueSort(input.sort),
+    type: input.type === "sealed" ? "sealed" : "card",
+  };
+}
+
+function normalizeCatalogueFacet(value?: string) {
+  const normalized = normalizeOptionalText(value);
+
+  return normalized && normalized.toLowerCase() !== "all" ? normalized : "all";
+}
+
+function normalizeCatalogueSort(value?: string) {
+  const normalized = value?.trim();
+  const allowed = new Set([
+    "name-asc",
+    "name-desc",
+    "rarity",
+    "set-number-asc",
+    "set-number-desc",
+    "value-asc",
+    "value-desc",
+  ]);
+
+  return normalized && allowed.has(normalized) ? normalized : "value-desc";
+}
+
+function catalogueSearchFetchLimit(query: NormalizedCatalogueSearchInput) {
+  const multiplier = query.q || query.set !== "all" || query.rarity !== "all"
+    ? CATALOGUE_SEARCH_FETCH_MULTIPLIER
+    : 3;
+
+  return Math.min(CATALOGUE_SEARCH_MAX_LIMIT * CATALOGUE_SEARCH_FETCH_MULTIPLIER, query.limit * multiplier);
+}
+
+function filterAndSortCatalogue(
+  catalogue: CatalogueItem[],
+  query: NormalizedCatalogueSearchInput,
+): CatalogueItem[] {
+  const normalizedSearch = query.q.toLowerCase();
+
+  return sortCatalogueSearchResults(
+    catalogue.filter((item) => {
+      if (item.type !== query.type) {
+        return false;
+      }
+
+      if (query.set !== "all" && item.set !== query.set) {
+        return false;
+      }
+
+      if (query.rarity !== "all" && item.rarity !== query.rarity) {
+        return false;
+      }
+
+      if (!normalizedSearch) {
+        return true;
+      }
+
+      return [item.name, item.set, item.number, item.rarity]
+        .join(" ")
+        .toLowerCase()
+        .includes(normalizedSearch);
+    }),
+    query.sort,
+  );
+}
+
+function sortCatalogueSearchResults(items: CatalogueItem[], sort: string) {
+  return [...items].sort((left, right) => {
+    if (sort === "value-asc") {
+      return compareCatalogueValues(left, right, "asc") || compareCatalogueNames(left, right);
+    }
+
+    if (sort === "name-asc") {
+      return compareCatalogueNames(left, right);
+    }
+
+    if (sort === "name-desc") {
+      return compareCatalogueNames(right, left);
+    }
+
+    if (sort === "set-number-asc") {
+      return compareCatalogueSetNumbers(left, right);
+    }
+
+    if (sort === "set-number-desc") {
+      return compareCatalogueSetNumbers(right, left);
+    }
+
+    if (sort === "rarity") {
+      return left.rarity.localeCompare(right.rarity) || compareCatalogueNames(left, right);
+    }
+
+    return compareCatalogueValues(right, left, "desc") || compareCatalogueNames(left, right);
+  });
+}
+
+function compareCatalogueValues(left: CatalogueItem, right: CatalogueItem, direction: "asc" | "desc") {
+  const leftValue = left.hasPrice ? left.valueMinor : null;
+  const rightValue = right.hasPrice ? right.valueMinor : null;
+
+  if (leftValue === null && rightValue === null) {
+    return 0;
+  }
+
+  if (leftValue === null) {
+    return direction === "asc" ? 1 : -1;
+  }
+
+  if (rightValue === null) {
+    return direction === "asc" ? -1 : 1;
+  }
+
+  return leftValue - rightValue;
+}
+
+function compareCatalogueNames(left: CatalogueItem, right: CatalogueItem) {
+  return left.name.localeCompare(right.name, undefined, { numeric: true });
+}
+
+function compareCatalogueSetNumbers(left: CatalogueItem, right: CatalogueItem) {
+  return `${left.set} ${left.number}`.localeCompare(`${right.set} ${right.number}`, undefined, {
+    numeric: true,
+  });
+}
+
+function dashboardSummary(data: AppData) {
+  const catalogueById = new Map(data.catalogue.map((item) => [item.id, item]));
+  const collectionSummary = data.collection.reduce(
+    (summary, item) => {
+      const catalogueItem = catalogueById.get(item.catalogueId);
+      const value = dashboardOwnedValueMinor(item, catalogueItem);
+
+      summary.items += item.quantity;
+      summary.costMinor += item.purchasePriceMinor ?? 0;
+      summary.valueMinor += value ?? 0;
+
+      if (value === null) {
+        summary.unvalued += item.quantity;
+      }
+
+      if (catalogueItem?.type === "sealed") {
+        summary.sealed += item.quantity;
+      } else {
+        summary.cards += item.quantity;
+      }
+
+      return summary;
+    },
+    { cards: 0, costMinor: 0, items: 0, sealed: 0, unvalued: 0, valueMinor: 0 },
+  );
+  const wishlistTargetMinor = data.wishlist.reduce((total, item) => {
+    const catalogueItem = catalogueById.get(item.catalogueId);
+
+    return total + (item.targetPriceMinor ?? catalogueItem?.valueMinor ?? 0);
+  }, 0);
+
+  return {
+    ...collectionSummary,
+    wishlistTargetMinor,
+  };
+}
+
+function dashboardOwnedValueMinor(item: CollectionItem, catalogueItem?: CatalogueItem) {
+  if (item.overrideValueMinor !== undefined) {
+    return item.overrideValueMinor;
+  }
+
+  if (!catalogueItem?.hasPrice) {
+    return null;
+  }
+
+  return Math.round(catalogueItem.valueMinor * conditionValueMultiplier(item.condition)) * item.quantity;
 }
 
 export async function createCollectionItem(
@@ -1307,6 +1666,23 @@ function sealedProductTypeToEnum(value?: string) {
   };
 
   return map[normalized] ?? SealedProductType.OTHER;
+}
+
+function sealedProductTypeFromSearchTerm(value?: string) {
+  const normalized = value?.trim().toLowerCase().replace(/[\s-]+/g, "_") ?? "";
+  const map: Record<string, SealedProductType> = {
+    booster_box: SealedProductType.BOOSTER_BOX,
+    booster_pack: SealedProductType.BOOSTER_PACK,
+    elite_trainer_box: SealedProductType.ELITE_TRAINER_BOX,
+    etb: SealedProductType.ELITE_TRAINER_BOX,
+    collection_box: SealedProductType.COLLECTION_BOX,
+    tin: SealedProductType.TIN,
+    blister: SealedProductType.BLISTER,
+    deck: SealedProductType.DECK,
+    case: SealedProductType.CASE,
+  };
+
+  return map[normalized];
 }
 
 async function resolveCardSet(id?: string) {

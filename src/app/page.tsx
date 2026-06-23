@@ -42,7 +42,7 @@ import Image from "next/image";
 import { signIn, signOut, useSession } from "next-auth/react";
 import type { ChangeEvent, CSSProperties, Dispatch, FormEvent, ReactNode, SetStateAction } from "react";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
-import { canUseOperations, normalizeAppRole, type AppUserRole } from "@/lib/auth/roles";
+import { canUseOperationsForUser, normalizeAppRole, type AppUserRole } from "@/lib/auth/roles";
 import {
   catalogueValueMinorForVariant,
   catalogueVariantLabels,
@@ -76,7 +76,9 @@ import {
 import { sampleAppData } from "@/lib/sample-data";
 import type {
   AppCatalogueData,
+  AppCatalogueSearchData,
   AppData,
+  AppDashboardData,
   AppDataSource,
   AppSubscription,
   CatalogueItem,
@@ -184,7 +186,14 @@ type ThemeId =
   | "ghost"
   | "meadow"
   | "sunset";
-type JobType = "price_alerts" | "catalogue_refresh" | "pricing_refresh" | "sealed_pricing_refresh";
+type JobType =
+  | "price_alerts"
+  | "card_image_repair"
+  | "catalogue_refresh"
+  | "pricing_refresh"
+  | "sealed_image_repair"
+  | "sealed_pricing_refresh"
+  | "variant_metadata_repair";
 type OperationsJobKind =
   | "alerts"
   | "card-image-repair"
@@ -332,6 +341,36 @@ type CatalogueStatusApiResult = {
   latestPricingRun?: JobRunRecord | null;
   latestSealedPricingRun?: JobRunRecord | null;
   status?: CatalogueStatusRecord;
+};
+
+type BetaEnvironmentSnapshot = {
+  appUrl: string;
+  authUrl: string;
+  billingProvider: string;
+  databaseConfigured: boolean;
+  emailProvider: string;
+  emailSmokeToConfigured: boolean;
+  jobMonitorDryRun: boolean;
+  jobSecretConfigured: boolean;
+  priceAlertAllowLiveRecipients: boolean;
+  priceAlertDryRun: boolean;
+  squareEnvironment: string;
+};
+
+type BetaLaunchCheck = {
+  detail: string;
+  label: string;
+  level: "good" | "watch" | "action";
+  passed: boolean;
+};
+
+type BetaStatusApiResult = {
+  catalogue?: CatalogueStatusApiResult;
+  env?: BetaEnvironmentSnapshot;
+  error?: string;
+  generatedAt?: string;
+  jobRuns?: JobRunRecord[];
+  launchChecks?: BetaLaunchCheck[];
 };
 
 type ResumeJob = {
@@ -594,7 +633,7 @@ export default function Home() {
     email: session?.user?.email || "",
     role: normalizeAppRole(session?.user?.role),
   };
-  const operationsEnabled = canUseOperations(viewer.role);
+  const operationsEnabled = canUseOperationsForUser(viewer.role, viewer.email);
   const canPreviewPlan = operationsEnabled || canPreviewSubscription(viewer.email, viewer.name);
   const effectivePlus = canPreviewPlan && plusPreviewOverride !== null
     ? plusPreviewOverride
@@ -682,13 +721,13 @@ export default function Home() {
       }
 
       try {
-        const response = await fetch("/api/app-data", { cache: "no-store" });
+        const response = await fetch("/api/dashboard", { cache: "no-store" });
 
         if (!response.ok) {
           throw new Error(`App data request failed with ${response.status}`);
         }
 
-        const data = (await response.json()) as AppData;
+        const data = (await response.json()) as AppDashboardData;
 
         if (options?.isCancelled?.()) {
           return false;
@@ -753,6 +792,14 @@ export default function Home() {
     [catalogueComplete, catalogueItems, isLoadingCatalogue, showToast],
   );
 
+  const cacheCatalogueItems = useCallback((items: CatalogueItem[]) => {
+    if (!items.length) {
+      return;
+    }
+
+    setCatalogueItems((current) => mergeCatalogueItems(current, items));
+  }, []);
+
   useEffect(() => {
     if (status !== "authenticated" || !session?.user?.id) {
       setIsLoadingData(status === "loading");
@@ -772,7 +819,7 @@ export default function Home() {
       return;
     }
 
-    if (appState.screen === "add" || appState.screen === "setDetail" || appState.screen === "ops") {
+    if (appState.screen === "setDetail" || appState.screen === "ops") {
       void loadCatalogueData({ quiet: true });
     }
   }, [appState.screen, loadCatalogueData, status]);
@@ -1818,6 +1865,7 @@ export default function Home() {
   const context = {
     appState: effectiveAppState,
     viewer,
+    cacheCatalogueItems,
     catalogueItems,
     catalogueById,
     catalogueComplete,
@@ -1908,6 +1956,7 @@ export default function Home() {
 type ScreenContext = {
   appState: AppState;
   viewer: Viewer;
+  cacheCatalogueItems: (items: CatalogueItem[]) => void;
   catalogueItems: CatalogueItem[];
   catalogueById: Map<string, CatalogueItem>;
   catalogueComplete: boolean;
@@ -1987,7 +2036,7 @@ function renderScreen(context: ScreenContext) {
     case "analytics":
       return <AnalyticsScreen {...context} />;
     case "ops":
-      return canUseOperations(context.viewer.role) ? <OperationsScreen {...context} /> : <OperationsLockedScreen />;
+      return canUseOperationsForUser(context.viewer.role, context.viewer.email) ? <OperationsScreen {...context} /> : <OperationsLockedScreen />;
     case "settings":
       return <SettingsScreen {...context} />;
     case "dashboard":
@@ -2299,6 +2348,7 @@ function DashboardScreen({
   collectionEvents,
   catalogueById,
   sets,
+  storageLocations,
   dataSource,
   dataNotice,
   isLoadingData,
@@ -2358,6 +2408,17 @@ function DashboardScreen({
           </div>
         </section>
       ) : null}
+
+      <OnboardingChecklist
+        collection={collection}
+        sets={sets}
+        storageLocations={storageLocations}
+        summary={summary}
+        wishlist={wishlist}
+        navigate={navigate}
+        setAppState={setAppState}
+        startAdd={startAdd}
+      />
 
       <div className="dashboard-grid">
         <section className="section-block">
@@ -2465,6 +2526,118 @@ function DashboardScreen({
           </section>
         </div>
       </div>
+    </section>
+  );
+}
+
+function OnboardingChecklist({
+  collection,
+  navigate,
+  sets,
+  setAppState,
+  startAdd,
+  storageLocations,
+  summary,
+  wishlist,
+}: {
+  collection: CollectionItem[];
+  navigate: (screen: Screen) => void;
+  sets: SetProgress[];
+  setAppState: Dispatch<SetStateAction<AppState>>;
+  startAdd: (type: ItemType) => void;
+  storageLocations: StorageLocation[];
+  summary: ScreenContext["summary"];
+  wishlist: WishlistItem[];
+}) {
+  const hasNamedStorage =
+    storageLocations.length > 0 ||
+    collection.some((item) => item.location.trim() && item.location.trim().toLowerCase() !== "unassigned");
+  const steps = [
+    {
+      action: () => startAdd("card"),
+      actionLabel: "Add",
+      done: collection.length > 0,
+      detail: "Start the collection ledger.",
+      icon: <Plus size={16} />,
+      label: "Track first item",
+    },
+    {
+      action: () => startAdd("card"),
+      actionLabel: "Add target",
+      done: wishlist.length > 0,
+      detail: "Save a card or sealed product you want next.",
+      icon: <Heart size={16} />,
+      label: "Add wishlist target",
+    },
+    {
+      action: () => navigate("settings"),
+      actionLabel: "Storage",
+      done: hasNamedStorage,
+      detail: "Name the binder, box, display, or safe.",
+      icon: <MapPin size={16} />,
+      label: "Set storage",
+    },
+    {
+      action: () => navigate("sets"),
+      actionLabel: "Sets",
+      done: sets.some((set) => set.owned > 0),
+      detail: "Use set progress as a collection goal.",
+      icon: <GalleryVerticalEnd size={16} />,
+      label: "Choose set focus",
+    },
+    {
+      action: () =>
+        setAppState((current) => ({
+          ...current,
+          collectionFilter: "unknown",
+          collectionValueFilter: "unvalued",
+          screen: "collection",
+        })),
+      actionLabel: "Review",
+      done: collection.length > 0 && summary.unvalued === 0,
+      detail: summary.unvalued ? `${summary.unvalued} lot${summary.unvalued === 1 ? "" : "s"} need a value.` : "All tracked lots have a value.",
+      icon: <Bell size={16} />,
+      label: "Close value gaps",
+    },
+  ];
+  const completed = steps.filter((step) => step.done).length;
+  const nextStep = steps.find((step) => !step.done);
+
+  return (
+    <section className="tool-panel onboarding-panel">
+      <div className="panel-title-row">
+        <div>
+          <h2>Beta setup</h2>
+          <p className="muted">{completed} of {steps.length} complete</p>
+        </div>
+        <span className={completed === steps.length ? "tag green" : "tag blue"}>
+          {completed === steps.length ? "Ready" : "Setup"}
+        </span>
+      </div>
+      <div className="setup-checklist-list">
+        {steps.map((step) => (
+          <article className={step.done ? "setup-checklist-row complete" : "setup-checklist-row"} key={step.label}>
+            <span className="setup-checklist-status" aria-label={step.done ? "Complete" : "Open"}>
+              {step.done ? <Check size={15} /> : step.icon}
+            </span>
+            <div>
+              <strong>{step.label}</strong>
+              <p className="muted">{step.detail}</p>
+            </div>
+            {!step.done ? (
+              <button className="button small" type="button" onClick={step.action}>
+                {step.actionLabel}
+              </button>
+            ) : null}
+          </article>
+        ))}
+      </div>
+      {nextStep ? (
+        <button className="button primary full" type="button" onClick={nextStep.action}>
+          {nextStep.icon}
+          Continue setup
+        </button>
+      ) : null}
     </section>
   );
 }
@@ -2919,23 +3092,25 @@ function CollectionScreen({
 
 function AddScreen({
   appState,
-  catalogueItems,
-  catalogueComplete,
+  cacheCatalogueItems,
+  catalogueById,
   sets,
   storageLocations,
   addSearch,
-  isLoadingCatalogue,
   setAddSearch,
   setAppState,
   addToCollection,
   createManualSealedProduct,
   addToWishlist,
-  loadCatalogueData,
   navigate,
 }: ScreenContext) {
   const [catalogueSetFilter, setCatalogueSetFilter] = useState("all");
   const [catalogueRarityFilter, setCatalogueRarityFilter] = useState("all");
   const [catalogueSort, setCatalogueSort] = useState<CatalogueSort>("value-desc");
+  const [catalogueSearchResults, setCatalogueSearchResults] = useState<CatalogueItem[]>([]);
+  const [catalogueSearchInfo, setCatalogueSearchInfo] = useState({ hasMore: false, resultCount: 0 });
+  const [catalogueSearchError, setCatalogueSearchError] = useState("");
+  const [isSearchingCatalogue, setIsSearchingCatalogue] = useState(false);
   const [addCondition, setAddCondition] = useState("Near mint");
   const [addQuantity, setAddQuantity] = useState(1);
   const [addVariant, setAddVariant] = useState<string | undefined>(undefined);
@@ -2946,24 +3121,68 @@ function AddScreen({
     setCatalogueRarityFilter("all");
   }, [appState.addType]);
 
-  const results = catalogueItems.filter((item) => item.type === appState.addType);
+  useEffect(() => {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(async () => {
+      setIsSearchingCatalogue(true);
+      setCatalogueSearchError("");
+
+      try {
+        const params = new URLSearchParams({
+          limit: "80",
+          q: addSearch.trim(),
+          rarity: catalogueRarityFilter,
+          set: catalogueSetFilter,
+          sort: catalogueSort,
+          type: appState.addType,
+        });
+        const response = await fetch(`/api/catalogue/search?${params.toString()}`, {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          throw new Error(`Catalogue search failed with ${response.status}`);
+        }
+
+        const data = (await response.json()) as AppCatalogueSearchData;
+
+        setCatalogueSearchResults(data.catalogue);
+        setCatalogueSearchInfo({ hasMore: data.hasMore, resultCount: data.resultCount });
+        cacheCatalogueItems(data.catalogue);
+      } catch (error) {
+        if (controller.signal.aborted) {
+          return;
+        }
+
+        console.warn("Catalogue search failed.", error);
+        setCatalogueSearchError("Catalogue search is not available right now.");
+        setCatalogueSearchResults([]);
+        setCatalogueSearchInfo({ hasMore: false, resultCount: 0 });
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsSearchingCatalogue(false);
+        }
+      }
+    }, 220);
+
+    return () => {
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [addSearch, appState.addType, cacheCatalogueItems, catalogueRarityFilter, catalogueSetFilter, catalogueSort]);
+
+  const results = catalogueSearchResults;
   const normalizedSearch = normalizeSearchText(addSearch);
-  const setOptionGroups = groupedSetOptions(uniqueValues(results.map((item) => item.set)), sets);
+  const setOptionGroups = groupedSetOptions(sets.map((item) => item.name), sets);
   const rarityOptions = uniqueValues(results.map((item) => item.rarity)).sort((left, right) =>
     left.localeCompare(right),
   );
-  const filteredResults = results.filter((item) => {
-    const matchesSearch = matchesCatalogueSearch(item, normalizedSearch);
-    const matchesSet = catalogueSetFilter === "all" || item.set === catalogueSetFilter;
-    const matchesRarity = catalogueRarityFilter === "all" || item.rarity === catalogueRarityFilter;
-
-    return matchesSearch && matchesSet && matchesRarity;
-  }).sort((left, right) => sortCatalogueItems(left, right, catalogueSort));
   const hasNarrowedResults = Boolean(normalizedSearch) || catalogueSetFilter !== "all" || catalogueRarityFilter !== "all";
-  const resultLimit = hasNarrowedResults ? 80 : 16;
-  const visibleResults = filteredResults.slice(0, resultLimit);
+  const visibleResults = results;
   const selected =
-    filteredResults.find((item) => item.id === appState.selectedCatalogueId && item.type === appState.addType);
+    results.find((item) => item.id === appState.selectedCatalogueId && item.type === appState.addType) ??
+    catalogueById.get(appState.selectedCatalogueId);
   const locationOptions = storageOptionNames(
     storageLocations,
     selected ? defaultStorageLocation(storageLocations, selected.type) : undefined,
@@ -2990,32 +3209,6 @@ function AddScreen({
     }
 
     void addToCollection(selected.id, new FormData(event.currentTarget));
-  }
-
-  if (!catalogueComplete) {
-    return (
-      <section className="page">
-        <PageHeader
-          title="Add item"
-          action={
-            <button className="button" onClick={() => navigate("collection")}>
-              <X size={17} />
-              Cancel
-            </button>
-          }
-        />
-        <EmptyState
-          title={isLoadingCatalogue ? "Loading catalogue" : "Catalogue not loaded"}
-          description="Opening the searchable card and sealed product catalogue."
-          action={
-            <button className="button primary" onClick={() => void loadCatalogueData()} disabled={isLoadingCatalogue}>
-              <Search size={17} />
-              {isLoadingCatalogue ? "Loading" : "Load catalogue"}
-            </button>
-          }
-        />
-      </section>
-    );
   }
 
   return (
@@ -3110,8 +3303,10 @@ function AddScreen({
           ) : null}
 
           <p className="result-meta">
-            Showing {visibleResults.length} of {filteredResults.length} {appState.addType === "sealed" ? "products" : "cards"}
-            {!hasNarrowedResults && filteredResults.length > visibleResults.length ? " | Search or filter to see more" : ""}
+            {isSearchingCatalogue && !visibleResults.length
+              ? "Searching catalogue"
+              : `Showing ${visibleResults.length} of ${catalogueSearchInfo.resultCount} ${appState.addType === "sealed" ? "products" : "cards"}`}
+            {catalogueSearchInfo.hasMore ? " | Search or filter to narrow results" : ""}
           </p>
           <div className="item-list">
             {visibleResults.length ? visibleResults.map((item) => (
@@ -3123,11 +3318,16 @@ function AddScreen({
               />
             )) : (
               <EmptyState
-                title="No matching catalogue items"
+                title={isSearchingCatalogue ? "Searching catalogue" : "No matching catalogue items"}
                 description={
-                  appState.addType === "sealed"
-                    ? "Try a shorter search, or create a private manual sealed product."
-                    : "Try a card name, set name, or collector number."
+                  catalogueSearchError ||
+                  (appState.addType === "sealed"
+                    ? hasNarrowedResults
+                      ? "Try a shorter search, fewer filters, or create a private manual sealed product."
+                      : "Search by product name, product type, or related set."
+                    : hasNarrowedResults
+                      ? "Try fewer filters, a card name, set name, or collector number."
+                      : "Search by card name, set name, or collector number.")
                 }
               />
             )}
@@ -4207,6 +4407,61 @@ function WishlistScreen({
         row.item.notes ?? "",
       ].join(" ").toLowerCase().includes(normalizedWishlistSearch);
     });
+  const buyingSignals = wishlistRows
+    .map((row) => {
+      const priorityScore = priorityRank(row.item.priority) * 20;
+      const marketValue = row.currentValue ?? 0;
+
+      if (row.delta === null) {
+        return {
+          action: "Estimate",
+          detail: "No live market value yet. Add a target note or wait for pricing coverage.",
+          row,
+          score: priorityScore + 20,
+          status: "estimate" as const,
+        };
+      }
+
+      if (row.delta >= 0) {
+        return {
+          action: "Buy",
+          detail: `${formatMoney(row.delta)} below your target price.`,
+          row,
+          score: priorityScore + 100 + Math.min(40, row.delta / 500),
+          status: "ready" as const,
+        };
+      }
+
+      const targetValue = row.targetValue ?? 0;
+      const watchBand = Math.max(500, Math.round(targetValue * 0.1));
+
+      if (targetValue > 0 && Math.abs(row.delta) <= watchBand) {
+        return {
+          action: "Watch",
+          detail: `${formatMoney(Math.abs(row.delta))} above target and inside the watch band.`,
+          row,
+          score: priorityScore + 60 + Math.min(20, marketValue / 1000),
+          status: "watch" as const,
+        };
+      }
+
+      return {
+        action: "Wait",
+        detail: `${formatMoney(Math.abs(row.delta))} above your target price.`,
+        row,
+        score: priorityScore,
+        status: "wait" as const,
+      };
+    })
+    .sort((left, right) => right.score - left.score);
+  const readySignals = buyingSignals.filter((signal) => signal.status === "ready");
+  const watchSignals = buyingSignals.filter((signal) => signal.status === "watch");
+  const estimateSignals = buyingSignals.filter((signal) => signal.status === "estimate");
+  const buyListSignals = [
+    ...readySignals,
+    ...watchSignals,
+    ...estimateSignals,
+  ].slice(0, 4);
 
   async function handleUpdate(event: FormEvent<HTMLFormElement>, itemId: string) {
     event.preventDefault();
@@ -4350,6 +4605,8 @@ function WishlistScreen({
       <div className="stats-grid compact">
         <StatCard label="Wanted" value={wishlist.length.toString()} note="Cards and sealed products" />
         <StatCard label="Target total" value={formatMoney(wishlistTotal)} note="Based on target prices" />
+        <StatCard label="Ready" value={readySignals.length.toString()} note="At or below target" positive={readySignals.length > 0} />
+        <StatCard label="Watch band" value={watchSignals.length.toString()} note="Within 10% of target" />
       </div>
       {wishlist.length ? (
         <div className="toolbar wishlist-toolbar">
@@ -4423,6 +4680,51 @@ function WishlistScreen({
             <span><b>{wishlistInsight.pricedCount}</b>Priced</span>
             <span><b>{wishlist.length - wishlistInsight.pricedCount}</b>Needs estimate</span>
           </div>
+        </section>
+      ) : null}
+      {wishlist.length ? (
+        <section className="tool-panel wishlist-buy-panel">
+          <div className="panel-title-row">
+            <div>
+              <h2>Buying signals</h2>
+              <p className="muted">
+                {readySignals.length
+                  ? `${readySignals.length} target ${readySignals.length === 1 ? "is" : "are"} ready now.`
+                  : watchSignals.length
+                    ? `${watchSignals.length} target ${watchSignals.length === 1 ? "is" : "are"} close to your buy price.`
+                    : "No target is close to your buy price yet."}
+              </p>
+            </div>
+            <span className={readySignals.length ? "tag green" : "tag blue"}>
+              {readySignals.length ? "Buy" : "Watch"}
+            </span>
+          </div>
+          {buyListSignals.length ? (
+            <div className="buying-signal-list">
+              {buyListSignals.map((signal) => (
+                <article className={`buying-signal-row signal-${signal.status}`} key={signal.row.item.id}>
+                  <div className="table-thumb">{renderItemImage(signal.row.catalogueItem)}</div>
+                  <div className="buying-signal-copy">
+                    <div className="tag-row">
+                      <span className={`tag ${wishlistSignalTagClass(signal.status)}`}>{signal.action}</span>
+                      <span className={`priority-pill priority-${signal.row.item.priority.toLowerCase()}`}>
+                        {signal.row.item.priority}
+                      </span>
+                    </div>
+                    <strong>{signal.row.catalogueItem.name}</strong>
+                    <span>{signal.row.catalogueItem.set} | Target {formatValuation(signal.row.targetValue)} | Market {formatValuation(signal.row.currentValue)}</span>
+                    <p className="muted">{signal.detail}</p>
+                  </div>
+                  <button className="button small" type="button" onClick={() => void addToCollection(signal.row.item.catalogueId)}>
+                    <Check size={15} />
+                    Move
+                  </button>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <p className="muted">Add target prices to turn wishlist rows into buying signals.</p>
+          )}
         </section>
       ) : null}
 
@@ -4861,6 +5163,106 @@ function OperationsLockedScreen() {
   );
 }
 
+function BetaStatusPanel({
+  error,
+  isLoading,
+  onRefresh,
+  status,
+}: {
+  error: string;
+  isLoading: boolean;
+  onRefresh: () => void;
+  status: BetaStatusApiResult | null;
+}) {
+  const checks = status?.launchChecks ?? [];
+  const actionCount = checks.filter((check) => check.level === "action").length;
+  const watchCount = checks.filter((check) => check.level === "watch").length;
+  const catalogue = status?.catalogue?.status;
+  const jobRuns = status?.jobRuns ?? [];
+  const env = status?.env;
+
+  return (
+    <section className="tool-panel beta-status-panel">
+      <div className="panel-title-row">
+        <div>
+          <h2>Beta status</h2>
+          <p className="muted">
+            {status?.generatedAt ? `Updated ${formatEventDate(status.generatedAt)}` : "Live admin readiness snapshot"}
+          </p>
+        </div>
+        <div className="actions">
+          <span className={actionCount ? "tag red" : watchCount ? "tag amber" : "tag green"}>
+            {actionCount ? `${actionCount} action` : watchCount ? `${watchCount} watch` : "Ready"}
+          </span>
+          <button className="button small" type="button" onClick={onRefresh} disabled={isLoading}>
+            <RefreshCw size={15} />
+            {isLoading ? "Loading" : "Refresh"}
+          </button>
+        </div>
+      </div>
+      {error ? <p className="form-note danger">{error}</p> : null}
+      {status ? (
+        <>
+          <div className="beta-status-grid">
+            <span>
+              <b>{formatCount(catalogue?.cardCount)}</b>
+              Cards
+            </span>
+            <span>
+              <b>{formatPercent(catalogue?.pricingCoveragePercent)}</b>
+              Card pricing
+            </span>
+            <span>
+              <b>{formatPercent(catalogue?.sealedPricingCoveragePercent)}</b>
+              Sealed pricing
+            </span>
+            <span>
+              <b>{env?.squareEnvironment ?? "unknown"}</b>
+              Square
+            </span>
+          </div>
+          <div className="beta-check-list">
+            {checks.map((check) => (
+              <article className="beta-check-row" key={check.label}>
+                <span className={`beta-check-icon ${check.level}`}>
+                  {check.level === "good" ? <Check size={15} /> : <Info size={15} />}
+                </span>
+                <div>
+                  <strong>{check.label}</strong>
+                  <p className="muted">{check.detail}</p>
+                </div>
+                <span className={`tag ${betaCheckTagClass(check.level)}`}>
+                  {check.level}
+                </span>
+              </article>
+            ))}
+          </div>
+          {env ? (
+            <div className="beta-env-row">
+              <span>{env.databaseConfigured ? "Database configured" : "Database missing"}</span>
+              <span>{env.jobSecretConfigured ? "Jobs protected" : "Job secret missing"}</span>
+              <span>{env.priceAlertDryRun ? "Alerts dry run" : "Alerts live"}</span>
+              <span>{env.emailSmokeToConfigured ? "Smoke recipient set" : "No smoke recipient"}</span>
+            </div>
+          ) : null}
+          {jobRuns.length ? (
+            <div className="beta-job-strip">
+              {jobRuns.slice(0, 4).map((run) => (
+                <span key={run.id}>
+                  <b className={`tag ${jobStatusClass(run.status)}`}>{run.status}</b>
+                  {jobTypeLabel(run.jobType)}
+                </span>
+              ))}
+            </div>
+          ) : null}
+        </>
+      ) : (
+        <p className="muted">{isLoading ? "Loading beta readiness." : "Refresh to load beta readiness."}</p>
+      )}
+    </section>
+  );
+}
+
 function OperationsScreen({
   catalogueItems,
   loadCatalogueData,
@@ -4879,6 +5281,8 @@ function OperationsScreen({
   const [sealedUsdToGbpRate, setSealedUsdToGbpRate] = useState("");
   const [mergePrimaryCardId, setMergePrimaryCardId] = useState("");
   const [mergeDuplicateCardId, setMergeDuplicateCardId] = useState("");
+  const [betaStatus, setBetaStatus] = useState<BetaStatusApiResult | null>(null);
+  const [betaStatusError, setBetaStatusError] = useState("");
   const [jobRuns, setJobRuns] = useState<JobRunRecord[]>([]);
   const [catalogueStatus, setCatalogueStatus] = useState<CatalogueStatusRecord | null>(null);
   const [lastResult, setLastResult] = useState<unknown>(null);
@@ -4893,6 +5297,60 @@ function OperationsScreen({
     importedCount: catalogueItems.filter((item) => item.type === "card" && preset.setNames.includes(item.set)).length,
     pageSize: Math.min(250, preset.expectedTotal),
   }));
+
+  const loadBetaStatus = useCallback(
+    async (options?: { quiet?: boolean }) => {
+      if (!options?.quiet) {
+        setIsBusy("beta-status");
+      }
+
+      try {
+        const response = await fetch("/api/admin/beta-status", { cache: "no-store" });
+        const body = (await response.json()) as BetaStatusApiResult;
+
+        if (!response.ok) {
+          throw new Error(body.error ?? `Beta status failed with ${response.status}`);
+        }
+
+        setBetaStatus(body);
+        setBetaStatusError("");
+
+        if (body.catalogue?.status) {
+          setCatalogueStatus(body.catalogue.status);
+        }
+
+        if (body.jobRuns?.length) {
+          setJobRuns(body.jobRuns);
+        }
+
+        if (!options?.quiet) {
+          showToast("Beta status loaded.");
+        }
+
+        return true;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unable to load beta status.";
+
+        console.warn("Unable to load beta status.", error);
+        setBetaStatusError(message);
+
+        if (!options?.quiet) {
+          showToast(message);
+        }
+
+        return false;
+      } finally {
+        if (!options?.quiet) {
+          setIsBusy("");
+        }
+      }
+    },
+    [showToast],
+  );
+
+  useEffect(() => {
+    void loadBetaStatus({ quiet: true });
+  }, [loadBetaStatus]);
 
   async function loadJobRuns() {
     if (!jobSecret.trim()) {
@@ -5278,6 +5736,12 @@ function OperationsScreen({
   return (
     <section className="page">
       <PageHeader title="Operations" action={<span className="status-pill"><TerminalSquare size={17} />Jobs</span>} />
+      <BetaStatusPanel
+        error={betaStatusError}
+        isLoading={isBusy === "beta-status" && !betaStatus}
+        status={betaStatus}
+        onRefresh={() => void loadBetaStatus()}
+      />
       <div className="stats-grid compact">
         <StatCard
           label="Catalogue cards"
@@ -6049,7 +6513,7 @@ function SettingsScreen({
             plus={appState.plus}
             onStartCheckout={startPlusCheckout}
           />
-          {canUseOperations(viewer.role) ? <OperationsEntryPanel onOpen={() => navigate("ops")} /> : null}
+          {canUseOperationsForUser(viewer.role, viewer.email) ? <OperationsEntryPanel onOpen={() => navigate("ops")} /> : null}
           <DataPanel
             plus={appState.plus}
             onExportCollection={exportCollectionCsv}
@@ -7364,14 +7828,20 @@ function formatValuation(valueMinor?: number | null) {
 
 function marketConfidenceDescription(item: CatalogueItem, marketValue?: number | null) {
   if (marketValue === null || marketValue === undefined) {
-    return "No market price is available yet. Add a manual value or refresh pricing when a source supports this card.";
+    return "No market price is available yet. Use a manual value with a note, or refresh pricing when a source supports this item.";
   }
 
   const confidence = item.confidence || "Unknown";
-  const source = item.priceSource ? ` from ${priceSourceLabel(item.priceSource)}` : "";
-  const observed = item.priceObservedAt ? ` Observed ${formatEventDate(item.priceObservedAt)}.` : "";
+  const source = priceSourceLabel(item.priceSource);
+  const observed = item.priceObservedAt ? formatEventDate(item.priceObservedAt) : "unknown date";
+  const reason =
+    confidence.toLowerCase() === "high"
+      ? "The latest imported value is considered usable for normal tracking."
+      : confidence.toLowerCase() === "medium"
+        ? "Check the source before buying or insuring higher-value items."
+        : "Treat this as a guide only until a stronger or newer source is available.";
 
-  return `Market confidence: ${confidence}${source}.${observed}`;
+  return `Market confidence: ${confidence}. Source: ${source}. Observed: ${observed}. ${reason}`;
 }
 
 function setInitials(name: string) {
@@ -7562,6 +8032,22 @@ function priceAlertTagClass(status: CollectionIntelligence["priceAlerts"][number
   return "amber";
 }
 
+function wishlistSignalTagClass(status: "estimate" | "ready" | "wait" | "watch") {
+  if (status === "ready") {
+    return "green";
+  }
+
+  if (status === "estimate") {
+    return "blue";
+  }
+
+  if (status === "wait") {
+    return "";
+  }
+
+  return "amber";
+}
+
 function jobHeaders(secret: string) {
   return {
     authorization: `Bearer ${secret.trim()}`,
@@ -7610,15 +8096,39 @@ function jobTypeLabel(type: JobType) {
     return "Catalogue";
   }
 
+  if (type === "card_image_repair") {
+    return "Card images";
+  }
+
   if (type === "pricing_refresh") {
     return "Pricing";
+  }
+
+  if (type === "sealed_image_repair") {
+    return "Sealed images";
   }
 
   if (type === "sealed_pricing_refresh") {
     return "Sealed pricing";
   }
 
+  if (type === "variant_metadata_repair") {
+    return "Variants";
+  }
+
   return "Price alerts";
+}
+
+function betaCheckTagClass(level: BetaLaunchCheck["level"]) {
+  if (level === "good") {
+    return "green";
+  }
+
+  if (level === "action") {
+    return "red";
+  }
+
+  return "amber";
 }
 
 function recommendationActionLabel(recommendation: CatalogueGapRecommendation) {

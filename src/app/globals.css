@@ -733,6 +733,56 @@ h3 {
   margin-bottom: 0;
 }
 
+.onboarding-panel {
+  gap: 14px;
+}
+
+.setup-checklist-list {
+  display: grid;
+  gap: 8px;
+}
+
+.setup-checklist-row {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--control);
+}
+
+.setup-checklist-row.complete {
+  border-color: color-mix(in srgb, var(--green) 24%, var(--line));
+  background: color-mix(in srgb, var(--green-soft) 52%, var(--control));
+}
+
+.setup-checklist-status {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--accent);
+}
+
+.setup-checklist-row.complete .setup-checklist-status {
+  border-color: color-mix(in srgb, var(--green) 28%, var(--line));
+  color: var(--green);
+}
+
+.setup-checklist-row strong {
+  display: block;
+  line-height: 1.2;
+}
+
+.setup-checklist-row p {
+  margin: 2px 0 0;
+}
+
 .button {
   display: inline-flex;
   min-height: 40px;
@@ -1220,6 +1270,69 @@ h3 {
 
 .wishlist-target-grid .target-hit strong {
   color: #166534;
+}
+
+.wishlist-buy-panel {
+  gap: 14px;
+}
+
+.buying-signal-list {
+  display: grid;
+  gap: 10px;
+}
+
+.buying-signal-row {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--control);
+}
+
+.buying-signal-row .table-thumb {
+  position: relative;
+  width: 58px;
+  height: 76px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-soft);
+}
+
+.buying-signal-row.signal-ready {
+  border-color: color-mix(in srgb, var(--green) 28%, var(--line));
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--green) 12%, transparent), transparent 58%),
+    var(--control);
+}
+
+.buying-signal-row.signal-watch {
+  border-color: color-mix(in srgb, var(--amber) 26%, var(--line));
+}
+
+.buying-signal-copy {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.buying-signal-copy strong,
+.buying-signal-copy span {
+  overflow-wrap: anywhere;
+}
+
+.buying-signal-copy > span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 850;
+  line-height: 1.35;
+}
+
+.buying-signal-copy p {
+  margin: 0;
 }
 
 .set-filter-tabs {
@@ -2517,6 +2630,14 @@ h3 {
   line-height: 1.45;
 }
 
+.form-note.danger {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--line));
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent) 14%, transparent), transparent 60%),
+    var(--control);
+  color: var(--accent-dark);
+}
+
 .field select,
 .sort-control select {
   appearance: none;
@@ -3167,6 +3288,90 @@ h3 {
   background: var(--control);
 }
 
+.beta-status-panel {
+  gap: 14px;
+}
+
+.beta-status-grid,
+.beta-env-row,
+.beta-job-strip {
+  display: grid;
+  gap: 8px;
+}
+
+.beta-status-grid {
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+}
+
+.beta-status-grid span,
+.beta-env-row span,
+.beta-job-strip span {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--control);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 850;
+  line-height: 1.3;
+}
+
+.beta-status-grid b {
+  color: var(--ink);
+  font-size: 16px;
+}
+
+.beta-check-list {
+  display: grid;
+  gap: 8px;
+}
+
+.beta-check-row {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 9px 0;
+  border-top: 1px solid var(--line);
+}
+
+.beta-check-row:first-child {
+  border-top: 0;
+}
+
+.beta-check-icon {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--control);
+  color: var(--amber);
+}
+
+.beta-check-icon.good {
+  color: var(--green);
+}
+
+.beta-check-icon.action {
+  color: var(--accent);
+}
+
+.beta-check-row p {
+  margin: 2px 0 0;
+}
+
+.beta-job-strip {
+  grid-template-columns: repeat(auto-fit, minmax(142px, 1fr));
+}
+
+.beta-job-strip .tag {
+  width: fit-content;
+}
+
 .duplicate-review-panel {
   gap: 14px;
 }
@@ -3674,6 +3879,27 @@ h3 {
 }
 
 @media (max-width: 759px) {
+  .setup-checklist-row,
+  .beta-check-row {
+    grid-template-columns: 32px minmax(0, 1fr);
+  }
+
+  .buying-signal-row {
+    grid-template-columns: 58px minmax(0, 1fr);
+  }
+
+  .setup-checklist-row .button,
+  .buying-signal-row .button,
+  .beta-check-row .tag {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .beta-env-row,
+  .beta-job-strip {
+    grid-template-columns: 1fr;
+  }
+
   .catalogue-preview-backdrop {
     padding: 12px;
     align-items: start;

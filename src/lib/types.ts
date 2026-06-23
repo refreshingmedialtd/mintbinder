@@ -130,10 +130,40 @@ export type AppData = {
   notice?: string;
 };
 
+export type DashboardSummary = {
+  cards: number;
+  costMinor: number;
+  items: number;
+  sealed: number;
+  unvalued: number;
+  valueMinor: number;
+  wishlistTargetMinor: number;
+};
+
+export type AppDashboardData = AppData & {
+  dashboard: {
+    generatedAt: string;
+    summary: DashboardSummary;
+  };
+};
+
 export type AppCatalogueData = {
   catalogue: CatalogueItem[];
   source: AppDataSource;
   notice?: string;
+};
+
+export type AppCatalogueSearchData = AppCatalogueData & {
+  hasMore: boolean;
+  query: {
+    limit: number;
+    q: string;
+    rarity: string;
+    set: string;
+    sort: string;
+    type: ItemType;
+  };
+  resultCount: number;
 };
 
 export type Screen =
