@@ -169,6 +169,7 @@ export type AppCatalogueSearchData = AppCatalogueData & {
 export type Screen =
   | "dashboard"
   | "collection"
+  | "binders"
   | "add"
   | "item"
   | "sets"

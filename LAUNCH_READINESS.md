@@ -1,6 +1,6 @@
 # Mint Binder Launch Readiness
 
-Last updated: 2026-06-23
+Last updated: 2026-06-24
 
 ## Overall Progress
 
@@ -87,6 +87,7 @@ Known QA warnings:
 - Collection flows for adding, editing, duplicating, removing, selling, grading, and storing cards/sealed products.
 - Wishlist flows with target prices, priorities, update/delete actions, and collection conversion.
 - Set progress, detail views, variant-aware card values, price history, analytics, action queues, and insurance report export.
+- Preliminary Binders screen with a default full-collection binder, custom binder creation, artwork choices, and animated page/card preview.
 - CSV import/export and collection import templates.
 - Square checkout, webhook verification, subscription entitlement foundations, and retained Stripe fallback support.
 - Square local tunnel testing and beta subscription management, including in-app renewal cancellation while preserving paid access until the period ends.
@@ -142,7 +143,8 @@ Known QA warnings:
 - CSV import preview: add a review step before committing imported rows. It should show matched catalogue item, quantity, condition, storage, target value, rows that will be skipped, and clear row-level reasons.
 - Manual value review queue: add an admin/user review surface for items that should have a manual value because the market price is missing, weak, stale, variant-mismatched, high-value, or user-overridden without a valuation note.
 - Set-builder mode: this is not a duplicate of the Sets menu. The idea is a focused set-detail workflow that lets a collector choose one set as an active goal, filter missing/wanted cards, add targets in bulk, and track "next best card to chase".
-- Plus Binders: promote this to a pre-beta signature feature. Plus users should get tactile custom binders for owned cards, with cover choices, page slots, manual ordering, and a polished open-card interaction; free users can see a tasteful preview.
+- Plus Binders: preliminary client-side version exists with artwork, custom contents, and animated previews. Next pass should persist binders in the database, add manual ordering/page slots, sharing/export options, and Plus/free gating.
+- Graded card pricing: collection lots can store grades, but PSA/BGS/CGC/ACE/SGC values currently fall back to raw/variant market pricing unless the user sets a manual value. Add a graded-price source/importer before promising true slab valuations.
 - Mobile QA pass: test the live app on real phones, using screenshots from account creation, dashboard, Add, item detail, set detail, wishlist, Settings, and checkout/Plus surfaces.
 - Sealed/value coverage: pursue PriceCharting sealed enrichment first, then add UPC/EAN metadata capture, alias management, and manual/admin price review for important products that no provider prices reliably.
 - Operations schema follow-up: the repair jobs currently record under existing tracked job types. If we want first-class run history for card image repair, sealed image repair, and variant metadata repair, add a database enum migration and update the job-run type list.

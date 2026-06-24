@@ -2075,6 +2075,401 @@ h3 {
   color: var(--muted);
 }
 
+.binders-page {
+  gap: 20px;
+}
+
+.binder-shelf {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 14px;
+}
+
+.binder-cover {
+  position: relative;
+  display: grid;
+  min-height: 210px;
+  align-content: end;
+  gap: 8px;
+  overflow: hidden;
+  padding: 18px 16px 18px 34px;
+  border: 1px solid color-mix(in srgb, var(--binder-accent) 52%, var(--line));
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--binder-surface) 82%, white), var(--binder-surface)),
+    radial-gradient(circle at 78% 18%, color-mix(in srgb, var(--binder-accent) 32%, transparent), transparent 32%);
+  box-shadow: 0 18px 34px rgba(15, 23, 42, 0.22);
+  color: color-mix(in srgb, var(--ink) 86%, var(--binder-spine));
+  text-align: left;
+  transform-origin: bottom left;
+  transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
+}
+
+.binder-cover::before,
+.binder-cover::after {
+  position: absolute;
+  content: "";
+}
+
+.binder-cover::before {
+  inset: 12px 12px auto auto;
+  width: 54px;
+  height: 54px;
+  border: 1px solid color-mix(in srgb, var(--binder-accent) 58%, white);
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--binder-accent) 26%, transparent);
+}
+
+.binder-cover::after {
+  inset: 0;
+  background:
+    linear-gradient(90deg, transparent, color-mix(in srgb, white 14%, transparent), transparent),
+    repeating-linear-gradient(135deg, transparent 0 16px, color-mix(in srgb, var(--binder-accent) 10%, transparent) 16px 17px);
+  opacity: 0.75;
+  pointer-events: none;
+}
+
+.binder-cover:hover,
+.binder-cover:focus-visible,
+.binder-cover.selected {
+  border-color: var(--binder-accent);
+  box-shadow: 0 22px 44px rgba(15, 23, 42, 0.3);
+  transform: translateY(-4px) rotate(-1deg);
+}
+
+.binder-cover-spine {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 20px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--binder-spine) 86%, black), var(--binder-spine)),
+    repeating-linear-gradient(180deg, transparent 0 24px, color-mix(in srgb, white 18%, transparent) 24px 25px);
+}
+
+.binder-cover-icon {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--binder-accent) 60%, white);
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--binder-accent) 18%, white);
+  color: var(--binder-spine);
+}
+
+.binder-cover strong,
+.binder-cover span:not(.binder-cover-spine):not(.binder-cover-icon) {
+  position: relative;
+  z-index: 1;
+}
+
+.binder-cover strong {
+  font-size: 18px;
+  line-height: 1.1;
+}
+
+.binder-cover span:not(.binder-cover-spine):not(.binder-cover-icon) {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.binder-builder-panel {
+  gap: 16px;
+}
+
+.binder-builder-grid {
+  display: grid;
+  grid-template-columns: minmax(240px, 0.8fr) minmax(280px, 1.2fr);
+  gap: 16px;
+}
+
+.binder-builder-fields {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+}
+
+.binder-artwork-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 8px;
+}
+
+.binder-artwork-option {
+  display: flex;
+  min-height: 48px;
+  align-items: center;
+  gap: 8px;
+  padding: 9px;
+  border: 1px solid color-mix(in srgb, var(--binder-accent) 38%, var(--line));
+  border-radius: 7px;
+  background: linear-gradient(135deg, var(--binder-surface), color-mix(in srgb, var(--binder-accent) 20%, var(--control)));
+  color: var(--ink);
+  font-weight: 900;
+}
+
+.binder-artwork-option.selected {
+  border-color: var(--binder-accent);
+  box-shadow: inset 0 0 0 1px var(--binder-accent);
+}
+
+.binder-focus-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.55fr);
+  gap: 18px;
+  align-items: flex-start;
+}
+
+.binder-stage {
+  display: grid;
+  gap: 18px;
+  overflow: hidden;
+  padding: 18px;
+  border: 1px solid color-mix(in srgb, var(--binder-accent) 42%, var(--line));
+  border-radius: var(--radius);
+  background:
+    radial-gradient(circle at 88% 10%, color-mix(in srgb, var(--binder-accent) 20%, transparent), transparent 30%),
+    linear-gradient(180deg, var(--surface), color-mix(in srgb, var(--binder-spine) 16%, var(--surface-soft)));
+}
+
+.binder-stage-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.binder-stage-header h2 {
+  margin: 0;
+  font-size: clamp(26px, 4vw, 44px);
+  letter-spacing: 0;
+}
+
+.binder-stage-stats {
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+  min-width: 120px;
+}
+
+.binder-stage-stats span {
+  color: var(--ink);
+  font-size: 22px;
+  font-weight: 950;
+}
+
+.binder-stage-stats small,
+.binder-overflow-note {
+  color: var(--muted);
+  font-weight: 850;
+}
+
+.binder-book {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  perspective: 1400px;
+}
+
+.binder-page {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  min-height: 500px;
+  padding: 16px;
+  border: 1px solid color-mix(in srgb, var(--binder-accent) 30%, var(--line));
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--binder-spine) 10%, transparent), transparent 14%),
+    linear-gradient(180deg, color-mix(in srgb, white 8%, var(--surface)), var(--surface-soft));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, white 8%, transparent);
+  animation: binderPageOpen 520ms cubic-bezier(0.2, 0.75, 0.2, 1) both;
+  transform-origin: center left;
+}
+
+.binder-page + .binder-page {
+  animation-delay: 90ms;
+  transform-origin: center right;
+}
+
+.binder-pocket {
+  display: grid;
+  min-width: 0;
+  min-height: 146px;
+  align-content: start;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--line) 76%, transparent);
+  border-radius: 6px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.12), transparent),
+    color-mix(in srgb, var(--control) 82%, transparent);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 850;
+  text-align: left;
+  transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+}
+
+.binder-pocket.filled:hover,
+.binder-pocket.filled:focus-visible {
+  border-color: var(--binder-accent);
+  background: color-mix(in srgb, var(--binder-accent) 12%, var(--control));
+  transform: translateY(-6px) scale(1.02);
+}
+
+.binder-pocket-image {
+  display: block;
+  overflow: hidden;
+  aspect-ratio: 5 / 7;
+  border-radius: 5px;
+}
+
+.binder-pocket-image .asset-image,
+.binder-picker-image .asset-image,
+.binder-focus-image .asset-image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.binder-empty-slot {
+  display: grid;
+  min-height: 100%;
+  place-items: center;
+  border: 1px dashed color-mix(in srgb, var(--line) 80%, transparent);
+  border-radius: 5px;
+  color: color-mix(in srgb, var(--muted) 70%, transparent);
+}
+
+.binder-side-panel {
+  gap: 14px;
+}
+
+.binder-picker {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.binder-picker-list {
+  display: grid;
+  max-height: 440px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.binder-picker-row {
+  display: grid;
+  grid-template-columns: auto 46px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
+
+.binder-picker-row:first-child {
+  border-top: 0;
+}
+
+.binder-picker-row input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+}
+
+.binder-picker-image {
+  width: 46px;
+  height: 58px;
+}
+
+.binder-picker-row strong,
+.binder-picker-row small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.binder-picker-row small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.binder-summary-list {
+  display: grid;
+  gap: 12px;
+}
+
+.binder-focus-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(220px, 360px) minmax(260px, 1fr);
+  gap: 22px;
+  width: min(920px, calc(100vw - 32px));
+  max-height: calc(100vh - 36px);
+  overflow: auto;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 24px 80px rgba(2, 6, 23, 0.46);
+  animation: binderCardLift 260ms cubic-bezier(0.2, 0.75, 0.2, 1) both;
+}
+
+.binder-focus-image {
+  display: grid;
+  min-height: 430px;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 9px;
+  background: var(--surface-soft);
+}
+
+.binder-focus-copy {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+}
+
+.binder-focus-copy h2,
+.binder-focus-copy p {
+  margin: 0;
+}
+
+.graded-pricing-note {
+  border-color: color-mix(in srgb, var(--amber) 42%, var(--line));
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--amber-soft) 42%, transparent), transparent 72%),
+    var(--surface);
+}
+
+@keyframes binderPageOpen {
+  from {
+    opacity: 0;
+    transform: rotateY(-16deg) translateY(12px);
+  }
+
+  to {
+    opacity: 1;
+    transform: rotateY(0deg) translateY(0);
+  }
+}
+
+@keyframes binderCardLift {
+  from {
+    opacity: 0;
+    transform: translateY(28px) scale(0.94) rotate(-1deg);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1) rotate(0deg);
+  }
+}
+
 .set-card {
   position: relative;
   display: grid;
@@ -4212,6 +4607,56 @@ h3 {
   .card-zoom-image {
     width: min(72vw, 320px);
   }
+
+  .binder-shelf {
+    grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  }
+
+  .binder-cover {
+    min-height: 170px;
+    padding: 16px 14px 16px 32px;
+  }
+
+  .binder-builder-grid,
+  .binder-focus-layout,
+  .binder-focus-card {
+    grid-template-columns: 1fr;
+  }
+
+  .binder-stage {
+    padding: 14px;
+  }
+
+  .binder-stage-header {
+    display: grid;
+  }
+
+  .binder-stage-stats {
+    justify-items: start;
+  }
+
+  .binder-book {
+    grid-template-columns: 1fr;
+  }
+
+  .binder-page {
+    min-height: 0;
+    padding: 10px;
+    gap: 8px;
+  }
+
+  .binder-pocket {
+    min-height: 112px;
+    padding: 6px;
+  }
+
+  .binder-picker-list {
+    max-height: 320px;
+  }
+
+  .binder-focus-image {
+    min-height: 360px;
+  }
 }
 
 @media (max-width: 430px) {
@@ -4310,5 +4755,30 @@ h3 {
 
   .plan-card-head {
     display: grid;
+  }
+
+  .binder-shelf {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .binder-cover {
+    min-height: 148px;
+  }
+
+  .binder-cover strong {
+    font-size: 16px;
+  }
+
+  .binder-artwork-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .binder-pocket {
+    min-height: 92px;
+    font-size: 10px;
+  }
+
+  .binder-focus-image {
+    min-height: 300px;
   }
 }

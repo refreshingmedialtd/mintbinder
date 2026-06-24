@@ -5,6 +5,7 @@ import {
   ArrowDownUp,
   BarChart3,
   Bell,
+  BookOpen,
   Boxes,
   Check,
   CreditCard,
@@ -24,6 +25,7 @@ import {
   Mail,
   Lock,
   Palette,
+  Paintbrush,
   PackagePlus,
   Plus,
   RefreshCw,
@@ -114,6 +116,7 @@ type AppState = {
   collectionView: "list" | "grid";
   wishlistView: "list" | "grid";
   setFilter: "all" | "owned" | "missing" | "want";
+  selectedBinderId: string;
   selectedItemId: string;
   selectedSetId: string;
   selectedCatalogueId: string;
@@ -209,6 +212,25 @@ type ImportPreset = {
   note: string;
   query: string;
   setNames: string[];
+};
+
+type BinderArtworkId = "mint" | "vault" | "sunburst" | "ocean" | "rose" | "midnight";
+
+type CustomBinder = {
+  artworkId: BinderArtworkId;
+  createdAt: string;
+  id: string;
+  itemIds: string[];
+  name: string;
+};
+
+type BinderSummary = {
+  artworkId: BinderArtworkId;
+  description: string;
+  id: string;
+  isDefault?: boolean;
+  items: CollectionItem[];
+  name: string;
 };
 
 type JobRunRecord = {
@@ -401,6 +423,7 @@ const initialState: AppState = {
   collectionView: "list",
   wishlistView: "list",
   setFilter: "all",
+  selectedBinderId: "all-collection",
   selectedItemId: "",
   selectedSetId: "",
   selectedCatalogueId: "",
@@ -455,8 +478,67 @@ const plusPlanFeatures = [
 ];
 const betaSetupDismissedStorageKey = "mintbinder-beta-setup-dismissed";
 const themeStorageKey = "mintbinder-theme";
+const defaultBinderId = "all-collection";
+const binderStoragePrefix = "mintbinder-binders";
 const plusPreviewEmails = new Set(["liam@example.com", "liam@refreshing.media"]);
 const plusPreviewDomains = new Set(["refreshing.media"]);
+const binderArtworkOptions: Array<{
+  accent: string;
+  description: string;
+  id: BinderArtworkId;
+  name: string;
+  spine: string;
+  surface: string;
+}> = [
+  {
+    accent: "#38d7c5",
+    description: "Clean mint cover with sharp collector lines.",
+    id: "mint",
+    name: "Mint League",
+    spine: "#0f766e",
+    surface: "#dffcf6",
+  },
+  {
+    accent: "#f59e0b",
+    description: "Dark vault cover for high-value showcases.",
+    id: "vault",
+    name: "Vault Black",
+    spine: "#0f172a",
+    surface: "#1f2937",
+  },
+  {
+    accent: "#f43f5e",
+    description: "Warm, bright binder for chase-card pages.",
+    id: "sunburst",
+    name: "Sunburst",
+    spine: "#fb923c",
+    surface: "#fff7ed",
+  },
+  {
+    accent: "#60a5fa",
+    description: "Cool blue cover for water-heavy sets.",
+    id: "ocean",
+    name: "Ocean Foil",
+    spine: "#1d4ed8",
+    surface: "#dbeafe",
+  },
+  {
+    accent: "#fb7185",
+    description: "Soft rose binder for display pages.",
+    id: "rose",
+    name: "Rose Gallery",
+    spine: "#be123c",
+    surface: "#ffe4e6",
+  },
+  {
+    accent: "#a78bfa",
+    description: "Night cover with purple foil details.",
+    id: "midnight",
+    name: "Midnight Holo",
+    spine: "#312e81",
+    surface: "#111827",
+  },
+];
 const themeOptions: ThemeOption[] = [
   {
     access: "free",
@@ -620,6 +702,8 @@ export default function Home() {
   const [addSearch, setAddSearch] = useState("");
   const [setSearch, setSetSearch] = useState("");
   const [plusPreviewOverride, setPlusPreviewOverride] = useState<boolean | null>(null);
+  const [customBinders, setCustomBinders] = useState<CustomBinder[]>([]);
+  const [customBindersLoaded, setCustomBindersLoaded] = useState(false);
 
   const showToast = useCallback((message: string) => {
     setToast(message);
@@ -662,6 +746,25 @@ export default function Home() {
     document.documentElement.dataset.theme = themeId;
     window.localStorage.setItem(themeStorageKey, themeId);
   }, [effectivePlus, themeId]);
+
+  useEffect(() => {
+    if (status !== "authenticated") {
+      setCustomBinders([]);
+      setCustomBindersLoaded(false);
+      return;
+    }
+
+    setCustomBinders(readStoredBinders(binderStorageKey(viewer.email)));
+    setCustomBindersLoaded(true);
+  }, [status, viewer.email]);
+
+  useEffect(() => {
+    if (!customBindersLoaded || status !== "authenticated") {
+      return;
+    }
+
+    window.localStorage.setItem(binderStorageKey(viewer.email), JSON.stringify(customBinders));
+  }, [customBinders, customBindersLoaded, status, viewer.email]);
 
   const applyAppData = useCallback((data: AppData) => {
     setCatalogueItems((current) =>
@@ -1930,6 +2033,7 @@ export default function Home() {
     catalogueById,
     catalogueComplete,
     collection,
+    customBinders,
     storageLocations,
     collectionEvents,
     notificationPreferences,
@@ -1953,6 +2057,7 @@ export default function Home() {
     wishlistTotal,
     addToCollection,
     createManualSealedProduct,
+    setCustomBinders,
     updateCollectionItem,
     archiveCollectionItem,
     recordCollectionSale,
@@ -2023,6 +2128,7 @@ type ScreenContext = {
   catalogueById: Map<string, CatalogueItem>;
   catalogueComplete: boolean;
   collection: CollectionItem[];
+  customBinders: CustomBinder[];
   storageLocations: StorageLocation[];
   collectionEvents: CollectionEvent[];
   notificationPreferences: NotificationPreferences;
@@ -2054,6 +2160,7 @@ type ScreenContext = {
   wishlistTotal: number;
   addToCollection: (catalogueId: string, formData?: FormData) => Promise<void>;
   createManualSealedProduct: (formData: FormData) => Promise<boolean>;
+  setCustomBinders: Dispatch<SetStateAction<CustomBinder[]>>;
   updateCollectionItem: (itemId: string, formData: FormData) => Promise<boolean>;
   archiveCollectionItem: (itemId: string) => Promise<boolean>;
   recordCollectionSale: (itemId: string, formData: FormData) => Promise<boolean>;
@@ -2085,6 +2192,8 @@ function renderScreen(context: ScreenContext) {
   switch (context.appState.screen) {
     case "collection":
       return <CollectionScreen {...context} />;
+    case "binders":
+      return <BindersScreen {...context} />;
     case "add":
       return <AddScreen {...context} />;
     case "item":
@@ -2327,6 +2436,7 @@ function Sidebar({
     <aside className="sidebar" aria-label="Primary navigation">
       <NavButton active={active === "dashboard"} icon={<LayoutDashboard />} label="Dashboard" onClick={() => onNavigate("dashboard")} />
       <NavButton active={active === "collection"} icon={<Layers3 />} label="Collection" onClick={() => onNavigate("collection")} />
+      <NavButton active={active === "binders"} icon={<BookOpen />} label="Binders" onClick={() => onNavigate("binders")} />
       <NavButton active={active === "add"} icon={<Plus />} label="Add item" onClick={() => onNavigate("add")} />
       <NavButton active={active === "sets" || active === "setDetail"} icon={<GalleryVerticalEnd />} label="Sets" onClick={() => onNavigate("sets")} />
       <NavButton active={active === "wishlist"} icon={<Heart />} label="Wishlist" onClick={() => onNavigate("wishlist")} />
@@ -2353,7 +2463,7 @@ function BottomNav({
   return (
     <nav className={canUseOperations ? "bottom-nav admin" : "bottom-nav"} aria-label="Primary navigation">
       <MobileNavButton active={active === "dashboard"} icon={<LayoutDashboard />} label="Home" onClick={() => onNavigate("dashboard")} />
-      <MobileNavButton active={active === "collection"} icon={<Layers3 />} label="Cards" onClick={() => onNavigate("collection")} />
+      <MobileNavButton active={active === "collection" || active === "binders"} icon={<Layers3 />} label="Cards" onClick={() => onNavigate("collection")} />
       <button className={active === "add" ? "active add-button" : "add-button"} onClick={() => onNavigate("add")}>
         <span className="icon-wrap">
           <Plus size={20} />
@@ -2940,6 +3050,10 @@ function CollectionScreen({
         action={
           <>
             <span className="status-pill">{items.length} shown</span>
+            <button className="button" onClick={() => navigate("binders")}>
+              <BookOpen size={17} />
+              Binders
+            </button>
             <button className="button primary" onClick={() => startAdd("card")}>
               <Plus size={17} />
               Add item
@@ -3173,6 +3287,496 @@ function CollectionScreen({
         />
       )}
     </section>
+  );
+}
+
+function BindersScreen({
+  appState,
+  catalogueById,
+  collection,
+  customBinders,
+  setAppState,
+  setCustomBinders,
+  showToast,
+  startAdd,
+  navigate,
+}: ScreenContext) {
+  const [isCreating, setIsCreating] = useState(false);
+  const [draftName, setDraftName] = useState("");
+  const [draftArtworkId, setDraftArtworkId] = useState<BinderArtworkId>("mint");
+  const [draftItemIds, setDraftItemIds] = useState<string[]>([]);
+  const [itemSearch, setItemSearch] = useState("");
+  const [focusedItemId, setFocusedItemId] = useState<string | null>(null);
+  const availableItems = useMemo(
+    () => collection.filter((item) => Boolean(catalogueById.get(item.catalogueId))),
+    [catalogueById, collection],
+  );
+  const binders = useMemo(() => binderSummaries(availableItems, customBinders), [availableItems, customBinders]);
+  const selectedBinder = useMemo(
+    () =>
+      binders.find((binder) => binder.id === appState.selectedBinderId) ??
+      binders[0] ??
+      defaultBinderSummary([]),
+    [appState.selectedBinderId, binders],
+  );
+  const visibleItemIds = useMemo(() => new Set(availableItems.map((item) => item.id)), [availableItems]);
+  const selectedCustomBinder = useMemo(
+    () => customBinders.find((binder) => binder.id === selectedBinder.id),
+    [customBinders, selectedBinder.id],
+  );
+  const binderValue = selectedBinder.items.reduce(
+    (total, item) => total + (getOwnedValue(item, catalogueById.get(item.catalogueId)) ?? 0),
+    0,
+  );
+  const cardCount = selectedBinder.items.filter((item) => catalogueById.get(item.catalogueId)?.type === "card").length;
+  const sealedCount = selectedBinder.items.length - cardCount;
+  const normalizedItemSearch = normalizeSearchText(itemSearch);
+  const pickerItems = useMemo(
+    () =>
+      availableItems
+        .filter((item) => {
+          const catalogueItem = catalogueById.get(item.catalogueId);
+          const haystack = normalizeSearchText(
+            [
+              catalogueItem?.name,
+              catalogueItem?.set,
+              catalogueItem?.number,
+              item.variant,
+              item.grade,
+              item.location,
+            ].filter(Boolean).join(" "),
+          );
+
+          return !normalizedItemSearch || haystack.includes(normalizedItemSearch);
+        })
+        .slice(0, 120),
+    [availableItems, catalogueById, normalizedItemSearch],
+  );
+  const focusedItem = focusedItemId ? selectedBinder.items.find((item) => item.id === focusedItemId) : undefined;
+  const focusedCatalogueItem = focusedItem ? catalogueById.get(focusedItem.catalogueId) : undefined;
+
+  useEffect(() => {
+    if (binders.some((binder) => binder.id === appState.selectedBinderId)) {
+      return;
+    }
+
+    setAppState((current) => ({ ...current, selectedBinderId: defaultBinderId }));
+  }, [appState.selectedBinderId, binders, setAppState]);
+
+  function selectBinder(id: string) {
+    setAppState((current) => ({ ...current, selectedBinderId: id }));
+  }
+
+  function toggleDraftItem(itemId: string) {
+    setDraftItemIds((current) =>
+      current.includes(itemId) ? current.filter((id) => id !== itemId) : [...current, itemId],
+    );
+  }
+
+  function toggleSelectedBinderItem(itemId: string) {
+    if (!selectedCustomBinder) {
+      return;
+    }
+
+    setCustomBinders((current) =>
+      current.map((binder) => {
+        if (binder.id !== selectedCustomBinder.id) {
+          return binder;
+        }
+
+        const itemIds = binder.itemIds.includes(itemId)
+          ? binder.itemIds.filter((id) => id !== itemId)
+          : [...binder.itemIds, itemId];
+
+        return { ...binder, itemIds };
+      }),
+    );
+  }
+
+  function createBinder(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const name = draftName.trim();
+
+    if (!name) {
+      showToast("Binder needs a name.");
+      return;
+    }
+
+    if (!draftItemIds.length) {
+      showToast("Choose at least one collection item.");
+      return;
+    }
+
+    const binder: CustomBinder = {
+      artworkId: draftArtworkId,
+      createdAt: new Date().toISOString(),
+      id: `binder-${Date.now()}`,
+      itemIds: draftItemIds.filter((id) => visibleItemIds.has(id)),
+      name,
+    };
+
+    setCustomBinders((current) => [...current, binder]);
+    setAppState((current) => ({ ...current, selectedBinderId: binder.id }));
+    setDraftName("");
+    setDraftArtworkId("mint");
+    setDraftItemIds([]);
+    setIsCreating(false);
+    showToast(`${binder.name} created.`);
+  }
+
+  function deleteSelectedBinder() {
+    if (!selectedCustomBinder) {
+      return;
+    }
+
+    if (!window.confirm(`Delete ${selectedCustomBinder.name}? This only removes the custom binder, not the collection items.`)) {
+      return;
+    }
+
+    setCustomBinders((current) => current.filter((binder) => binder.id !== selectedCustomBinder.id));
+    setAppState((current) => ({ ...current, selectedBinderId: defaultBinderId }));
+    showToast(`${selectedCustomBinder.name} removed.`);
+  }
+
+  if (!availableItems.length) {
+    return (
+      <section className="page">
+        <PageHeader
+          title="Binders"
+          action={
+            <button className="button primary" onClick={() => startAdd("card")}>
+              <Plus size={17} />
+              Add item
+            </button>
+          }
+        />
+        <EmptyState
+          title="Your first binder is waiting."
+          description="Add cards or sealed products to your collection and Mint Binder will build the full collection binder automatically."
+          action={
+            <button className="button primary" onClick={() => startAdd("card")}>
+              <Plus size={17} />
+              Add first card
+            </button>
+          }
+        />
+      </section>
+    );
+  }
+
+  return (
+    <section className="page binders-page">
+      <PageHeader
+        title="Binders"
+        action={
+          <>
+            <button className="button" onClick={() => navigate("collection")}>
+              <Layers3 size={17} />
+              Collection
+            </button>
+            <button className="button primary" onClick={() => setIsCreating((open) => !open)}>
+              <BookOpen size={17} />
+              New binder
+            </button>
+          </>
+        }
+      />
+
+      <section className="binder-shelf" aria-label="Binder shelf">
+        {binders.map((binder) => (
+          <button
+            className={binder.id === selectedBinder.id ? "binder-cover selected" : "binder-cover"}
+            key={binder.id}
+            onClick={() => selectBinder(binder.id)}
+            style={binderArtworkStyle(binder.artworkId)}
+            type="button"
+          >
+            <span className="binder-cover-spine" />
+            <span className="binder-cover-icon"><BookOpen size={24} /></span>
+            <strong>{binder.name}</strong>
+            <span>{binder.items.length} lot{binder.items.length === 1 ? "" : "s"}</span>
+          </button>
+        ))}
+      </section>
+
+      {isCreating ? (
+        <section className="tool-panel binder-builder-panel">
+          <div className="panel-title-row">
+            <div>
+              <h2>Create custom binder</h2>
+              <p className="muted">Pick artwork, then choose collection items for this binder.</p>
+            </div>
+            <button className="icon-button" type="button" onClick={() => setIsCreating(false)} aria-label="Close custom binder form">
+              <X size={17} />
+            </button>
+          </div>
+          <form className="binder-builder-grid" onSubmit={createBinder}>
+            <div className="binder-builder-fields">
+              <Field label="Binder name">
+                <input value={draftName} onChange={(event) => setDraftName(event.target.value)} placeholder="Trade binder" required />
+              </Field>
+              <Field label="Artwork">
+                <div className="binder-artwork-grid" role="radiogroup" aria-label="Binder artwork">
+                  {binderArtworkOptions.map((artwork) => (
+                    <button
+                      aria-checked={draftArtworkId === artwork.id}
+                      className={draftArtworkId === artwork.id ? "binder-artwork-option selected" : "binder-artwork-option"}
+                      key={artwork.id}
+                      onClick={() => setDraftArtworkId(artwork.id)}
+                      role="radio"
+                      style={binderArtworkStyle(artwork.id)}
+                      type="button"
+                    >
+                      <Paintbrush size={15} />
+                      <span>{artwork.name}</span>
+                    </button>
+                  ))}
+                </div>
+              </Field>
+              <button className="button primary full" type="submit">
+                <Check size={17} />
+                Create binder
+              </button>
+            </div>
+            <BinderItemPicker
+              catalogueById={catalogueById}
+              itemSearch={itemSearch}
+              items={pickerItems}
+              selectedItemIds={draftItemIds}
+              onItemSearchChange={setItemSearch}
+              onToggleItem={toggleDraftItem}
+            />
+          </form>
+        </section>
+      ) : null}
+
+      <section className="binder-focus-layout">
+        <div className="binder-stage" style={binderArtworkStyle(selectedBinder.artworkId)}>
+          <div className="binder-stage-header">
+            <div>
+              <p className="eyebrow">{selectedBinder.isDefault ? "Default binder" : "Custom binder"}</p>
+              <h2>{selectedBinder.name}</h2>
+              <p className="muted">{selectedBinder.description}</p>
+            </div>
+            <div className="binder-stage-stats">
+              <span>{formatMoney(binderValue)}</span>
+              <small>{cardCount} cards | {sealedCount} sealed</small>
+            </div>
+          </div>
+          <div className="binder-book" aria-label={`${selectedBinder.name} preview`}>
+            <BinderPage
+              catalogueById={catalogueById}
+              items={selectedBinder.items.slice(0, 9)}
+              offset={0}
+              onFocusItem={setFocusedItemId}
+            />
+            <BinderPage
+              catalogueById={catalogueById}
+              items={selectedBinder.items.slice(9, 18)}
+              offset={9}
+              onFocusItem={setFocusedItemId}
+            />
+          </div>
+          {selectedBinder.items.length > 18 ? (
+            <p className="binder-overflow-note">{selectedBinder.items.length - 18} more lot{selectedBinder.items.length - 18 === 1 ? "" : "s"} in this binder.</p>
+          ) : null}
+        </div>
+
+        <aside className="tool-panel binder-side-panel">
+          <div className="panel-title-row">
+            <h2>{selectedCustomBinder ? "Binder contents" : "Full collection"}</h2>
+            {selectedCustomBinder ? (
+              <button className="button small danger" onClick={deleteSelectedBinder}>
+                <Trash2 size={15} />
+                Delete
+              </button>
+            ) : null}
+          </div>
+          {selectedCustomBinder ? (
+            <BinderItemPicker
+              catalogueById={catalogueById}
+              itemSearch={itemSearch}
+              items={pickerItems}
+              selectedItemIds={selectedCustomBinder.itemIds}
+              onItemSearchChange={setItemSearch}
+              onToggleItem={toggleSelectedBinderItem}
+            />
+          ) : (
+            <div className="binder-summary-list">
+              <MetricList
+                rows={[
+                  ["Lots", selectedBinder.items.length],
+                  ["Estimated value", formatMoney(binderValue)],
+                  ["Cards", cardCount],
+                  ["Sealed", sealedCount],
+                ]}
+              />
+              <p className="muted">This default binder always mirrors every active collection item.</p>
+            </div>
+          )}
+        </aside>
+      </section>
+
+      {focusedItem && focusedCatalogueItem ? (
+        <BinderFocusModal
+          catalogueItem={focusedCatalogueItem}
+          item={focusedItem}
+          onClose={() => setFocusedItemId(null)}
+          onOpenItem={() => {
+            setAppState((current) => ({ ...current, selectedItemId: focusedItem.id }));
+            navigate("item");
+          }}
+        />
+      ) : null}
+    </section>
+  );
+}
+
+function BinderPage({
+  catalogueById,
+  items,
+  offset,
+  onFocusItem,
+}: {
+  catalogueById: Map<string, CatalogueItem>;
+  items: CollectionItem[];
+  offset: number;
+  onFocusItem: (itemId: string) => void;
+}) {
+  const slots = Array.from({ length: 9 }, (_, index) => items[index]);
+
+  return (
+    <div className="binder-page">
+      {slots.map((item, index) => {
+        const catalogueItem = item ? catalogueById.get(item.catalogueId) : undefined;
+
+        return (
+          <button
+            className={item && catalogueItem ? "binder-pocket filled" : "binder-pocket"}
+            disabled={!item || !catalogueItem}
+            key={item?.id ?? `empty-${offset + index}`}
+            onClick={() => item && onFocusItem(item.id)}
+            type="button"
+          >
+            {item && catalogueItem ? (
+              <>
+                <span className="binder-pocket-image">{renderItemImage(catalogueItem)}</span>
+                <span>{catalogueItem.name}</span>
+              </>
+            ) : (
+              <span className="binder-empty-slot">Empty</span>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function BinderItemPicker({
+  catalogueById,
+  itemSearch,
+  items,
+  selectedItemIds,
+  onItemSearchChange,
+  onToggleItem,
+}: {
+  catalogueById: Map<string, CatalogueItem>;
+  itemSearch: string;
+  items: CollectionItem[];
+  selectedItemIds: string[];
+  onItemSearchChange: (value: string) => void;
+  onToggleItem: (itemId: string) => void;
+}) {
+  const selectedIds = new Set(selectedItemIds);
+
+  return (
+    <div className="binder-picker">
+      <label className="search-box">
+        <Search size={17} />
+        <input value={itemSearch} onChange={(event) => onItemSearchChange(event.target.value)} placeholder="Search collection items" />
+      </label>
+      <div className="binder-picker-list">
+        {items.map((item) => {
+          const catalogueItem = catalogueById.get(item.catalogueId);
+
+          if (!catalogueItem) {
+            return null;
+          }
+
+          return (
+            <label className="binder-picker-row" key={item.id}>
+              <input
+                checked={selectedIds.has(item.id)}
+                onChange={() => onToggleItem(item.id)}
+                type="checkbox"
+              />
+              <span className="item-image binder-picker-image">{renderItemImage(catalogueItem)}</span>
+              <span>
+                <strong>{catalogueItem.name}</strong>
+                <small>{catalogueItem.set} | {item.variant} | {item.grade}</small>
+              </span>
+            </label>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function BinderFocusModal({
+  catalogueItem,
+  item,
+  onClose,
+  onOpenItem,
+}: {
+  catalogueItem: CatalogueItem;
+  item: CollectionItem;
+  onClose: () => void;
+  onOpenItem: () => void;
+}) {
+  const value = getOwnedValue(item, catalogueItem);
+
+  useEffect(() => {
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    }
+
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [onClose]);
+
+  return (
+    <div className="card-zoom-backdrop binder-focus-backdrop" onClick={onClose} role="presentation">
+      <article className="binder-focus-card" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label={`${catalogueItem.name} binder card`}>
+        <button className="icon-button card-zoom-close" type="button" onClick={onClose} aria-label="Close binder card">
+          <X size={18} />
+        </button>
+        <div className="binder-focus-image">{renderItemImage(catalogueItem)}</div>
+        <div className="binder-focus-copy">
+          <h2>{catalogueItem.name}</h2>
+          <p>{catalogueItem.set} | No. {catalogueItem.number}</p>
+          <div className="tag-row">
+            <span className="tag">{item.variant}</span>
+            <span className="tag">{item.condition}</span>
+            {item.grade !== "Raw" && item.grade !== "N/A" ? <span className="tag">{item.grade}</span> : null}
+          </div>
+          <MetricList
+            rows={[
+              ["Value", formatValuation(value)],
+              ["Quantity", item.quantity],
+              ["Location", item.location],
+            ]}
+          />
+          <button className="button primary" type="button" onClick={onOpenItem}>
+            Open lot
+          </button>
+        </div>
+      </article>
+    </div>
   );
 }
 
@@ -3654,6 +4258,7 @@ function ItemDetailScreen({
   const itemName = item.name;
   const locationOptions = storageOptionNames(storageLocations, owned.location);
   const itemEvents = collectionEvents.filter((event) => event.itemId === owned.id).slice(0, 6);
+  const usesRawGradedPrice = usesRawMarketForGradedItem(owned, item);
 
   async function handleUpdate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -3901,6 +4506,22 @@ function ItemDetailScreen({
               ["Market observed", valuationObservedLabel(item, owned)],
             ]}
           />
+          {usesRawGradedPrice ? (
+            <section className="tool-panel graded-pricing-note">
+              <div className="panel-title-row">
+                <h2>Graded pricing</h2>
+                <span className="tag amber">Raw market fallback</span>
+              </div>
+              <p className="muted">
+                This lot is marked {owned.grade}, but Mint Binder does not have a graded price snapshot for this card yet.
+                The value above is using the raw card market value for {selectedVariantLabel(item, owned.variant)}.
+              </p>
+              <p className="muted">
+                For PSA, BGS, CGC, ACE, SGC, or other slab values, set a Manual value and add the source in Valuation note
+                until a graded-price importer is connected.
+              </p>
+            </section>
+          ) : null}
           <PriceTrendPanel item={item} overrideValueMinor={owned.overrideValueMinor} />
           <section className="tool-panel">
             <h2>Valuation note</h2>
@@ -7536,6 +8157,7 @@ function OwnedItemCard({
   const gradeLabel = item.grade && item.grade !== "Raw" && item.grade !== "N/A" ? item.grade : "";
   const marketValue = catalogueMarketValueMinor(catalogueItem, item.variant);
   const usesManualValue = item.overrideValueMinor !== undefined;
+  const usesRawGradedPrice = usesRawMarketForGradedItem(item, catalogueItem);
 
   return (
     <article
@@ -7573,6 +8195,7 @@ function OwnedItemCard({
           <span className="tag">{item.condition}</span>
           {variantLabel ? <span className="tag">{variantLabel}</span> : null}
           {gradeLabel ? <span className="tag">{gradeLabel}</span> : null}
+          {usesRawGradedPrice ? <span className="tag amber">Raw price</span> : null}
           <span className="tag">{item.language}</span>
           <span className="tag blue">Qty {item.quantity}</span>
         </div>
@@ -8138,6 +8761,23 @@ function getOwnedValue(item: CollectionItem, catalogueItem?: CatalogueItem) {
     adjustedMarketValueMinor(catalogueItem, item.variant, item.condition, item.quantity);
 }
 
+function isGradedCollectionItem(item: CollectionItem) {
+  return item.grade !== "Raw" && item.grade !== "N/A";
+}
+
+function usesRawMarketForGradedItem(item: CollectionItem, catalogueItem?: CatalogueItem) {
+  if (
+    !catalogueItem ||
+    catalogueItem.type !== "card" ||
+    item.overrideValueMinor !== undefined ||
+    !isGradedCollectionItem(item)
+  ) {
+    return false;
+  }
+
+  return catalogueMarketValueMinor(catalogueItem, item.variant) !== null;
+}
+
 function catalogueMarketValueMinor(item: CatalogueItem, variant?: string) {
   if (!item.hasPrice) {
     return null;
@@ -8314,6 +8954,10 @@ function valuationStatusLabel(item: CatalogueItem, owned?: CollectionItem) {
 
   if (owned && catalogueMarketValueMinor(item, owned.variant) === null) {
     return "Needs estimate";
+  }
+
+  if (owned && usesRawMarketForGradedItem(owned, item)) {
+    return "Raw market fallback";
   }
 
   const variantPrice = owned ? latestPricePointForCatalogueVariant(item, owned.variant) : undefined;
@@ -9082,6 +9726,91 @@ function importPayload(row: CollectionImportRow) {
     location: row.location,
     notes: row.notes,
   };
+}
+
+function binderStorageKey(email: string) {
+  const owner = email.trim().toLowerCase() || "local";
+
+  return `${binderStoragePrefix}:${owner}`;
+}
+
+function readStoredBinders(storageKey: string): CustomBinder[] {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(storageKey) ?? "[]");
+
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed
+      .map((value) => sanitizeStoredBinder(value))
+      .filter((binder): binder is CustomBinder => Boolean(binder));
+  } catch {
+    return [];
+  }
+}
+
+function sanitizeStoredBinder(value: unknown): CustomBinder | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const source = value as Record<string, unknown>;
+  const id = typeof source.id === "string" && source.id.trim() ? source.id.trim() : "";
+  const name = typeof source.name === "string" && source.name.trim() ? source.name.trim() : "";
+  const artworkId = isBinderArtworkId(source.artworkId) ? source.artworkId : "mint";
+  const createdAt = typeof source.createdAt === "string" && source.createdAt.trim()
+    ? source.createdAt
+    : new Date().toISOString();
+  const itemIds = Array.isArray(source.itemIds)
+    ? uniqueValues(source.itemIds.filter((itemId): itemId is string => typeof itemId === "string" && itemId.trim().length > 0))
+    : [];
+
+  return id && name ? { artworkId, createdAt, id, itemIds, name } : null;
+}
+
+function isBinderArtworkId(value: unknown): value is BinderArtworkId {
+  return typeof value === "string" && binderArtworkOptions.some((artwork) => artwork.id === value);
+}
+
+function binderSummaries(collection: CollectionItem[], customBinders: CustomBinder[]): BinderSummary[] {
+  const collectionById = new Map(collection.map((item) => [item.id, item]));
+
+  return [
+    defaultBinderSummary(collection),
+    ...customBinders.map((binder) => ({
+      artworkId: binder.artworkId,
+      description: `${binder.itemIds.length} saved collection lot${binder.itemIds.length === 1 ? "" : "s"}.`,
+      id: binder.id,
+      items: binder.itemIds.map((itemId) => collectionById.get(itemId)).filter((item): item is CollectionItem => Boolean(item)),
+      name: binder.name,
+    })),
+  ];
+}
+
+function defaultBinderSummary(collection: CollectionItem[]): BinderSummary {
+  return {
+    artworkId: "mint",
+    description: "Every active collection item appears here automatically.",
+    id: defaultBinderId,
+    isDefault: true,
+    items: collection,
+    name: "Full Collection",
+  };
+}
+
+function binderArtworkStyle(artworkId: BinderArtworkId): CSSProperties {
+  const artwork = binderArtwork(artworkId);
+
+  return {
+    "--binder-accent": artwork.accent,
+    "--binder-spine": artwork.spine,
+    "--binder-surface": artwork.surface,
+  } as CSSProperties;
+}
+
+function binderArtwork(artworkId: BinderArtworkId) {
+  return binderArtworkOptions.find((artwork) => artwork.id === artworkId) ?? binderArtworkOptions[0];
 }
 
 function storageOptionNames(locations: StorageLocation[], current?: string) {
