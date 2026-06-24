@@ -2598,6 +2598,76 @@ h3 {
   width: 100%;
 }
 
+.card-zoom-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background:
+    radial-gradient(circle at 50% 12%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 32%),
+    color-mix(in srgb, var(--bg) 82%, rgba(0, 0, 0, 0.76));
+  backdrop-filter: blur(12px);
+}
+
+.card-zoom-modal {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(240px, 420px) minmax(0, 330px);
+  gap: 22px;
+  width: min(94vw, 860px);
+  max-height: min(92vh, 780px);
+  overflow: auto;
+  padding: 22px;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line));
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: 0 30px 90px color-mix(in srgb, #000000 44%, transparent);
+}
+
+.card-zoom-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 2;
+}
+
+.card-zoom-image {
+  position: relative;
+  width: min(100%, 410px);
+  aspect-ratio: 0.716;
+  justify-self: center;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface-soft);
+  box-shadow: var(--shadow);
+}
+
+.card-zoom-copy {
+  display: grid;
+  min-width: 0;
+  align-content: center;
+  gap: 12px;
+  padding-right: 34px;
+}
+
+.card-zoom-copy h2,
+.card-zoom-copy p {
+  margin: 0;
+}
+
+.card-zoom-copy h2 {
+  font-size: clamp(28px, 4vw, 42px);
+  line-height: 1;
+}
+
+.card-zoom-copy p {
+  color: var(--muted);
+  font-weight: 850;
+}
+
 .progress {
   width: 100%;
   height: 9px;
@@ -2819,6 +2889,18 @@ h3 {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--control);
+}
+
+.selected-preview-image-button {
+  padding: 0;
+  cursor: zoom-in;
+}
+
+.selected-preview-image-button:hover,
+.selected-preview-image-button:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 58%, var(--line));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+  outline: 0;
 }
 
 .add-details-panel {
@@ -3546,6 +3628,38 @@ h3 {
   gap: 18px;
 }
 
+.pricing-explainer-panel {
+  gap: 14px;
+  grid-column: 1 / -1;
+}
+
+.pricing-explainer-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 10px;
+}
+
+.pricing-explainer-grid article {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--control);
+}
+
+.pricing-explainer-grid strong {
+  color: var(--ink);
+  line-height: 1.2;
+}
+
+.pricing-explainer-grid span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.4;
+}
+
 .gap-row {
   display: grid;
   gap: 10px;
@@ -3659,6 +3773,59 @@ h3 {
 
 .mini-chart.empty span {
   background: var(--line);
+}
+
+.price-history-timeline {
+  display: grid;
+  grid-template-columns: repeat(var(--point-count, 1), minmax(120px, 1fr));
+  gap: 10px;
+  overflow-x: auto;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, var(--control), var(--surface-soft));
+}
+
+.price-history-point {
+  display: grid;
+  min-width: 120px;
+  gap: 6px;
+  align-content: end;
+}
+
+.price-history-bar-track {
+  position: relative;
+  height: 126px;
+  overflow: hidden;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--line) 68%, var(--surface-soft));
+}
+
+.price-history-bar-track span {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  border-radius: 7px 7px 0 0;
+  background: linear-gradient(180deg, var(--teal), var(--blue));
+}
+
+.price-history-point strong {
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.15;
+}
+
+.price-history-point > span:not(.market-confidence-badge),
+.price-history-point small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 850;
+  line-height: 1.25;
+}
+
+.price-history-point .market-confidence-badge {
+  justify-self: start;
 }
 
 .locked-tile {
@@ -4000,6 +4167,28 @@ h3 {
 
   .catalogue-preview-image {
     width: min(64vw, 270px);
+  }
+
+  .card-zoom-backdrop {
+    padding: 12px;
+    align-items: start;
+    overflow: auto;
+  }
+
+  .card-zoom-modal {
+    grid-template-columns: 1fr;
+    width: min(100%, 520px);
+    max-height: none;
+    padding: 18px;
+  }
+
+  .card-zoom-copy {
+    align-content: start;
+    padding-right: 0;
+  }
+
+  .card-zoom-image {
+    width: min(72vw, 320px);
   }
 }
 

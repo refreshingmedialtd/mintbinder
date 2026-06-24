@@ -89,7 +89,7 @@ export function catalogueGapRecommendations(status: CatalogueStatus): CatalogueG
 
   if (cardGap) {
     recommendations.push({
-      detail: `${cardGap.series} has ${cardGap.unpricedCardCount} unpriced card${cardGap.unpricedCardCount === 1 ? "" : "s"} with ${formatPercent(cardGap.pricingCoveragePercent)} coverage.`,
+      detail: `${cardGap.series} has ${cardGap.unpricedCardCount} catalogue card printing${cardGap.unpricedCardCount === 1 ? "" : "s"} without an imported price snapshot, with ${formatPercent(cardGap.pricingCoveragePercent)} coverage.`,
       id: `card-pricing-${slug(cardGap.series)}`,
       priority: cardGap.unpricedCardCount >= 100 || (cardGap.pricingCoveragePercent ?? 100) < 80 ? "high" : "medium",
       title: `Price ${cardGap.series}`,

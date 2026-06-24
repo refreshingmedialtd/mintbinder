@@ -595,6 +595,7 @@ export default function Home() {
   const [appState, setAppState] = useState(initialState);
   const [catalogueItems, setCatalogueItems] = useState<CatalogueItem[]>([]);
   const [catalogueComplete, setCatalogueComplete] = useState(false);
+  const [loadedCatalogueSetNames, setLoadedCatalogueSetNames] = useState<string[]>([]);
   const [collection, setCollection] = useState<CollectionItem[]>([]);
   const [wishlist, setWishlist] = useState<WishlistItem[]>([]);
   const [sets, setSets] = useState<SetProgress[]>([]);
@@ -697,6 +698,7 @@ export default function Home() {
   const applyEmptyAppData = useCallback((notice: string) => {
     setCatalogueItems([]);
     setCatalogueComplete(false);
+    setLoadedCatalogueSetNames([]);
     setCollection([]);
     setWishlist([]);
     setSets([]);
@@ -774,6 +776,7 @@ export default function Home() {
 
         setCatalogueItems(data.catalogue);
         setCatalogueComplete(true);
+        setLoadedCatalogueSetNames([]);
         setDataSource(data.source);
         setDataNotice(data.notice ?? "");
 
@@ -791,6 +794,61 @@ export default function Home() {
       }
     },
     [catalogueComplete, catalogueItems, isLoadingCatalogue, showToast],
+  );
+
+  const loadSetCatalogueData = useCallback(
+    async (setName: string, options?: { force?: boolean; quiet?: boolean }) => {
+      const normalizedSetName = setName.trim();
+
+      if (!normalizedSetName) {
+        return [];
+      }
+
+      if (catalogueComplete && !options?.force) {
+        return catalogueItems.filter((item) => item.type === "card" && item.set === normalizedSetName);
+      }
+
+      if (loadedCatalogueSetNames.includes(normalizedSetName) && !options?.force) {
+        return catalogueItems.filter((item) => item.type === "card" && item.set === normalizedSetName);
+      }
+
+      if (isLoadingCatalogue) {
+        return null;
+      }
+
+      setIsLoadingCatalogue(true);
+
+      try {
+        const params = new URLSearchParams({ set: normalizedSetName });
+        const response = await fetch(`/api/catalogue/set?${params.toString()}`, { cache: "no-store" });
+
+        if (!response.ok) {
+          throw new Error(`Set catalogue request failed with ${response.status}`);
+        }
+
+        const data = (await response.json()) as AppCatalogueData;
+
+        setCatalogueItems((current) => mergeCatalogueItems(current, data.catalogue));
+        setLoadedCatalogueSetNames((current) =>
+          current.includes(normalizedSetName) ? current : [...current, normalizedSetName],
+        );
+        setDataSource(data.source);
+        setDataNotice(data.notice ?? "");
+
+        return data.catalogue;
+      } catch (error) {
+        console.warn("Set catalogue API load failed.", error);
+
+        if (!options?.quiet) {
+          showToast("Could not load cards for this set yet.");
+        }
+
+        return null;
+      } finally {
+        setIsLoadingCatalogue(false);
+      }
+    },
+    [catalogueComplete, catalogueItems, isLoadingCatalogue, loadedCatalogueSetNames, showToast],
   );
 
   const cacheCatalogueItems = useCallback((items: CatalogueItem[]) => {
@@ -820,7 +878,7 @@ export default function Home() {
       return;
     }
 
-    if (appState.screen === "setDetail" || appState.screen === "ops") {
+    if (appState.screen === "ops") {
       void loadCatalogueData({ quiet: true });
     }
   }, [appState.screen, loadCatalogueData, status]);
@@ -1376,6 +1434,7 @@ export default function Home() {
   function resetSampleData() {
     setCatalogueItems(sampleAppData.catalogue);
     setCatalogueComplete(true);
+    setLoadedCatalogueSetNames([]);
     setCollection(sampleAppData.collection);
     setWishlist(sampleAppData.wishlist);
     setSets(sampleAppData.sets);
@@ -1917,6 +1976,8 @@ export default function Home() {
     resetSampleData,
     refreshAppData,
     loadCatalogueData,
+    loadSetCatalogueData,
+    loadedCatalogueSetNames,
     themeId,
   };
 
@@ -1971,6 +2032,7 @@ type ScreenContext = {
   dataNotice: string;
   isLoadingData: boolean;
   isLoadingCatalogue: boolean;
+  loadedCatalogueSetNames: string[];
   collectionSearch: string;
   setCollectionSearch: (value: string) => void;
   addSearch: string;
@@ -2015,6 +2077,7 @@ type ScreenContext = {
   resetSampleData: () => void;
   refreshAppData: (options?: { quiet?: boolean }) => Promise<boolean>;
   loadCatalogueData: (options?: { force?: boolean; quiet?: boolean }) => Promise<CatalogueItem[] | null>;
+  loadSetCatalogueData: (setName: string, options?: { force?: boolean; quiet?: boolean }) => Promise<CatalogueItem[] | null>;
   themeId: ThemeId;
 };
 
@@ -2623,7 +2686,7 @@ function OnboardingChecklist({
     <section className="tool-panel onboarding-panel">
       <div className="panel-title-row">
         <div>
-          <h2>Beta setup</h2>
+          <h2>Collection setup</h2>
           <p className="muted">{completed} of {steps.length} complete</p>
         </div>
         <div className="actions setup-panel-actions">
@@ -2631,7 +2694,7 @@ function OnboardingChecklist({
             {isComplete ? "Ready" : "Setup"}
           </span>
           {isComplete ? (
-            <button className="icon-button setup-dismiss-button" type="button" onClick={dismissSetup} aria-label="Hide beta setup">
+            <button className="icon-button setup-dismiss-button" type="button" onClick={dismissSetup} aria-label="Hide collection setup">
               <X size={16} />
             </button>
           ) : null}
@@ -3138,6 +3201,7 @@ function AddScreen({
   const [addQuantity, setAddQuantity] = useState(1);
   const [addVariant, setAddVariant] = useState<string | undefined>(undefined);
   const [addLanguage, setAddLanguage] = useState("English");
+  const [zoomedCatalogueItemId, setZoomedCatalogueItemId] = useState<string | null>(null);
 
   useEffect(() => {
     setCatalogueSetFilter("all");
@@ -3221,6 +3285,9 @@ function AddScreen({
   const selectedBaseValue = selected ? catalogueMarketValueMinor(selected, selectedVariant) : null;
   const selectedConditionMultiplier = conditionValueMultiplier(addCondition, selected?.type);
   const usesEnglishMarketPricing = selected?.type === "card" && addLanguage !== "English";
+  const zoomedCatalogueItem = zoomedCatalogueItemId
+    ? catalogueById.get(zoomedCatalogueItemId) ?? results.find((item) => item.id === zoomedCatalogueItemId)
+    : undefined;
 
   useEffect(() => {
     setAddCondition(selected?.type === "sealed" ? "Sealed" : "Near mint");
@@ -3364,7 +3431,10 @@ function AddScreen({
         <section className="tool-panel add-details-panel">
           <h2>Owned details</h2>
           {selected ? (
-            <CataloguePreview item={selected} />
+            <CataloguePreview
+              item={selected}
+              onImageOpen={selected.type === "card" ? () => setZoomedCatalogueItemId(selected.id) : undefined}
+            />
           ) : (
             <EmptyState title="Choose an item" description="Search or select a catalogue result to add owned-copy details." />
           )}
@@ -3468,6 +3538,9 @@ function AddScreen({
           ) : null}
         </section>
       </div>
+      {zoomedCatalogueItem ? (
+        <CardImageZoomModal item={zoomedCatalogueItem} onClose={() => setZoomedCatalogueItemId(null)} />
+      ) : null}
     </section>
   );
 }
@@ -3939,7 +4012,8 @@ function SetDetailScreen({
   catalogueComplete,
   collection,
   isLoadingCatalogue,
-  loadCatalogueData,
+  loadedCatalogueSetNames,
+  loadSetCatalogueData,
   sets,
   wishlist,
   setAppState,
@@ -3951,12 +4025,22 @@ function SetDetailScreen({
   const [sort, setSort] = useState<SetDetailSort>("number-asc");
   const [previewItemId, setPreviewItemId] = useState<string | null>(null);
   const set = sets.find((item) => item.id === appState.selectedSetId) ?? sets[0];
+  const setCards = set ? catalogueItems.filter((item) => item.type === "card" && item.set === set.name) : [];
+  const hasSetCatalogue = Boolean(set && (catalogueComplete || loadedCatalogueSetNames.includes(set.name)));
+
+  useEffect(() => {
+    if (!set || hasSetCatalogue || isLoadingCatalogue) {
+      return;
+    }
+
+    void loadSetCatalogueData(set.name, { quiet: true });
+  }, [hasSetCatalogue, isLoadingCatalogue, loadSetCatalogueData, set]);
 
   if (!set) {
     return <EmptyState title="No sets found" />;
   }
 
-  if (!catalogueComplete) {
+  if (!hasSetCatalogue) {
     return (
       <section className="page">
         <PageHeader
@@ -3972,7 +4056,7 @@ function SetDetailScreen({
           title={isLoadingCatalogue ? "Loading set cards" : "Set cards not loaded"}
           description="Opening card printings, prices, and variants for this set."
           action={
-            <button className="button primary" onClick={() => void loadCatalogueData()} disabled={isLoadingCatalogue}>
+            <button className="button primary" onClick={() => void loadSetCatalogueData(set.name)} disabled={isLoadingCatalogue}>
               <Search size={17} />
               {isLoadingCatalogue ? "Loading" : "Load cards"}
             </button>
@@ -3982,7 +4066,6 @@ function SetDetailScreen({
     );
   }
 
-  const setCards = catalogueItems.filter((item) => item.type === "card" && item.set === set.name);
   const done = completionPercent(set.owned, set.total);
   const normalizedCardSearch = normalizeSearchText(cardSearch);
   const rarityOptions = uniqueValues(setCards.map((item) => item.rarity)).sort((left, right) =>
@@ -6145,6 +6228,7 @@ function OperationsScreen({
       ) : null}
 
       <div className="operations-breakdowns">
+        <CataloguePricingExplainer />
         <GapRecommendationsPanel
           disabled={Boolean(isBusy)}
           recommendations={gapRecommendations}
@@ -6184,6 +6268,31 @@ function OperationsScreen({
           <p className="muted">No job runs loaded.</p>
         )}
       </section>
+    </section>
+  );
+}
+
+function CataloguePricingExplainer() {
+  return (
+    <section className="tool-panel pricing-explainer-panel">
+      <div className="panel-title-row">
+        <h2>Pricing gaps explained</h2>
+        <Info size={18} />
+      </div>
+      <div className="pricing-explainer-grid">
+        <article>
+          <strong>Catalogue, not collection</strong>
+          <span>These gaps are for every card printing Mint Binder knows about. They are separate from your owned cards, manual values, and Dashboard value gaps.</span>
+        </article>
+        <article>
+          <strong>One imported snapshot counts</strong>
+          <span>A card is priced when it has at least one imported market snapshot. Variant metadata, images, and manual owned values do not count as imported pricing.</span>
+        </article>
+        <article>
+          <strong>Series rows are prioritisation</strong>
+          <span>Sword & Shield, Scarlet & Violet, and similar rows show where pricing jobs should focus next. The percentage is priced printings divided by total printings in that series.</span>
+        </article>
+      </div>
     </section>
   );
 }
@@ -6371,6 +6480,7 @@ function PricingSeriesGapPanel({ rows }: { rows: PricingBySeriesGap[] }) {
             <CoverageGapRow
               key={row.series}
               coverage={row.pricingCoveragePercent}
+              gapLabel="unpriced printings"
               label={row.series}
               priced={row.pricedCardCount}
               total={row.cardCount}
@@ -7504,12 +7614,23 @@ function CatalogueResult({
   );
 }
 
-function CataloguePreview({ item }: { item: CatalogueItem }) {
+function CataloguePreview({ item, onImageOpen }: { item: CatalogueItem; onImageOpen?: () => void }) {
   const variants = item.type === "card" ? item.variantOptions ?? [] : [];
 
   return (
     <div className="selected-preview">
-      <div className="item-image">{renderItemImage(item)}</div>
+      {onImageOpen ? (
+        <button
+          className="item-image selected-preview-image-button"
+          type="button"
+          onClick={onImageOpen}
+          aria-label={`Zoom ${item.name} image`}
+        >
+          {renderItemImage(item)}
+        </button>
+      ) : (
+        <div className="item-image">{renderItemImage(item)}</div>
+      )}
       <div>
         <h3>{item.name}</h3>
         <p className="muted">{item.set} | {item.number}</p>
@@ -7525,6 +7646,48 @@ function CataloguePreview({ item }: { item: CatalogueItem }) {
           </div>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+function CardImageZoomModal({ item, onClose }: { item: CatalogueItem; onClose: () => void }) {
+  const titleId = `card-image-zoom-${item.id}`;
+  const marketValue = catalogueMarketValueMinor(item);
+
+  useEffect(() => {
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    }
+
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [onClose]);
+
+  return (
+    <div className="card-zoom-backdrop" onClick={onClose} role="presentation">
+      <article
+        aria-labelledby={titleId}
+        aria-modal="true"
+        className="card-zoom-modal"
+        onClick={(event) => event.stopPropagation()}
+        role="dialog"
+      >
+        <button className="icon-button card-zoom-close" type="button" onClick={onClose} aria-label="Close card image">
+          <X size={18} />
+        </button>
+        <div className="card-zoom-image">{renderItemImage(item)}</div>
+        <div className="card-zoom-copy">
+          <h2 id={titleId}>{item.name}</h2>
+          <p>{item.set} | No. {item.number}</p>
+          <div className="tag-row">
+            <span className="set-print-rarity">{item.rarity}</span>
+            <span className={valuationTagClass(item)}>{valuationStatusLabel(item)}</span>
+            <span className="tag">{formatValuation(marketValue)}</span>
+          </div>
+        </div>
+      </article>
     </div>
   );
 }
@@ -7722,8 +7885,10 @@ function PriceTrendPanel({
   const history = item.priceHistory ?? [];
   const latest = history[history.length - 1];
   const first = history[0];
+  const previous = history[history.length - 2];
   const range = priceRangeMinor(history);
   const delta = latest && first ? latest.valueMinor - first.valueMinor : null;
+  const latestMove = latest && previous ? latest.valueMinor - previous.valueMinor : null;
   const source = latest?.source ?? item.priceSource;
   const observedAt = latest?.observedAt ?? item.priceObservedAt;
   const latestMarketValue = latest?.valueMinor ?? catalogueMarketValueMinor(item);
@@ -7734,8 +7899,8 @@ function PriceTrendPanel({
         <h2>Price history</h2>
         <BarChart3 size={18} />
       </div>
-      {history.length > 1 ? (
-        <MiniChart values={history.map((point) => point.valueMinor)} />
+      {history.length ? (
+        <PriceHistoryTimeline history={history} />
       ) : (
         <p className="muted">No price history yet.</p>
       )}
@@ -7748,6 +7913,11 @@ function PriceTrendPanel({
             delta === null ? "Unknown" : `${delta >= 0 ? "+" : ""}${formatMoney(delta)}`,
             delta !== null && delta >= 0 ? "positive" : "",
           ],
+          [
+            "Latest move",
+            latestMove === null ? "Unknown" : `${latestMove >= 0 ? "+" : ""}${formatMoney(latestMove)}`,
+            latestMove !== null && latestMove >= 0 ? "positive" : "",
+          ],
           ["Observed", observedAt ? formatEventDate(observedAt) : "Unknown"],
           ["Source", item.hasPrice ? priceSourceLabel(source) : "No market source"],
           ...(overrideValueMinor === undefined
@@ -7756,6 +7926,34 @@ function PriceTrendPanel({
         ]}
       />
     </section>
+  );
+}
+
+function PriceHistoryTimeline({ history }: { history: NonNullable<CatalogueItem["priceHistory"]> }) {
+  const points = history.slice(-8);
+  const values = points.map((point) => point.valueMinor);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = Math.max(1, max - min);
+
+  return (
+    <div className="price-history-timeline" style={{ "--point-count": points.length } as CSSProperties}>
+      {points.map((point, index) => {
+        const barHeight = points.length === 1 ? 72 : Math.round(28 + ((point.valueMinor - min) / span) * 72);
+
+        return (
+          <article className="price-history-point" key={`${point.observedAt}-${point.valueMinor}-${index}`}>
+            <div className="price-history-bar-track" aria-hidden="true">
+              <span style={{ height: `${barHeight}%` }} />
+            </div>
+            <strong>{formatMoney(point.valueMinor)}</strong>
+            <span>{formatEventDate(point.observedAt)}</span>
+            <span className={marketConfidenceBadgeClass(point.confidence)}>{point.confidence}</span>
+            <small>{priceSourceLabel(point.source)}</small>
+          </article>
+        );
+      })}
+    </div>
   );
 }
 

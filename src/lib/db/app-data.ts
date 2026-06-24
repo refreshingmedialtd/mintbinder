@@ -296,6 +296,56 @@ export async function getCatalogueData(userId: string): Promise<AppCatalogueData
   }
 }
 
+export async function getCatalogueSetData(setName: string): Promise<AppCatalogueData> {
+  const normalizedSetName = normalizeOptionalText(setName);
+
+  if (!process.env.DATABASE_URL) {
+    const catalogue = sampleAppData.catalogue.filter((item) => item.type === "card" && item.set === normalizedSetName);
+
+    return {
+      catalogue,
+      notice: "Using sample data because DATABASE_URL is not configured.",
+      source: sampleAppData.source,
+    };
+  }
+
+  if (!normalizedSetName) {
+    return {
+      catalogue: [],
+      source: "database",
+    };
+  }
+
+  try {
+    const cards = await prisma.cardPrinting.findMany({
+      where: { cardSet: { name: normalizedSetName } },
+      include: {
+        cardSet: true,
+        priceSnapshots: {
+          orderBy: [{ observedAt: "desc" }, { createdAt: "desc" }],
+          take: PRICE_HISTORY_LIMIT,
+        },
+      },
+      orderBy: [{ number: "asc" }, { name: "asc" }],
+    });
+
+    return {
+      catalogue: sortCatalogueSearchResults(
+        cards.map((card) => mapCardPrintingToCatalogueItem(card, card.priceSnapshots)),
+        "set-number-asc",
+      ),
+      source: "database",
+    };
+  } catch (error) {
+    console.warn("Falling back to sample set catalogue after Prisma read failed.", error);
+    return {
+      catalogue: sampleAppData.catalogue.filter((item) => item.type === "card" && item.set === normalizedSetName),
+      notice: "Using sample data because the database set catalogue could not be reached.",
+      source: sampleAppData.source,
+    };
+  }
+}
+
 export async function getDashboardData(userId: string): Promise<AppDashboardData> {
   const data = await getAppData(userId, { catalogueScope: "referenced" });
 
