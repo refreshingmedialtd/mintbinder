@@ -3775,57 +3775,79 @@ h3 {
   background: var(--line);
 }
 
-.price-history-timeline {
+.price-history-chart {
   display: grid;
-  grid-template-columns: repeat(var(--point-count, 1), minmax(120px, 1fr));
   gap: 10px;
-  overflow-x: auto;
-  padding: 12px;
+}
+
+.price-history-ranges {
+  justify-self: start;
+}
+
+.price-history-ranges button {
+  width: auto;
+  min-width: 46px;
+  padding-inline: 10px;
+}
+
+.price-history-plot {
+  overflow: hidden;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: linear-gradient(180deg, var(--control), var(--surface-soft));
 }
 
-.price-history-point {
-  display: grid;
-  min-width: 120px;
-  gap: 6px;
-  align-content: end;
+.price-history-plot svg {
+  display: block;
+  width: 100%;
+  min-height: 220px;
 }
 
-.price-history-bar-track {
-  position: relative;
-  height: 126px;
-  overflow: hidden;
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--line) 68%, var(--surface-soft));
+.price-history-grid-line {
+  stroke: color-mix(in srgb, var(--line) 82%, transparent);
+  stroke-width: 1;
 }
 
-.price-history-bar-track span {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  border-radius: 7px 7px 0 0;
-  background: linear-gradient(180deg, var(--teal), var(--blue));
-}
-
-.price-history-point strong {
-  color: var(--ink);
-  font-size: 14px;
-  line-height: 1.15;
-}
-
-.price-history-point > span:not(.market-confidence-badge),
-.price-history-point small {
-  color: var(--muted);
-  font-size: 12px;
+.price-history-axis-label,
+.price-history-date-label {
+  fill: var(--muted);
+  font-size: 13px;
   font-weight: 850;
-  line-height: 1.25;
 }
 
-.price-history-point .market-confidence-badge {
-  justify-self: start;
+.price-history-area {
+  fill: url("#price-history-area");
+}
+
+.price-history-line {
+  fill: none;
+  stroke: var(--teal);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 4;
+  filter: drop-shadow(0 0 10px color-mix(in srgb, var(--teal) 38%, transparent));
+}
+
+.price-history-dot {
+  fill: var(--surface);
+  stroke: var(--teal);
+  stroke-width: 4;
+}
+
+.price-history-latest-label {
+  fill: var(--ink);
+  font-size: 15px;
+  font-weight: 950;
+}
+
+.price-history-chart-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 850;
 }
 
 .locked-tile {

@@ -41,7 +41,7 @@ export function priceConfidenceFromScore(score?: number | null): PricePoint["con
     return "Weak";
   }
 
-  if (score >= 80) {
+  if (score >= 75) {
     return "Strong";
   }
 

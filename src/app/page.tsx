@@ -6289,8 +6289,8 @@ function CataloguePricingExplainer() {
           <span>A card is priced when it has at least one imported market snapshot. Variant metadata, images, and manual owned values do not count as imported pricing.</span>
         </article>
         <article>
-          <strong>Series rows are prioritisation</strong>
-          <span>Sword & Shield, Scarlet & Violet, and similar rows show where pricing jobs should focus next. The percentage is priced printings divided by total printings in that series.</span>
+          <strong>Distinct printings only</strong>
+          <span>Historical price snapshots do not multiply the totals. The percentage is distinct priced printings divided by distinct catalogue printings in that series.</span>
         </article>
       </div>
     </section>
@@ -6473,7 +6473,7 @@ function PricingSeriesGapPanel({ rows }: { rows: PricingBySeriesGap[] }) {
         <h2>Card pricing gaps</h2>
         <BarChart3 size={18} />
       </div>
-      <p className="muted">Catalogue-wide card printings without an imported price snapshot yet.</p>
+      <p className="muted">Distinct catalogue card printings without an imported price snapshot yet.</p>
       {visibleRows.length ? (
         <div className="gap-list">
           {visibleRows.map((row) => (
@@ -7882,16 +7882,20 @@ function PriceTrendPanel({
   item: CatalogueItem;
   overrideValueMinor?: number;
 }) {
+  const [range, setRange] = useState<PriceHistoryRange>("30d");
   const history = item.priceHistory ?? [];
-  const latest = history[history.length - 1];
-  const first = history[0];
+  const visibleHistory = filterPriceHistoryByRange(history, range);
+  const activeHistory = visibleHistory.length ? visibleHistory : history;
+  const latest = activeHistory[activeHistory.length - 1];
+  const first = activeHistory[0];
   const previous = history[history.length - 2];
-  const range = priceRangeMinor(history);
+  const valueRange = priceRangeMinor(activeHistory);
   const delta = latest && first ? latest.valueMinor - first.valueMinor : null;
-  const latestMove = latest && previous ? latest.valueMinor - previous.valueMinor : null;
-  const source = latest?.source ?? item.priceSource;
-  const observedAt = latest?.observedAt ?? item.priceObservedAt;
-  const latestMarketValue = latest?.valueMinor ?? catalogueMarketValueMinor(item);
+  const overallLatest = history[history.length - 1];
+  const latestMove = overallLatest && previous ? overallLatest.valueMinor - previous.valueMinor : null;
+  const source = overallLatest?.source ?? item.priceSource;
+  const observedAt = overallLatest?.observedAt ?? item.priceObservedAt;
+  const latestMarketValue = overallLatest?.valueMinor ?? catalogueMarketValueMinor(item);
 
   return (
     <section className="tool-panel">
@@ -7900,16 +7904,17 @@ function PriceTrendPanel({
         <BarChart3 size={18} />
       </div>
       {history.length ? (
-        <PriceHistoryTimeline history={history} />
+        <PriceHistoryLineChart history={history} onRangeChange={setRange} range={range} />
       ) : (
         <p className="muted">No price history yet.</p>
       )}
       <MetricList
         rows={[
           ["Latest market", formatValuation(latestMarketValue)],
-          ["Range", range ? `${formatMoney(range.low)} - ${formatMoney(range.high)}` : "Unknown"],
+          ["Selected range", priceHistoryRangeLabel(range)],
+          ["Range", valueRange ? `${formatMoney(valueRange.low)} - ${formatMoney(valueRange.high)}` : "Unknown"],
           [
-            "Since first",
+            "Since range start",
             delta === null ? "Unknown" : `${delta >= 0 ? "+" : ""}${formatMoney(delta)}`,
             delta !== null && delta >= 0 ? "positive" : "",
           ],
@@ -7929,32 +7934,156 @@ function PriceTrendPanel({
   );
 }
 
-function PriceHistoryTimeline({ history }: { history: NonNullable<CatalogueItem["priceHistory"]> }) {
-  const points = history.slice(-8);
+type PriceHistoryRange = "7d" | "30d" | "3m" | "6m" | "all";
+
+const priceHistoryRanges: Array<{ days?: number; label: string; value: PriceHistoryRange }> = [
+  { days: 7, label: "7d", value: "7d" },
+  { days: 30, label: "30d", value: "30d" },
+  { days: 92, label: "3m", value: "3m" },
+  { days: 183, label: "6m", value: "6m" },
+  { label: "All", value: "all" },
+];
+
+function PriceHistoryLineChart({
+  history,
+  onRangeChange,
+  range,
+}: {
+  history: NonNullable<CatalogueItem["priceHistory"]>;
+  onRangeChange: (range: PriceHistoryRange) => void;
+  range: PriceHistoryRange;
+}) {
+  const points = filterPriceHistoryByRange(history, range);
   const values = points.map((point) => point.valueMinor);
   const min = Math.min(...values);
   const max = Math.max(...values);
   const span = Math.max(1, max - min);
+  const width = 720;
+  const height = 250;
+  const plot = { bottom: 204, left: 58, right: 20, top: 18 };
+  const plotWidth = width - plot.left - plot.right;
+  const plotHeight = plot.bottom - plot.top;
+  const times = points.map((point) => Date.parse(point.observedAt));
+  const minTime = Math.min(...times);
+  const maxTime = Math.max(...times);
+  const timeSpan = Math.max(1, maxTime - minTime);
+  const chartPoints = points.map((point, index) => {
+    const parsed = Date.parse(point.observedAt);
+    const x =
+      points.length === 1
+        ? plot.left + plotWidth / 2
+        : Number.isFinite(parsed) && maxTime > minTime
+          ? plot.left + ((parsed - minTime) / timeSpan) * plotWidth
+          : plot.left + (index / Math.max(1, points.length - 1)) * plotWidth;
+    const y = min === max ? plot.top + plotHeight / 2 : plot.bottom - ((point.valueMinor - min) / span) * plotHeight;
+
+    return { point, x, y };
+  });
+  const linePoints = chartPoints.map((entry) => `${entry.x.toFixed(1)},${entry.y.toFixed(1)}`).join(" ");
+  const areaPath = chartPoints.length
+    ? `M ${chartPoints[0].x.toFixed(1)} ${plot.bottom} L ${linePoints.replaceAll(",", " ")} L ${chartPoints[chartPoints.length - 1].x.toFixed(1)} ${plot.bottom} Z`
+    : "";
+  const ticks = [0, 0.5, 1].map((ratio) => {
+    const value = max - (max - min) * ratio;
+    return {
+      label: formatMoney(Math.round(value)),
+      y: plot.top + plotHeight * ratio,
+    };
+  });
+  const latest = points[points.length - 1];
+  const first = points[0];
 
   return (
-    <div className="price-history-timeline" style={{ "--point-count": points.length } as CSSProperties}>
-      {points.map((point, index) => {
-        const barHeight = points.length === 1 ? 72 : Math.round(28 + ((point.valueMinor - min) / span) * 72);
-
-        return (
-          <article className="price-history-point" key={`${point.observedAt}-${point.valueMinor}-${index}`}>
-            <div className="price-history-bar-track" aria-hidden="true">
-              <span style={{ height: `${barHeight}%` }} />
-            </div>
-            <strong>{formatMoney(point.valueMinor)}</strong>
-            <span>{formatEventDate(point.observedAt)}</span>
-            <span className={marketConfidenceBadgeClass(point.confidence)}>{point.confidence}</span>
-            <small>{priceSourceLabel(point.source)}</small>
-          </article>
-        );
-      })}
+    <div className="price-history-chart">
+      <div className="segmented compact price-history-ranges" aria-label="Price history timeframe">
+        {priceHistoryRanges.map((option) => (
+          <button
+            aria-pressed={range === option.value}
+            className={range === option.value ? "active" : ""}
+            key={option.value}
+            onClick={() => onRangeChange(option.value)}
+            type="button"
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+      <div className="price-history-plot">
+        <svg aria-label={`Price history line chart, ${priceHistoryRangeLabel(range)}`} role="img" viewBox={`0 0 ${width} ${height}`}>
+          <defs>
+            <linearGradient id="price-history-area" x1="0" x2="0" y1="0" y2="1">
+              <stop offset="0%" stopColor="var(--teal)" stopOpacity="0.32" />
+              <stop offset="100%" stopColor="var(--blue)" stopOpacity="0.04" />
+            </linearGradient>
+          </defs>
+          {ticks.map((tick) => (
+            <g key={tick.y}>
+              <line className="price-history-grid-line" x1={plot.left} x2={plot.right + plotWidth} y1={tick.y} y2={tick.y} />
+              <text className="price-history-axis-label" x={plot.left - 10} y={tick.y + 4} textAnchor="end">
+                {tick.label}
+              </text>
+            </g>
+          ))}
+          {areaPath ? <path className="price-history-area" d={areaPath} /> : null}
+          {linePoints ? <polyline className="price-history-line" points={linePoints} /> : null}
+          {chartPoints.map(({ point, x, y }, index) => (
+            <g key={`${point.observedAt}-${point.valueMinor}-${index}`}>
+              <circle className="price-history-dot" cx={x} cy={y} r={index === chartPoints.length - 1 ? 6 : 4.5} />
+              {index === chartPoints.length - 1 ? (
+                <text className="price-history-latest-label" x={Math.min(width - 90, x + 10)} y={Math.max(28, y - 10)}>
+                  {formatMoney(point.valueMinor)}
+                </text>
+              ) : null}
+            </g>
+          ))}
+          {first ? (
+            <text className="price-history-date-label" x={plot.left} y={height - 16}>
+              {formatEventDate(first.observedAt)}
+            </text>
+          ) : null}
+          {latest ? (
+            <text className="price-history-date-label" x={width - plot.right} y={height - 16} textAnchor="end">
+              {formatEventDate(latest.observedAt)}
+            </text>
+          ) : null}
+        </svg>
+      </div>
+      {latest ? (
+        <div className="price-history-chart-footer">
+          <span className={marketConfidenceBadgeClass(latest.confidence)}>{latest.confidence}</span>
+          <span>{formatMoney(latest.valueMinor)} latest</span>
+          <span>{points.length} point{points.length === 1 ? "" : "s"}</span>
+          <span>{priceSourceLabel(latest.source)}</span>
+        </div>
+      ) : null}
     </div>
   );
+}
+
+function filterPriceHistoryByRange(
+  history: NonNullable<CatalogueItem["priceHistory"]>,
+  range: PriceHistoryRange,
+) {
+  if (range === "all" || history.length <= 1) {
+    return history;
+  }
+
+  const latest = history[history.length - 1];
+  const latestTime = latest ? Date.parse(latest.observedAt) : NaN;
+  const days = priceHistoryRanges.find((option) => option.value === range)?.days;
+
+  if (!days || !Number.isFinite(latestTime)) {
+    return history;
+  }
+
+  const startTime = latestTime - days * 24 * 60 * 60 * 1000;
+  const filtered = history.filter((point) => Date.parse(point.observedAt) >= startTime);
+
+  return filtered.length ? filtered : history.slice(-1);
+}
+
+function priceHistoryRangeLabel(range: PriceHistoryRange) {
+  return priceHistoryRanges.find((option) => option.value === range)?.label ?? "All";
 }
 
 function ProgressBar({ value }: { value: number }) {
@@ -8143,11 +8272,11 @@ function marketConfidenceReason(confidence: string) {
   const normalized = confidence.trim().toLowerCase();
 
   if (normalized === "strong" || normalized === "high") {
-    return "The latest imported value is considered usable for normal tracking.";
+    return "Direct marketplace market pricing from a trusted import source. Good for normal tracking.";
   }
 
   if (normalized === "fair" || normalized === "medium") {
-    return "Check the source before buying or insuring higher-value items.";
+    return "Usually based on a trend, average, mid, or single-source estimate. Check before buying or insuring higher-value items.";
   }
 
   return "Treat this as a guide only until a stronger or newer source is available.";

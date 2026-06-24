@@ -129,7 +129,7 @@ async function catalogueCounts() {
     prisma.$queryRaw<PricingBySeriesRow[]>`
       SELECT
         COALESCE(cs.series, 'Other') AS series,
-        COUNT(cp.id)::int AS "cardCount",
+        COUNT(DISTINCT cp.id)::int AS "cardCount",
         COUNT(DISTINCT ps.card_printing_id)::int AS "pricedCardCount"
       FROM card_printings cp
       JOIN card_sets cs ON cs.id = cp.card_set_id
@@ -137,7 +137,7 @@ async function catalogueCounts() {
         ON ps.card_printing_id = cp.id
         AND ps.item_type = 'card'
       GROUP BY COALESCE(cs.series, 'Other')
-      ORDER BY (COUNT(cp.id) - COUNT(DISTINCT ps.card_printing_id)) DESC, COALESCE(cs.series, 'Other')
+      ORDER BY (COUNT(DISTINCT cp.id) - COUNT(DISTINCT ps.card_printing_id)) DESC, COALESCE(cs.series, 'Other')
     `,
     prisma.$queryRaw<PricingBySourceRow[]>`
       SELECT

@@ -48,7 +48,8 @@ test("builds sorted price history with normalized confidence and sources", () =>
 });
 
 test("maps confidence score thresholds", () => {
-  assert.equal(priceConfidenceFromScore(80), "Strong");
+  assert.equal(priceConfidenceFromScore(75), "Strong");
+  assert.equal(priceConfidenceFromScore(74), "Fair");
   assert.equal(priceConfidenceFromScore(60), "Fair");
   assert.equal(priceConfidenceFromScore(59), "Weak");
   assert.equal(priceConfidenceFromScore(null), "Weak");
