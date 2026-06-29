@@ -2081,14 +2081,15 @@ h3 {
 
 .binder-shelf {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(150px, 184px));
   gap: 14px;
+  align-items: stretch;
 }
 
 .binder-cover {
   position: relative;
   display: grid;
-  min-height: 210px;
+  min-height: 222px;
   align-content: end;
   gap: 8px;
   overflow: hidden;
@@ -2134,7 +2135,7 @@ h3 {
 .binder-cover.selected {
   border-color: var(--binder-accent);
   box-shadow: 0 22px 44px rgba(15, 23, 42, 0.3);
-  transform: translateY(-4px) rotate(-1deg);
+  transform: translateY(-5px) rotate(-0.6deg);
 }
 
 .binder-cover-spine {
@@ -2198,6 +2199,11 @@ h3 {
   gap: 8px;
 }
 
+.binder-artwork-grid.compact,
+.binder-interior-grid.compact {
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+}
+
 .binder-artwork-option {
   display: flex;
   min-height: 48px;
@@ -2216,6 +2222,42 @@ h3 {
   box-shadow: inset 0 0 0 1px var(--binder-accent);
 }
 
+.binder-interior-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  gap: 8px;
+}
+
+.binder-interior-option {
+  display: flex;
+  min-height: 46px;
+  align-items: center;
+  gap: 8px;
+  padding: 9px;
+  border: 1px solid color-mix(in srgb, var(--binder-stitch) 62%, var(--line));
+  border-radius: 7px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--binder-page) 88%, white), var(--binder-page)),
+    linear-gradient(45deg, transparent 0 12px, color-mix(in srgb, var(--binder-stitch) 14%, transparent) 12px 13px);
+  color: var(--ink);
+  font-weight: 900;
+}
+
+.binder-interior-option.selected {
+  border-color: var(--binder-stitch);
+  box-shadow: inset 0 0 0 1px var(--binder-stitch);
+}
+
+.binder-interior-swatch {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  border: 1px solid color-mix(in srgb, var(--binder-ring) 72%, var(--line));
+  border-radius: 50%;
+  background:
+    linear-gradient(135deg, var(--binder-inner) 0 48%, var(--binder-page) 48% 100%);
+}
+
 .binder-focus-layout {
   display: grid;
   grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.55fr);
@@ -2226,13 +2268,16 @@ h3 {
 .binder-stage {
   display: grid;
   gap: 18px;
-  overflow: hidden;
+  overflow: visible;
   padding: 18px;
   border: 1px solid color-mix(in srgb, var(--binder-accent) 42%, var(--line));
-  border-radius: var(--radius);
+  border-radius: 14px;
   background:
-    radial-gradient(circle at 88% 10%, color-mix(in srgb, var(--binder-accent) 20%, transparent), transparent 30%),
-    linear-gradient(180deg, var(--surface), color-mix(in srgb, var(--binder-spine) 16%, var(--surface-soft)));
+    radial-gradient(circle at 92% 9%, color-mix(in srgb, var(--binder-accent) 20%, transparent), transparent 30%),
+    linear-gradient(135deg, color-mix(in srgb, var(--binder-inner) 86%, white), var(--binder-inner));
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, white 12%, transparent),
+    0 24px 58px rgba(15, 23, 42, 0.18);
 }
 
 .binder-stage-header {
@@ -2267,32 +2312,83 @@ h3 {
   font-weight: 850;
 }
 
+.binder-arrange-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--binder-accent) 34%, var(--line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--binder-page) 84%, var(--surface));
+}
+
 .binder-book {
+  position: relative;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) 38px minmax(0, 1fr);
+  gap: 0;
+  padding: 16px;
+  border: 1px solid color-mix(in srgb, var(--binder-stitch) 42%, var(--line));
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 50% 6%, color-mix(in srgb, white 12%, transparent), transparent 26%),
+    linear-gradient(90deg, color-mix(in srgb, black 20%, transparent), transparent 9%, transparent 91%, color-mix(in srgb, black 18%, transparent)),
+    var(--binder-inner);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, white 8%, transparent),
+    inset 0 22px 40px color-mix(in srgb, black 16%, transparent);
   perspective: 1400px;
 }
 
 .binder-page {
+  position: relative;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
-  min-height: 500px;
+  min-height: 470px;
   padding: 16px;
-  border: 1px solid color-mix(in srgb, var(--binder-accent) 30%, var(--line));
-  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--binder-stitch) 34%, var(--line));
+  border-radius: 13px 5px 5px 13px;
   background:
-    linear-gradient(90deg, color-mix(in srgb, var(--binder-spine) 10%, transparent), transparent 14%),
-    linear-gradient(180deg, color-mix(in srgb, white 8%, var(--surface)), var(--surface-soft));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, white 8%, transparent);
+    linear-gradient(90deg, color-mix(in srgb, var(--binder-inner) 10%, transparent), transparent 13%),
+    repeating-linear-gradient(135deg, transparent 0 18px, color-mix(in srgb, var(--binder-stitch) 9%, transparent) 18px 19px),
+    var(--binder-page);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, white 24%, transparent),
+    0 14px 28px color-mix(in srgb, black 12%, transparent);
   animation: binderPageOpen 520ms cubic-bezier(0.2, 0.75, 0.2, 1) both;
   transform-origin: center left;
 }
 
-.binder-page + .binder-page {
+.binder-ring-strip + .binder-page {
   animation-delay: 90ms;
+  border-radius: 5px 13px 13px 5px;
   transform-origin: center right;
+}
+
+.binder-ring-strip {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  align-content: space-around;
+  justify-items: center;
+  padding: 28px 0;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, black 24%, transparent), transparent 35% 65%, color-mix(in srgb, black 20%, transparent)),
+    color-mix(in srgb, var(--binder-inner) 72%, black);
+}
+
+.binder-ring {
+  width: 30px;
+  height: 58px;
+  border: 5px solid var(--binder-ring);
+  border-left-color: transparent;
+  border-radius: 50%;
+  box-shadow:
+    inset -4px 0 0 color-mix(in srgb, white 26%, transparent),
+    0 6px 14px color-mix(in srgb, black 22%, transparent);
 }
 
 .binder-pocket {
@@ -2302,13 +2398,14 @@ h3 {
   min-height: 146px;
   align-content: start;
   gap: 6px;
-  overflow: hidden;
+  overflow: visible;
   padding: 8px;
-  border: 1px solid color-mix(in srgb, var(--line) 76%, transparent);
+  border: 1px solid color-mix(in srgb, var(--binder-stitch) 58%, transparent);
   border-radius: 6px;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.12), transparent),
-    color-mix(in srgb, var(--control) 82%, transparent);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.28), transparent 38%),
+    linear-gradient(135deg, transparent 0 48%, color-mix(in srgb, white 20%, transparent) 48% 52%, transparent 52%),
+    var(--binder-pocket);
   color: var(--muted);
   font-size: 11px;
   font-weight: 850;
@@ -2323,6 +2420,32 @@ h3 {
   transform: translateY(-6px) scale(1.02);
 }
 
+.binder-book.arranging .binder-pocket.filled:hover,
+.binder-book.arranging .binder-pocket.filled:focus-visible {
+  transform: translateY(-3px);
+}
+
+.binder-pocket.drop-target {
+  border-color: var(--binder-accent);
+  box-shadow:
+    inset 0 0 0 1px var(--binder-accent),
+    0 0 0 3px color-mix(in srgb, var(--binder-accent) 16%, transparent);
+}
+
+.binder-pocket.lifted {
+  z-index: 4;
+  border-color: var(--binder-accent);
+}
+
+.binder-pocket.lifted .binder-pocket-image {
+  z-index: 4;
+  animation: cardPullFromSleeve 260ms cubic-bezier(0.2, 0.75, 0.2, 1) both;
+}
+
+.binder-pocket.moved .binder-pocket-image {
+  animation: cardDropIntoSleeve 420ms cubic-bezier(0.2, 0.75, 0.2, 1) both;
+}
+
 .binder-pocket-image {
   position: relative;
   display: block;
@@ -2331,6 +2454,8 @@ h3 {
   aspect-ratio: 5 / 7;
   border-radius: 5px;
   background: var(--surface-soft);
+  box-shadow: 0 4px 12px color-mix(in srgb, black 18%, transparent);
+  transform-origin: center bottom;
 }
 
 .binder-pocket-image .asset-image,
@@ -2352,6 +2477,11 @@ h3 {
 
 .binder-side-panel {
   gap: 14px;
+}
+
+.binder-appearance-editor {
+  display: grid;
+  gap: 12px;
 }
 
 .binder-picker {
@@ -2468,6 +2598,34 @@ h3 {
   from {
     opacity: 0;
     transform: translateY(28px) scale(0.94) rotate(-1deg);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1) rotate(0deg);
+  }
+}
+
+@keyframes cardPullFromSleeve {
+  from {
+    transform: translateY(0) scale(1);
+  }
+
+  to {
+    transform: translateY(-20px) scale(1.08) rotate(-1.4deg);
+    box-shadow: 0 18px 28px color-mix(in srgb, black 28%, transparent);
+  }
+}
+
+@keyframes cardDropIntoSleeve {
+  from {
+    opacity: 0.72;
+    transform: translateY(-34px) scale(1.08) rotate(1.2deg);
+  }
+
+  72% {
+    opacity: 1;
+    transform: translateY(4px) scale(0.98) rotate(0deg);
   }
 
   to {
@@ -4615,7 +4773,7 @@ h3 {
   }
 
   .binder-shelf {
-    grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(132px, 164px));
   }
 
   .binder-cover {
@@ -4643,6 +4801,24 @@ h3 {
 
   .binder-book {
     grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .binder-ring-strip {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    align-content: center;
+    padding: 0 24px;
+    min-height: 36px;
+    background:
+      linear-gradient(180deg, color-mix(in srgb, black 18%, transparent), transparent 42% 58%, color-mix(in srgb, black 16%, transparent)),
+      color-mix(in srgb, var(--binder-inner) 72%, black);
+  }
+
+  .binder-ring {
+    width: 58px;
+    height: 30px;
+    border: 5px solid var(--binder-ring);
+    border-top-color: transparent;
   }
 
   .binder-page {
@@ -4776,6 +4952,10 @@ h3 {
   }
 
   .binder-artwork-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .binder-interior-grid {
     grid-template-columns: 1fr;
   }
 
