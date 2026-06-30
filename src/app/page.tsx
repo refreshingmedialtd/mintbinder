@@ -3,6 +3,7 @@
 import {
   ArrowLeft,
   ArrowDownUp,
+  ArrowRight,
   BarChart3,
   Bell,
   BookOpen,
@@ -224,6 +225,12 @@ type CustomBinder = {
   interiorId: BinderInteriorId;
   itemIds: string[];
   name: string;
+};
+
+type DefaultBinderSettings = {
+  artworkId: BinderArtworkId;
+  interiorId: BinderInteriorId;
+  itemIds: string[];
 };
 
 type BinderSummary = {
@@ -483,6 +490,12 @@ const betaSetupDismissedStorageKey = "mintbinder-beta-setup-dismissed";
 const themeStorageKey = "mintbinder-theme";
 const defaultBinderId = "all-collection";
 const binderStoragePrefix = "mintbinder-binders";
+const defaultBinderSettingsStoragePrefix = "mintbinder-default-binder";
+const defaultBinderSettingsFallback: DefaultBinderSettings = {
+  artworkId: "mint",
+  interiorId: "classic",
+  itemIds: [],
+};
 const plusPreviewEmails = new Set(["liam@example.com", "liam@refreshing.media"]);
 const plusPreviewDomains = new Set(["refreshing.media"]);
 const binderArtworkOptions: Array<{
@@ -771,6 +784,9 @@ export default function Home() {
   const [plusPreviewOverride, setPlusPreviewOverride] = useState<boolean | null>(null);
   const [customBinders, setCustomBinders] = useState<CustomBinder[]>([]);
   const [customBindersLoaded, setCustomBindersLoaded] = useState(false);
+  const [defaultBinderSettings, setDefaultBinderSettings] =
+    useState<DefaultBinderSettings>(defaultBinderSettingsFallback);
+  const [defaultBinderSettingsLoaded, setDefaultBinderSettingsLoaded] = useState(false);
 
   const showToast = useCallback((message: string) => {
     setToast(message);
@@ -818,11 +834,15 @@ export default function Home() {
     if (status !== "authenticated") {
       setCustomBinders([]);
       setCustomBindersLoaded(false);
+      setDefaultBinderSettings(defaultBinderSettingsFallback);
+      setDefaultBinderSettingsLoaded(false);
       return;
     }
 
     setCustomBinders(readStoredBinders(binderStorageKey(viewer.email)));
     setCustomBindersLoaded(true);
+    setDefaultBinderSettings(readStoredDefaultBinderSettings(defaultBinderSettingsStorageKey(viewer.email)));
+    setDefaultBinderSettingsLoaded(true);
   }, [status, viewer.email]);
 
   useEffect(() => {
@@ -832,6 +852,17 @@ export default function Home() {
 
     window.localStorage.setItem(binderStorageKey(viewer.email), JSON.stringify(customBinders));
   }, [customBinders, customBindersLoaded, status, viewer.email]);
+
+  useEffect(() => {
+    if (!defaultBinderSettingsLoaded || status !== "authenticated") {
+      return;
+    }
+
+    window.localStorage.setItem(
+      defaultBinderSettingsStorageKey(viewer.email),
+      JSON.stringify(defaultBinderSettings),
+    );
+  }, [defaultBinderSettings, defaultBinderSettingsLoaded, status, viewer.email]);
 
   const applyAppData = useCallback((data: AppData) => {
     setCatalogueItems((current) =>
@@ -2101,6 +2132,7 @@ export default function Home() {
     catalogueComplete,
     collection,
     customBinders,
+    defaultBinderSettings,
     storageLocations,
     collectionEvents,
     notificationPreferences,
@@ -2125,6 +2157,7 @@ export default function Home() {
     addToCollection,
     createManualSealedProduct,
     setCustomBinders,
+    setDefaultBinderSettings,
     updateCollectionItem,
     archiveCollectionItem,
     recordCollectionSale,
@@ -2196,6 +2229,7 @@ type ScreenContext = {
   catalogueComplete: boolean;
   collection: CollectionItem[];
   customBinders: CustomBinder[];
+  defaultBinderSettings: DefaultBinderSettings;
   storageLocations: StorageLocation[];
   collectionEvents: CollectionEvent[];
   notificationPreferences: NotificationPreferences;
@@ -2228,6 +2262,7 @@ type ScreenContext = {
   addToCollection: (catalogueId: string, formData?: FormData) => Promise<void>;
   createManualSealedProduct: (formData: FormData) => Promise<boolean>;
   setCustomBinders: Dispatch<SetStateAction<CustomBinder[]>>;
+  setDefaultBinderSettings: Dispatch<SetStateAction<DefaultBinderSettings>>;
   updateCollectionItem: (itemId: string, formData: FormData) => Promise<boolean>;
   archiveCollectionItem: (itemId: string) => Promise<boolean>;
   recordCollectionSale: (itemId: string, formData: FormData) => Promise<boolean>;
@@ -2530,7 +2565,8 @@ function BottomNav({
   return (
     <nav className={canUseOperations ? "bottom-nav admin" : "bottom-nav"} aria-label="Primary navigation">
       <MobileNavButton active={active === "dashboard"} icon={<LayoutDashboard />} label="Home" onClick={() => onNavigate("dashboard")} />
-      <MobileNavButton active={active === "collection" || active === "binders"} icon={<Layers3 />} label="Cards" onClick={() => onNavigate("collection")} />
+      <MobileNavButton active={active === "collection"} icon={<Layers3 />} label="Cards" onClick={() => onNavigate("collection")} />
+      <MobileNavButton active={active === "binders"} icon={<BookOpen />} label="Binders" onClick={() => onNavigate("binders")} />
       <button className={active === "add" ? "active add-button" : "add-button"} onClick={() => onNavigate("add")}>
         <span className="icon-wrap">
           <Plus size={20} />
@@ -3362,8 +3398,10 @@ function BindersScreen({
   catalogueById,
   collection,
   customBinders,
+  defaultBinderSettings,
   setAppState,
   setCustomBinders,
+  setDefaultBinderSettings,
   showToast,
   startAdd,
   navigate,
@@ -3378,11 +3416,16 @@ function BindersScreen({
   const [isArranging, setIsArranging] = useState(false);
   const [liftedItemId, setLiftedItemId] = useState<string | null>(null);
   const [recentMoveItemId, setRecentMoveItemId] = useState<string | null>(null);
+  const [openBinderId, setOpenBinderId] = useState<string | null>(null);
+  const [visiblePageIndex, setVisiblePageIndex] = useState(0);
   const availableItems = useMemo(
     () => collection.filter((item) => Boolean(catalogueById.get(item.catalogueId))),
     [catalogueById, collection],
   );
-  const binders = useMemo(() => binderSummaries(availableItems, customBinders), [availableItems, customBinders]);
+  const binders = useMemo(
+    () => binderSummaries(availableItems, customBinders, defaultBinderSettings),
+    [availableItems, customBinders, defaultBinderSettings],
+  );
   const selectedBinder = useMemo(
     () =>
       binders.find((binder) => binder.id === appState.selectedBinderId) ??
@@ -3391,16 +3434,26 @@ function BindersScreen({
     [appState.selectedBinderId, binders],
   );
   const visibleItemIds = useMemo(() => new Set(availableItems.map((item) => item.id)), [availableItems]);
-  const selectedCustomBinder = useMemo(
-    () => customBinders.find((binder) => binder.id === selectedBinder.id),
-    [customBinders, selectedBinder.id],
+  const activeBinder = useMemo(
+    () => (openBinderId ? binders.find((binder) => binder.id === openBinderId) ?? null : null),
+    [binders, openBinderId],
   );
-  const binderValue = selectedBinder.items.reduce(
+  const activeCustomBinder = useMemo(
+    () => (activeBinder ? customBinders.find((binder) => binder.id === activeBinder.id) : undefined),
+    [activeBinder, customBinders],
+  );
+  const activeBinderValue = activeBinder?.items.reduce(
     (total, item) => total + (getOwnedValue(item, catalogueById.get(item.catalogueId)) ?? 0),
     0,
-  );
-  const cardCount = selectedBinder.items.filter((item) => catalogueById.get(item.catalogueId)?.type === "card").length;
-  const sealedCount = selectedBinder.items.length - cardCount;
+  ) ?? 0;
+  const activeCardCount = activeBinder
+    ? activeBinder.items.filter((item) => catalogueById.get(item.catalogueId)?.type === "card").length
+    : 0;
+  const activeSealedCount = (activeBinder?.items.length ?? 0) - activeCardCount;
+  const totalPages = Math.max(1, Math.ceil((activeBinder?.items.length ?? 0) / 9));
+  const boundedPageIndex = Math.min(visiblePageIndex, totalPages - 1);
+  const currentPageStart = boundedPageIndex * 9;
+  const nextPageStart = currentPageStart + 9;
   const normalizedItemSearch = normalizeSearchText(itemSearch);
   const pickerItems = useMemo(
     () =>
@@ -3423,7 +3476,7 @@ function BindersScreen({
         .slice(0, 120),
     [availableItems, catalogueById, normalizedItemSearch],
   );
-  const focusedItem = focusedItemId ? selectedBinder.items.find((item) => item.id === focusedItemId) : undefined;
+  const focusedItem = focusedItemId ? activeBinder?.items.find((item) => item.id === focusedItemId) : undefined;
   const focusedCatalogueItem = focusedItem ? catalogueById.get(focusedItem.catalogueId) : undefined;
 
   useEffect(() => {
@@ -3437,19 +3490,41 @@ function BindersScreen({
   useEffect(() => {
     setIsArranging(false);
     setLiftedItemId(null);
-  }, [selectedBinder.id]);
+    setFocusedItemId(null);
+    setVisiblePageIndex(0);
+  }, [activeBinder?.id]);
 
   useEffect(() => {
-    if (selectedCustomBinder || !isArranging) {
+    if (!openBinderId || binders.some((binder) => binder.id === openBinderId)) {
       return;
     }
 
-    setIsArranging(false);
-    setLiftedItemId(null);
-  }, [isArranging, selectedCustomBinder]);
+    setOpenBinderId(null);
+  }, [binders, openBinderId]);
+
+  useEffect(() => {
+    if (visiblePageIndex <= totalPages - 1) {
+      return;
+    }
+
+    setVisiblePageIndex(Math.max(0, totalPages - 1));
+  }, [totalPages, visiblePageIndex]);
 
   function selectBinder(id: string) {
     setAppState((current) => ({ ...current, selectedBinderId: id }));
+  }
+
+  function openBinder(id: string) {
+    selectBinder(id);
+    setOpenBinderId(id);
+    setVisiblePageIndex(0);
+  }
+
+  function closeBinderViewer() {
+    setOpenBinderId(null);
+    setIsArranging(false);
+    setLiftedItemId(null);
+    setFocusedItemId(null);
   }
 
   function toggleDraftItem(itemId: string) {
@@ -3459,13 +3534,13 @@ function BindersScreen({
   }
 
   function toggleSelectedBinderItem(itemId: string) {
-    if (!selectedCustomBinder) {
+    if (!activeCustomBinder) {
       return;
     }
 
     setCustomBinders((current) =>
       current.map((binder) => {
-        if (binder.id !== selectedCustomBinder.id) {
+        if (binder.id !== activeCustomBinder.id) {
           return binder;
         }
 
@@ -3504,6 +3579,8 @@ function BindersScreen({
 
     setCustomBinders((current) => [...current, binder]);
     setAppState((current) => ({ ...current, selectedBinderId: binder.id }));
+    setOpenBinderId(binder.id);
+    setVisiblePageIndex(0);
     setDraftName("");
     setDraftArtworkId("mint");
     setDraftInteriorId("classic");
@@ -3512,14 +3589,23 @@ function BindersScreen({
     showToast(`${binder.name} created.`);
   }
 
-  function updateSelectedBinderAppearance(next: Partial<Pick<CustomBinder, "artworkId" | "interiorId">>) {
-    if (!selectedCustomBinder) {
+  function updateActiveBinderAppearance(next: Partial<Pick<CustomBinder, "artworkId" | "interiorId">>) {
+    if (!activeBinder) {
+      return;
+    }
+
+    if (activeBinder.id === defaultBinderId) {
+      setDefaultBinderSettings((current) => ({ ...current, ...next }));
+      return;
+    }
+
+    if (!activeCustomBinder) {
       return;
     }
 
     setCustomBinders((current) =>
       current.map((binder) =>
-        binder.id === selectedCustomBinder.id
+        binder.id === activeCustomBinder.id
           ? {
               ...binder,
               ...next,
@@ -3529,8 +3615,29 @@ function BindersScreen({
     );
   }
 
+  function updateActiveBinderOrder(nextItemIds: string[]) {
+    if (!activeBinder) {
+      return;
+    }
+
+    if (activeBinder.id === defaultBinderId) {
+      setDefaultBinderSettings((current) => ({ ...current, itemIds: nextItemIds }));
+      return;
+    }
+
+    if (!activeCustomBinder) {
+      return;
+    }
+
+    setCustomBinders((current) =>
+      current.map((binder) =>
+        binder.id === activeCustomBinder.id ? { ...binder, itemIds: nextItemIds } : binder,
+      ),
+    );
+  }
+
   function handleBinderSlotClick(item: CollectionItem | undefined, slotIndex: number) {
-    if (!selectedCustomBinder || !isArranging) {
+    if (!activeBinder || !isArranging) {
       if (item) {
         setFocusedItemId(item.id);
       }
@@ -3551,33 +3658,32 @@ function BindersScreen({
       return;
     }
 
-    setCustomBinders((current) =>
-      current.map((binder) => {
-        if (binder.id !== selectedCustomBinder.id) {
-          return binder;
-        }
-
-        const nextItemIds = moveBinderItemToSlot(binder.itemIds, liftedItemId, slotIndex, visibleItemIds);
-        return { ...binder, itemIds: nextItemIds };
-      }),
+    const nextItemIds = moveBinderItemToSlot(
+      activeBinder.items.map((binderItem) => binderItem.id),
+      liftedItemId,
+      slotIndex,
+      visibleItemIds,
     );
+
+    updateActiveBinderOrder(nextItemIds);
     setRecentMoveItemId(liftedItemId);
     window.setTimeout(() => setRecentMoveItemId(null), 520);
     setLiftedItemId(null);
   }
 
   function deleteSelectedBinder() {
-    if (!selectedCustomBinder) {
+    if (!activeCustomBinder) {
       return;
     }
 
-    if (!window.confirm(`Delete ${selectedCustomBinder.name}? This only removes the custom binder, not the collection items.`)) {
+    if (!window.confirm(`Delete ${activeCustomBinder.name}? This only removes the custom binder, not the collection items.`)) {
       return;
     }
 
-    setCustomBinders((current) => current.filter((binder) => binder.id !== selectedCustomBinder.id));
+    setCustomBinders((current) => current.filter((binder) => binder.id !== activeCustomBinder.id));
     setAppState((current) => ({ ...current, selectedBinderId: defaultBinderId }));
-    showToast(`${selectedCustomBinder.name} removed.`);
+    setOpenBinderId(null);
+    showToast(`${activeCustomBinder.name} removed.`);
   }
 
   if (!availableItems.length) {
@@ -3629,14 +3735,17 @@ function BindersScreen({
           <button
             className={binder.id === selectedBinder.id ? "binder-cover selected" : "binder-cover"}
             key={binder.id}
-            onClick={() => selectBinder(binder.id)}
+            onClick={() => openBinder(binder.id)}
             style={binderArtworkStyle(binder.artworkId)}
             type="button"
           >
             <span className="binder-cover-spine" />
             <span className="binder-cover-icon"><BookOpen size={24} /></span>
-            <strong>{binder.name}</strong>
-            <span>{binder.items.length} lot{binder.items.length === 1 ? "" : "s"}</span>
+            <span className="binder-cover-label">
+              <strong>{binder.name}</strong>
+              <span>{binder.items.length} lot{binder.items.length === 1 ? "" : "s"}</span>
+            </span>
+            <span className="binder-cover-open">Open binder</span>
           </button>
         ))}
       </section>
@@ -3710,145 +3819,188 @@ function BindersScreen({
         </section>
       ) : null}
 
-      <section className="binder-focus-layout">
-        <div className="binder-stage" style={binderStageStyle(selectedBinder.artworkId, selectedBinder.interiorId)}>
-          <div className="binder-stage-header">
-            <div>
-              <p className="eyebrow">{selectedBinder.isDefault ? "Default binder" : "Custom binder"}</p>
-              <h2>{selectedBinder.name}</h2>
-              <p className="muted">{selectedBinder.description}</p>
-            </div>
-            <div className="binder-stage-stats">
-              <span>{formatMoney(binderValue)}</span>
-              <small>{cardCount} cards | {sealedCount} sealed</small>
-            </div>
-          </div>
-          {selectedCustomBinder ? (
-            <div className="binder-arrange-bar">
-              <button
-                className={isArranging ? "button primary small" : "button small"}
-                type="button"
-                onClick={() => {
-                  setIsArranging((current) => !current);
-                  setLiftedItemId(null);
-                }}
-              >
-                <ArrowDownUp size={15} />
-                {isArranging ? "Finish arranging" : "Arrange cards"}
+      {activeBinder ? (
+        <section className="binder-viewer-backdrop" onClick={closeBinderViewer} role="presentation">
+          <div className="binder-viewer" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label={`${activeBinder.name} binder`}>
+            <div className="binder-viewer-topbar">
+              <button className="button small" type="button" onClick={closeBinderViewer}>
+                <ArrowLeft size={16} />
+                Library
               </button>
-              <span className="muted">
-                {isArranging
-                  ? liftedItemId
-                    ? "Choose another sleeve to place the lifted card."
-                    : "Click a card to lift it out of its sleeve."
-                  : "Arrange mode animates cards between binder sleeves."}
-              </span>
-            </div>
-          ) : null}
-          <div className={isArranging ? "binder-book arranging" : "binder-book"} aria-label={`${selectedBinder.name} preview`}>
-            <BinderPage
-              catalogueById={catalogueById}
-              items={selectedBinder.items.slice(0, 9)}
-              isArranging={isArranging}
-              liftedItemId={liftedItemId}
-              recentMoveItemId={recentMoveItemId}
-              offset={0}
-              onSlotClick={handleBinderSlotClick}
-            />
-            <span className="binder-ring-strip" aria-hidden="true">
-              {Array.from({ length: 4 }, (_, index) => (
-                <span className="binder-ring" key={index} />
-              ))}
-            </span>
-            <BinderPage
-              catalogueById={catalogueById}
-              items={selectedBinder.items.slice(9, 18)}
-              isArranging={isArranging}
-              liftedItemId={liftedItemId}
-              recentMoveItemId={recentMoveItemId}
-              offset={9}
-              onSlotClick={handleBinderSlotClick}
-            />
-          </div>
-          {selectedBinder.items.length > 18 ? (
-            <p className="binder-overflow-note">{selectedBinder.items.length - 18} more lot{selectedBinder.items.length - 18 === 1 ? "" : "s"} in this binder.</p>
-          ) : null}
-        </div>
-
-        <aside className="tool-panel binder-side-panel">
-          <div className="panel-title-row">
-            <h2>{selectedCustomBinder ? "Binder contents" : "Full collection"}</h2>
-            {selectedCustomBinder ? (
-              <button className="button small danger" onClick={deleteSelectedBinder}>
-                <Trash2 size={15} />
-                Delete
-              </button>
-            ) : null}
-          </div>
-          {selectedCustomBinder ? (
-            <>
-              <div className="binder-appearance-editor">
-                <Field label="Outside artwork">
-                  <div className="binder-artwork-grid compact" role="radiogroup" aria-label="Selected binder artwork">
-                    {binderArtworkOptions.map((artwork) => (
-                      <button
-                        aria-checked={selectedCustomBinder.artworkId === artwork.id}
-                        className={selectedCustomBinder.artworkId === artwork.id ? "binder-artwork-option selected" : "binder-artwork-option"}
-                        key={artwork.id}
-                        onClick={() => updateSelectedBinderAppearance({ artworkId: artwork.id })}
-                        role="radio"
-                        style={binderArtworkStyle(artwork.id)}
-                        type="button"
-                      >
-                        <Paintbrush size={15} />
-                        <span>{artwork.name}</span>
-                      </button>
-                    ))}
-                  </div>
-                </Field>
-                <Field label="Inside material">
-                  <div className="binder-interior-grid compact" role="radiogroup" aria-label="Selected binder internal material">
-                    {binderInteriorOptions.map((interior) => (
-                      <button
-                        aria-checked={selectedCustomBinder.interiorId === interior.id}
-                        className={selectedCustomBinder.interiorId === interior.id ? "binder-interior-option selected" : "binder-interior-option"}
-                        key={interior.id}
-                        onClick={() => updateSelectedBinderAppearance({ interiorId: interior.id })}
-                        role="radio"
-                        style={binderInteriorStyle(interior.id)}
-                        type="button"
-                      >
-                        <span className="binder-interior-swatch" />
-                        <span>{interior.name}</span>
-                      </button>
-                    ))}
-                  </div>
-                </Field>
+              <div>
+                <p className="eyebrow">{activeBinder.isDefault ? "Default binder" : "Custom binder"}</p>
+                <h2>{activeBinder.name}</h2>
               </div>
-              <BinderItemPicker
-                catalogueById={catalogueById}
-                itemSearch={itemSearch}
-                items={pickerItems}
-                selectedItemIds={selectedCustomBinder.itemIds}
-                onItemSearchChange={setItemSearch}
-                onToggleItem={toggleSelectedBinderItem}
-              />
-            </>
-          ) : (
-            <div className="binder-summary-list">
-              <MetricList
-                rows={[
-                  ["Lots", selectedBinder.items.length],
-                  ["Estimated value", formatMoney(binderValue)],
-                  ["Cards", cardCount],
-                  ["Sealed", sealedCount],
-                ]}
-              />
-              <p className="muted">This default binder always mirrors every active collection item.</p>
+              <button className="icon-button" type="button" onClick={closeBinderViewer} aria-label="Close binder viewer">
+                <X size={18} />
+              </button>
             </div>
-          )}
-        </aside>
-      </section>
+
+            <div className="binder-viewer-grid">
+              <div className="binder-stage" style={binderStageStyle(activeBinder.artworkId, activeBinder.interiorId)}>
+                <div className="binder-stage-header">
+                  <div>
+                    <p className="eyebrow">{activeBinder.isDefault ? "Full collection" : "Selected binder"}</p>
+                    <h2>{activeBinder.name}</h2>
+                    <p className="muted">{activeBinder.description}</p>
+                  </div>
+                  <div className="binder-stage-stats">
+                    <span>{formatMoney(activeBinderValue)}</span>
+                    <small>{activeCardCount} cards | {activeSealedCount} sealed</small>
+                  </div>
+                </div>
+
+                <div className="binder-arrange-bar">
+                  <button
+                    className={isArranging ? "button primary small" : "button small"}
+                    type="button"
+                    onClick={() => {
+                      setIsArranging((current) => !current);
+                      setLiftedItemId(null);
+                    }}
+                  >
+                    <ArrowDownUp size={15} />
+                    {isArranging ? "Finish arranging" : "Arrange cards"}
+                  </button>
+                  <span>
+                    {isArranging
+                      ? liftedItemId
+                        ? "Choose a sleeve to place the lifted card."
+                        : "Click a card to lift it out of its sleeve."
+                      : "Move cards between sleeves without opening the lot modal."}
+                  </span>
+                </div>
+
+                <div className="binder-page-toolbar">
+                  <button
+                    className="button small"
+                    disabled={boundedPageIndex === 0}
+                    onClick={() => setVisiblePageIndex((current) => Math.max(0, current - 1))}
+                    type="button"
+                  >
+                    <ArrowLeft size={15} />
+                    Previous
+                  </button>
+                  <span>Page {boundedPageIndex + 1} of {totalPages}</span>
+                  <button
+                    className="button small"
+                    disabled={boundedPageIndex >= totalPages - 1}
+                    onClick={() => setVisiblePageIndex((current) => Math.min(totalPages - 1, current + 1))}
+                    type="button"
+                  >
+                    Next
+                    <ArrowRight size={15} />
+                  </button>
+                </div>
+
+                <div className={isArranging ? "binder-book arranging" : "binder-book"} aria-label={`${activeBinder.name} page ${boundedPageIndex + 1}`}>
+                  <BinderPage
+                    catalogueById={catalogueById}
+                    items={activeBinder.items.slice(currentPageStart, currentPageStart + 9)}
+                    isArranging={isArranging}
+                    liftedItemId={liftedItemId}
+                    offset={currentPageStart}
+                    pageRole="primary"
+                    recentMoveItemId={recentMoveItemId}
+                    onSlotClick={handleBinderSlotClick}
+                  />
+                  <span className="binder-ring-strip" aria-hidden="true">
+                    {Array.from({ length: 5 }, (_, index) => (
+                      <span className="binder-ring" key={index} />
+                    ))}
+                  </span>
+                  <BinderPage
+                    catalogueById={catalogueById}
+                    items={activeBinder.items.slice(nextPageStart, nextPageStart + 9)}
+                    isArranging={isArranging}
+                    liftedItemId={liftedItemId}
+                    offset={nextPageStart}
+                    pageRole="secondary"
+                    recentMoveItemId={recentMoveItemId}
+                    onSlotClick={handleBinderSlotClick}
+                  />
+                </div>
+              </div>
+
+              <aside className="tool-panel binder-side-panel binder-viewer-panel">
+                <div className="panel-title-row">
+                  <h2>{activeBinder.isDefault ? "Full collection" : "Binder settings"}</h2>
+                  {activeCustomBinder ? (
+                    <button className="button small danger" onClick={deleteSelectedBinder} type="button">
+                      <Trash2 size={15} />
+                      Delete
+                    </button>
+                  ) : null}
+                </div>
+
+                <div className="binder-summary-list">
+                  <MetricList
+                    rows={[
+                      ["Lots", activeBinder.items.length],
+                      ["Estimated value", formatMoney(activeBinderValue)],
+                      ["Cards", activeCardCount],
+                      ["Sealed", activeSealedCount],
+                    ]}
+                  />
+                  {activeBinder.isDefault ? (
+                    <p className="muted">This binder mirrors every active collection item. Styling and sleeve order are saved for this account.</p>
+                  ) : null}
+                </div>
+
+                <div className="binder-appearance-editor">
+                  <Field label="Outside artwork">
+                    <div className="binder-artwork-grid compact" role="radiogroup" aria-label="Selected binder artwork">
+                      {binderArtworkOptions.map((artwork) => (
+                        <button
+                          aria-checked={activeBinder.artworkId === artwork.id}
+                          className={activeBinder.artworkId === artwork.id ? "binder-artwork-option selected" : "binder-artwork-option"}
+                          key={artwork.id}
+                          onClick={() => updateActiveBinderAppearance({ artworkId: artwork.id })}
+                          role="radio"
+                          style={binderArtworkStyle(artwork.id)}
+                          type="button"
+                        >
+                          <Paintbrush size={15} />
+                          <span>{artwork.name}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </Field>
+                  <Field label="Inside material">
+                    <div className="binder-interior-grid compact" role="radiogroup" aria-label="Selected binder internal material">
+                      {binderInteriorOptions.map((interior) => (
+                        <button
+                          aria-checked={activeBinder.interiorId === interior.id}
+                          className={activeBinder.interiorId === interior.id ? "binder-interior-option selected" : "binder-interior-option"}
+                          key={interior.id}
+                          onClick={() => updateActiveBinderAppearance({ interiorId: interior.id })}
+                          role="radio"
+                          style={binderInteriorStyle(interior.id)}
+                          type="button"
+                        >
+                          <span className="binder-interior-swatch" />
+                          <span>{interior.name}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </Field>
+                </div>
+
+                {activeCustomBinder ? (
+                  <BinderItemPicker
+                    catalogueById={catalogueById}
+                    itemSearch={itemSearch}
+                    items={pickerItems}
+                    selectedItemIds={activeCustomBinder.itemIds}
+                    onItemSearchChange={setItemSearch}
+                    onToggleItem={toggleSelectedBinderItem}
+                  />
+                ) : null}
+              </aside>
+            </div>
+          </div>
+        </section>
+      ) : null}
 
       {focusedItem && focusedCatalogueItem ? (
         <BinderFocusModal
@@ -3871,6 +4023,7 @@ function BinderPage({
   items,
   liftedItemId,
   offset,
+  pageRole,
   recentMoveItemId,
   onSlotClick,
 }: {
@@ -3879,13 +4032,14 @@ function BinderPage({
   items: CollectionItem[];
   liftedItemId: string | null;
   offset: number;
+  pageRole?: "primary" | "secondary";
   recentMoveItemId: string | null;
   onSlotClick: (item: CollectionItem | undefined, slotIndex: number) => void;
 }) {
   const slots = Array.from({ length: 9 }, (_, index) => items[index]);
 
   return (
-    <div className="binder-page">
+    <div className={pageRole ? `binder-page ${pageRole}` : "binder-page"}>
       {slots.map((item, index) => {
         const catalogueItem = item ? catalogueById.get(item.catalogueId) : undefined;
         const isFilled = Boolean(item && catalogueItem);
@@ -9993,6 +10147,12 @@ function binderStorageKey(email: string) {
   return `${binderStoragePrefix}:${owner}`;
 }
 
+function defaultBinderSettingsStorageKey(email: string) {
+  const owner = email.trim().toLowerCase() || "local";
+
+  return `${defaultBinderSettingsStoragePrefix}:${owner}`;
+}
+
 function readStoredBinders(storageKey: string): CustomBinder[] {
   try {
     const parsed = JSON.parse(window.localStorage.getItem(storageKey) ?? "[]");
@@ -10007,6 +10167,32 @@ function readStoredBinders(storageKey: string): CustomBinder[] {
   } catch {
     return [];
   }
+}
+
+function readStoredDefaultBinderSettings(storageKey: string): DefaultBinderSettings {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(storageKey) ?? "{}");
+    return sanitizeStoredDefaultBinderSettings(parsed);
+  } catch {
+    return defaultBinderSettingsFallback;
+  }
+}
+
+function sanitizeStoredDefaultBinderSettings(value: unknown): DefaultBinderSettings {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return defaultBinderSettingsFallback;
+  }
+
+  const source = value as Record<string, unknown>;
+  const itemIds = Array.isArray(source.itemIds)
+    ? uniqueValues(source.itemIds.filter((itemId): itemId is string => typeof itemId === "string" && itemId.trim().length > 0))
+    : [];
+
+  return {
+    artworkId: isBinderArtworkId(source.artworkId) ? source.artworkId : defaultBinderSettingsFallback.artworkId,
+    interiorId: isBinderInteriorId(source.interiorId) ? source.interiorId : defaultBinderSettingsFallback.interiorId,
+    itemIds,
+  };
 }
 
 function sanitizeStoredBinder(value: unknown): CustomBinder | null {
@@ -10037,11 +10223,16 @@ function isBinderInteriorId(value: unknown): value is BinderInteriorId {
   return typeof value === "string" && binderInteriorOptions.some((interior) => interior.id === value);
 }
 
-function binderSummaries(collection: CollectionItem[], customBinders: CustomBinder[]): BinderSummary[] {
+function binderSummaries(
+  collection: CollectionItem[],
+  customBinders: CustomBinder[],
+  defaultBinderSettings: DefaultBinderSettings,
+): BinderSummary[] {
   const collectionById = new Map(collection.map((item) => [item.id, item]));
+  const orderedDefaultItems = orderedCollectionItems(collection, defaultBinderSettings.itemIds);
 
   return [
-    defaultBinderSummary(collection),
+    defaultBinderSummary(orderedDefaultItems, defaultBinderSettings),
     ...customBinders.map((binder) => ({
       artworkId: binder.artworkId,
       description: `${binder.itemIds.length} saved collection lot${binder.itemIds.length === 1 ? "" : "s"}.`,
@@ -10053,12 +10244,26 @@ function binderSummaries(collection: CollectionItem[], customBinders: CustomBind
   ];
 }
 
-function defaultBinderSummary(collection: CollectionItem[]): BinderSummary {
+function orderedCollectionItems(collection: CollectionItem[], preferredItemIds: string[]) {
+  const collectionById = new Map(collection.map((item) => [item.id, item]));
+  const orderedItems = preferredItemIds
+    .map((itemId) => collectionById.get(itemId))
+    .filter((item): item is CollectionItem => Boolean(item));
+  const orderedIds = new Set(orderedItems.map((item) => item.id));
+  const remainingItems = collection.filter((item) => !orderedIds.has(item.id));
+
+  return [...orderedItems, ...remainingItems];
+}
+
+function defaultBinderSummary(
+  collection: CollectionItem[],
+  settings: DefaultBinderSettings = defaultBinderSettingsFallback,
+): BinderSummary {
   return {
-    artworkId: "mint",
+    artworkId: settings.artworkId,
     description: "Every active collection item appears here automatically.",
     id: defaultBinderId,
-    interiorId: "classic",
+    interiorId: settings.interiorId,
     isDefault: true,
     items: collection,
     name: "Full Collection",

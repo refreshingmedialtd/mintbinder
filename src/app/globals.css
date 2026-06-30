@@ -1050,14 +1050,14 @@ h3 {
   left: 0;
   z-index: 30;
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(6, 1fr);
   border-top: 1px solid var(--line);
   background: var(--bottom-nav-bg);
   backdrop-filter: blur(14px);
 }
 
 .bottom-nav.admin {
-  grid-template-columns: repeat(6, 1fr);
+  grid-template-columns: repeat(7, 1fr);
 }
 
 .bottom-nav button {
@@ -2081,28 +2081,29 @@ h3 {
 
 .binder-shelf {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 184px));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(164px, 210px));
+  gap: 16px;
   align-items: stretch;
 }
 
 .binder-cover {
   position: relative;
   display: grid;
-  min-height: 222px;
-  align-content: end;
-  gap: 8px;
+  aspect-ratio: 3 / 4;
+  min-height: 0;
+  align-content: space-between;
+  gap: 12px;
   overflow: hidden;
-  padding: 18px 16px 18px 34px;
+  padding: 18px 16px 16px 34px;
   border: 1px solid color-mix(in srgb, var(--binder-accent) 52%, var(--line));
-  border-radius: 8px;
+  border-radius: 9px;
   background:
+    linear-gradient(90deg, color-mix(in srgb, var(--binder-spine) 90%, black) 0 22px, transparent 22px),
     linear-gradient(135deg, color-mix(in srgb, var(--binder-surface) 82%, white), var(--binder-surface)),
     radial-gradient(circle at 78% 18%, color-mix(in srgb, var(--binder-accent) 32%, transparent), transparent 32%);
   box-shadow: 0 18px 34px rgba(15, 23, 42, 0.22);
-  color: color-mix(in srgb, var(--ink) 86%, var(--binder-spine));
+  color: #111827;
   text-align: left;
-  transform-origin: bottom left;
   transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
 }
 
@@ -2113,12 +2114,14 @@ h3 {
 }
 
 .binder-cover::before {
-  inset: 12px 12px auto auto;
-  width: 54px;
-  height: 54px;
+  inset: 13px 13px auto auto;
+  width: 44px;
+  height: 44px;
   border: 1px solid color-mix(in srgb, var(--binder-accent) 58%, white);
   border-radius: 50%;
-  background: color-mix(in srgb, var(--binder-accent) 26%, transparent);
+  background:
+    radial-gradient(circle at 36% 32%, color-mix(in srgb, white 58%, transparent), transparent 30%),
+    color-mix(in srgb, var(--binder-accent) 28%, transparent);
 }
 
 .binder-cover::after {
@@ -2135,7 +2138,7 @@ h3 {
 .binder-cover.selected {
   border-color: var(--binder-accent);
   box-shadow: 0 22px 44px rgba(15, 23, 42, 0.3);
-  transform: translateY(-5px) rotate(-0.6deg);
+  transform: translateY(-4px);
 }
 
 .binder-cover-spine {
@@ -2160,21 +2163,43 @@ h3 {
   color: var(--binder-spine);
 }
 
-.binder-cover strong,
-.binder-cover span:not(.binder-cover-spine):not(.binder-cover-icon) {
+.binder-cover-label,
+.binder-cover-open {
   position: relative;
   z-index: 1;
 }
 
-.binder-cover strong {
-  font-size: 18px;
+.binder-cover-label {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, white 70%, var(--binder-accent));
+  border-radius: 7px;
+  background: color-mix(in srgb, white 88%, var(--binder-surface));
+  box-shadow: 0 10px 22px color-mix(in srgb, black 12%, transparent);
+}
+
+.binder-cover-label strong {
+  color: #111827;
+  font-size: 17px;
   line-height: 1.1;
 }
 
-.binder-cover span:not(.binder-cover-spine):not(.binder-cover-icon) {
-  color: var(--muted);
+.binder-cover-label span {
+  color: #64748b;
   font-size: 13px;
   font-weight: 850;
+}
+
+.binder-cover-open {
+  width: max-content;
+  padding: 6px 9px;
+  border: 1px solid color-mix(in srgb, var(--binder-accent) 48%, white);
+  border-radius: 999px;
+  background: color-mix(in srgb, white 82%, var(--binder-accent));
+  color: color-mix(in srgb, var(--binder-spine) 86%, #111827);
+  font-size: 12px;
+  font-weight: 950;
 }
 
 .binder-builder-panel {
@@ -2278,6 +2303,7 @@ h3 {
   box-shadow:
     inset 0 0 0 1px color-mix(in srgb, white 12%, transparent),
     0 24px 58px rgba(15, 23, 42, 0.18);
+  color: #f8fafc;
 }
 
 .binder-stage-header {
@@ -2289,8 +2315,14 @@ h3 {
 
 .binder-stage-header h2 {
   margin: 0;
+  color: #ffffff;
   font-size: clamp(26px, 4vw, 44px);
   letter-spacing: 0;
+}
+
+.binder-stage-header .eyebrow,
+.binder-stage-header .muted {
+  color: rgba(248, 250, 252, 0.78);
 }
 
 .binder-stage-stats {
@@ -2301,14 +2333,14 @@ h3 {
 }
 
 .binder-stage-stats span {
-  color: var(--ink);
+  color: #ffffff;
   font-size: 22px;
   font-weight: 950;
 }
 
 .binder-stage-stats small,
 .binder-overflow-note {
-  color: var(--muted);
+  color: rgba(248, 250, 252, 0.76);
   font-weight: 850;
 }
 
@@ -2321,13 +2353,37 @@ h3 {
   padding: 10px;
   border: 1px solid color-mix(in srgb, var(--binder-accent) 34%, var(--line));
   border-radius: 8px;
-  background: color-mix(in srgb, var(--binder-page) 84%, var(--surface));
+  background: color-mix(in srgb, #020617 58%, var(--binder-inner));
+  color: #ffffff;
+}
+
+.binder-arrange-bar span {
+  color: rgba(248, 250, 252, 0.76);
+  font-weight: 850;
+}
+
+.binder-page-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--binder-accent) 30%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, #020617 46%, var(--binder-inner));
+  color: #f8fafc;
+}
+
+.binder-page-toolbar > span {
+  font-size: 13px;
+  font-weight: 950;
 }
 
 .binder-book {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 38px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) 28px minmax(0, 1fr);
   gap: 0;
   padding: 16px;
   border: 1px solid color-mix(in srgb, var(--binder-stitch) 42%, var(--line));
@@ -2375,20 +2431,23 @@ h3 {
   align-content: space-around;
   justify-items: center;
   padding: 28px 0;
+  border-inline: 1px solid color-mix(in srgb, white 10%, transparent);
   background:
-    linear-gradient(90deg, color-mix(in srgb, black 24%, transparent), transparent 35% 65%, color-mix(in srgb, black 20%, transparent)),
+    linear-gradient(90deg, color-mix(in srgb, black 26%, transparent), transparent 42% 58%, color-mix(in srgb, black 22%, transparent)),
     color-mix(in srgb, var(--binder-inner) 72%, black);
 }
 
 .binder-ring {
-  width: 30px;
-  height: 58px;
-  border: 5px solid var(--binder-ring);
-  border-left-color: transparent;
-  border-radius: 50%;
+  width: 11px;
+  height: 11px;
+  border: 1px solid color-mix(in srgb, white 34%, var(--binder-ring));
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 34% 30%, color-mix(in srgb, white 72%, transparent), transparent 32%),
+    linear-gradient(135deg, color-mix(in srgb, var(--binder-ring) 82%, white), color-mix(in srgb, var(--binder-ring) 82%, black));
   box-shadow:
-    inset -4px 0 0 color-mix(in srgb, white 26%, transparent),
-    0 6px 14px color-mix(in srgb, black 22%, transparent);
+    inset 0 -1px 2px color-mix(in srgb, black 28%, transparent),
+    0 5px 12px color-mix(in srgb, black 20%, transparent);
 }
 
 .binder-pocket {
@@ -2536,6 +2595,64 @@ h3 {
 .binder-summary-list {
   display: grid;
   gap: 12px;
+}
+
+.binder-viewer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  overflow: auto;
+  background:
+    radial-gradient(circle at 50% 0, color-mix(in srgb, var(--theme-b) 14%, transparent), transparent 36%),
+    color-mix(in srgb, var(--body-start) 92%, rgba(2, 6, 23, 0.76));
+  backdrop-filter: blur(10px);
+}
+
+.binder-viewer {
+  display: grid;
+  gap: 16px;
+  min-height: 100dvh;
+  padding: 18px;
+  color: var(--ink);
+}
+
+.binder-viewer-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface) 90%, transparent);
+  box-shadow: 0 12px 34px rgba(15, 23, 42, 0.18);
+  backdrop-filter: blur(14px);
+}
+
+.binder-viewer-topbar h2,
+.binder-viewer-topbar p {
+  margin: 0;
+}
+
+.binder-viewer-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 380px);
+  gap: 18px;
+  align-items: start;
+}
+
+.binder-viewer .binder-stage {
+  min-height: calc(100dvh - 120px);
+}
+
+.binder-viewer-panel {
+  position: sticky;
+  top: 92px;
+  max-height: calc(100dvh - 110px);
+  overflow: auto;
 }
 
 .binder-focus-card {
@@ -4773,22 +4890,42 @@ h3 {
   }
 
   .binder-shelf {
-    grid-template-columns: repeat(auto-fill, minmax(132px, 164px));
+    grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
   }
 
   .binder-cover {
-    min-height: 170px;
+    aspect-ratio: 3 / 3.8;
     padding: 16px 14px 16px 32px;
   }
 
   .binder-builder-grid,
-  .binder-focus-layout,
+  .binder-viewer-grid,
   .binder-focus-card {
     grid-template-columns: 1fr;
   }
 
-  .binder-stage {
+  .binder-viewer {
+    padding: 12px;
+  }
+
+  .binder-viewer-topbar {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .binder-viewer-topbar > .button {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+
+  .binder-viewer-panel {
+    position: static;
+    max-height: none;
+  }
+
+  .binder-stage,
+  .binder-viewer .binder-stage {
     padding: 14px;
+    min-height: 0;
   }
 
   .binder-stage-header {
@@ -4804,27 +4941,16 @@ h3 {
     gap: 10px;
   }
 
-  .binder-ring-strip {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    align-content: center;
-    padding: 0 24px;
-    min-height: 36px;
-    background:
-      linear-gradient(180deg, color-mix(in srgb, black 18%, transparent), transparent 42% 58%, color-mix(in srgb, black 16%, transparent)),
-      color-mix(in srgb, var(--binder-inner) 72%, black);
-  }
-
-  .binder-ring {
-    width: 58px;
-    height: 30px;
-    border: 5px solid var(--binder-ring);
-    border-top-color: transparent;
+  .binder-ring-strip,
+  .binder-page.secondary {
+    display: none;
   }
 
   .binder-page {
     min-height: 0;
     padding: 10px;
     gap: 8px;
+    border-radius: 13px;
   }
 
   .binder-pocket {
@@ -4944,10 +5070,10 @@ h3 {
   }
 
   .binder-cover {
-    min-height: 148px;
+    aspect-ratio: 3 / 3.5;
   }
 
-  .binder-cover strong {
+  .binder-cover-label strong {
     font-size: 16px;
   }
 
