@@ -217,6 +217,8 @@ model CardSet {
   id             String          @id @default(uuid()) @db.Uuid
   providerIds    Json            @default("{}") @map("provider_ids")
   name           String
+  language       String          @default("en")
+  region         String          @default("international")
   series         String?
   releaseDate    DateTime?       @map("release_date") @db.Date
   printedTotal   Int?            @map("printed_total")
@@ -230,6 +232,8 @@ model CardSet {
   sealedProducts SealedProduct[]
 
   @@index([name])
+  @@index([language])
+  @@index([region])
   @@index([series])
   @@map("card_sets")
 }
@@ -239,6 +243,8 @@ model CardPrinting {
   cardSetId       String           @map("card_set_id") @db.Uuid
   providerIds     Json             @default("{}") @map("provider_ids")
   name            String
+  language        String           @default("en")
+  region          String           @default("international")
   number          String
   rarity          String?
   supertype       String?
@@ -258,6 +264,8 @@ model CardPrinting {
 
   @@index([cardSetId])
   @@index([name])
+  @@index([language])
+  @@index([region])
   @@index([cardSetId, number])
   @@index([searchText])
   @@map("card_printings")

@@ -13,6 +13,7 @@ export async function GET(request: Request) {
 
   const params = new URL(request.url).searchParams;
   const data = await searchCatalogueData(session.user.id, {
+    language: params.get("language") ?? "all",
     limit: Number(params.get("limit") ?? 40),
     q: params.get("q") ?? "",
     rarity: params.get("rarity") ?? "all",

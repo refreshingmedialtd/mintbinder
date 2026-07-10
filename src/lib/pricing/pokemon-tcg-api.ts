@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { ItemCondition, ItemType, type Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
+import { catalogueLanguageSearchAliases } from "@/lib/catalogue/languages";
 import { ExchangeRateConfigError, resolvePokemonPricingRates } from "@/lib/pricing/exchange-rates";
 import {
   normalizePokemonTcgPaging,
@@ -195,11 +196,13 @@ export async function syncPokemonTcgCards({
     await prisma.cardSet.upsert({
       where: { id: setId },
       update: {
+        language: "en",
         logoImageUrl: card.set.images?.logo,
         metadata: { provider: "pokemon-tcg-api", providerUpdatedAt: new Date().toISOString() },
         name: card.set.name,
         printedTotal: card.set.printedTotal,
         providerIds: { pokemon_tcg_api: card.set.id },
+        region: "international",
         releaseDate: parsePokemonDate(card.set.releaseDate),
         series: card.set.series,
         symbolImageUrl: card.set.images?.symbol,
@@ -207,11 +210,13 @@ export async function syncPokemonTcgCards({
       },
       create: {
         id: setId,
+        language: "en",
         logoImageUrl: card.set.images?.logo,
         metadata: { provider: "pokemon-tcg-api", providerUpdatedAt: new Date().toISOString() },
         name: card.set.name,
         printedTotal: card.set.printedTotal,
         providerIds: { pokemon_tcg_api: card.set.id },
+        region: "international",
         releaseDate: parsePokemonDate(card.set.releaseDate),
         series: card.set.series,
         symbolImageUrl: card.set.images?.symbol,
@@ -227,10 +232,12 @@ export async function syncPokemonTcgCards({
         imageLargeUrl: card.images?.large,
         imageSmallUrl: card.images?.small,
         legalities: card.legalities ?? {},
+        language: "en",
         name: card.name,
         number: card.number ?? "",
         providerIds: { pokemon_tcg_api: card.id },
         rarity: card.rarity,
+        region: "international",
         searchText: searchText(card),
         subtypes: card.subtypes ?? [],
         supertype: card.supertype,
@@ -243,10 +250,12 @@ export async function syncPokemonTcgCards({
         imageLargeUrl: card.images?.large,
         imageSmallUrl: card.images?.small,
         legalities: card.legalities ?? {},
+        language: "en",
         name: card.name,
         number: card.number ?? "",
         providerIds: { pokemon_tcg_api: card.id },
         rarity: card.rarity,
+        region: "international",
         searchText: searchText(card),
         subtypes: card.subtypes ?? [],
         supertype: card.supertype,
@@ -474,6 +483,7 @@ function searchText(card: PokemonTcgCard) {
     card.rarity,
     card.supertype,
     ...(card.subtypes ?? []),
+    ...catalogueLanguageSearchAliases("en"),
   ]
     .filter(Boolean)
     .join(" ")

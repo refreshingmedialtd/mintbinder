@@ -11,8 +11,10 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Authentication required." }, { status: 401 });
   }
 
-  const setName = new URL(request.url).searchParams.get("set") ?? "";
-  const data = await getCatalogueSetData(setName);
+  const params = new URL(request.url).searchParams;
+  const setName = params.get("set") ?? "";
+  const setId = params.get("setId");
+  const data = await getCatalogueSetData(setName, setId);
 
   return NextResponse.json(data);
 }

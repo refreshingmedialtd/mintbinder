@@ -15,6 +15,13 @@ import {
   latestPricePointForVariant,
   pokemonTcgImageUrlFromProviderIds,
 } from "@/lib/catalogue/variants";
+import {
+  catalogueLanguageCodesForSearch,
+  catalogueLanguageLabel,
+  catalogueRegionLabel,
+  languageLabelToCode,
+  normalizeCatalogueLanguageFilter,
+} from "@/lib/catalogue/languages";
 import { getEntitlements } from "@/lib/entitlements";
 import { getNotificationPreferences } from "@/lib/notifications/preferences";
 import { buildPriceHistory, latestPricePoint } from "@/lib/pricing/price-history";
@@ -44,6 +51,7 @@ type PriceLike = {
 type CatalogueScope = "full" | "referenced";
 
 type CatalogueSearchInput = {
+  language?: string;
   limit?: number;
   q?: string;
   rarity?: string;
@@ -53,6 +61,7 @@ type CatalogueSearchInput = {
 };
 
 type NormalizedCatalogueSearchInput = {
+  language: string;
   limit: number;
   q: string;
   rarity: string;
@@ -72,13 +81,15 @@ type AppDataOptions = {
 type CardPrintingWithPrices = {
   id: string;
   name: string;
+  language: string;
+  region: string;
   number: string;
   rarity: string | null;
   imageLargeUrl: string | null;
   imageSmallUrl: string | null;
   providerIds: unknown;
   variantMetadata: unknown;
-  cardSet: { name: string };
+  cardSet: { id: string; name: string };
   priceSnapshots: PriceLike[];
 };
 
@@ -296,8 +307,9 @@ export async function getCatalogueData(userId: string): Promise<AppCatalogueData
   }
 }
 
-export async function getCatalogueSetData(setName: string): Promise<AppCatalogueData> {
+export async function getCatalogueSetData(setName: string, setId?: string | null): Promise<AppCatalogueData> {
   const normalizedSetName = normalizeOptionalText(setName);
+  const normalizedSetId = normalizeOptionalText(setId ?? undefined);
 
   if (!process.env.DATABASE_URL) {
     const catalogue = sampleAppData.catalogue.filter((item) => item.type === "card" && item.set === normalizedSetName);
@@ -309,7 +321,7 @@ export async function getCatalogueSetData(setName: string): Promise<AppCatalogue
     };
   }
 
-  if (!normalizedSetName) {
+  if (!normalizedSetName && !normalizedSetId) {
     return {
       catalogue: [],
       source: "database",
@@ -318,7 +330,7 @@ export async function getCatalogueSetData(setName: string): Promise<AppCatalogue
 
   try {
     const cards = await prisma.cardPrinting.findMany({
-      where: { cardSet: { name: normalizedSetName } },
+      where: normalizedSetId ? { cardSetId: normalizedSetId } : { cardSet: { name: normalizedSetName } },
       include: {
         cardSet: true,
         priceSnapshots: {
@@ -453,12 +465,15 @@ async function searchCardPrintings(query: NormalizedCatalogueSearchInput): Promi
   const filters: Prisma.CardPrintingWhereInput[] = [];
 
   if (query.q) {
+    const languageCodes = catalogueLanguageCodesForSearch(query.q);
+
     filters.push({
       OR: [
         { searchText: { contains: query.q, mode: "insensitive" } },
         { name: { contains: query.q, mode: "insensitive" } },
         { number: { contains: query.q, mode: "insensitive" } },
         { rarity: { contains: query.q, mode: "insensitive" } },
+        ...(languageCodes.length ? [{ language: { in: languageCodes } }] : []),
         { cardSet: { name: { contains: query.q, mode: "insensitive" } } },
       ],
     });
@@ -470,6 +485,10 @@ async function searchCardPrintings(query: NormalizedCatalogueSearchInput): Promi
 
   if (query.rarity !== "all") {
     filters.push({ rarity: query.rarity });
+  }
+
+  if (query.language !== "all") {
+    filters.push({ language: query.language });
   }
 
   const cards = await prisma.cardPrinting.findMany({
@@ -690,6 +709,7 @@ function normalizeCatalogueSearchInput(input: CatalogueSearchInput): NormalizedC
   const limit = Number(input.limit);
 
   return {
+    language: normalizeCatalogueLanguageFilter(input.language),
     limit:
       Number.isFinite(limit) && limit > 0
         ? Math.min(Math.floor(limit), CATALOGUE_SEARCH_MAX_LIMIT)
@@ -724,7 +744,7 @@ function normalizeCatalogueSort(value?: string) {
 }
 
 function catalogueSearchFetchLimit(query: NormalizedCatalogueSearchInput) {
-  const multiplier = query.q || query.set !== "all" || query.rarity !== "all"
+  const multiplier = query.q || query.set !== "all" || query.rarity !== "all" || query.language !== "all"
     ? CATALOGUE_SEARCH_FETCH_MULTIPLIER
     : 3;
 
@@ -744,12 +764,15 @@ function cardCatalogueSearchWhere(query: NormalizedCatalogueSearchInput) {
 
   if (query.q) {
     const pattern = `%${query.q}%`;
+    const languageCodes = catalogueLanguageCodesForSearch(query.q);
+
     filters.push(Prisma.sql`(
       cp.search_text ILIKE ${pattern}
       OR cp.name ILIKE ${pattern}
       OR cp.number ILIKE ${pattern}
       OR cp.rarity ILIKE ${pattern}
       OR cs.name ILIKE ${pattern}
+      ${languageCodes.length ? Prisma.sql`OR cp.language IN (${Prisma.join(languageCodes)})` : Prisma.empty}
     )`);
   }
 
@@ -759,6 +782,10 @@ function cardCatalogueSearchWhere(query: NormalizedCatalogueSearchInput) {
 
   if (query.rarity !== "all") {
     filters.push(Prisma.sql`cp.rarity = ${query.rarity}`);
+  }
+
+  if (query.language !== "all") {
+    filters.push(Prisma.sql`cp.language = ${query.language}`);
   }
 
   return filters.length ? Prisma.sql`WHERE ${Prisma.join(filters, " AND ")}` : Prisma.empty;
@@ -814,11 +841,15 @@ function filterAndSortCatalogue(
         return false;
       }
 
+      if (query.language !== "all" && (item.language ?? "en") !== query.language) {
+        return false;
+      }
+
       if (!normalizedSearch) {
         return true;
       }
 
-      return [item.name, item.set, item.number, item.rarity]
+      return [item.name, item.set, item.number, item.rarity, item.language, item.languageLabel, item.regionLabel]
         .join(" ")
         .toLowerCase()
         .includes(normalizedSearch);
@@ -1454,13 +1485,15 @@ function mapCardPrintingToCatalogueItem(
   card: {
     id: string;
     name: string;
+    language: string;
+    region: string;
     number: string;
     rarity: string | null;
     imageLargeUrl: string | null;
     imageSmallUrl: string | null;
     providerIds: unknown;
     variantMetadata: unknown;
-    cardSet: { name: string };
+    cardSet: { id: string; name: string; language?: string | null; region?: string | null };
   },
   prices: PriceLike[] = [],
 ): CatalogueItem {
@@ -1473,6 +1506,11 @@ function mapCardPrintingToCatalogueItem(
     type: "card",
     name: card.name,
     set: card.cardSet.name,
+    setId: card.cardSet.id,
+    language: card.language,
+    languageLabel: catalogueLanguageLabel(card.language),
+    region: card.region,
+    regionLabel: catalogueRegionLabel(card.region),
     number: card.number,
     rarity: card.rarity ?? "Unknown",
     image,
@@ -1583,6 +1621,8 @@ function mapWishlistItem(item: {
 function mapSetProgress(set: {
   id: string;
   name: string;
+  language: string;
+  region: string;
   series: string | null;
   releaseDate: Date | null;
   logoImageUrl: string | null;
@@ -1592,6 +1632,10 @@ function mapSetProgress(set: {
   return {
     id: set.id,
     name: set.name,
+    language: set.language,
+    languageLabel: catalogueLanguageLabel(set.language),
+    region: set.region,
+    regionLabel: catalogueRegionLabel(set.region),
     series: set.series ?? undefined,
     releaseDate: dateOnly(set.releaseDate),
     logoImage: set.logoImageUrl ?? undefined,
@@ -1768,33 +1812,11 @@ function enumLabel(value: string) {
 }
 
 function languageLabel(value?: string | null) {
-  const languages: Record<string, string> = {
-    en: "English",
-    ja: "Japanese",
-    de: "German",
-    fr: "French",
-    it: "Italian",
-    es: "Spanish",
-    pt: "Portuguese",
-    other: "Other",
-  };
-
-  return value ? languages[value] ?? enumLabel(value) : "Unknown";
+  return value ? catalogueLanguageLabel(value) : "Unknown";
 }
 
 function languageToCode(value?: string) {
-  const languages: Record<string, string> = {
-    English: "en",
-    Japanese: "ja",
-    German: "de",
-    French: "fr",
-    Italian: "it",
-    Spanish: "es",
-    Portuguese: "pt",
-    Other: "other",
-  };
-
-  return value ? languages[value] ?? value.toLowerCase() : "en";
+  return languageLabelToCode(value);
 }
 
 function conditionToEnum(value: string | undefined, itemType: PrismaItemType) {

@@ -51,6 +51,7 @@ import {
   catalogueVariantLabels,
   latestPricePointForCatalogueVariant,
 } from "@/lib/catalogue/variants";
+import { CATALOGUE_LANGUAGE_OPTIONS, LOT_LANGUAGE_OPTIONS } from "@/lib/catalogue/languages";
 import {
   buildCollectionCsv,
   buildCollectionImportTemplateCsv,
@@ -998,19 +999,24 @@ export default function Home() {
   );
 
   const loadSetCatalogueData = useCallback(
-    async (setName: string, options?: { force?: boolean; quiet?: boolean }) => {
+    async (setName: string, options?: { force?: boolean; quiet?: boolean; setId?: string }) => {
       const normalizedSetName = setName.trim();
+      const setKey = options?.setId ?? normalizedSetName;
 
-      if (!normalizedSetName) {
+      if (!normalizedSetName && !setKey) {
         return [];
       }
 
       if (catalogueComplete && !options?.force) {
-        return catalogueItems.filter((item) => item.type === "card" && item.set === normalizedSetName);
+        return catalogueItems.filter((item) =>
+          item.type === "card" && (options?.setId ? item.setId === options.setId : item.set === normalizedSetName),
+        );
       }
 
-      if (loadedCatalogueSetNames.includes(normalizedSetName) && !options?.force) {
-        return catalogueItems.filter((item) => item.type === "card" && item.set === normalizedSetName);
+      if (loadedCatalogueSetNames.includes(setKey) && !options?.force) {
+        return catalogueItems.filter((item) =>
+          item.type === "card" && (options?.setId ? item.setId === options.setId : item.set === normalizedSetName),
+        );
       }
 
       if (isLoadingCatalogue) {
@@ -1021,6 +1027,9 @@ export default function Home() {
 
       try {
         const params = new URLSearchParams({ set: normalizedSetName });
+        if (options?.setId) {
+          params.set("setId", options.setId);
+        }
         const response = await fetch(`/api/catalogue/set?${params.toString()}`, { cache: "no-store" });
 
         if (!response.ok) {
@@ -1031,7 +1040,7 @@ export default function Home() {
 
         setCatalogueItems((current) => mergeCatalogueItems(current, data.catalogue));
         setLoadedCatalogueSetNames((current) =>
-          current.includes(normalizedSetName) ? current : [...current, normalizedSetName],
+          current.includes(setKey) ? current : [...current, setKey],
         );
         setDataSource(data.source);
         setDataNotice(data.notice ?? "");
@@ -2286,7 +2295,10 @@ type ScreenContext = {
   resetSampleData: () => void;
   refreshAppData: (options?: { quiet?: boolean }) => Promise<boolean>;
   loadCatalogueData: (options?: { force?: boolean; quiet?: boolean }) => Promise<CatalogueItem[] | null>;
-  loadSetCatalogueData: (setName: string, options?: { force?: boolean; quiet?: boolean }) => Promise<CatalogueItem[] | null>;
+  loadSetCatalogueData: (
+    setName: string,
+    options?: { force?: boolean; quiet?: boolean; setId?: string },
+  ) => Promise<CatalogueItem[] | null>;
   themeId: ThemeId;
 };
 
@@ -4209,6 +4221,7 @@ function AddScreen({
 }: ScreenContext) {
   const [catalogueSetFilter, setCatalogueSetFilter] = useState("all");
   const [catalogueRarityFilter, setCatalogueRarityFilter] = useState("all");
+  const [catalogueLanguageFilter, setCatalogueLanguageFilter] = useState("all");
   const [catalogueSort, setCatalogueSort] = useState<CatalogueSort>("value-desc");
   const [catalogueSearchResults, setCatalogueSearchResults] = useState<CatalogueItem[]>([]);
   const [catalogueSearchInfo, setCatalogueSearchInfo] = useState({ hasMore: false, resultCount: 0 });
@@ -4223,6 +4236,7 @@ function AddScreen({
   useEffect(() => {
     setCatalogueSetFilter("all");
     setCatalogueRarityFilter("all");
+    setCatalogueLanguageFilter("all");
   }, [appState.addType]);
 
   useEffect(() => {
@@ -4234,6 +4248,7 @@ function AddScreen({
       try {
         const params = new URLSearchParams({
           limit: "80",
+          language: appState.addType === "card" ? catalogueLanguageFilter : "all",
           q: addSearch.trim(),
           rarity: catalogueRarityFilter,
           set: catalogueSetFilter,
@@ -4274,7 +4289,15 @@ function AddScreen({
       window.clearTimeout(timeout);
       controller.abort();
     };
-  }, [addSearch, appState.addType, cacheCatalogueItems, catalogueRarityFilter, catalogueSetFilter, catalogueSort]);
+  }, [
+    addSearch,
+    appState.addType,
+    cacheCatalogueItems,
+    catalogueLanguageFilter,
+    catalogueRarityFilter,
+    catalogueSetFilter,
+    catalogueSort,
+  ]);
 
   const results = catalogueSearchResults;
   const normalizedSearch = normalizeSearchText(addSearch);
@@ -4301,7 +4324,10 @@ function AddScreen({
     : null;
   const selectedBaseValue = selected ? catalogueMarketValueMinor(selected, selectedVariant) : null;
   const selectedConditionMultiplier = conditionValueMultiplier(addCondition, selected?.type);
-  const usesEnglishMarketPricing = selected?.type === "card" && addLanguage !== "English";
+  const selectedCatalogueLanguageLabel = selected?.languageLabel ?? "English";
+  const usesDifferentLotLanguage = selected?.type === "card" && addLanguage !== selectedCatalogueLanguageLabel;
+  const selectedNeedsLocalPricing =
+    selected?.type === "card" && selected.language && selected.language !== "en" && !selected.hasPrice;
   const zoomedCatalogueItem = zoomedCatalogueItemId
     ? catalogueById.get(zoomedCatalogueItemId) ?? results.find((item) => item.id === zoomedCatalogueItemId)
     : undefined;
@@ -4310,8 +4336,8 @@ function AddScreen({
     setAddCondition(selected?.type === "sealed" ? "Sealed" : "Near mint");
     setAddQuantity(1);
     setAddVariant(undefined);
-    setAddLanguage("English");
-  }, [selected?.id, selected?.type]);
+    setAddLanguage(selected?.languageLabel ?? "English");
+  }, [selected?.id, selected?.languageLabel, selected?.type]);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -4394,6 +4420,19 @@ function AddScreen({
                   ))}
                 </select>
               </label>
+              {appState.addType === "card" ? (
+                <label className="sort-control">
+                  Language
+                  <select value={catalogueLanguageFilter} onChange={(event) => setCatalogueLanguageFilter(event.target.value)}>
+                    <option value="all">All catalogue languages</option>
+                    {CATALOGUE_LANGUAGE_OPTIONS.map((language) => (
+                      <option key={language.code} value={language.code}>
+                        {language.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
               <label className="sort-control">
                 Sort
                 <select value={catalogueSort} onChange={(event) => setCatalogueSort(event.target.value as CatalogueSort)}>
@@ -4487,13 +4526,9 @@ function AddScreen({
                 </Field>
                 <Field label="Language">
                   <select name="language" value={addLanguage} onChange={(event) => setAddLanguage(event.target.value)}>
-                    <option>English</option>
-                    <option>German</option>
-                    <option>French</option>
-                    <option>Italian</option>
-                    <option>Spanish</option>
-                    <option>Portuguese</option>
-                    <option>Other</option>
+                    {LOT_LANGUAGE_OPTIONS.map((language) => (
+                      <option key={language.code}>{language.label}</option>
+                    ))}
                   </select>
                 </Field>
                 <Field label="Quantity">
@@ -4529,10 +4564,16 @@ function AddScreen({
                   </Field>
                 )}
               </div>
-              {usesEnglishMarketPricing ? (
+              {usesDifferentLotLanguage ? (
                 <p className="form-note">
-                  Pricing is based on English-market data for this catalogue item. Japanese and Chinese printings need
-                  their own separate catalogues and are not included in this language selector yet.
+                  This lot language differs from the selected {selectedCatalogueLanguageLabel} catalogue printing. Use a
+                  manual value if the market should be priced from the lot language rather than this catalogue record.
+                </p>
+              ) : null}
+              {selectedNeedsLocalPricing ? (
+                <p className="form-note">
+                  This {selectedCatalogueLanguageLabel} printing is in the catalogue, but local market pricing has not
+                  been imported yet. Add a manual value for now if you have a sale comp or receipt.
                 </p>
               ) : null}
               <Field label="Valuation note">
@@ -4799,14 +4840,12 @@ function ItemDetailScreen({
                   </Field>
                   <Field label="Language">
                     <select name="language" defaultValue={owned.language}>
-                      <option>English</option>
-                      {owned.language === "Japanese" ? <option>Japanese</option> : null}
-                      <option>German</option>
-                      <option>French</option>
-                      <option>Italian</option>
-                      <option>Spanish</option>
-                      <option>Portuguese</option>
-                      <option>Other</option>
+                      {LOT_LANGUAGE_OPTIONS.map((language) => (
+                        <option key={language.code}>{language.label}</option>
+                      ))}
+                      {LOT_LANGUAGE_OPTIONS.some((language) => language.label === owned.language) ? null : (
+                        <option>{owned.language}</option>
+                      )}
                     </select>
                   </Field>
                   <Field label="Quantity">
@@ -5059,15 +5098,19 @@ function SetDetailScreen({
   const [sort, setSort] = useState<SetDetailSort>("number-asc");
   const [previewItemId, setPreviewItemId] = useState<string | null>(null);
   const set = sets.find((item) => item.id === appState.selectedSetId) ?? sets[0];
-  const setCards = set ? catalogueItems.filter((item) => item.type === "card" && item.set === set.name) : [];
-  const hasSetCatalogue = Boolean(set && (catalogueComplete || loadedCatalogueSetNames.includes(set.name)));
+  const setCards = set
+    ? catalogueItems.filter((item) =>
+      item.type === "card" && (item.setId ? item.setId === set.id : item.set === set.name),
+    )
+    : [];
+  const hasSetCatalogue = Boolean(set && (catalogueComplete || loadedCatalogueSetNames.includes(set.id)));
 
   useEffect(() => {
     if (!set || hasSetCatalogue || isLoadingCatalogue) {
       return;
     }
 
-    void loadSetCatalogueData(set.name, { quiet: true });
+    void loadSetCatalogueData(set.name, { quiet: true, setId: set.id });
   }, [hasSetCatalogue, isLoadingCatalogue, loadSetCatalogueData, set]);
 
   if (!set) {
@@ -5090,7 +5133,11 @@ function SetDetailScreen({
           title={isLoadingCatalogue ? "Loading set cards" : "Set cards not loaded"}
           description="Opening card printings, prices, and variants for this set."
           action={
-            <button className="button primary" onClick={() => void loadSetCatalogueData(set.name)} disabled={isLoadingCatalogue}>
+            <button
+              className="button primary"
+              onClick={() => void loadSetCatalogueData(set.name, { setId: set.id })}
+              disabled={isLoadingCatalogue}
+            >
               <Search size={17} />
               {isLoadingCatalogue ? "Loading" : "Load cards"}
             </button>
@@ -8640,6 +8687,9 @@ function CatalogueResult({
         <p className="item-value">{formatValuation(catalogueMarketValueMinor(item))}</p>
         {item.type === "card" && item.variantOptions?.length ? (
           <div className="tag-row">
+            {item.language && item.language !== "en" ? (
+              <span className="tag blue">{item.languageLabel ?? item.language}</span>
+            ) : null}
             {item.variantOptions.slice(0, 3).map((option) => (
               <span className="tag" key={option.label}>{option.label}</span>
             ))}
@@ -8671,6 +8721,9 @@ function CataloguePreview({ item, onImageOpen }: { item: CatalogueItem; onImageO
         <h3>{item.name}</h3>
         <p className="muted">{item.set} | {item.number}</p>
         <div className="tag-row item-meta-row">
+          {item.language && item.language !== "en" ? (
+            <span className="tag blue">{item.languageLabel ?? item.language}</span>
+          ) : null}
           <span className="set-print-rarity">{item.rarity}</span>
           <span className={valuationTagClass(item)}>{valuationStatusLabel(item)}</span>
         </div>
@@ -8776,6 +8829,9 @@ function SetProgressCard({ set, onClick }: { set: SetProgress; onClick: () => vo
         </div>
         <b>{done}%</b>
       </div>
+      {set.language && set.language !== "en" ? (
+        <span className="tag blue">{set.languageLabel ?? set.language}</span>
+      ) : null}
       <ProgressBar value={done} />
       <span>{set.owned} / {set.total} owned</span>
     </button>
@@ -10019,6 +10075,9 @@ function catalogueSearchTokens(item: CatalogueItem) {
     ...searchTokens(item.set),
     ...searchTokens(item.number),
     ...searchTokens(item.rarity),
+    ...searchTokens(item.language ?? ""),
+    ...searchTokens(item.languageLabel ?? ""),
+    ...searchTokens(item.regionLabel ?? ""),
     ...searchTokens(`${item.set} ${item.number}`),
     ...(item.variantOptions ?? []).flatMap((option) => searchTokens(option.label)),
   ]);
@@ -10033,6 +10092,9 @@ function matchesSetSearch(set: SetProgress, normalizedQuery: string) {
   const searchableTokens = uniqueValues([
     ...searchTokens(set.name),
     ...searchTokens(set.series ?? ""),
+    ...searchTokens(set.language ?? ""),
+    ...searchTokens(set.languageLabel ?? ""),
+    ...searchTokens(set.regionLabel ?? ""),
     ...searchTokens(set.releaseDate?.slice(0, 4) ?? ""),
   ]);
   const compactSearchable = searchableTokens.join("");

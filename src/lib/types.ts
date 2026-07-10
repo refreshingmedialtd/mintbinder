@@ -22,6 +22,11 @@ export type CatalogueItem = {
   type: ItemType;
   name: string;
   set: string;
+  setId?: string;
+  language?: string;
+  languageLabel?: string;
+  region?: string;
+  regionLabel?: string;
   number: string;
   rarity: string;
   image?: string;
@@ -61,6 +66,10 @@ export type WishlistItem = {
 export type SetProgress = {
   id: string;
   name: string;
+  language?: string;
+  languageLabel?: string;
+  region?: string;
+  regionLabel?: string;
   series?: string;
   releaseDate?: string;
   logoImage?: string;
@@ -156,6 +165,7 @@ export type AppCatalogueData = {
 export type AppCatalogueSearchData = AppCatalogueData & {
   hasMore: boolean;
   query: {
+    language: string;
     limit: number;
     q: string;
     rarity: string;
