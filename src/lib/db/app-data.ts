@@ -16,6 +16,10 @@ import {
   pokemonTcgImageUrlFromProviderIds,
 } from "@/lib/catalogue/variants";
 import {
+  catalogueNameAliasesForText,
+  catalogueSearchTermsForQuery,
+} from "@/lib/catalogue/name-aliases";
+import {
   catalogueLanguageCodesForSearch,
   catalogueLanguageLabel,
   catalogueRegionLabel,
@@ -466,15 +470,19 @@ async function searchCardPrintings(query: NormalizedCatalogueSearchInput): Promi
 
   if (query.q) {
     const languageCodes = catalogueLanguageCodesForSearch(query.q);
+    const searchTerms = catalogueSearchTermsForQuery(query.q);
+    const searchFilters = searchTerms.flatMap((term): Prisma.CardPrintingWhereInput[] => [
+      { searchText: { contains: term, mode: "insensitive" } },
+      { name: { contains: term, mode: "insensitive" } },
+      { number: { contains: term, mode: "insensitive" } },
+      { rarity: { contains: term, mode: "insensitive" } },
+      { cardSet: { name: { contains: term, mode: "insensitive" } } },
+    ]);
 
     filters.push({
       OR: [
-        { searchText: { contains: query.q, mode: "insensitive" } },
-        { name: { contains: query.q, mode: "insensitive" } },
-        { number: { contains: query.q, mode: "insensitive" } },
-        { rarity: { contains: query.q, mode: "insensitive" } },
+        ...searchFilters,
         ...(languageCodes.length ? [{ language: { in: languageCodes } }] : []),
-        { cardSet: { name: { contains: query.q, mode: "insensitive" } } },
       ],
     });
   }
@@ -763,15 +771,18 @@ function cardCatalogueSearchWhere(query: NormalizedCatalogueSearchInput) {
   const filters: Prisma.Sql[] = [];
 
   if (query.q) {
-    const pattern = `%${query.q}%`;
+    const patterns = catalogueSearchTermsForQuery(query.q).map((term) => `%${term}%`);
     const languageCodes = catalogueLanguageCodesForSearch(query.q);
-
-    filters.push(Prisma.sql`(
+    const textFilters = patterns.map((pattern) => Prisma.sql`(
       cp.search_text ILIKE ${pattern}
       OR cp.name ILIKE ${pattern}
       OR cp.number ILIKE ${pattern}
       OR cp.rarity ILIKE ${pattern}
       OR cs.name ILIKE ${pattern}
+    )`);
+
+    filters.push(Prisma.sql`(
+      ${Prisma.join(textFilters, " OR ")}
       ${languageCodes.length ? Prisma.sql`OR cp.language IN (${Prisma.join(languageCodes)})` : Prisma.empty}
     )`);
   }
@@ -849,7 +860,16 @@ function filterAndSortCatalogue(
         return true;
       }
 
-      return [item.name, item.set, item.number, item.rarity, item.language, item.languageLabel, item.regionLabel]
+      return [
+        item.name,
+        ...catalogueNameAliasesForText(item.name),
+        item.set,
+        item.number,
+        item.rarity,
+        item.language,
+        item.languageLabel,
+        item.regionLabel,
+      ]
         .join(" ")
         .toLowerCase()
         .includes(normalizedSearch);

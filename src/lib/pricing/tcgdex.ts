@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
+import { catalogueNameAliasesForText } from "@/lib/catalogue/name-aliases";
 import {
   CATALOGUE_LANGUAGE_OPTIONS,
   catalogueLanguageLabel,
@@ -254,6 +255,7 @@ function searchText(card: TcgdexCard, language: string) {
     card.stage,
     card.suffix,
     ...(card.types ?? []),
+    ...catalogueNameAliasesForText(card.name),
     ...catalogueLanguageSearchAliases(language),
   ]
     .filter(Boolean)

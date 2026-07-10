@@ -51,6 +51,7 @@ import {
   catalogueVariantLabels,
   latestPricePointForCatalogueVariant,
 } from "@/lib/catalogue/variants";
+import { catalogueNameAliasesForText } from "@/lib/catalogue/name-aliases";
 import { CATALOGUE_LANGUAGE_OPTIONS, LOT_LANGUAGE_OPTIONS } from "@/lib/catalogue/languages";
 import {
   buildCollectionCsv,
@@ -10072,6 +10073,7 @@ function matchesCatalogueSearch(item: CatalogueItem, normalizedQuery: string) {
 function catalogueSearchTokens(item: CatalogueItem) {
   return uniqueValues([
     ...searchTokens(item.name),
+    ...catalogueNameAliasesForText(item.name).flatMap((alias) => searchTokens(alias)),
     ...searchTokens(item.set),
     ...searchTokens(item.number),
     ...searchTokens(item.rarity),

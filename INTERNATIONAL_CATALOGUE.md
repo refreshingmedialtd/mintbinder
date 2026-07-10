@@ -21,6 +21,7 @@ This is a core USP: most collection apps handle English and some Japanese. Korea
 - Existing English imports default to `language = en` and `region = international`.
 - Catalogue API search accepts `language=all|en|ja|zh-tw|zh-cn|ko`.
 - Add Item has a catalogue language filter and collection lot language options for Japanese, Traditional Chinese, Simplified Chinese, and Korean.
+- International card search has an initial localized-name alias layer for high-value/common Pokemon, so English searches such as `chariz` can match Japanese `リザードン`, Traditional Chinese `噴火龍`, Simplified Chinese `喷火龙`, and Korean `리자몽`.
 - Set detail loading now uses set IDs where available, so localized sets with duplicate names do not bleed into each other.
 - TCGdex batch import endpoint:
   - `POST /api/jobs/international-catalogue-refresh`
@@ -35,9 +36,10 @@ This is a core USP: most collection apps handle English and some Japanese. Korea
 1. Run small TCGdex pilot imports for `ja` and `zh-tw`, then inspect Add Item, Sets, images, and duplicate behaviour.
 2. Increase `pageSize`/`maxPages` gradually once the UI is confirmed stable.
 3. Run `zh-cn` and `ko` as partial imports only, then review the coverage gaps rather than presenting them as complete.
-4. Build a coverage dashboard grouped by language and region: sets, cards, images, priced records.
-5. Research licensed or partnership-friendly Korean and Simplified Chinese sources. Do not scrape official pages into production without rights review.
-6. Add local-market pricing sources per language. Catalogue coverage should land before price coverage, but the UI must clearly show unpriced international cards.
+4. Expand the localized-name alias table beyond the first high-value/common Pokemon set. Long term this should be generated from a licensed species-name dataset rather than maintained by hand.
+5. Build a coverage dashboard grouped by language and region: sets, cards, images, priced records.
+6. Research licensed or partnership-friendly Korean and Simplified Chinese sources. Do not scrape official pages into production without rights review.
+7. Add local-market pricing sources per language. Catalogue coverage should land before price coverage, but the UI must clearly show unpriced international cards.
 
 ## Open Decisions
 
