@@ -169,3 +169,26 @@ test("formats provider variant keys for display", () => {
   assert.equal(displayVariantLabel("reverseHolofoil"), "Reverse Holofoil");
   assert.equal(displayVariantLabel("1stEditionHolofoil"), "1st Edition Holofoil");
 });
+
+test("builds catalogue variant options from TCGdex variant metadata", () => {
+  const options = buildCatalogueVariantOptions({
+    itemType: "card",
+    variantMetadata: {
+      variants: {
+        firstEdition: true,
+        normal: true,
+        reverse: true,
+        wPromo: true,
+      },
+      variantsDetailed: [
+        { size: "standard", type: "holo" },
+        { size: "jumbo", type: "normal" },
+      ],
+    },
+  });
+
+  assert.deepEqual(
+    options.map((option) => option.label),
+    ["Normal", "Holofoil", "Reverse Holofoil", "1st Edition", "Jumbo", "Promo Stamp"],
+  );
+});

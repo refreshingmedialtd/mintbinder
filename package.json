@@ -53,6 +53,7 @@
     "db:deploy": "prisma migrate deploy",
     "db:seed": "prisma db seed",
     "job:catalogue-batch": "node scripts/run-catalogue-batch.mjs",
+    "job:international-catalogue-backfill": "node scripts/run-international-catalogue-backfill.mjs",
     "job:international-catalogue-batch": "node scripts/run-international-catalogue-batch.mjs",
     "job:production-bootstrap": "node scripts/bootstrap-production-catalogue.mjs",
     "job:production-set-bootstrap": "node scripts/bootstrap-pokemon-sets.mjs",

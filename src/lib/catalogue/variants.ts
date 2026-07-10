@@ -202,7 +202,56 @@ function variantLabelsFromMetadata(metadata: unknown) {
     labels.push(displayVariantLabel(source.finish));
   }
 
+  labels.push(...tcgdexVariantLabels(source));
+
   return uniqueLabels(labels);
+}
+
+function tcgdexVariantLabels(source: Record<string, unknown>) {
+  const labels: string[] = [];
+  const variants = source.variants;
+
+  if (variants && typeof variants === "object" && !Array.isArray(variants)) {
+    for (const [key, enabled] of Object.entries(variants)) {
+      if (enabled === true) {
+        labels.push(tcgdexVariantLabel(key));
+      }
+    }
+  }
+
+  if (Array.isArray(source.variantsDetailed)) {
+    for (const variant of source.variantsDetailed) {
+      if (!variant || typeof variant !== "object" || Array.isArray(variant)) {
+        continue;
+      }
+
+      const type = (variant as Record<string, unknown>).type;
+      const size = (variant as Record<string, unknown>).size;
+
+      if (typeof type === "string") {
+        labels.push(tcgdexVariantLabel(type));
+      }
+
+      if (typeof size === "string" && size !== "standard") {
+        labels.push(displayVariantLabel(size));
+      }
+    }
+  }
+
+  return labels;
+}
+
+function tcgdexVariantLabel(value: string) {
+  const normalized = normalizeVariantLabel(value);
+  const labels: Record<string, string> = {
+    firstedition: "1st Edition",
+    holo: "Holofoil",
+    normal: "Normal",
+    reverse: "Reverse Holofoil",
+    wpromo: "Promo Stamp",
+  };
+
+  return labels[normalized] ?? displayVariantLabel(value);
 }
 
 function displayVariantLabelForCatalogue({

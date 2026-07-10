@@ -42,6 +42,11 @@ type TcgdexCard = TcgdexCardBrief & {
   suffix?: string;
   types?: string[];
   variants?: Record<string, boolean>;
+  variants_detailed?: Array<{
+    size?: string;
+    type?: string;
+    variantId?: string;
+  }>;
 };
 
 type SyncTcgdexCardsInput = {
@@ -261,12 +266,35 @@ function searchText(card: TcgdexCard, language: string) {
     card.stage,
     card.suffix,
     ...(card.types ?? []),
+    ...tcgdexVariantSearchTerms(card),
     ...catalogueNameAliasesForText(card.name),
     ...catalogueLanguageSearchAliases(language),
   ]
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
+}
+
+function tcgdexVariantSearchTerms(card: TcgdexCard) {
+  const terms: string[] = [];
+
+  for (const [key, enabled] of Object.entries(card.variants ?? {})) {
+    if (enabled) {
+      terms.push(key);
+    }
+  }
+
+  for (const variant of card.variants_detailed ?? []) {
+    if (variant.type) {
+      terms.push(variant.type);
+    }
+
+    if (variant.size) {
+      terms.push(variant.size);
+    }
+  }
+
+  return terms;
 }
 
 function tcgdexImageUrl(value: string | undefined, size: "high" | "low") {
@@ -289,6 +317,7 @@ function variantMetadata(card: TcgdexCard, language: string) {
     regulationMark: card.regulationMark,
     tcgdexLanguage: language,
     variants: card.variants,
+    variantsDetailed: card.variants_detailed,
   });
 }
 

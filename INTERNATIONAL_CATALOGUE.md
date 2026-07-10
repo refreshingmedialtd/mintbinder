@@ -29,12 +29,22 @@ This is a core USP: most collection apps handle English and some Japanese. Korea
   - Body: `{ "language": "ja", "page": 1, "pageSize": 50, "maxPages": 1 }`
 - Local runner:
   - `TCGDEX_IMPORT_LANGUAGE=ja npm run job:international-catalogue-batch`
-  - Supported first-pass language codes: `ja`, `zh-tw`, `zh-cn`, `ko`
+  - `npm run job:international-catalogue-backfill` imports every supported TCGdex page for `ja`, `zh-tw`, `zh-cn`, and `ko` in safer chunks.
+  - Optional controls: `TCGDEX_BACKFILL_LANGUAGES=ja,zh-tw,zh-cn,ko`, `TCGDEX_BACKFILL_PAGE_SIZE=250`, `TCGDEX_BACKFILL_CHUNK_PAGES=2`, `TCGDEX_BACKFILL_START_PAGE=1`.
+- Supported first-pass language codes: `ja`, `zh-tw`, `zh-cn`, `ko`
 - Starter Neon imports run on 10 July 2026:
   - Japanese: 500 cards / 60 sets
   - Traditional Chinese: 250 cards / 83 sets
   - Simplified Chinese: 150 cards / 8 sets
   - Korean: 150 cards / 3 sets
+- Full TCGdex-backed Neon import run on 10 July 2026:
+  - Japanese: 6,246 cards / 60 sets
+  - Traditional Chinese: 7,436 cards / 83 sets
+  - Simplified Chinese: 877 cards / 8 sets
+  - Korean: 239 cards / 3 sets
+- Current source-backed full import target is every card exposed by the TCGdex language endpoints. This gets Mint Binder much closer to the USP quickly, but it is not a legal claim that every official card ever printed in those regions is complete beyond TCGdex. True exhaustive coverage still needs a licensed/permissioned source strategy for any gaps, especially Korean and newer Asian-language releases.
+- TCGdex variant metadata now feeds catalogue variant options and search text, so imported localized cards can expose source-backed finishes such as Normal, Holofoil, Reverse Holofoil, 1st Edition, promo stamp, and non-standard sizes where the source provides them.
+- Image coverage is uneven in the current TCGdex source. Some international rows expose no image field and their deterministic asset URLs return 404, so Mint Binder should keep showing a clear no-image placeholder rather than storing broken links until a licensed image source or cache process is added.
 
 ## Rollout Order
 
