@@ -17,6 +17,8 @@ import {
 } from "@/lib/catalogue/variants";
 import {
   catalogueNameAliasesForText,
+  catalogueDisplayNameForText,
+  catalogueDisplaySetForText,
   catalogueSearchTermsForQuery,
 } from "@/lib/catalogue/name-aliases";
 import {
@@ -1520,19 +1522,26 @@ function mapCardPrintingToCatalogueItem(
   const priceHistory = buildPriceHistory(prices);
   const latestPrice = latestPricePoint(priceHistory);
   const image = card.imageLargeUrl ?? card.imageSmallUrl ?? pokemonTcgImageUrlFromProviderIds(card.providerIds);
+  const displayName = catalogueDisplayNameForText(card.name);
+  const displaySet = catalogueDisplaySetForText(card.cardSet.name);
+  const rarity = displayCatalogueRarity(card.rarity);
 
   return {
     id: card.id,
     type: "card",
     name: card.name,
+    displayName,
+    localName: displayName ? card.name : undefined,
     set: card.cardSet.name,
+    displaySet,
+    localSet: displaySet ? card.cardSet.name : undefined,
     setId: card.cardSet.id,
     language: card.language,
     languageLabel: catalogueLanguageLabel(card.language),
     region: card.region,
     regionLabel: catalogueRegionLabel(card.region),
     number: card.number,
-    rarity: card.rarity ?? "Unknown",
+    rarity,
     image,
     hasPrice: Boolean(latestPrice),
     valueMinor: latestPrice?.valueMinor ?? 0,
@@ -1543,7 +1552,7 @@ function mapCardPrintingToCatalogueItem(
     variantOptions: buildCatalogueVariantOptions({
       itemType: "card",
       priceHistory,
-      rarity: card.rarity ?? undefined,
+      rarity,
       setName: card.cardSet.name,
       variantMetadata: card.variantMetadata,
     }),
@@ -1652,6 +1661,8 @@ function mapSetProgress(set: {
   return {
     id: set.id,
     name: set.name,
+    displayName: catalogueDisplaySetForText(set.name),
+    localName: catalogueDisplaySetForText(set.name) ? set.name : undefined,
     language: set.language,
     languageLabel: catalogueLanguageLabel(set.language),
     region: set.region,
@@ -1663,6 +1674,14 @@ function mapSetProgress(set: {
     owned: counts.owned,
     total: set.total ?? counts.total,
   };
+}
+
+function displayCatalogueRarity(value?: string | null) {
+  if (!value || value.trim().toLowerCase() === "none") {
+    return "Unknown";
+  }
+
+  return value;
 }
 
 function mapStorageLocations(

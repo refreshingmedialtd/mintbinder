@@ -30,6 +30,11 @@ This is a core USP: most collection apps handle English and some Japanese. Korea
 - Local runner:
   - `TCGDEX_IMPORT_LANGUAGE=ja npm run job:international-catalogue-batch`
   - Supported first-pass language codes: `ja`, `zh-tw`, `zh-cn`, `ko`
+- Starter Neon imports run on 10 July 2026:
+  - Japanese: 500 cards / 60 sets
+  - Traditional Chinese: 250 cards / 83 sets
+  - Simplified Chinese: 150 cards / 8 sets
+  - Korean: 150 cards / 3 sets
 
 ## Rollout Order
 

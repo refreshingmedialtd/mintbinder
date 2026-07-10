@@ -173,6 +173,7 @@ type WishlistSort =
 type SetOptionGroup = {
   label: string;
   options: Array<{
+    displayName?: string;
     name: string;
     releaseDate?: string;
   }>;
@@ -5122,7 +5123,7 @@ function SetDetailScreen({
     return (
       <section className="page">
         <PageHeader
-          title={set.name}
+          title={setTitle(set)}
           action={
             <button className="button" onClick={() => navigate("sets")}>
               <ArrowLeft size={17} />
@@ -5193,7 +5194,7 @@ function SetDetailScreen({
   return (
     <section className="page">
       <PageHeader
-        title={set.name}
+        title={setTitle(set)}
         action={
           <button className="button" onClick={() => navigate("sets")}>
             <ArrowLeft size={17} />
@@ -8674,14 +8675,17 @@ function CatalogueResult({
   selected: boolean;
   onClick: () => void;
 }) {
+  const title = catalogueItemTitle(item);
+  const setLabel = catalogueItemSetLabel(item);
+
   return (
     <button className={selected ? "item-card clickable selected" : "item-card clickable"} onClick={onClick}>
       <div className="item-image">{renderItemImage(item)}</div>
       <div className="item-main">
         <div className="item-title-row">
           <div>
-            <h3>{item.name}</h3>
-            <p className="muted">{item.set} | {item.number}</p>
+            <h3>{title}</h3>
+            <p className="muted">{setLabel} | {item.number}</p>
           </div>
           {selected ? <span className="set-print-status owned">Selected</span> : <span className="set-print-rarity">{item.rarity}</span>}
         </div>
@@ -8703,6 +8707,8 @@ function CatalogueResult({
 
 function CataloguePreview({ item, onImageOpen }: { item: CatalogueItem; onImageOpen?: () => void }) {
   const variants = item.type === "card" ? item.variantOptions ?? [] : [];
+  const title = catalogueItemTitle(item);
+  const setLabel = catalogueItemSetLabel(item);
 
   return (
     <div className="selected-preview">
@@ -8711,7 +8717,7 @@ function CataloguePreview({ item, onImageOpen }: { item: CatalogueItem; onImageO
           className="item-image selected-preview-image-button"
           type="button"
           onClick={onImageOpen}
-          aria-label={`Zoom ${item.name} image`}
+          aria-label={`Zoom ${title} image`}
         >
           {renderItemImage(item)}
         </button>
@@ -8719,8 +8725,8 @@ function CataloguePreview({ item, onImageOpen }: { item: CatalogueItem; onImageO
         <div className="item-image">{renderItemImage(item)}</div>
       )}
       <div>
-        <h3>{item.name}</h3>
-        <p className="muted">{item.set} | {item.number}</p>
+        <h3>{title}</h3>
+        <p className="muted">{setLabel} | {item.number}</p>
         <div className="tag-row item-meta-row">
           {item.language && item.language !== "en" ? (
             <span className="tag blue">{item.languageLabel ?? item.language}</span>
@@ -8743,6 +8749,8 @@ function CataloguePreview({ item, onImageOpen }: { item: CatalogueItem; onImageO
 function CardImageZoomModal({ item, onClose }: { item: CatalogueItem; onClose: () => void }) {
   const titleId = `card-image-zoom-${item.id}`;
   const marketValue = catalogueMarketValueMinor(item);
+  const title = catalogueItemTitle(item);
+  const setLabel = catalogueItemSetLabel(item);
 
   useEffect(() => {
     function closeOnEscape(event: KeyboardEvent) {
@@ -8769,8 +8777,8 @@ function CardImageZoomModal({ item, onClose }: { item: CatalogueItem; onClose: (
         </button>
         <div className="card-zoom-image">{renderItemImage(item)}</div>
         <div className="card-zoom-copy">
-          <h2 id={titleId}>{item.name}</h2>
-          <p>{item.set} | No. {item.number}</p>
+          <h2 id={titleId}>{title}</h2>
+          <p>{setLabel} | No. {item.number}</p>
           <div className="tag-row">
             <span className="set-print-rarity">{item.rarity}</span>
             <span className={valuationTagClass(item)}>{valuationStatusLabel(item)}</span>
@@ -8819,13 +8827,14 @@ function VariantSelect({
 
 function SetProgressCard({ set, onClick }: { set: SetProgress; onClick: () => void }) {
   const done = completionPercent(set.owned, set.total);
+  const title = setTitle(set);
 
   return (
     <button className="set-card" onClick={onClick}>
       <SetArtwork set={set} />
       <div className="set-card-header">
         <div>
-          <strong>{set.name}</strong>
+          <strong>{title}</strong>
           <span>{set.series ?? "Pokemon TCG"}</span>
         </div>
         <b>{done}%</b>
@@ -8841,6 +8850,7 @@ function SetProgressCard({ set, onClick }: { set: SetProgress; onClick: () => vo
 
 function SetArtwork({ set }: { set: SetProgress }) {
   const image = set.logoImage ?? set.symbolImage;
+  const title = setTitle(set);
 
   if (image) {
     return (
@@ -8848,7 +8858,7 @@ function SetArtwork({ set }: { set: SetProgress }) {
         <Image
           className="set-artwork-image"
           src={image}
-          alt={`${set.name} logo`}
+          alt={`${title} logo`}
           fill
           sizes="(min-width: 980px) 220px, 50vw"
           unoptimized
@@ -8857,7 +8867,7 @@ function SetArtwork({ set }: { set: SetProgress }) {
     );
   }
 
-  return <div className="set-artwork set-artwork-fallback">{setInitials(set.name)}</div>;
+  return <div className="set-artwork set-artwork-fallback">{setInitials(title)}</div>;
 }
 
 function PageHeader({ title, action }: { title: string; action?: ReactNode }) {
@@ -10072,8 +10082,10 @@ function matchesCatalogueSearch(item: CatalogueItem, normalizedQuery: string) {
 
 function catalogueSearchTokens(item: CatalogueItem) {
   return uniqueValues([
+    ...searchTokens(catalogueItemTitle(item)),
     ...searchTokens(item.name),
     ...catalogueNameAliasesForText(item.name).flatMap((alias) => searchTokens(alias)),
+    ...searchTokens(catalogueItemSetLabel(item)),
     ...searchTokens(item.set),
     ...searchTokens(item.number),
     ...searchTokens(item.rarity),
@@ -10093,6 +10105,7 @@ function matchesSetSearch(set: SetProgress, normalizedQuery: string) {
   const queryTokens = searchTokens(normalizedQuery);
   const searchableTokens = uniqueValues([
     ...searchTokens(set.name),
+    ...searchTokens(setTitle(set)),
     ...searchTokens(set.series ?? ""),
     ...searchTokens(set.language ?? ""),
     ...searchTokens(set.languageLabel ?? ""),
@@ -10105,6 +10118,18 @@ function matchesSetSearch(set: SetProgress, normalizedQuery: string) {
     compactSearchable.includes(queryToken) ||
     searchableTokens.some((token) => token.includes(queryToken)),
   );
+}
+
+function catalogueItemTitle(item: CatalogueItem) {
+  return item.displayName ?? item.name;
+}
+
+function catalogueItemSetLabel(item: CatalogueItem) {
+  return item.displaySet ?? item.set;
+}
+
+function setTitle(set: SetProgress) {
+  return set.displayName ?? set.name;
 }
 
 function normalizeSearchText(value: string) {
@@ -10130,6 +10155,7 @@ function groupedSetOptions(setNames: string[], sets: SetProgress[]): SetOptionGr
     const groupName = set?.series?.trim() || "Other sets";
     const options = groups.get(groupName) ?? [];
     options.push({
+      displayName: set?.displayName,
       name: setName,
       releaseDate: set?.releaseDate,
     });
@@ -10150,7 +10176,7 @@ function compareSetOptions(
   right: SetOptionGroup["options"][number],
 ) {
   return releaseTime(right.releaseDate) - releaseTime(left.releaseDate) ||
-    left.name.localeCompare(right.name, undefined, { sensitivity: "base" });
+    (left.displayName ?? left.name).localeCompare(right.displayName ?? right.name, undefined, { sensitivity: "base" });
 }
 
 function newestSetTime(options: SetOptionGroup["options"]) {
@@ -10169,8 +10195,9 @@ function releaseTime(value?: string) {
 
 function formatSetOptionLabel(option: SetOptionGroup["options"][number]) {
   const year = option.releaseDate?.slice(0, 4);
+  const label = option.displayName ?? option.name;
 
-  return year ? `${year} - ${option.name}` : option.name;
+  return year ? `${year} - ${label}` : label;
 }
 
 function compareCatalogueNumbers(left: string, right: string) {

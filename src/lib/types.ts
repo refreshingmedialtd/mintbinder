@@ -21,7 +21,11 @@ export type CatalogueItem = {
   id: string;
   type: ItemType;
   name: string;
+  displayName?: string;
+  localName?: string;
   set: string;
+  displaySet?: string;
+  localSet?: string;
   setId?: string;
   language?: string;
   languageLabel?: string;
@@ -66,6 +70,8 @@ export type WishlistItem = {
 export type SetProgress = {
   id: string;
   name: string;
+  displayName?: string;
+  localName?: string;
   language?: string;
   languageLabel?: string;
   region?: string;

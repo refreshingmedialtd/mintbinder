@@ -1,7 +1,11 @@
 import { createHash } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
-import { catalogueNameAliasesForText } from "@/lib/catalogue/name-aliases";
+import {
+  catalogueDisplayNameForText,
+  catalogueDisplaySetForText,
+  catalogueNameAliasesForText,
+} from "@/lib/catalogue/name-aliases";
 import {
   CATALOGUE_LANGUAGE_OPTIONS,
   catalogueLanguageLabel,
@@ -121,8 +125,8 @@ export async function syncTcgdexCardPages({
       update: {
         artist: card.illustrator,
         cardSetId: setId,
-        imageLargeUrl: card.image,
-        imageSmallUrl: card.image,
+        imageLargeUrl: tcgdexImageUrl(card.image, "high"),
+        imageSmallUrl: tcgdexImageUrl(card.image, "low"),
         language: resolvedLanguage.code,
         legalities: card.legal ?? {},
         name: card.name,
@@ -139,8 +143,8 @@ export async function syncTcgdexCardPages({
         id: cardId,
         artist: card.illustrator,
         cardSetId: setId,
-        imageLargeUrl: card.image,
-        imageSmallUrl: card.image,
+        imageLargeUrl: tcgdexImageUrl(card.image, "high"),
+        imageSmallUrl: tcgdexImageUrl(card.image, "low"),
         language: resolvedLanguage.code,
         legalities: card.legal ?? {},
         name: card.name,
@@ -248,7 +252,9 @@ function uuidFromString(value: string) {
 function searchText(card: TcgdexCard, language: string) {
   return [
     card.name,
+    catalogueDisplayNameForText(card.name),
     card.set?.name,
+    catalogueDisplaySetForText(card.set?.name),
     card.localId,
     card.rarity,
     card.category,
@@ -261,6 +267,14 @@ function searchText(card: TcgdexCard, language: string) {
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
+}
+
+function tcgdexImageUrl(value: string | undefined, size: "high" | "low") {
+  if (!value) {
+    return undefined;
+  }
+
+  return value.endsWith(".png") ? value : `${value}/${size}.png`;
 }
 
 function cardSubtypes(card: TcgdexCard) {

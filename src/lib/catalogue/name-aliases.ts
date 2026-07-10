@@ -187,6 +187,64 @@ export function catalogueNameAliasesForText(value?: string | null) {
   );
 }
 
+export function catalogueDisplayNameForText(value?: string | null) {
+  return englishDisplayText(value, [
+    ["かがやく", "Radiant "],
+    ["輝く", "Radiant "],
+    ["메가", "Mega "],
+    ["メガ", "Mega "],
+    ["超級", "Mega "],
+    ["超级", "Mega "],
+    ["ex", " ex"],
+    ["EX", " EX"],
+    ["VSTAR", " VSTAR"],
+    ["VMAX", " VMAX"],
+  ]);
+}
+
+export function catalogueDisplaySetForText(value?: string | null) {
+  return englishDisplayText(value, [
+    ["ポケモンカード151", "Pokemon Card 151"],
+    ["デッキビルドBOX", "Deck Build Box "],
+    ["ハイクラスパック", "High Class Pack "],
+    ["強化拡張パック", "Enhanced Expansion Pack "],
+    ["拡張パック", "Expansion Pack "],
+    ["スターターセット", "Starter Set "],
+    ["スタートデッキ", "Start Deck "],
+    ["ステラミラクル", "Stellar Miracle"],
+    ["ロケット団の栄光", "Glory of Team Rocket"],
+    ["熱風のアリーナ", "Heat Wave Arena"],
+    ["バトルパートナーズ", "Battle Partners"],
+    ["テラスタルフェスex", "Terastal Festival ex"],
+    ["超電ブレイカー", "Super Electric Breaker"],
+    ["楽園ドラゴーナ", "Paradise Dragona"],
+    ["ナイトワンダラー", "Night Wanderer"],
+    ["変幻の仮面", "Mask of Change"],
+    ["クリムゾンヘイズ", "Crimson Haze"],
+    ["ワイルドフォース", "Wild Force"],
+    ["サイバージャッジ", "Cyber Judge"],
+    ["シャイニートレジャーex", "Shiny Treasure ex"],
+    ["レイジングサーフ", "Raging Surf"],
+    ["黒炎の支配者", "Ruler of the Black Flame"],
+    ["スノーハザード", "Snow Hazard"],
+    ["クレイバースト", "Clay Burst"],
+    ["トリプレットビート", "Triplet Beat"],
+    ["バイオレットex", "Violet ex"],
+    ["スカーレットex", "Scarlet ex"],
+    ["VSTARユニバース", "VSTAR Universe"],
+    ["白熱のアルカナ", "Incandescent Arcana"],
+    ["ロストアビス", "Lost Abyss"],
+    ["ダークファンタズマ", "Dark Phantasma"],
+    ["スペースジャグラー", "Space Juggler"],
+    ["タイムゲイザー", "Time Gazer"],
+    ["バトルリージョン", "Battle Region"],
+    ["スターバース", "Star Birth"],
+    ["VMAXクライマックス", "VMAX Climax"],
+    ["フュージョンアーツ", "Fusion Arts"],
+    ["イーブイヒーローズ", "Eevee Heroes"],
+  ]);
+}
+
 export function catalogueSearchTermsForQuery(value?: string | null) {
   const normalized = normalizeAliasText(value);
   const raw = value?.trim();
@@ -207,6 +265,44 @@ export function catalogueSearchTermsForQuery(value?: string | null) {
   });
 
   return uniqueAliasValues([raw, ...aliasTerms]);
+}
+
+function englishDisplayText(value: string | null | undefined, phraseReplacements: Array<[string, string]>) {
+  const raw = value?.trim();
+
+  if (!raw) {
+    return undefined;
+  }
+
+  let display = raw;
+  let changed = false;
+
+  for (const [localized, english] of [...phraseReplacements, ...pokemonReplacementPairs()]) {
+    if (!display.includes(localized)) {
+      continue;
+    }
+
+    display = display.replaceAll(localized, english);
+    changed = true;
+  }
+
+  if (!changed) {
+    return undefined;
+  }
+
+  return display
+    .replace(/([A-Z])\s+(MAX|STAR)\b/g, "$1$2")
+    .replace(/\b([A-Z])\s+ex\b/g, "$1 ex")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function pokemonReplacementPairs() {
+  return POKEMON_NAME_ALIASES.flatMap((entry) =>
+    entry.aliases
+      .filter((alias) => /[^\u0000-\u007f]/.test(alias) || alias !== entry.english)
+      .map((alias) => [alias, entry.english] as [string, string]),
+  ).sort((left, right) => right[0].length - left[0].length);
 }
 
 function normalizeAliasText(value?: string | null) {
