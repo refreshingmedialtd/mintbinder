@@ -229,6 +229,122 @@ test("imports Japanese card price snapshots from the Pokemon Japan category", as
   assert.equal(snapshots[0].metadata.categoryId, 85);
 });
 
+test("rotates Japanese card pricing through unpriced and oldest-priced groups", async () => {
+  const snapshots = [];
+  const requestedProductUrls = [];
+  const cardsBySet = new Map([
+    ["set-empty", [{ id: "card-empty", name: "Pikachu", number: "001" }]],
+    ["set-old", [{ id: "card-old", name: "Charmander", number: "002" }]],
+    ["set-recent", [{ id: "card-recent", name: "Squirtle", number: "003" }]],
+  ]);
+  const prisma = {
+    cardPrinting: {
+      findMany: async ({ where }) => cardsBySet.get(where.cardSetId) ?? [],
+    },
+    cardSet: {
+      findMany: async () => [
+        {
+          cardPrintings: [{ priceSnapshots: [{ observedAt: new Date("2026-07-13T00:00:00.000Z"), source: "tcgcsv-japan-card" }] }],
+          id: "set-recent",
+          language: "ja",
+          name: "Recent Set",
+          providerIds: { tcgdex_ja: "m2a" },
+        },
+        {
+          cardPrintings: [{ priceSnapshots: [{ observedAt: new Date("2026-01-01T00:00:00.000Z"), source: "tcgcsv-japan-card" }] }],
+          id: "set-old",
+          language: "ja",
+          name: "Old Set",
+          providerIds: { tcgdex_ja: "m5" },
+        },
+        {
+          cardPrintings: [{ priceSnapshots: [] }],
+          id: "set-empty",
+          language: "ja",
+          name: "Empty Set",
+          providerIds: { tcgdex_ja: "m6" },
+        },
+      ],
+    },
+    priceSnapshot: {
+      create: async ({ data }) => {
+        snapshots.push(data);
+        return { id: `snapshot-${snapshots.length}`, ...data };
+      },
+      findFirst: async () => ({ id: "existing-snapshot" }),
+    },
+  };
+  const fetchImpl = async (url) => {
+    if (url.includes("/products")) {
+      requestedProductUrls.push(url);
+    }
+
+    return {
+      ok: true,
+      json: async () => {
+        if (url.endsWith("/groups")) {
+          return {
+            success: true,
+            results: [
+              { abbreviation: "M2a", groupId: 301, name: "M2a: Recent Set" },
+              { abbreviation: "M5", groupId: 302, name: "M5: Old Set" },
+              { abbreviation: "M6", groupId: 303, name: "M6: Empty Set" },
+            ],
+          };
+        }
+
+        if (url.endsWith("/303/products")) {
+          return {
+            success: true,
+            results: [{ extendedData: [{ name: "Number", value: "001/100" }], name: "Pikachu", productId: 3031 }],
+          };
+        }
+
+        if (url.endsWith("/302/products")) {
+          return {
+            success: true,
+            results: [{ extendedData: [{ name: "Number", value: "002/100" }], name: "Charmander", productId: 3021 }],
+          };
+        }
+
+        if (url.endsWith("/301/products")) {
+          return {
+            success: true,
+            results: [{ extendedData: [{ name: "Number", value: "003/100" }], name: "Squirtle", productId: 3011 }],
+          };
+        }
+
+        const productId = url.includes("/303/") ? 3031 : url.includes("/302/") ? 3021 : 3011;
+
+        return {
+          success: true,
+          results: [{ marketPrice: 5, productId, subTypeName: "Normal" }],
+        };
+      },
+    };
+  };
+
+  const summary = await syncTcgcsvCardPrices({
+    categoryId: 85,
+    fetchImpl,
+    groupLimit: 2,
+    language: "ja",
+    priceOnlyUnpriced: false,
+    prisma,
+    source: "tcgcsv-japan-card",
+    usdToGbpRate: 0.8,
+    waitMs: 0,
+  });
+
+  assert.equal(summary.groupsMatched, 2);
+  assert.equal(summary.pricingSnapshotsCreated, 2);
+  assert.deepEqual(requestedProductUrls, [
+    "https://tcgcsv.com/tcgplayer/85/303/products",
+    "https://tcgcsv.com/tcgplayer/85/302/products",
+  ]);
+  assert.deepEqual(snapshots.map((snapshot) => snapshot.cardPrintingId), ["card-empty", "card-old"]);
+});
+
 test("imports card price snapshots from TCGCSV payloads", async () => {
   const snapshots = [];
   const prisma = {

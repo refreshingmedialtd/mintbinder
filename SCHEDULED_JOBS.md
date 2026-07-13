@@ -12,9 +12,9 @@ JOB_SECRET="..."
 EXCHANGE_RATES_PROVIDER="frankfurter"
 EXCHANGE_RATES_AUTO="true"
 EXCHANGE_RATES_ALLOW_ENV_FALLBACK="true"
-TCGCSV_JAPAN_CARD_GROUP_LIMIT="4"
-TCGCSV_JAPAN_CARD_ONLY_UNPRICED_GROUPS="true"
-TCGCSV_JAPAN_CARD_PRICE_ONLY_UNPRICED="true"
+TCGCSV_JAPAN_CARD_GROUP_LIMIT="1"
+TCGCSV_JAPAN_CARD_ONLY_UNPRICED_GROUPS="false"
+TCGCSV_JAPAN_CARD_PRICE_ONLY_UNPRICED="false"
 PRICE_ALERT_DIGEST_DRY_RUN="true"
 PRICE_ALERT_DIGEST_ALLOW_LIVE_RECIPIENTS="false"
 JOB_MONITOR_DRY_RUN="true"
@@ -69,7 +69,7 @@ Start conservative while beta data volume is small:
 | --- | --- | --- |
 | Health smoke | `/usr/bin/bash /home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/cron-live-health.sh` | Every 30 minutes |
 | Card pricing history | `/usr/bin/bash /home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/cron-live-pricing.sh` | Hourly, with `POKEMON_TCG_SET_PRICING_LIMIT=8` |
-| Japanese card pricing | `/usr/bin/bash /home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/cron-live-japan-card-pricing.sh` | Daily around 02:40 UK time, with `TCGCSV_JAPAN_CARD_GROUP_LIMIT=4` |
+| Japanese card pricing | `/usr/bin/bash /home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/cron-live-japan-card-pricing.sh` | Hourly at `:40`, with `TCGCSV_JAPAN_CARD_GROUP_LIMIT=1` |
 | Sealed pricing history | `/usr/bin/bash /home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/cron-live-sealed-pricing.sh` | Daily around 03:10 UK time |
 | Job monitor | `/usr/bin/bash /home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/cron-monitor-jobs.sh` | Hourly |
 | Price alert digest dry run | `/usr/bin/bash /home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/cron-live-price-alerts.sh` | Daily around 08:00 UK time |
@@ -136,6 +136,6 @@ They use the same `Authorization: Bearer <JOB_SECRET>` header. Keep the request 
 - Scheduled card pricing writes new snapshots over time, so price history charts become more useful the longer the job runs.
 - `POKEMON_TCG_SET_PRICING_LIMIT` controls how many sets a live pricing run refreshes. `POKEMON_TCG_SET_PRICING_REQUEST_LIMIT` defaults to `1`, so the live helper sends several small set-refresh requests rather than one long request. `POKEMON_TCG_PRICING_BATCH_WAIT_MS` pauses between those calls, and `POKEMON_TCG_API_RETRY_ATTEMPTS` retries transient Pokemon TCG API `429`/`5xx` responses before an individual set attempt is marked failed. Keep the hourly job history clean before raising set batch sizes further.
 - Keep `TCGCSV_SEALED_GROUP_LIMIT` small at first. Sealed pricing can become expensive in provider calls if run too broadly.
-- Japanese single-card pricing uses TCGCSV's `Pokemon Japan` category (`TCGCSV_JAPAN_CARD_CATEGORY_ID=85`) and writes source `tcgcsv-japan-card` snapshots for `language=ja`. Keep the daily group limit small until Operations shows clean runs and useful match rates.
+- Japanese single-card pricing uses TCGCSV's `Pokemon Japan` category (`TCGCSV_JAPAN_CARD_CATEGORY_ID=85`) and writes source `tcgcsv-japan-card` snapshots for `language=ja`. Use `TCGCSV_JAPAN_CARD_GROUP_LIMIT=1`, `TCGCSV_JAPAN_CARD_ONLY_UNPRICED_GROUPS=false`, and `TCGCSV_JAPAN_CARD_PRICE_ONLY_UNPRICED=false` for hourly production runs so each run fills missing Japanese prices and also creates fresh price-history snapshots for the oldest Japanese group.
 - Traditional Chinese, Simplified Chinese, and Korean pricing should stay as visible gaps until a reviewed CSV/licensed source is available. Do not scrape official pages or require Cardmarket personal/business verification for this lane.
 - Review Operations job history after the first few scheduled runs. Do not enable live recipient emails until pricing and monitor jobs are consistently clean.

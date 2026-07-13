@@ -163,11 +163,11 @@ TCGCSV_CARD_PRICE_ONLY_UNPRICED="true"
 TCGCSV_CARD_WRITE_PRICES="true"
 TCGCSV_JAPAN_CARD_CATEGORY_ID="85"
 TCGCSV_JAPAN_CARD_GROUP_IDS=""
-TCGCSV_JAPAN_CARD_GROUP_LIMIT="4"
+TCGCSV_JAPAN_CARD_GROUP_LIMIT="1"
 TCGCSV_JAPAN_CARD_LANGUAGE="ja"
 TCGCSV_JAPAN_CARD_MIN_UNPRICED="1"
-TCGCSV_JAPAN_CARD_ONLY_UNPRICED_GROUPS="true"
-TCGCSV_JAPAN_CARD_PRICE_ONLY_UNPRICED="true"
+TCGCSV_JAPAN_CARD_ONLY_UNPRICED_GROUPS="false"
+TCGCSV_JAPAN_CARD_PRICE_ONLY_UNPRICED="false"
 TCGCSV_JAPAN_CARD_WAIT_MS="120"
 TCGCSV_JAPAN_CARD_WRITE_PRICES="true"
 TCGCSV_JAPAN_USD_TO_GBP_RATE=""
@@ -281,7 +281,7 @@ Use `npm run report:catalogue-gaps` or the Operations export button to check loc
 
 For TCGCSV card-pricing enrichment, run `npm run job:tcgcsv-card-pricing`. The importer reads TCGCSV's cached TCGplayer Pokemon groups/products/prices, matches groups to local card sets, matches card products by set/name/number, and writes card price snapshots with source `tcgcsv-card`. When a matched product has multiple price subtypes, each usable subtype is stored as its own variant snapshot. Set `TCGCSV_CARD_GROUP_IDS` to a comma-separated list of TCGplayer group IDs for a targeted run, `TCGCSV_USD_TO_GBP_RATE` or `POKEMON_TCG_USD_TO_GBP_RATE` for this standalone importer, and `TCGCSV_CARD_PRICE_ONLY_UNPRICED=true` to enrich only missing card/variant snapshots. For large production catch-ups, set `TCGCSV_CARD_ONLY_UNPRICED_GROUPS=true` and `TCGCSV_CARD_MIN_UNPRICED=25` so repeat runs process matched sets with the largest remaining unpriced-card gaps first.
 
-For Japanese card-pricing enrichment, run `npm run job:tcgcsv-japan-card-pricing` locally or `npm run job:live-japan-card-pricing` against the deployed app. This uses TCGCSV's `Pokemon Japan` category (`TCGCSV_JAPAN_CARD_CATEGORY_ID=85`), matches TCGdex-backed Japanese sets by set code where possible, and writes source `tcgcsv-japan-card` snapshots with `language=ja`. Keep `TCGCSV_JAPAN_CARD_GROUP_LIMIT` small for scheduled production runs.
+For Japanese card-pricing enrichment, run `npm run job:tcgcsv-japan-card-pricing` locally or `npm run job:live-japan-card-pricing` against the deployed app. This uses TCGCSV's `Pokemon Japan` category (`TCGCSV_JAPAN_CARD_CATEGORY_ID=85`), matches TCGdex-backed Japanese sets by set code where possible, and writes source `tcgcsv-japan-card` snapshots with `language=ja`. Scheduled production runs should use `TCGCSV_JAPAN_CARD_GROUP_LIMIT=1`, `TCGCSV_JAPAN_CARD_ONLY_UNPRICED_GROUPS=false`, and `TCGCSV_JAPAN_CARD_PRICE_ONLY_UNPRICED=false` so each run fills blanks and also creates fresh price-history snapshots for the oldest Japanese group.
 
 Traditional Chinese, Simplified Chinese, and Korean card-pricing enrichment does not currently have a safe automated source. Keep those pricing gaps visible in Operations and use a reviewed CSV/licensed-source workflow rather than scraping official pages or requiring Cardmarket personal/business verification.
 

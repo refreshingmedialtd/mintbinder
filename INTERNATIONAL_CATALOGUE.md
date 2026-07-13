@@ -56,7 +56,8 @@ This is a core USP: most collection apps handle English and some Japanese. Korea
   - Protected live runner: `npm run job:live-japan-card-pricing`
   - Protected endpoint: `POST /api/jobs/international-card-pricing`
   - Default source/language written to snapshots: `tcgcsv-japan-card`, `ja`
-  - Conservative controls: `TCGCSV_JAPAN_CARD_GROUP_LIMIT`, `TCGCSV_JAPAN_CARD_ONLY_UNPRICED_GROUPS`, `TCGCSV_JAPAN_CARD_PRICE_ONLY_UNPRICED`, and `TCGCSV_JAPAN_CARD_WAIT_MS`
+  - Production controls: `TCGCSV_JAPAN_CARD_GROUP_LIMIT=1`, `TCGCSV_JAPAN_CARD_ONLY_UNPRICED_GROUPS=false`, `TCGCSV_JAPAN_CARD_PRICE_ONLY_UNPRICED=false`, and `TCGCSV_JAPAN_CARD_WAIT_MS=120`
+  - Selection rotates by oldest `tcgcsv-japan-card` snapshot, with never-priced groups first, so hourly runs fill blanks and build Japanese price history.
 - Traditional Chinese, Simplified Chinese, and Korean pricing remains intentionally unautomated until a reviewed CSV/licensed source exists. The official Asia Pokemon Card site is useful for manual verification, but its terms prohibit copying/reproducing site content outside the service without permission, so it should not be used as an automated import source.
 
 ## Rollout Order

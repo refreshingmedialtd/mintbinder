@@ -60,11 +60,11 @@ export function japanCardPricingOptionsFromEnv(env = process.env) {
   return {
     categoryId: positiveInteger(env.TCGCSV_JAPAN_CARD_CATEGORY_ID, tcgcsvPokemonJapanCategoryId),
     groupIds: idList(env.TCGCSV_JAPAN_CARD_GROUP_IDS),
-    groupLimit: positiveInteger(env.TCGCSV_JAPAN_CARD_GROUP_LIMIT, 4),
+    groupLimit: positiveInteger(env.TCGCSV_JAPAN_CARD_GROUP_LIMIT, 1),
     language: optionalString(env.TCGCSV_JAPAN_CARD_LANGUAGE) ?? "ja",
     minUnpricedCards: positiveInteger(env.TCGCSV_JAPAN_CARD_MIN_UNPRICED, 1),
-    onlyUnpricedGroups: booleanSetting(env.TCGCSV_JAPAN_CARD_ONLY_UNPRICED_GROUPS, true),
-    priceOnlyUnpriced: booleanSetting(env.TCGCSV_JAPAN_CARD_PRICE_ONLY_UNPRICED, true),
+    onlyUnpricedGroups: booleanSetting(env.TCGCSV_JAPAN_CARD_ONLY_UNPRICED_GROUPS, false),
+    priceOnlyUnpriced: booleanSetting(env.TCGCSV_JAPAN_CARD_PRICE_ONLY_UNPRICED, false),
     source: optionalString(env.TCGCSV_JAPAN_CARD_SOURCE) ?? "tcgcsv-japan-card",
     usdToGbpRate:
       conversionRate(env.TCGCSV_JAPAN_USD_TO_GBP_RATE) ??
@@ -111,8 +111,23 @@ export async function syncTcgcsvCardPrices(options = {}) {
                   priceSnapshots: true,
                 },
               },
+              priceSnapshots: {
+                orderBy: {
+                  observedAt: "desc",
+                },
+                select: {
+                  observedAt: true,
+                  source: true,
+                },
+                take: 1,
+                where: {
+                  itemType: ItemType.CARD,
+                  source,
+                },
+              },
             },
           },
+          releaseDate: true,
         },
         where: language === "all" ? undefined : { language },
       }),
@@ -120,9 +135,7 @@ export async function syncTcgcsvCardPrices(options = {}) {
     const availableMatches = matchTcgcsvCardGroupsToSets(groups.results ?? [], sets)
       .filter(({ group }) => groupIds.size === 0 || groupIds.has(String(group.groupId)))
       .filter(({ set }) => !onlyUnpricedGroups || unpricedCardCount(set) >= minUnpricedCards)
-      .sort((a, b) => onlyUnpricedGroups
-        ? unpricedCardCount(b.set) - unpricedCardCount(a.set)
-        : 0);
+      .sort((a, b) => compareCardGroupRefreshPriority(a.set, b.set));
     const matches = availableMatches.slice(0, groupLimit);
     const summary = {
       cardProductsMatched: 0,
@@ -524,7 +537,64 @@ function unpricedCardCount(set) {
     return 0;
   }
 
-  return set.cardPrintings.filter((card) => Number(card._count?.priceSnapshots ?? 0) === 0).length;
+  return set.cardPrintings.filter((card) => cardPriceSnapshotCount(card) === 0).length;
+}
+
+function cardPriceSnapshotCount(card) {
+  if (Array.isArray(card.priceSnapshots)) {
+    return card.priceSnapshots.length;
+  }
+
+  return Number(card._count?.priceSnapshots ?? 0);
+}
+
+function compareCardGroupRefreshPriority(left, right) {
+  const leftLatest = latestCardPriceSnapshotTime(left);
+  const rightLatest = latestCardPriceSnapshotTime(right);
+
+  if (leftLatest !== rightLatest) {
+    return leftLatest - rightLatest;
+  }
+
+  const leftUnpriced = unpricedCardCount(left);
+  const rightUnpriced = unpricedCardCount(right);
+
+  if (leftUnpriced !== rightUnpriced) {
+    return rightUnpriced - leftUnpriced;
+  }
+
+  const leftRelease = dateTime(left.releaseDate);
+  const rightRelease = dateTime(right.releaseDate);
+
+  if (leftRelease !== rightRelease) {
+    return rightRelease - leftRelease;
+  }
+
+  return String(left.name ?? "").localeCompare(String(right.name ?? ""));
+}
+
+function latestCardPriceSnapshotTime(set) {
+  if (!Array.isArray(set.cardPrintings)) {
+    return 0;
+  }
+
+  return set.cardPrintings.reduce((latest, card) => {
+    if (!Array.isArray(card.priceSnapshots)) {
+      return latest;
+    }
+
+    return card.priceSnapshots.reduce((cardLatest, snapshot) => Math.max(cardLatest, dateTime(snapshot.observedAt)), latest);
+  }, 0);
+}
+
+function dateTime(value) {
+  if (!value) {
+    return 0;
+  }
+
+  const time = new Date(value).getTime();
+
+  return Number.isFinite(time) ? time : 0;
 }
 
 function conversionRate(value) {
