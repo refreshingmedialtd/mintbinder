@@ -8,6 +8,7 @@ import {
   extendedDataValue,
   isSealedProduct,
   matchTcgcsvGroupsToSets,
+  tcgcsvPokemonJapanCategoryId,
   tcgcsvPokemonCategoryId,
 } from "./tcgcsv-sealed-products.mjs";
 
@@ -38,14 +39,39 @@ const cardGroupNameProviderAliases = new Map([
 ]);
 
 export function cardPricingOptionsFromEnv(env = process.env) {
+  const language = optionalString(env.TCGCSV_CARD_LANGUAGE);
+  const categoryId = positiveInteger(env.TCGCSV_CARD_CATEGORY_ID, categoryIdForLanguage(language));
+
   return {
+    categoryId,
     groupIds: idList(env.TCGCSV_CARD_GROUP_IDS),
     groupLimit: positiveInteger(env.TCGCSV_CARD_GROUP_LIMIT, Number.POSITIVE_INFINITY),
+    language: language ?? languageForCategory(categoryId),
     minUnpricedCards: positiveInteger(env.TCGCSV_CARD_MIN_UNPRICED, 1),
     onlyUnpricedGroups: booleanSetting(env.TCGCSV_CARD_ONLY_UNPRICED_GROUPS, false),
     priceOnlyUnpriced: booleanSetting(env.TCGCSV_CARD_PRICE_ONLY_UNPRICED, true),
+    source: sourceForCategory(categoryId),
     usdToGbpRate: conversionRate(env.TCGCSV_USD_TO_GBP_RATE) ?? conversionRate(env.POKEMON_TCG_USD_TO_GBP_RATE),
     writePrices: booleanSetting(env.TCGCSV_CARD_WRITE_PRICES, true),
+  };
+}
+
+export function japanCardPricingOptionsFromEnv(env = process.env) {
+  return {
+    categoryId: positiveInteger(env.TCGCSV_JAPAN_CARD_CATEGORY_ID, tcgcsvPokemonJapanCategoryId),
+    groupIds: idList(env.TCGCSV_JAPAN_CARD_GROUP_IDS),
+    groupLimit: positiveInteger(env.TCGCSV_JAPAN_CARD_GROUP_LIMIT, 4),
+    language: optionalString(env.TCGCSV_JAPAN_CARD_LANGUAGE) ?? "ja",
+    minUnpricedCards: positiveInteger(env.TCGCSV_JAPAN_CARD_MIN_UNPRICED, 1),
+    onlyUnpricedGroups: booleanSetting(env.TCGCSV_JAPAN_CARD_ONLY_UNPRICED_GROUPS, true),
+    priceOnlyUnpriced: booleanSetting(env.TCGCSV_JAPAN_CARD_PRICE_ONLY_UNPRICED, true),
+    source: optionalString(env.TCGCSV_JAPAN_CARD_SOURCE) ?? "tcgcsv-japan-card",
+    usdToGbpRate:
+      conversionRate(env.TCGCSV_JAPAN_USD_TO_GBP_RATE) ??
+      conversionRate(env.TCGCSV_USD_TO_GBP_RATE) ??
+      conversionRate(env.POKEMON_TCG_USD_TO_GBP_RATE),
+    waitMs: nonNegativeInteger(env.TCGCSV_JAPAN_CARD_WAIT_MS, 120),
+    writePrices: booleanSetting(env.TCGCSV_JAPAN_CARD_WRITE_PRICES, true),
   };
 }
 
@@ -53,11 +79,14 @@ export async function syncTcgcsvCardPrices(options = {}) {
   const prisma = options.prisma ?? new PrismaClient();
   const shouldDisconnect = !options.prisma;
   const fetchImpl = options.fetchImpl ?? fetch;
+  const categoryId = positiveInteger(options.categoryId, tcgcsvPokemonCategoryId);
   const groupIds = idSet(options.groupIds);
   const groupLimit = positiveInteger(options.groupLimit, Number.POSITIVE_INFINITY);
+  const language = normalizedLanguage(options.language ?? languageForCategory(categoryId));
   const minUnpricedCards = positiveInteger(options.minUnpricedCards, 1);
   const onlyUnpricedGroups = options.onlyUnpricedGroups ?? false;
   const priceOnlyUnpriced = options.priceOnlyUnpriced ?? true;
+  const source = optionalString(options.source) ?? sourceForCategory(categoryId);
   const waitMs = nonNegativeInteger(options.waitMs, 120);
   const writePrices = options.writePrices ?? true;
   const usdToGbp = conversionRate(options.usdToGbpRate);
@@ -68,10 +97,11 @@ export async function syncTcgcsvCardPrices(options = {}) {
 
   try {
     const [groups, sets] = await Promise.all([
-      fetchTcgcsv(`https://tcgcsv.com/tcgplayer/${tcgcsvPokemonCategoryId}/groups`, fetchImpl),
+      fetchTcgcsv(`https://tcgcsv.com/tcgplayer/${categoryId}/groups`, fetchImpl),
       prisma.cardSet.findMany({
         select: {
           id: true,
+          language: true,
           name: true,
           providerIds: true,
           cardPrintings: {
@@ -84,6 +114,7 @@ export async function syncTcgcsvCardPrices(options = {}) {
             },
           },
         },
+        where: language === "all" ? undefined : { language },
       }),
     ]);
     const availableMatches = matchTcgcsvCardGroupsToSets(groups.results ?? [], sets)
@@ -97,15 +128,18 @@ export async function syncTcgcsvCardPrices(options = {}) {
       cardProductsMatched: 0,
       cardProductsSkipped: 0,
       cardProductsUnmatched: 0,
+      categoryId,
       groupsAvailable: availableMatches.length,
       groupsMatched: matches.length,
       groupsProcessed: 0,
+      language,
       minUnpricedCards,
       onlyUnpricedGroups,
       priceOnlyUnpriced,
       pricingSnapshotsCreated: 0,
       productsFetched: 0,
       sampleUnmatchedProducts: [],
+      source,
       writePrices,
     };
 
@@ -115,6 +149,9 @@ export async function syncTcgcsvCardPrices(options = {}) {
         match,
         priceOnlyUnpriced,
         prisma,
+        categoryId,
+        language,
+        source,
         usdToGbp,
         writePrices,
       });
@@ -218,13 +255,16 @@ async function importCardGroup({
   match,
   priceOnlyUnpriced,
   prisma,
+  categoryId,
+  language,
+  source,
   usdToGbp,
   writePrices,
 }) {
   const { group, set } = match;
   const [productsResponse, pricesResponse, cards] = await Promise.all([
-    fetchTcgcsv(`https://tcgcsv.com/tcgplayer/${tcgcsvPokemonCategoryId}/${group.groupId}/products`, fetchImpl),
-    fetchTcgcsv(`https://tcgcsv.com/tcgplayer/${tcgcsvPokemonCategoryId}/${group.groupId}/prices`, fetchImpl),
+    fetchTcgcsv(`https://tcgcsv.com/tcgplayer/${categoryId}/${group.groupId}/products`, fetchImpl),
+    fetchTcgcsv(`https://tcgcsv.com/tcgplayer/${categoryId}/${group.groupId}/prices`, fetchImpl),
     prisma.cardPrinting.findMany({
       select: {
         id: true,
@@ -299,11 +339,13 @@ async function importCardGroup({
           confidenceScore: price.confidenceScore,
           currency: "GBP",
           itemType: ItemType.CARD,
-          language: "en",
+          language,
           metadata: {
+            categoryId,
             conversionRate: usdToGbp,
             groupId: group.groupId,
             groupName: group.name,
+            language,
             originalCurrency: "USD",
             originalPrice: price.usd,
             priceSource: "TCGCSV TCGplayer market",
@@ -312,7 +354,7 @@ async function importCardGroup({
           },
           observedAt: new Date(),
           priceMinor: Math.round(price.usd * usdToGbp * 100),
-          source: "tcgcsv-card",
+          source,
           sourceRef: String(product.productId),
           variantLabel,
         },
@@ -433,7 +475,7 @@ function cardGroupProviderCodes(group) {
   const idAliases = cardGroupProviderAliases.get(String(group.groupId));
   const nameAliases = cardGroupNameProviderAliases.get(normalizedAliasKey(group.name));
 
-  return [...new Set([...(idAliases ?? []), ...(nameAliases ?? [])])]
+  return [...new Set([group.abbreviation, ...(idAliases ?? []), ...(nameAliases ?? [])])]
     .map(normalizedProviderCode)
     .filter(Boolean);
 }
@@ -464,7 +506,14 @@ function setProviderId(set) {
   }
 
   if (set.providerIds && typeof set.providerIds === "object" && !Array.isArray(set.providerIds)) {
-    return set.providerIds.pokemon_tcg_api;
+    return (
+      set.providerIds.pokemon_tcg_api ??
+      set.providerIds.tcgdex_ja ??
+      set.providerIds.tcgdex_zh_tw ??
+      set.providerIds.tcgdex_zh_cn ??
+      set.providerIds.tcgdex_ko ??
+      set.providerIds.tcgdex
+    );
   }
 
   return undefined;
@@ -482,6 +531,28 @@ function conversionRate(value) {
   const rate = Number(value);
 
   return Number.isFinite(rate) && rate > 0 ? rate : undefined;
+}
+
+function categoryIdForLanguage(value) {
+  return normalizedLanguage(value) === "ja" ? tcgcsvPokemonJapanCategoryId : tcgcsvPokemonCategoryId;
+}
+
+function languageForCategory(value) {
+  return Number(value) === tcgcsvPokemonJapanCategoryId ? "ja" : "en";
+}
+
+function sourceForCategory(value) {
+  return Number(value) === tcgcsvPokemonJapanCategoryId ? "tcgcsv-japan-card" : "tcgcsv-card";
+}
+
+function normalizedLanguage(value) {
+  return optionalString(value)?.toLowerCase().replaceAll("_", "-") ?? "en";
+}
+
+function optionalString(value) {
+  const trimmed = String(value ?? "").trim();
+
+  return trimmed || undefined;
 }
 
 function nonNegativeInteger(value, fallback) {

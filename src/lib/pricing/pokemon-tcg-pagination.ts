@@ -9,6 +9,7 @@ export type PokemonTcgPageResult = {
   cardsUpserted: number;
   page: number;
   pricingSnapshotsCreated: number;
+  provider?: string;
   setIds: string[];
   setsUpserted: number;
   totalCount: number;
@@ -70,6 +71,7 @@ export function summarizePokemonTcgPageResults({
     })),
     pagesProcessed: pages.length,
     pricingSnapshotsCreated: totalPriceSnapshots(pages),
+    provider: "pokemon-tcg-api",
     query,
     setsUpserted: setIds.size,
     totalCount,

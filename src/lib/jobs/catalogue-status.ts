@@ -1,9 +1,11 @@
 import { prisma } from "@/lib/db/prisma";
+import { catalogueLanguageLabel, catalogueRegionLabel } from "@/lib/catalogue/languages";
 import { recentJobRuns, type JobRunRecord } from "@/lib/jobs/runs";
 import {
   normalizeCatalogueResult,
   percent,
   summarizeCatalogueStatus,
+  type PricingByLanguageGap,
   type PricingBySeriesGap,
   type SealedPricingByProductTypeGap,
 } from "@/lib/jobs/catalogue-status-summary";
@@ -38,6 +40,15 @@ type PricingBySourceRow = {
   itemType: string;
   priceSnapshotCount: number;
   pricedItemCount: number;
+};
+
+type PricingByLanguageRow = {
+  cardCount: number;
+  cardImageCount: number;
+  language: string;
+  pricedCardCount: number;
+  region: string;
+  setCount: number;
 };
 
 type SealedPricingByProductTypeRow = {
@@ -77,6 +88,7 @@ async function catalogueCounts() {
     duplicateRows,
     mediaCoverageRows,
     pricingCoverageRows,
+    pricingByLanguageRows,
     pricingBySeriesRows,
     pricingBySourceRows,
     sealedPricingByProductTypeRows,
@@ -122,9 +134,40 @@ async function catalogueCounts() {
         ) AS "sealedImageCount"
     `,
     prisma.$queryRaw<PricingCoverageRow[]>`
-      SELECT COUNT(DISTINCT card_printing_id)::int AS "pricedCardCount"
-      FROM price_snapshots
-      WHERE card_printing_id IS NOT NULL
+      SELECT COUNT(DISTINCT ps.card_printing_id)::int AS "pricedCardCount"
+      FROM price_snapshots ps
+      JOIN card_printings cp ON cp.id = ps.card_printing_id
+      WHERE ps.card_printing_id IS NOT NULL
+        AND cp.language = 'en'
+    `,
+    prisma.$queryRaw<PricingByLanguageRow[]>`
+      SELECT
+        cp.language,
+        cp.region,
+        COUNT(DISTINCT cs.id)::int AS "setCount",
+        COUNT(DISTINCT cp.id)::int AS "cardCount",
+        COUNT(DISTINCT CASE
+          WHEN NULLIF(BTRIM(COALESCE(cp.image_large_url, cp.image_small_url, '')), '') IS NOT NULL
+          THEN cp.id
+        END)::int AS "cardImageCount",
+        COUNT(DISTINCT ps.card_printing_id)::int AS "pricedCardCount"
+      FROM card_printings cp
+      JOIN card_sets cs ON cs.id = cp.card_set_id
+      LEFT JOIN price_snapshots ps
+        ON ps.card_printing_id = cp.id
+        AND ps.item_type = 'card'
+      GROUP BY cp.language, cp.region
+      ORDER BY
+        CASE cp.language
+          WHEN 'en' THEN 0
+          WHEN 'ja' THEN 1
+          WHEN 'zh-tw' THEN 2
+          WHEN 'zh-cn' THEN 3
+          WHEN 'ko' THEN 4
+          ELSE 5
+        END,
+        cp.language,
+        cp.region
     `,
     prisma.$queryRaw<PricingBySeriesRow[]>`
       SELECT
@@ -136,6 +179,7 @@ async function catalogueCounts() {
       LEFT JOIN price_snapshots ps
         ON ps.card_printing_id = cp.id
         AND ps.item_type = 'card'
+      WHERE cp.language = 'en'
       GROUP BY COALESCE(cs.series, 'Other')
       ORDER BY (COUNT(DISTINCT cp.id) - COUNT(DISTINCT ps.card_printing_id)) DESC, COALESCE(cs.series, 'Other')
     `,
@@ -182,6 +226,7 @@ async function catalogueCounts() {
     priceSnapshotCount,
     pricedCardCount: pricingCoverageRows[0]?.pricedCardCount ?? 0,
     pricedSealedProductCount: sealedPricingCoverageRows[0]?.pricedSealedProductCount ?? 0,
+    pricingByLanguage: pricingByLanguageRows.map(mapPricingByLanguage),
     pricingBySeries: pricingBySeriesRows.map(mapPricingBySeries),
     pricingBySource: pricingBySourceRows,
     sealedPricingByProductType: sealedPricingByProductTypeRows.map(mapSealedPricingByProductType),
@@ -198,6 +243,22 @@ function mapPricingBySeries(row: PricingBySeriesRow): PricingBySeriesGap {
     pricedCardCount: row.pricedCardCount,
     pricingCoveragePercent: percent(row.pricedCardCount, row.cardCount),
     series: row.series ?? "Other",
+    unpricedCardCount: row.cardCount - row.pricedCardCount,
+  };
+}
+
+function mapPricingByLanguage(row: PricingByLanguageRow): PricingByLanguageGap {
+  return {
+    cardCount: row.cardCount,
+    cardImageCount: row.cardImageCount,
+    cardImageCoveragePercent: percent(row.cardImageCount, row.cardCount),
+    language: row.language,
+    languageLabel: catalogueLanguageLabel(row.language),
+    pricedCardCount: row.pricedCardCount,
+    pricingCoveragePercent: percent(row.pricedCardCount, row.cardCount),
+    region: row.region,
+    regionLabel: catalogueRegionLabel(row.region),
+    setCount: row.setCount,
     unpricedCardCount: row.cardCount - row.pricedCardCount,
   };
 }
@@ -220,9 +281,11 @@ function latestSucceeded(runs: JobRunRecord[]) {
 function latestUsefulCatalogueRun(runs: JobRunRecord[], query: string) {
   return runs.find((run) => {
     const result = normalizeCatalogueResult(run.resultPayload);
+    const provider = result?.provider ?? "pokemon-tcg-api";
 
     return (
       Boolean(result) &&
+      provider === "pokemon-tcg-api" &&
       (run.status === "succeeded" || hasCatalogueProgress(run.resultPayload)) &&
       (result?.query ?? "") === query
     );

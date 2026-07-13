@@ -1,6 +1,6 @@
 # International Catalogue Plan
 
-Last updated: 10 July 2026
+Last updated: 13 July 2026
 
 ## Why This Matters
 
@@ -42,9 +42,22 @@ This is a core USP: most collection apps handle English and some Japanese. Korea
   - Traditional Chinese: 7,436 cards / 83 sets
   - Simplified Chinese: 877 cards / 8 sets
   - Korean: 239 cards / 3 sets
+- Source-backed coverage verified on 13 July 2026 after rerunning the international backfill:
+  - Japanese: 6,246 cards / 60 sets / 3,297 cards with images
+  - Traditional Chinese: 7,436 cards / 83 sets / 2,146 cards with images
+  - Simplified Chinese: 877 cards / 8 sets / 0 cards with images
+  - Korean: 239 cards / 3 sets / 0 cards with images
 - Current source-backed full import target is every card exposed by the TCGdex language endpoints. This gets Mint Binder much closer to the USP quickly, but it is not a legal claim that every official card ever printed in those regions is complete beyond TCGdex. True exhaustive coverage still needs a licensed/permissioned source strategy for any gaps, especially Korean and newer Asian-language releases.
 - TCGdex variant metadata now feeds catalogue variant options and search text, so imported localized cards can expose source-backed finishes such as Normal, Holofoil, Reverse Holofoil, 1st Edition, promo stamp, and non-standard sizes where the source provides them.
 - Image coverage is uneven in the current TCGdex source. Some international rows expose no image field and their deterministic asset URLs return 404, so Mint Binder should keep showing a clear no-image placeholder rather than storing broken links until a licensed image source or cache process is added.
+- Operations now reports per-language card, image, and price coverage so Japanese, Traditional Chinese, Simplified Chinese, and Korean gaps remain visible separately from English Pokemon TCG API coverage.
+- Japanese card pricing has a first scheduled updater path through TCGCSV's TCGplayer `Pokemon Japan` category (`categoryId = 85`):
+  - Local direct runner: `npm run job:tcgcsv-japan-card-pricing`
+  - Protected live runner: `npm run job:live-japan-card-pricing`
+  - Protected endpoint: `POST /api/jobs/international-card-pricing`
+  - Default source/language written to snapshots: `tcgcsv-japan-card`, `ja`
+  - Conservative controls: `TCGCSV_JAPAN_CARD_GROUP_LIMIT`, `TCGCSV_JAPAN_CARD_ONLY_UNPRICED_GROUPS`, `TCGCSV_JAPAN_CARD_PRICE_ONLY_UNPRICED`, and `TCGCSV_JAPAN_CARD_WAIT_MS`
+- Traditional Chinese, Simplified Chinese, and Korean pricing remains intentionally unautomated until a reviewed CSV/licensed source exists. The official Asia Pokemon Card site is useful for manual verification, but its terms prohibit copying/reproducing site content outside the service without permission, so it should not be used as an automated import source.
 
 ## Rollout Order
 
@@ -53,8 +66,8 @@ This is a core USP: most collection apps handle English and some Japanese. Korea
 3. Run `zh-cn` and `ko` as partial imports only, then review the coverage gaps rather than presenting them as complete.
 4. Expand the localized-name alias table beyond the first high-value/common Pokemon set. Long term this should be generated from a licensed species-name dataset rather than maintained by hand.
 5. Build a coverage dashboard grouped by language and region: sets, cards, images, priced records.
-6. Research licensed or partnership-friendly Korean and Simplified Chinese sources. Do not scrape official pages into production without rights review.
-7. Add local-market pricing sources per language. Catalogue coverage should land before price coverage, but the UI must clearly show unpriced international cards.
+6. Keep Traditional Chinese, Simplified Chinese, and Korean price gaps visible in Operations while evaluating reviewed CSV, licensed-data, or direct-partner options. Do not scrape official pages or local marketplace pages into production without rights review.
+7. Expand local-market pricing sources per language. Japanese now has a TCGCSV-backed first pass; Traditional Chinese, Simplified Chinese, and Korean still need a source that does not require personal/business API verification or unauthorized reuse.
 
 ## Open Decisions
 

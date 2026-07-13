@@ -1,7 +1,13 @@
 import "dotenv/config";
 import { pathToFileURL } from "node:url";
 
-const knownJobs = new Set(["health", "pricing", "sealed-pricing", "price-alerts"]);
+const knownJobs = new Set([
+  "health",
+  "pricing",
+  "sealed-pricing",
+  "japan-card-pricing",
+  "price-alerts",
+]);
 
 export async function runLiveScheduledJob({
   env = process.env,
@@ -65,6 +71,13 @@ export function protectedJobRequest(kind, env = process.env) {
     return {
       body: sealedPricingBody(env),
       path: "/api/jobs/sealed-pricing-refresh",
+    };
+  }
+
+  if (kind === "japan-card-pricing") {
+    return {
+      body: japanCardPricingBody(env),
+      path: "/api/jobs/international-card-pricing",
     };
   }
 
@@ -417,6 +430,64 @@ function sealedPricingBody(env) {
 
   if (groupLimit) {
     body.groupLimit = groupLimit;
+  }
+
+  if (priceOnlyUnpriced !== undefined) {
+    body.priceOnlyUnpriced = priceOnlyUnpriced;
+  }
+
+  if (usdToGbpRate) {
+    body.usdToGbpRate = usdToGbpRate;
+  }
+
+  if (waitMs) {
+    body.waitMs = waitMs;
+  }
+
+  if (writePrices !== undefined) {
+    body.writePrices = writePrices;
+  }
+
+  return body;
+}
+
+function japanCardPricingBody(env) {
+  const body = {};
+  const categoryId = optionalPositiveInteger(env.TCGCSV_JAPAN_CARD_CATEGORY_ID);
+  const groupIds = listSetting(env.TCGCSV_JAPAN_CARD_GROUP_IDS);
+  const groupLimit = optionalPositiveInteger(env.TCGCSV_JAPAN_CARD_GROUP_LIMIT);
+  const language = optionalString(env.TCGCSV_JAPAN_CARD_LANGUAGE);
+  const minUnpricedCards = optionalPositiveInteger(env.TCGCSV_JAPAN_CARD_MIN_UNPRICED);
+  const onlyUnpricedGroups = optionalBoolean(env.TCGCSV_JAPAN_CARD_ONLY_UNPRICED_GROUPS);
+  const priceOnlyUnpriced = optionalBoolean(env.TCGCSV_JAPAN_CARD_PRICE_ONLY_UNPRICED);
+  const usdToGbpRate =
+    optionalRate(env.TCGCSV_JAPAN_USD_TO_GBP_RATE) ??
+    optionalRate(env.TCGCSV_USD_TO_GBP_RATE);
+  const waitMs = optionalPositiveInteger(env.TCGCSV_JAPAN_CARD_WAIT_MS);
+  const writePrices = optionalBoolean(env.TCGCSV_JAPAN_CARD_WRITE_PRICES);
+
+  if (categoryId) {
+    body.categoryId = categoryId;
+  }
+
+  if (groupIds.length) {
+    body.groupIds = groupIds;
+  }
+
+  if (groupLimit) {
+    body.groupLimit = groupLimit;
+  }
+
+  if (language) {
+    body.language = language;
+  }
+
+  if (minUnpricedCards) {
+    body.minUnpricedCards = minUnpricedCards;
+  }
+
+  if (onlyUnpricedGroups !== undefined) {
+    body.onlyUnpricedGroups = onlyUnpricedGroups;
   }
 
   if (priceOnlyUnpriced !== undefined) {

@@ -102,7 +102,7 @@ test("warns on missing manual conversion rates, audit rows, and job runs", () =>
     ),
     [
       "POKEMON_TCG_USD_TO_GBP_RATE is not configured with a positive number while automatic exchange rates are disabled; Pokemon card pricing jobs will fail.",
-      "POKEMON_TCG_EUR_TO_GBP_RATE is not configured with a positive number; Cardmarket fallback pricing is disabled.",
+      "POKEMON_TCG_EUR_TO_GBP_RATE is not configured with a positive number while automatic exchange rates are disabled; Pokemon TCG API Cardmarket fallback prices will be skipped.",
       "TCGCSV_USD_TO_GBP_RATE is not configured and no Pokemon USD fallback is available while automatic exchange rates are disabled; sealed pricing jobs will fail.",
     ],
   );

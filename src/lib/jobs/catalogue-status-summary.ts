@@ -13,6 +13,8 @@ export type CatalogueJobResult = {
   pagesProcessed?: number;
   pricingSnapshotsCreated?: number;
   productsFetched?: number;
+  provider?: string;
+  language?: string;
   query?: string;
   sealedProductsSkipped?: number;
   sealedProductsUpserted?: number;
@@ -34,6 +36,20 @@ export type PricingBySourceSummary = {
   pricedItemCount: number;
   priceSnapshotCount: number;
   source: string;
+};
+
+export type PricingByLanguageGap = {
+  cardCount: number;
+  cardImageCount: number;
+  cardImageCoveragePercent: number | null;
+  language: string;
+  languageLabel: string;
+  pricedCardCount: number;
+  pricingCoveragePercent: number | null;
+  region: string;
+  regionLabel: string;
+  setCount: number;
+  unpricedCardCount: number;
 };
 
 export type SealedPricingByProductTypeGap = {
@@ -62,6 +78,7 @@ export type CatalogueStatus = {
   priceSnapshotCount: number;
   pricedCardCount: number;
   pricedSealedProductCount: number;
+  pricingByLanguage: PricingByLanguageGap[];
   pricingBySeries: PricingBySeriesGap[];
   pricingBySource: PricingBySourceSummary[];
   pricingCoveragePercent: number | null;
@@ -86,6 +103,7 @@ export function summarizeCatalogueStatus({
   latestSealedPricingResult,
   pricedCardCount,
   pricedSealedProductCount,
+  pricingByLanguage = [],
   pricingBySeries = [],
   pricingBySource = [],
   priceSnapshotCount,
@@ -94,6 +112,7 @@ export function summarizeCatalogueStatus({
   sealedPriceSnapshotCount,
   sealedProductCount,
   setCount,
+  providerCardCount,
 }: {
   cardCount: number;
   cardImageCount?: number;
@@ -104,6 +123,7 @@ export function summarizeCatalogueStatus({
   latestSealedPricingResult?: unknown;
   pricedCardCount: number;
   pricedSealedProductCount: number;
+  pricingByLanguage?: PricingByLanguageGap[];
   pricingBySeries?: PricingBySeriesGap[];
   pricingBySource?: PricingBySourceSummary[];
   priceSnapshotCount: number;
@@ -112,12 +132,13 @@ export function summarizeCatalogueStatus({
   sealedPriceSnapshotCount: number;
   sealedProductCount: number;
   setCount: number;
+  providerCardCount?: number;
 }): CatalogueStatus {
   const catalogueResult = normalizeCatalogueResult(latestCatalogueResult);
   const pricingResult = normalizeCatalogueResult(latestPricingResult);
   const sealedPricingResult = normalizeCatalogueResult(latestSealedPricingResult);
   const providerTotalCount = positiveNumber(catalogueResult?.totalCount) ?? null;
-  const coveragePercent = percent(cardCount, providerTotalCount ?? 0);
+  const coveragePercent = percent(providerCardCount ?? cardCount, providerTotalCount ?? 0);
 
   return {
     cardCount,
@@ -136,6 +157,7 @@ export function summarizeCatalogueStatus({
     priceSnapshotCount,
     pricedCardCount,
     pricedSealedProductCount,
+    pricingByLanguage,
     pricingBySeries,
     pricingBySource,
     pricingCoveragePercent: percent(pricedCardCount, cardCount),
@@ -177,6 +199,8 @@ export function normalizeCatalogueResult(value: unknown): CatalogueJobResult | n
     pagesProcessed: nonNegativeNumber(source.pagesProcessed),
     pricingSnapshotsCreated: nonNegativeNumber(source.pricingSnapshotsCreated),
     productsFetched: nonNegativeNumber(source.productsFetched),
+    provider: typeof source.provider === "string" ? source.provider : undefined,
+    language: typeof source.language === "string" ? source.language : undefined,
     query: typeof source.query === "string" ? source.query : undefined,
     sealedProductsSkipped: nonNegativeNumber(source.sealedProductsSkipped),
     sealedProductsUpserted: nonNegativeNumber(source.sealedProductsUpserted),

@@ -29,6 +29,8 @@ test("normalizes catalogue job result payloads", () => {
       pagesProcessed: undefined,
       pricingSnapshotsCreated: undefined,
       productsFetched: undefined,
+      provider: undefined,
+      language: undefined,
       query: "",
       sealedProductsSkipped: undefined,
       sealedProductsUpserted: undefined,

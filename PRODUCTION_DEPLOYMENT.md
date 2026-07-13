@@ -83,7 +83,7 @@ Pricing:
 - `EXCHANGE_RATES_AUTO`: `true` for automatic live GBP rates.
 - `EXCHANGE_RATES_ALLOW_ENV_FALLBACK`: `true` so optional `.env` rates can keep pricing jobs running during provider outages.
 - `POKEMON_TCG_USD_TO_GBP_RATE`: optional fallback USD conversion rate.
-- `POKEMON_TCG_EUR_TO_GBP_RATE`: optional fallback EUR conversion rate for Cardmarket fallback.
+- `POKEMON_TCG_EUR_TO_GBP_RATE`: optional fallback EUR conversion rate for provider-supplied Pokemon TCG API Cardmarket fallback prices.
 - `TCGCSV_USD_TO_GBP_RATE`: optional fallback USD conversion rate for TCGCSV imports.
 - `PRICECHARTING_API_TOKEN`: optional until that paid source is available.
 - `PRICECHARTING_USD_TO_GBP_RATE`: positive current conversion rate when PriceCharting is active.
@@ -180,7 +180,7 @@ npm run report:catalogue-gaps
 
 Expected remaining gaps: older/legacy card pricing, selected promos, and sealed products without usable TCGCSV prices. Use PriceCharting or another sealed-price provider for the next major sealed-pricing lift.
 
-For recurring pricing maintenance, use [SCHEDULED_JOBS.md](SCHEDULED_JOBS.md). The preferred card-pricing schedule calls `npm run job:live-pricing` hourly with `POKEMON_TCG_PRICING_STRATEGY=sets` and `POKEMON_TCG_SET_PRICING_LIMIT=8`, which posts to `/api/jobs/scheduled-set-pricing` in one-set timeout-safe batches; that route selects the least-recently refreshed Pokemon TCG sets from the production database, writes new snapshots, and avoids deep full-catalogue provider pages.
+For recurring pricing maintenance, use [SCHEDULED_JOBS.md](SCHEDULED_JOBS.md). The preferred English card-pricing schedule calls `npm run job:live-pricing` hourly with `POKEMON_TCG_PRICING_STRATEGY=sets` and `POKEMON_TCG_SET_PRICING_LIMIT=8`, which posts to `/api/jobs/scheduled-set-pricing` in one-set timeout-safe batches; that route selects the least-recently refreshed Pokemon TCG sets from the production database, writes new snapshots, and avoids deep full-catalogue provider pages. Japanese pricing uses `npm run job:live-japan-card-pricing`; Traditional Chinese, Simplified Chinese, and Korean pricing should remain visible as gaps until a reviewed CSV/licensed source is available.
 
 ## Square Domain Batch
 

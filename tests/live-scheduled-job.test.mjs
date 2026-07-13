@@ -148,6 +148,23 @@ test("explicit live pricing page requests remain single requests", async () => {
   });
 });
 
+test("live Japanese card pricing posts to the international pricing endpoint", () => {
+  const request = protectedJobRequest("japan-card-pricing", {
+    TCGCSV_JAPAN_CARD_GROUP_LIMIT: "3",
+    TCGCSV_JAPAN_CARD_PRICE_ONLY_UNPRICED: "false",
+    TCGCSV_JAPAN_CARD_WAIT_MS: "250",
+  });
+
+  assert.deepEqual(request, {
+    body: {
+      groupLimit: 3,
+      priceOnlyUnpriced: false,
+      waitMs: 250,
+    },
+    path: "/api/jobs/international-card-pricing",
+  });
+});
+
 function jsonResponse(body, status = 200) {
   return new Response(JSON.stringify(body), {
     headers: {

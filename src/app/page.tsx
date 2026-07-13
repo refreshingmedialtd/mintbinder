@@ -18,6 +18,7 @@ import {
   History,
   Info,
   Layers3,
+  Languages,
   List,
   LayoutDashboard,
   LogIn,
@@ -330,6 +331,20 @@ type PricingBySourceSummary = {
   source: string;
 };
 
+type PricingByLanguageGap = {
+  cardCount: number;
+  cardImageCount: number;
+  cardImageCoveragePercent: number | null;
+  language: string;
+  languageLabel: string;
+  pricedCardCount: number;
+  pricingCoveragePercent: number | null;
+  region: string;
+  regionLabel: string;
+  setCount: number;
+  unpricedCardCount: number;
+};
+
 type SealedPricingByProductTypeGap = {
   pricedSealedProductCount: number;
   productType: string;
@@ -356,6 +371,7 @@ type CatalogueStatusRecord = {
   priceSnapshotCount: number;
   pricedCardCount: number;
   pricedSealedProductCount: number;
+  pricingByLanguage: PricingByLanguageGap[];
   pricingBySeries: PricingBySeriesGap[];
   pricingBySource: PricingBySourceSummary[];
   pricingCoveragePercent: number | null;
@@ -7317,6 +7333,7 @@ function OperationsScreen({
           recommendations={gapRecommendations}
           onRun={(recommendation) => void runGapRecommendation(recommendation)}
         />
+        <InternationalPricingGapPanel rows={catalogueStatus?.pricingByLanguage ?? []} />
         <PricingSeriesGapPanel rows={catalogueStatus?.pricingBySeries ?? []} />
         <SealedPricingGapPanel rows={catalogueStatus?.sealedPricingByProductType ?? []} />
         <CatalogueMediaGapPanel status={catalogueStatus} />
@@ -7544,6 +7561,38 @@ function DuplicateProviderCardReview({
         </button>
       )}
     </article>
+  );
+}
+
+function InternationalPricingGapPanel({ rows }: { rows: PricingByLanguageGap[] }) {
+  const visibleRows = rows
+    .filter((row) => row.language !== "en" && row.cardCount > 0)
+    .slice(0, 8);
+
+  return (
+    <section className="tool-panel">
+      <div className="panel-title-row">
+        <h2>International cards</h2>
+        <Languages size={18} />
+      </div>
+      {visibleRows.length ? (
+        <div className="gap-list">
+          {visibleRows.map((row) => (
+            <CoverageGapRow
+              key={`${row.language}-${row.region}`}
+              coverage={row.pricingCoveragePercent}
+              gapLabel="unpriced printings"
+              label={`${row.languageLabel} (${row.setCount} sets, ${formatPercent(row.cardImageCoveragePercent)} images)`}
+              priced={row.pricedCardCount}
+              total={row.cardCount}
+              unpriced={row.unpricedCardCount}
+            />
+          ))}
+        </div>
+      ) : (
+        <p className="muted">No international card rows loaded.</p>
+      )}
+    </section>
   );
 }
 
@@ -9826,6 +9875,10 @@ function priceSourceLabel(source?: string | null) {
 
   if (source === "tcgcsv-card") {
     return "TCGCSV card";
+  }
+
+  if (source === "tcgcsv-japan-card") {
+    return "TCGCSV Japan";
   }
 
   if (source === "pricecharting-sealed") {

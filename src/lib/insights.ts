@@ -1094,6 +1094,10 @@ function readableSource(source: string) {
     return "TCGCSV card";
   }
 
+  if (source === "tcgcsv-japan-card") {
+    return "TCGCSV Japan";
+  }
+
   if (source === "pricecharting-sealed") {
     return "PriceCharting sealed";
   }

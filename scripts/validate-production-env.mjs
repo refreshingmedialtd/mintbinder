@@ -102,7 +102,11 @@ if (normalized("EXCHANGE_RATES_API_URL")) {
 
 if (manualExchangeRates) {
   positiveNumber("POKEMON_TCG_USD_TO_GBP_RATE", "Set a positive USD-to-GBP rate when automatic exchange rates are disabled.");
-  warnPositiveNumber("POKEMON_TCG_EUR_TO_GBP_RATE", "Cardmarket fallback pricing is disabled without a positive EUR-to-GBP rate.");
+  warnIf(
+    !positiveNumberValue("POKEMON_TCG_EUR_TO_GBP_RATE"),
+    "POKEMON_TCG_EUR_TO_GBP_RATE",
+    "Pokemon TCG API Cardmarket fallback prices need a positive EUR-to-GBP rate when automatic exchange rates are disabled.",
+  );
   warnIf(
     !positiveNumberValue("TCGCSV_USD_TO_GBP_RATE") && !positiveNumberValue("POKEMON_TCG_USD_TO_GBP_RATE"),
     "TCGCSV_USD_TO_GBP_RATE",
@@ -117,7 +121,7 @@ if (manualExchangeRates) {
   warnIf(
     !positiveNumberValue("POKEMON_TCG_EUR_TO_GBP_RATE"),
     "POKEMON_TCG_EUR_TO_GBP_RATE",
-    "Automatic exchange rates are enabled; add this only as an EUR fallback for Cardmarket provider outages.",
+    "Automatic exchange rates are enabled; add this only as an EUR fallback for Pokemon TCG API Cardmarket fallback prices.",
   );
   warnIf(
     !positiveNumberValue("TCGCSV_USD_TO_GBP_RATE") && !positiveNumberValue("POKEMON_TCG_USD_TO_GBP_RATE"),

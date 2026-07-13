@@ -318,6 +318,7 @@ export async function syncPokemonTcgCards({
     page: response.page,
     pageSize: response.pageSize,
     pricingSnapshotsCreated: snapshotsCreated,
+    provider: "pokemon-tcg-api",
     query: q,
     setIds: [...setIds],
     setsUpserted: setIds.size,

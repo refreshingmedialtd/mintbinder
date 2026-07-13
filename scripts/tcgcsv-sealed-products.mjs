@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 export const tcgcsvPokemonCategoryId = 3;
+export const tcgcsvPokemonJapanCategoryId = 85;
 
 const sealedKeywords = [
   "booster",
