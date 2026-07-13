@@ -30,6 +30,16 @@ type SetPricingTarget = {
   releaseDate: string | null;
 };
 
+class ScheduledSetPricingFailureError extends Error {
+  resultPayload: unknown;
+
+  constructor(message: string, resultPayload: unknown) {
+    super(message);
+    this.name = "ScheduledSetPricingFailureError";
+    this.resultPayload = resultPayload;
+  }
+}
+
 export async function runScheduledSetPricing(input: ScheduledSetPricingInput) {
   const targets = await nextPokemonTcgSetPricingTargets(input);
   const setResults = [];
@@ -66,6 +76,7 @@ export async function runScheduledSetPricing(input: ScheduledSetPricingInput) {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Set pricing refresh failed.";
+      await recordSetPricingAttempt(target, message);
 
       setResults.push({
         cardsFetched: 0,
@@ -92,14 +103,7 @@ export async function runScheduledSetPricing(input: ScheduledSetPricingInput) {
   }
 
   const failedSets = setResults.filter((result) => result.status === "failed");
-
-  if (targets.length > 0 && failedSets.length === targets.length) {
-    const firstError = failedSets[0]?.error ?? "Unknown set pricing error.";
-
-    throw new Error(`Scheduled set pricing failed for all ${failedSets.length} selected sets. First error: ${firstError}`);
-  }
-
-  return {
+  const result = {
     cardsFetched: sumResults(setResults, "cardsFetched"),
     cardsUpserted: sumResults(setResults, "cardsUpserted"),
     complete: targets.length === 0,
@@ -130,6 +134,17 @@ export async function runScheduledSetPricing(input: ScheduledSetPricingInput) {
     totalCount: sumResults(setResults, "totalCount"),
     waitMs: input.waitMs,
   };
+
+  if (targets.length > 0 && failedSets.length === targets.length) {
+    const firstError = failedSets[0]?.error ?? "Unknown set pricing error.";
+
+    throw new ScheduledSetPricingFailureError(
+      `Scheduled set pricing failed for all ${failedSets.length} selected sets. First error: ${firstError}`,
+      result,
+    );
+  }
+
+  return result;
 }
 
 export async function nextPokemonTcgSetPricingTargets(
@@ -147,7 +162,7 @@ export async function nextPokemonTcgSetPricingTargets(
       cs.printed_total AS "printedTotal",
       cs.total,
       cs.release_date AS "releaseDate",
-      COUNT(cp.id)::int AS "cardCount",
+      COUNT(DISTINCT cp.id)::int AS "cardCount",
       COUNT(DISTINCT ps.card_printing_id)::int AS "pricedCardCount",
       MAX(ps.observed_at) AS "latestSnapshotAt",
       GREATEST(
@@ -192,6 +207,29 @@ export async function nextPokemonTcgSetPricingTargets(
         releaseDate: toIso(row.releaseDate),
       };
     });
+}
+
+async function recordSetPricingAttempt(target: SetPricingTarget, message: string) {
+  const attemptedAt = new Date().toISOString();
+  const metadata = JSON.stringify({
+    scheduledPricingLastAttemptAt: attemptedAt,
+    scheduledPricingLastError: message,
+    scheduledPricingLastErrorStatus: providerErrorStatus(message),
+  });
+
+  await prisma.$executeRaw`
+    UPDATE card_sets
+    SET
+      metadata = COALESCE(metadata, '{}'::jsonb) || ${metadata}::jsonb,
+      updated_at = NOW()
+    WHERE id = ${target.id}::uuid
+  `;
+}
+
+function providerErrorStatus(message: string) {
+  const match = message.match(/\b(4\d\d|5\d\d)\b/);
+
+  return match ? Number(match[1]) : undefined;
 }
 
 function sumResults(results: Array<Record<string, unknown>>, key: string) {

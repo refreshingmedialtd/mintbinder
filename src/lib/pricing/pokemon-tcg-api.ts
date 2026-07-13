@@ -83,7 +83,7 @@ export class PricingProviderConfigError extends Error {
   }
 }
 
-class PokemonTcgApiRequestError extends Error {
+export class PokemonTcgApiRequestError extends Error {
   status: number;
 
   constructor(message: string, status: number) {
@@ -184,12 +184,16 @@ export async function syncPokemonTcgCards({
     q,
   });
   const resolvedPricingRates = writePrices ? pricingRates ?? await pokemonPricingRates() : null;
+  const cards = response.data;
   const setIds = new Set<string>();
+  const pricedCardIds = writePrices && priceOnlyUnpriced
+    ? await existingPriceSnapshotCardIds(cards.map((card) => cardPrintingId(card.id)))
+    : new Set<string>();
+  const priceSnapshots: Prisma.PriceSnapshotCreateManyInput[] = [];
   let snapshotsCreated = 0;
 
-  for (const card of response.data) {
+  for (const card of uniqueCardsBySet(cards)) {
     const setId = cardSetId(card.set.id);
-    const cardId = cardPrintingId(card.id);
 
     setIds.add(setId);
 
@@ -223,6 +227,13 @@ export async function syncPokemonTcgCards({
         total: card.set.total,
       },
     });
+  }
+
+  for (const card of cards) {
+    const setId = cardSetId(card.set.id);
+    const cardId = cardPrintingId(card.id);
+
+    setIds.add(setId);
 
     await prisma.cardPrinting.upsert({
       where: { id: cardId },
@@ -263,43 +274,47 @@ export async function syncPokemonTcgCards({
       },
     });
 
-    if (writePrices && resolvedPricingRates && (!priceOnlyUnpriced || !(await hasCardPriceSnapshot(cardId)))) {
+    if (writePrices && resolvedPricingRates && (!priceOnlyUnpriced || !pricedCardIds.has(cardId))) {
       const price = bestPokemonTcgCardPrice(card, resolvedPricingRates);
 
       if (price) {
-        await prisma.priceSnapshot.create({
-          data: {
-            cardPrintingId: cardId,
-            condition: ItemCondition.NEAR_MINT,
-            confidenceScore: price.confidenceScore,
-            currency: "GBP",
-            itemType: ItemType.CARD,
-            language: "en",
-            metadata: compactJson({
-              originalCurrency: price.originalCurrency,
-              originalPrice: price.originalPrice,
-              providerUpdatedAt: price.providerUpdatedAt,
-              conversionRate: price.conversionRate,
-              exchangeRateObservedAt: resolvedPricingRates.metadata?.[price.originalCurrency]?.observedAt,
-              exchangeRateProvider: resolvedPricingRates.metadata?.[price.originalCurrency]?.provider,
-              exchangeRateSourceDate: resolvedPricingRates.metadata?.[price.originalCurrency]?.sourceDate,
-              priceSource: price.sourceLabel,
-            }),
-            observedAt: new Date(),
-            priceMinor: Math.round(price.originalPrice * price.conversionRate * 100),
-            source: price.source,
-            sourceRef: card.id,
-            variantLabel: price.variantLabel,
-          },
+        priceSnapshots.push({
+          cardPrintingId: cardId,
+          condition: ItemCondition.NEAR_MINT,
+          confidenceScore: price.confidenceScore,
+          currency: "GBP",
+          itemType: ItemType.CARD,
+          language: "en",
+          metadata: compactJson({
+            originalCurrency: price.originalCurrency,
+            originalPrice: price.originalPrice,
+            providerUpdatedAt: price.providerUpdatedAt,
+            conversionRate: price.conversionRate,
+            exchangeRateObservedAt: resolvedPricingRates.metadata?.[price.originalCurrency]?.observedAt,
+            exchangeRateProvider: resolvedPricingRates.metadata?.[price.originalCurrency]?.provider,
+            exchangeRateSourceDate: resolvedPricingRates.metadata?.[price.originalCurrency]?.sourceDate,
+            priceSource: price.sourceLabel,
+          }),
+          observedAt: new Date(),
+          priceMinor: Math.round(price.originalPrice * price.conversionRate * 100),
+          source: price.source,
+          sourceRef: card.id,
+          variantLabel: price.variantLabel,
         });
         snapshotsCreated += 1;
       }
     }
   }
 
+  if (priceSnapshots.length) {
+    await prisma.priceSnapshot.createMany({
+      data: priceSnapshots,
+    });
+  }
+
   return {
     cardsFetched: response.count,
-    cardsUpserted: response.data.length,
+    cardsUpserted: cards.length,
     page: response.page,
     pageSize: response.pageSize,
     pricingSnapshotsCreated: snapshotsCreated,
@@ -433,16 +448,33 @@ async function pokemonPricingRates(): Promise<PokemonPricingRates> {
   }
 }
 
-async function hasCardPriceSnapshot(cardId: string) {
-  const snapshot = await prisma.priceSnapshot.findFirst({
-    select: { id: true },
+async function existingPriceSnapshotCardIds(cardIds: string[]) {
+  if (!cardIds.length) {
+    return new Set<string>();
+  }
+
+  const snapshots = await prisma.priceSnapshot.findMany({
+    distinct: ["cardPrintingId"],
+    select: { cardPrintingId: true },
     where: {
-      cardPrintingId: cardId,
+      cardPrintingId: { in: cardIds },
       itemType: ItemType.CARD,
     },
   });
 
-  return Boolean(snapshot);
+  return new Set(snapshots.map((snapshot) => snapshot.cardPrintingId).filter(Boolean) as string[]);
+}
+
+function uniqueCardsBySet(cards: PokemonTcgCard[]) {
+  const unique = new Map<string, PokemonTcgCard>();
+
+  for (const card of cards) {
+    if (!unique.has(card.set.id)) {
+      unique.set(card.set.id, card);
+    }
+  }
+
+  return [...unique.values()];
 }
 
 function cardSetId(providerId: string) {
