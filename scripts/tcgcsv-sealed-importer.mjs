@@ -21,6 +21,7 @@ export function sealedImportOptionsFromEnv(env = process.env) {
     groupIds: idList(env.TCGCSV_SEALED_GROUP_IDS),
     groupLimit: positiveInteger(env.TCGCSV_SEALED_GROUP_LIMIT, Number.POSITIVE_INFINITY),
     priceOnlyUnpriced: booleanSetting(env.TCGCSV_SEALED_PRICE_ONLY_UNPRICED, true),
+    productLimit: positiveInteger(env.TCGCSV_SEALED_PRODUCT_LIMIT, Number.POSITIVE_INFINITY),
     usdToGbpRate: conversionRate(env.TCGCSV_USD_TO_GBP_RATE) ?? conversionRate(env.POKEMON_TCG_USD_TO_GBP_RATE),
     writePrices: booleanSetting(env.TCGCSV_SEALED_WRITE_PRICES, true),
   };
@@ -33,6 +34,7 @@ export async function syncTcgcsvSealedProducts(options = {}) {
   const groupIds = idSet(options.groupIds);
   const groupLimit = positiveInteger(options.groupLimit, Number.POSITIVE_INFINITY);
   const priceOnlyUnpriced = options.priceOnlyUnpriced ?? true;
+  const productLimit = positiveInteger(options.productLimit, Number.POSITIVE_INFINITY);
   const waitMs = nonNegativeInteger(options.waitMs, 120);
   const writePrices = options.writePrices ?? true;
   const usdToGbp = conversionRate(options.usdToGbpRate);
@@ -47,45 +49,106 @@ export async function syncTcgcsvSealedProducts(options = {}) {
       prisma.cardSet.findMany({
         select: {
           id: true,
+          metadata: true,
           name: true,
           providerIds: true,
         },
       }),
     ]);
-    const availableMatches = matchTcgcsvGroupsToSets(groups.results ?? [], sets)
-      .filter(({ group }) => groupIds.size === 0 || groupIds.has(String(group.groupId)));
+    const availableMatches = orderSealedPricingMatches(
+      matchTcgcsvGroupsToSets(groups.results ?? [], sets)
+        .filter(({ group, set }) =>
+          (groupIds.size === 0 || groupIds.has(String(group.groupId))) &&
+          !sealedPricingRetryInFuture(set.metadata)
+        ),
+    );
     const matches = availableMatches.slice(0, groupLimit);
     const summary = {
+      failedGroups: 0,
+      groupResults: [],
       groupsAvailable: availableMatches.length,
       groupsMatched: matches.length,
       groupsProcessed: 0,
       priceOnlyUnpriced,
+      productLimit: Number.isFinite(productLimit) ? productLimit : null,
+      productsProcessed: 0,
       pricingSnapshotsCreated: 0,
       productsFetched: 0,
       sealedProductsSkipped: 0,
       sealedProductsUpserted: 0,
+      warning: null,
       writePrices,
     };
 
     for (const match of matches) {
-      const groupSummary = await importGroup({
-        fetchImpl,
-        match,
-        priceOnlyUnpriced,
-        prisma,
-        usdToGbp,
-        writePrices,
-      });
+      try {
+        const groupSummary = await importGroup({
+          fetchImpl,
+          match,
+          priceOnlyUnpriced,
+          prisma,
+          productLimit,
+          usdToGbp,
+          writePrices,
+        });
 
-      summary.groupsProcessed += 1;
-      summary.pricingSnapshotsCreated += groupSummary.pricingSnapshotsCreated;
-      summary.productsFetched += groupSummary.productsFetched;
-      summary.sealedProductsSkipped += groupSummary.sealedProductsSkipped;
-      summary.sealedProductsUpserted += groupSummary.sealedProductsUpserted;
+        await recordSealedPricingProgress({
+          groupSummary,
+          match,
+          prisma,
+          productLimit,
+        });
+
+        summary.groupsProcessed += 1;
+        summary.productsProcessed += groupSummary.productsProcessed;
+        summary.pricingSnapshotsCreated += groupSummary.pricingSnapshotsCreated;
+        summary.productsFetched += groupSummary.productsFetched;
+        summary.sealedProductsSkipped += groupSummary.sealedProductsSkipped;
+        summary.sealedProductsUpserted += groupSummary.sealedProductsUpserted;
+        summary.groupResults.push({
+          complete: groupSummary.complete,
+          groupId: String(match.group.groupId),
+          groupName: match.group.name,
+          nextProductIndex: groupSummary.nextProductIndex,
+          pricingSnapshotsCreated: groupSummary.pricingSnapshotsCreated,
+          productsFetched: groupSummary.productsFetched,
+          productsProcessed: groupSummary.productsProcessed,
+          sealedProductsUpserted: groupSummary.sealedProductsUpserted,
+          setId: match.set.id,
+          setName: match.set.name,
+          status: "succeeded",
+        });
+      } catch (error) {
+        if (!isSkippableSealedGroupError(error)) {
+          throw error;
+        }
+
+        const message = error instanceof Error ? error.message : "Sealed group import failed.";
+
+        await recordSealedPricingAttempt({
+          errorMessage: message,
+          match,
+          prisma,
+        });
+
+        summary.failedGroups += 1;
+        summary.groupResults.push({
+          error: message,
+          groupId: String(match.group.groupId),
+          groupName: match.group.name,
+          setId: match.set.id,
+          setName: match.set.name,
+          status: "failed",
+        });
+      }
 
       if (waitMs > 0) {
         await wait(waitMs);
       }
+    }
+
+    if (summary.failedGroups) {
+      summary.warning = `Sealed pricing completed with ${summary.failedGroups} failed group(s).`;
     }
 
     return summary;
@@ -101,6 +164,7 @@ async function importGroup({
   match,
   priceOnlyUnpriced,
   prisma,
+  productLimit,
   usdToGbp,
   writePrices,
 }) {
@@ -110,9 +174,21 @@ async function importGroup({
     fetchTcgcsv(`https://tcgcsv.com/tcgplayer/${tcgcsvPokemonCategoryId}/${group.groupId}/prices`, fetchImpl),
   ]);
   const pricesByProductId = new Map();
+  const products = productsResponse.results ?? [];
+  const productBatch = selectProductBatch({
+    productLimit,
+    products,
+    startIndex: sealedPricingNextProductIndex(set.metadata, products.length),
+  });
   const summary = {
+    complete: productBatch.complete,
+    nextProductIndex: productBatch.nextProductIndex,
+    productBatchEndIndex: productBatch.endIndex,
+    productBatchStartIndex: productBatch.startIndex,
+    productLimit: Number.isFinite(productLimit) ? productLimit : null,
+    productsProcessed: productBatch.products.length,
     pricingSnapshotsCreated: 0,
-    productsFetched: productsResponse.results?.length ?? 0,
+    productsFetched: products.length,
     sealedProductsSkipped: 0,
     sealedProductsUpserted: 0,
   };
@@ -124,7 +200,7 @@ async function importGroup({
     pricesByProductId.set(price.productId, productPrices);
   }
 
-  for (const product of productsResponse.results ?? []) {
+  for (const product of productBatch.products) {
     if (!isSealedProduct(product)) {
       summary.sealedProductsSkipped += 1;
       continue;
@@ -169,6 +245,57 @@ async function importGroup({
   }
 
   return summary;
+}
+
+async function recordSealedPricingProgress({
+  groupSummary,
+  match,
+  prisma,
+  productLimit,
+}) {
+  const attemptedAt = new Date().toISOString();
+  await updateCardSetMetadata(prisma, match.set, {
+    scheduledSealedPricingGroupId: String(match.group.groupId),
+    scheduledSealedPricingLastAttemptAt: attemptedAt,
+    scheduledSealedPricingLastError: null,
+    scheduledSealedPricingLastProductIndex: groupSummary.productBatchStartIndex,
+    scheduledSealedPricingLastProductLimit: Number.isFinite(productLimit) ? productLimit : null,
+    scheduledSealedPricingLastSnapshotCount: groupSummary.pricingSnapshotsCreated,
+    scheduledSealedPricingLastSucceededAt: attemptedAt,
+    scheduledSealedPricingLastTotalProducts: groupSummary.productsFetched,
+    scheduledSealedPricingNextProductIndex: groupSummary.nextProductIndex,
+    scheduledSealedPricingRetryAfter: null,
+  });
+}
+
+async function recordSealedPricingAttempt({
+  errorMessage,
+  match,
+  prisma,
+}) {
+  const attemptedAt = new Date().toISOString();
+  const status = providerErrorStatus(errorMessage);
+  await updateCardSetMetadata(prisma, match.set, {
+    scheduledSealedPricingGroupId: String(match.group.groupId),
+    scheduledSealedPricingLastAttemptAt: attemptedAt,
+    scheduledSealedPricingLastError: errorMessage,
+    scheduledSealedPricingLastErrorStatus: status,
+    scheduledSealedPricingRetryAfter: retryAfterForProviderStatus(status, attemptedAt),
+  });
+}
+
+async function updateCardSetMetadata(prisma, set, patch) {
+  const metadata = {
+    ...(isObject(set.metadata) ? set.metadata : {}),
+    ...patch,
+  };
+
+  await prisma.cardSet.update({
+    data: { metadata },
+    where: { id: set.id },
+  });
+
+  set.metadata = metadata;
 }
 
 async function upsertSealedProduct({ group, product, prisma, set }) {
@@ -232,10 +359,93 @@ async function fetchTcgcsv(url, fetchImpl) {
   const body = await response.json().catch(() => ({}));
 
   if (!response.ok || !body.success) {
-    throw new Error(`TCGCSV request failed for ${url}.`);
+    throw new Error(`TCGCSV request failed with HTTP ${response.status} for ${url}.`);
   }
 
   return body;
+}
+
+function orderSealedPricingMatches(matches) {
+  return [...matches].sort((left, right) =>
+    sealedPricingCursorPriority(left.set.metadata) - sealedPricingCursorPriority(right.set.metadata) ||
+    sealedPricingLastAttemptMs(left.set.metadata) - sealedPricingLastAttemptMs(right.set.metadata) ||
+    String(left.group.name ?? "").localeCompare(String(right.group.name ?? "")) ||
+    String(left.group.groupId ?? "").localeCompare(String(right.group.groupId ?? "")),
+  );
+}
+
+function sealedPricingCursorPriority(metadata) {
+  return sealedPricingNextProductIndex(metadata) > 0 ? 0 : 1;
+}
+
+function sealedPricingLastAttemptMs(metadata) {
+  const value = isObject(metadata) ? metadata.scheduledSealedPricingLastAttemptAt : null;
+  const ms = value ? Date.parse(String(value)) : 0;
+
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+function sealedPricingRetryInFuture(metadata) {
+  const value = isObject(metadata) ? metadata.scheduledSealedPricingRetryAfter : null;
+  const ms = value ? Date.parse(String(value)) : NaN;
+
+  return Number.isFinite(ms) && ms > Date.now();
+}
+
+function sealedPricingNextProductIndex(metadata, productCount = Number.POSITIVE_INFINITY) {
+  const value = isObject(metadata) ? metadata.scheduledSealedPricingNextProductIndex : undefined;
+  const index = nonNegativeInteger(value, 0);
+
+  if (!Number.isFinite(productCount)) {
+    return index;
+  }
+
+  if (productCount <= 0) {
+    return 0;
+  }
+
+  return Math.min(index, productCount - 1);
+}
+
+function selectProductBatch({ productLimit, products, startIndex }) {
+  const limit = Number.isFinite(productLimit) ? productLimit : products.length;
+  const normalizedStart = products.length ? Math.min(startIndex, products.length - 1) : 0;
+  const endIndex = Math.min(products.length, normalizedStart + limit);
+  const nextProductIndex = endIndex >= products.length ? 0 : endIndex;
+
+  return {
+    complete: nextProductIndex === 0,
+    endIndex,
+    nextProductIndex,
+    products: products.slice(normalizedStart, endIndex),
+    startIndex: normalizedStart,
+  };
+}
+
+function providerErrorStatus(message) {
+  const match = message.match(/\b(4\d\d|5\d\d)\b/);
+
+  return match ? Number(match[1]) : undefined;
+}
+
+function retryAfterForProviderStatus(status, attemptedAt) {
+  if (status !== 404) {
+    return null;
+  }
+
+  return new Date(Date.parse(attemptedAt) + 7 * 24 * 60 * 60 * 1000).toISOString();
+}
+
+function isSkippableSealedGroupError(error) {
+  if (error instanceof DOMException && ["AbortError", "TimeoutError"].includes(error.name)) {
+    return true;
+  }
+
+  if (error instanceof TypeError && /fetch|network/i.test(error.message)) {
+    return true;
+  }
+
+  return error instanceof Error && /TCGCSV request failed/i.test(error.message);
 }
 
 async function hasSealedPriceSnapshot(prisma, sealedProductId) {

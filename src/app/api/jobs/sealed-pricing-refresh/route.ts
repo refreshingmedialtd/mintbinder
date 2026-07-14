@@ -16,6 +16,7 @@ type SealedPricingBody = {
   groupIds?: string[] | string;
   groupLimit?: number | string;
   priceOnlyUnpriced?: boolean;
+  productLimit?: number | string;
   usdToGbpRate?: number | string;
   waitMs?: number | string;
   writePrices?: boolean;
@@ -57,6 +58,7 @@ async function sealedPricingInput(body: SealedPricingBody): Promise<TcgcsvSealed
   const input: TcgcsvSealedImportOptions = {};
   const groupIds = optionalGroupIds(body.groupIds);
   const groupLimit = optionalPositiveInteger(body.groupLimit);
+  const productLimit = optionalPositiveInteger(body.productLimit);
   const usdToGbpRate = optionalRate(body.usdToGbpRate);
   const waitMs = optionalPositiveInteger(body.waitMs);
 
@@ -70,6 +72,10 @@ async function sealedPricingInput(body: SealedPricingBody): Promise<TcgcsvSealed
 
   if (typeof body.priceOnlyUnpriced === "boolean") {
     input.priceOnlyUnpriced = body.priceOnlyUnpriced;
+  }
+
+  if (productLimit !== undefined) {
+    input.productLimit = productLimit;
   }
 
   if (usdToGbpRate !== undefined) {

@@ -420,6 +420,7 @@ function sealedPricingBody(env) {
   const groupIds = listSetting(env.TCGCSV_SEALED_GROUP_IDS);
   const groupLimit = optionalPositiveInteger(env.TCGCSV_SEALED_GROUP_LIMIT) ?? 1;
   const priceOnlyUnpriced = optionalBoolean(env.TCGCSV_SEALED_PRICE_ONLY_UNPRICED) ?? false;
+  const productLimit = optionalPositiveInteger(env.TCGCSV_SEALED_PRODUCT_LIMIT) ?? 40;
   const usdToGbpRate = optionalRate(env.TCGCSV_USD_TO_GBP_RATE);
   const waitMs = optionalPositiveInteger(env.TCGCSV_SEALED_WAIT_MS) ?? 120;
   const writePrices = optionalBoolean(env.TCGCSV_SEALED_WRITE_PRICES) ?? true;
@@ -431,6 +432,8 @@ function sealedPricingBody(env) {
   body.groupLimit = groupLimit;
 
   body.priceOnlyUnpriced = priceOnlyUnpriced;
+
+  body.productLimit = productLimit;
 
   if (usdToGbpRate) {
     body.usdToGbpRate = usdToGbpRate;

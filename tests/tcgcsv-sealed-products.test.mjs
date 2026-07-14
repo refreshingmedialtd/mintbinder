@@ -92,11 +92,16 @@ test("selects the strongest usable TCGCSV sealed price", () => {
 });
 
 test("imports sealed products and GBP price snapshots from TCGCSV payloads", async () => {
+  const metadataUpdates = [];
   const upserts = [];
   const snapshots = [];
   const prisma = {
     cardSet: {
       findMany: async () => [{ id: "set-1", name: "Silver Tempest" }],
+      update: async ({ data, where }) => {
+        metadataUpdates.push({ data, where });
+        return { id: where.id, ...data };
+      },
     },
     priceSnapshot: {
       create: async ({ data }) => {
@@ -168,13 +173,111 @@ test("imports sealed products and GBP price snapshots from TCGCSV payloads", asy
   assert.equal(summary.groupsMatched, 1);
   assert.equal(summary.groupsProcessed, 1);
   assert.equal(summary.productsFetched, 2);
+  assert.equal(summary.productsProcessed, 2);
   assert.equal(summary.sealedProductsSkipped, 1);
   assert.equal(summary.sealedProductsUpserted, 1);
   assert.equal(summary.pricingSnapshotsCreated, 1);
+  assert.equal(summary.groupResults[0].nextProductIndex, 0);
+  assert.equal(metadataUpdates[0].where.id, "set-1");
+  assert.equal(metadataUpdates[0].data.metadata.scheduledSealedPricingNextProductIndex, 0);
   assert.equal(upserts[0].productType, "BOOSTER_BOX");
   assert.equal(upserts[0].metadata.upc, "123");
   assert.equal(snapshots[0].priceMinor, 8000);
   assert.equal(snapshots[0].currency, "GBP");
+});
+
+test("resumes sealed product batches from set metadata", async () => {
+  const metadataUpdates = [];
+  const upserts = [];
+  const prisma = {
+    cardSet: {
+      findMany: async () => [
+        {
+          id: "set-1",
+          metadata: { scheduledSealedPricingNextProductIndex: 1 },
+          name: "Silver Tempest",
+        },
+      ],
+      update: async ({ data, where }) => {
+        metadataUpdates.push({ data, where });
+        return { id: where.id, ...data };
+      },
+    },
+    priceSnapshot: {
+      create: async ({ data }) => ({ id: "snapshot-1", ...data }),
+      findFirst: async () => null,
+    },
+    sealedProduct: {
+      findFirst: async () => null,
+      upsert: async ({ create }) => {
+        upserts.push(create);
+        return { id: create.id };
+      },
+    },
+  };
+  const fetchImpl = async (url) => ({
+    ok: true,
+    status: 200,
+    json: async () => {
+      if (url.endsWith("/groups")) {
+        return {
+          success: true,
+          results: [{ groupId: 3170, name: "SWSH12: Silver Tempest" }],
+        };
+      }
+
+      if (url.endsWith("/3170/products")) {
+        return {
+          success: true,
+          results: [
+            {
+              extendedData: [],
+              name: "Silver Tempest Booster Box",
+              productId: 100,
+            },
+            {
+              extendedData: [],
+              name: "Silver Tempest Elite Trainer Box",
+              productId: 200,
+            },
+          ],
+        };
+      }
+
+      return {
+        success: true,
+        results: [
+          {
+            marketPrice: 100,
+            productId: 100,
+            subTypeName: "Normal",
+          },
+          {
+            marketPrice: 50,
+            productId: 200,
+            subTypeName: "Normal",
+          },
+        ],
+      };
+    },
+  });
+
+  const summary = await syncTcgcsvSealedProducts({
+    fetchImpl,
+    priceOnlyUnpriced: false,
+    prisma,
+    productLimit: 1,
+    usdToGbpRate: 0.8,
+    waitMs: 0,
+  });
+
+  assert.equal(summary.productsFetched, 2);
+  assert.equal(summary.productsProcessed, 1);
+  assert.equal(summary.sealedProductsUpserted, 1);
+  assert.equal(summary.pricingSnapshotsCreated, 1);
+  assert.equal(upserts[0].name, "Silver Tempest Elite Trainer Box");
+  assert.equal(metadataUpdates[0].data.metadata.scheduledSealedPricingNextProductIndex, 0);
+  assert.equal(summary.groupResults[0].complete, true);
 });
 
 test("reads sealed import options from env", () => {
@@ -190,6 +293,7 @@ test("reads sealed import options from env", () => {
       groupIds: ["3170", "6052"],
       groupLimit: 2,
       priceOnlyUnpriced: false,
+      productLimit: Number.POSITIVE_INFINITY,
       usdToGbpRate: 0.8,
       writePrices: true,
     },

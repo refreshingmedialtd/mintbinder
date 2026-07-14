@@ -172,6 +172,7 @@ test("live sealed pricing defaults to a timeout-safe history-building group rota
     body: {
       groupLimit: 1,
       priceOnlyUnpriced: false,
+      productLimit: 40,
       waitMs: 120,
       writePrices: true,
     },

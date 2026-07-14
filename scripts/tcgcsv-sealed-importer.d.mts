@@ -3,6 +3,7 @@ export type TcgcsvSealedImportOptions = {
   groupIds?: string[] | string;
   groupLimit?: number;
   priceOnlyUnpriced?: boolean;
+  productLimit?: number;
   prisma?: unknown;
   usdToGbpRate?: number;
   waitMs?: number;
@@ -10,14 +11,19 @@ export type TcgcsvSealedImportOptions = {
 };
 
 export type TcgcsvSealedImportSummary = {
+  failedGroups: number;
+  groupResults: Array<Record<string, unknown>>;
   groupsAvailable: number;
   groupsMatched: number;
   groupsProcessed: number;
   priceOnlyUnpriced: boolean;
+  productLimit: number | null;
+  productsProcessed: number;
   pricingSnapshotsCreated: number;
   productsFetched: number;
   sealedProductsSkipped: number;
   sealedProductsUpserted: number;
+  warning: string | null;
   writePrices: boolean;
 };
 
