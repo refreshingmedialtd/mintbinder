@@ -12,7 +12,7 @@ type StatusLevel = "good" | "watch" | "action";
 export async function GET() {
   const session = await auth();
 
-  if (!session?.user?.id || !canUseOperationsForUser(session.user.role, session.user.email)) {
+  if (!session?.user?.id || !canUseOperationsForUser(session.user.role)) {
     return NextResponse.json({ error: "Admin access required." }, { status: 403 });
   }
 

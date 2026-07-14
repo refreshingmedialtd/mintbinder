@@ -4,6 +4,7 @@ import { SubscriptionPlan, SubscriptionStatus } from "@prisma/client";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import { normalizeAppRole, type AppUserRole } from "@/lib/auth/roles";
 import { prisma } from "@/lib/db/prisma";
+import { ensureNotificationPreferences } from "@/lib/notifications/preferences";
 
 const authSecret = process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET ?? process.env.JOB_SECRET;
 
@@ -87,6 +88,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
                   },
                   select: { id: true, email: true, displayName: true, role: true },
                 });
+            await ensureNotificationPreferences(user.id);
 
             return {
               id: user.id,
@@ -121,10 +123,12 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
       return token;
     },
-    session({ session, token }) {
+    async session({ session, token }) {
       if (session.user && token.sub) {
+        const role = await currentUserRole(token.sub, (token as { role?: AppUserRole }).role);
+
         session.user.id = token.sub;
-        session.user.role = normalizeAppRole((token as { role?: AppUserRole }).role);
+        session.user.role = role;
       }
 
       return session;
@@ -152,4 +156,18 @@ function normalizePassword(value: unknown) {
 
 function defaultNameFromEmail(email: string) {
   return email.split("@")[0] || "Collector";
+}
+
+async function currentUserRole(userId: string, fallback: unknown) {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { role: true },
+    });
+
+    return normalizeAppRole(user?.role ?? fallback);
+  } catch (error) {
+    console.warn("Unable to refresh user role for session.", error);
+    return normalizeAppRole(fallback);
+  }
 }

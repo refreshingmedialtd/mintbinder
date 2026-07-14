@@ -1,6 +1,6 @@
 # International Catalogue Plan
 
-Last updated: 13 July 2026
+Last updated: 14 July 2026
 
 ## Why This Matters
 
@@ -31,6 +31,10 @@ This is a core USP: most collection apps handle English and some Japanese. Korea
   - `TCGDEX_IMPORT_LANGUAGE=ja npm run job:international-catalogue-batch`
   - `npm run job:international-catalogue-backfill` imports every supported TCGdex page for `ja`, `zh-tw`, `zh-cn`, and `ko` in safer chunks.
   - Optional controls: `TCGDEX_BACKFILL_LANGUAGES=ja,zh-tw,zh-cn,ko`, `TCGDEX_BACKFILL_PAGE_SIZE=250`, `TCGDEX_BACKFILL_CHUNK_PAGES=2`, `TCGDEX_BACKFILL_START_PAGE=1`.
+- Deployed live runner:
+  - `npm run job:live-international-catalogue-backfill`
+  - Defaults to `TCGDEX_BACKFILL_LANGUAGES=zh-cn,ko` so Simplified Chinese and Korean can be refreshed urgently without starting a local Next server.
+  - Uses `SCHEDULED_JOB_APP_URL`/`NEXT_PUBLIC_APP_URL`/`AUTH_URL`, falling back to `https://mintbinder.co.uk`.
 - Supported first-pass language codes: `ja`, `zh-tw`, `zh-cn`, `ko`
 - Starter Neon imports run on 10 July 2026:
   - Japanese: 500 cards / 60 sets
@@ -66,7 +70,7 @@ This is a core USP: most collection apps handle English and some Japanese. Korea
 2. Increase `pageSize`/`maxPages` gradually once the UI is confirmed stable.
 3. Run `zh-cn` and `ko` as partial imports only, then review the coverage gaps rather than presenting them as complete.
 4. Expand the localized-name alias table beyond the first high-value/common Pokemon set. Long term this should be generated from a licensed species-name dataset rather than maintained by hand.
-5. Build a coverage dashboard grouped by language and region: sets, cards, images, priced records.
+5. Keep the Operations coverage dashboard grouped by language and region: sets, cards, images, priced records.
 6. Keep Traditional Chinese, Simplified Chinese, and Korean price gaps visible in Operations while evaluating reviewed CSV, licensed-data, or direct-partner options. Do not scrape official pages or local marketplace pages into production without rights review.
 7. Expand local-market pricing sources per language. Japanese now has a TCGCSV-backed first pass; Traditional Chinese, Simplified Chinese, and Korean still need a source that does not require personal/business API verification or unauthorized reuse.
 

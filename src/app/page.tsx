@@ -206,6 +206,7 @@ type OperationsJobKind =
   | "alerts"
   | "card-image-repair"
   | "catalogue"
+  | "international-catalogue"
   | "pricing"
   | "sealed"
   | "sealed-image-repair"
@@ -515,8 +516,6 @@ const defaultBinderSettingsFallback: DefaultBinderSettings = {
   interiorId: "classic",
   itemIds: [],
 };
-const plusPreviewEmails = new Set(["liam@example.com", "liam@refreshing.media"]);
-const plusPreviewDomains = new Set(["refreshing.media"]);
 const binderArtworkOptions: Array<{
   accent: string;
   description: string;
@@ -821,8 +820,8 @@ export default function Home() {
     email: session?.user?.email || "",
     role: normalizeAppRole(session?.user?.role),
   };
-  const operationsEnabled = canUseOperationsForUser(viewer.role, viewer.email);
-  const canPreviewPlan = operationsEnabled || canPreviewSubscription(viewer.email, viewer.name);
+  const operationsEnabled = canUseOperationsForUser(viewer.role);
+  const canPreviewPlan = operationsEnabled;
   const effectivePlus = canPreviewPlan && plusPreviewOverride !== null
     ? plusPreviewOverride
     : appState.plus;
@@ -2341,7 +2340,7 @@ function renderScreen(context: ScreenContext) {
     case "analytics":
       return <AnalyticsScreen {...context} />;
     case "ops":
-      return canUseOperationsForUser(context.viewer.role, context.viewer.email) ? <OperationsScreen {...context} /> : <OperationsLockedScreen />;
+      return canUseOperationsForUser(context.viewer.role) ? <OperationsScreen {...context} /> : <OperationsLockedScreen />;
     case "settings":
       return <SettingsScreen {...context} />;
     case "dashboard":
@@ -6510,6 +6509,10 @@ function OperationsScreen({
   const [sealedGroupLimit, setSealedGroupLimit] = useState(10);
   const [sealedPriceOnlyUnpriced, setSealedPriceOnlyUnpriced] = useState(true);
   const [sealedUsdToGbpRate, setSealedUsdToGbpRate] = useState("");
+  const [internationalLanguage, setInternationalLanguage] = useState("zh-cn");
+  const [internationalPage, setInternationalPage] = useState(1);
+  const [internationalPageSize, setInternationalPageSize] = useState(250);
+  const [internationalMaxPages, setInternationalMaxPages] = useState(2);
   const [mergePrimaryCardId, setMergePrimaryCardId] = useState("");
   const [mergeDuplicateCardId, setMergeDuplicateCardId] = useState("");
   const [betaStatus, setBetaStatus] = useState<BetaStatusApiResult | null>(null);
@@ -6767,6 +6770,8 @@ function OperationsScreen({
     const path =
       kind === "catalogue"
         ? "/api/jobs/catalogue-refresh"
+        : kind === "international-catalogue"
+          ? "/api/jobs/international-catalogue-refresh"
         : kind === "pricing"
           ? "/api/jobs/pricing-refresh"
           : kind === "sealed"
@@ -6781,6 +6786,8 @@ function OperationsScreen({
     const body =
       kind === "alerts"
         ? { dryRun: true }
+        : kind === "international-catalogue"
+          ? internationalCatalogueJobBody()
         : kind === "sealed"
           ? sealedJobBody()
           : kind === "card-image-repair"
@@ -6846,6 +6853,15 @@ function OperationsScreen({
       priceOnlyUnpriced: sealedPriceOnlyUnpriced,
       usdToGbpRate: Number.isFinite(rate) && rate > 0 ? rate : undefined,
       writePrices: true,
+    };
+  }
+
+  function internationalCatalogueJobBody() {
+    return {
+      language: internationalLanguage,
+      maxPages: internationalMaxPages,
+      page: internationalPage,
+      pageSize: internationalPageSize,
     };
   }
 
@@ -7129,10 +7145,67 @@ function OperationsScreen({
               </label>
             </div>
           </div>
+          <div className="ops-subsection">
+            <div className="panel-title-row">
+              <h3>International catalogue</h3>
+              <Languages size={17} />
+            </div>
+            <div className="field-grid">
+              <Field label="Language">
+                <select
+                  value={internationalLanguage}
+                  onChange={(event) => {
+                    setInternationalLanguage(event.currentTarget.value);
+                    setInternationalPage(1);
+                  }}
+                >
+                  {CATALOGUE_LANGUAGE_OPTIONS
+                    .filter((language) => language.code !== "en")
+                    .map((language) => (
+                      <option key={language.code} value={language.code}>
+                        {language.label}
+                      </option>
+                    ))}
+                </select>
+              </Field>
+              <Field label="Page">
+                <input
+                  min={1}
+                  type="number"
+                  value={internationalPage}
+                  onChange={(event) => setInternationalPage(Math.max(1, Number(event.currentTarget.value) || 1))}
+                />
+              </Field>
+              <Field label="Page size">
+                <input
+                  max={250}
+                  min={1}
+                  type="number"
+                  value={internationalPageSize}
+                  onChange={(event) =>
+                    setInternationalPageSize(Math.min(250, Math.max(1, Number(event.currentTarget.value) || 1)))}
+                />
+              </Field>
+              <Field label="Max pages">
+                <input
+                  max={20}
+                  min={1}
+                  type="number"
+                  value={internationalMaxPages}
+                  onChange={(event) =>
+                    setInternationalMaxPages(Math.min(20, Math.max(1, Number(event.currentTarget.value) || 1)))}
+                />
+              </Field>
+            </div>
+          </div>
           <div className="actions">
             <button className="button primary" disabled={Boolean(isBusy)} onClick={() => void runJob("catalogue")}>
               <Database size={17} />
               {isBusy === "catalogue" ? "Running" : "Catalogue"}
+            </button>
+            <button className="button" disabled={Boolean(isBusy)} onClick={() => void runJob("international-catalogue")}>
+              <Languages size={17} />
+              {isBusy === "international-catalogue" ? "Running" : "International"}
             </button>
             <button className="button" disabled={Boolean(isBusy)} onClick={() => void runJob("pricing")}>
               <RefreshCw size={17} />
@@ -7806,7 +7879,7 @@ function SettingsScreen({
             plus={appState.plus}
             onStartCheckout={startPlusCheckout}
           />
-          {canUseOperationsForUser(viewer.role, viewer.email) ? <OperationsEntryPanel onOpen={() => navigate("ops")} /> : null}
+          {canUseOperationsForUser(viewer.role) ? <OperationsEntryPanel onOpen={() => navigate("ops")} /> : null}
           <DataPanel
             plus={appState.plus}
             onExportCollection={exportCollectionCsv}
@@ -10682,15 +10755,6 @@ function isThemeId(value: unknown): value is ThemeId {
 
 function isThemeAllowed(themeId: ThemeId, plus: boolean) {
   return plus || freeThemeIds.has(themeId);
-}
-
-function canPreviewSubscription(email: string, name: string) {
-  const normalizedEmail = email.trim().toLowerCase();
-  const domain = normalizedEmail.split("@")[1] ?? "";
-
-  return plusPreviewEmails.has(normalizedEmail)
-    || plusPreviewDomains.has(domain)
-    || name.trim().toLowerCase() === "liamb";
 }
 
 function capitalize(value: string) {

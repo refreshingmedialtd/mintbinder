@@ -3,7 +3,6 @@ import test from "node:test";
 import {
   canUseOperations,
   canUseOperationsForUser,
-  isOperationsOwnerEmail,
   normalizeAppRole,
 } from "../src/lib/auth/roles.ts";
 
@@ -20,11 +19,8 @@ test("allows Operations for admins only", () => {
   assert.equal(canUseOperations(null), false);
 });
 
-test("allows Operations for the configured owner email", () => {
-  assert.equal(isOperationsOwnerEmail("liam@refreshing.media"), true);
-  assert.equal(isOperationsOwnerEmail("LIAM@REFRESHING.MEDIA"), true);
-  assert.equal(isOperationsOwnerEmail("liam@example.com"), false);
-  assert.equal(canUseOperationsForUser("USER", "liam@refreshing.media"), true);
+test("allows Operations only for stored admin roles", () => {
+  assert.equal(canUseOperationsForUser("USER", "liam@refreshing.media"), false);
   assert.equal(canUseOperationsForUser("USER", "liam@example.com"), false);
   assert.equal(canUseOperationsForUser("ADMIN", "liam@example.com"), true);
 });

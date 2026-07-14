@@ -128,6 +128,7 @@ test("warns on missing manual conversion rates, audit rows, and job runs", () =>
   );
   assert.deepEqual(
     jobRunWarnings({
+      now: new Date("2026-06-03T10:00:00.000Z"),
       recentFailedJobRunReport: {
         runs: [
           {
@@ -149,6 +150,29 @@ test("warns on missing manual conversion rates, audit rows, and job runs", () =>
       "1 job run failed in the last 24 hours; latest failed pricing refresh started 2026-06-03T09:15:00.000Z: Missing GBP conversion rate. Latest pricing refresh has since succeeded at 2026-06-03T09:20:00.000Z.",
       "No catalogue refresh job run has been recorded yet.",
       "Latest price alerts job run failed: Email provider missing.",
+    ],
+  );
+});
+
+test("warns when key scheduled jobs are stale", () => {
+  assert.deepEqual(
+    jobRunWarnings({
+      now: new Date("2026-06-05T12:00:00.000Z"),
+      recentFailedJobRunReport: {
+        runs: [],
+        total: 0,
+      },
+      latestJobRunsByType: {
+        CATALOGUE_REFRESH: { status: "SUCCEEDED", startedAt: "2026-06-04T12:01:00.000Z" },
+        PRICE_ALERTS: { status: "SUCCEEDED", startedAt: "2026-06-01T08:00:00.000Z" },
+        PRICING_REFRESH: { status: "SUCCEEDED", startedAt: "2026-06-05T08:00:00.000Z" },
+        SEALED_PRICING_REFRESH: { status: "SUCCEEDED", startedAt: "2026-06-01T09:00:00.000Z" },
+      },
+    }),
+    [
+      "Latest price alerts job run is stale: 2026-06-01T08:00:00.000Z is older than 48 hours.",
+      "Latest pricing refresh job run is stale: 2026-06-05T08:00:00.000Z is older than 3 hours.",
+      "Latest sealed pricing refresh job run is stale: 2026-06-01T09:00:00.000Z is older than 48 hours.",
     ],
   );
 });

@@ -165,6 +165,20 @@ test("live Japanese card pricing posts to the international pricing endpoint", (
   });
 });
 
+test("live sealed pricing defaults to a timeout-safe history-building group rotation", () => {
+  const request = protectedJobRequest("sealed-pricing", {});
+
+  assert.deepEqual(request, {
+    body: {
+      groupLimit: 1,
+      priceOnlyUnpriced: false,
+      waitMs: 120,
+      writePrices: true,
+    },
+    path: "/api/jobs/sealed-pricing-refresh",
+  });
+});
+
 function jsonResponse(body, status = 200) {
   return new Response(JSON.stringify(body), {
     headers: {

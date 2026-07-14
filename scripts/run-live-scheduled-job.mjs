@@ -418,35 +418,27 @@ function pricingStrategy(env) {
 function sealedPricingBody(env) {
   const body = {};
   const groupIds = listSetting(env.TCGCSV_SEALED_GROUP_IDS);
-  const groupLimit = optionalPositiveInteger(env.TCGCSV_SEALED_GROUP_LIMIT);
-  const priceOnlyUnpriced = optionalBoolean(env.TCGCSV_SEALED_PRICE_ONLY_UNPRICED);
+  const groupLimit = optionalPositiveInteger(env.TCGCSV_SEALED_GROUP_LIMIT) ?? 1;
+  const priceOnlyUnpriced = optionalBoolean(env.TCGCSV_SEALED_PRICE_ONLY_UNPRICED) ?? false;
   const usdToGbpRate = optionalRate(env.TCGCSV_USD_TO_GBP_RATE);
-  const waitMs = optionalPositiveInteger(env.TCGCSV_SEALED_WAIT_MS);
-  const writePrices = optionalBoolean(env.TCGCSV_SEALED_WRITE_PRICES);
+  const waitMs = optionalPositiveInteger(env.TCGCSV_SEALED_WAIT_MS) ?? 120;
+  const writePrices = optionalBoolean(env.TCGCSV_SEALED_WRITE_PRICES) ?? true;
 
   if (groupIds.length) {
     body.groupIds = groupIds;
   }
 
-  if (groupLimit) {
-    body.groupLimit = groupLimit;
-  }
+  body.groupLimit = groupLimit;
 
-  if (priceOnlyUnpriced !== undefined) {
-    body.priceOnlyUnpriced = priceOnlyUnpriced;
-  }
+  body.priceOnlyUnpriced = priceOnlyUnpriced;
 
   if (usdToGbpRate) {
     body.usdToGbpRate = usdToGbpRate;
   }
 
-  if (waitMs) {
-    body.waitMs = waitMs;
-  }
+  body.waitMs = waitMs;
 
-  if (writePrices !== undefined) {
-    body.writePrices = writePrices;
-  }
+  body.writePrices = writePrices;
 
   return body;
 }

@@ -2,7 +2,7 @@ import "dotenv/config";
 import { PrismaClient } from "@prisma/client";
 import { pathToFileURL } from "node:url";
 
-const defaultAdminEmail = process.env.ADMIN_QA_EMAIL?.trim() || "liam@example.com";
+const defaultAdminEmail = process.env.ADMIN_QA_EMAIL?.trim() || "liam@refreshing.media";
 const requiredEnv = [
   "DATABASE_URL",
   "AUTH_SECRET",
@@ -22,6 +22,12 @@ const jobRunTypes = [
   "PRICING_REFRESH",
   "SEALED_PRICING_REFRESH",
 ];
+const staleJobWarningHours = {
+  PRICE_ALERTS: 48,
+  CATALOGUE_REFRESH: 168,
+  PRICING_REFRESH: 3,
+  SEALED_PRICING_REFRESH: 48,
+};
 const recentFailedJobRunDetailLimit = 5;
 
 export async function runAdminQaSmoke({
@@ -80,7 +86,7 @@ export async function runAdminQaSmoke({
       ...countWarnings(counts),
       ...catalogueWarnings(catalogueHealth),
       ...conversionRateWarnings(conversionRates, { automaticExchangeRates: exchangeRates.automatic }),
-      ...jobRunWarnings({ recentFailedJobRunReport, latestJobRunsByType }),
+      ...jobRunWarnings({ latestJobRunsByType, now, recentFailedJobRunReport }),
       ...(duplicateGroups > 0
         ? [`${duplicateGroups} duplicate Pokemon TCG provider ID group${duplicateGroups === 1 ? "" : "s"} need review.`]
         : []),
@@ -243,7 +249,7 @@ export function catalogueWarnings(health) {
   ];
 }
 
-export function jobRunWarnings({ recentFailedJobRunReport, latestJobRunsByType }) {
+export function jobRunWarnings({ latestJobRunsByType, now = new Date(), recentFailedJobRunReport }) {
   const recentFailedJobRuns = recentFailedJobRunReport?.total ?? 0;
   const latestRecentFailure = recentFailedJobRunReport?.runs?.[0] ?? null;
 
@@ -257,6 +263,11 @@ export function jobRunWarnings({ recentFailedJobRunReport, latestJobRunsByType }
     ...Object.entries(latestJobRunsByType)
       .filter(([, run]) => run?.status === "FAILED")
       .map(([type, run]) => `Latest ${jobTypeLabel(type)} job run failed: ${jobRunErrorMessage(run)}`),
+    ...Object.entries(staleJobWarningHours)
+      .map(([type, hours]) => ({ hours, run: latestJobRunsByType[type], type }))
+      .filter(({ run }) => run)
+      .filter(({ hours, run }) => isOlderThanHours(run.startedAt, now, hours))
+      .map(({ hours, run, type }) => `Latest ${jobTypeLabel(type)} job run is stale: ${run.startedAt} is older than ${hours} hours.`),
   ];
 }
 
@@ -450,6 +461,16 @@ function isAfter(value, comparison) {
   const comparisonDate = new Date(comparison);
 
   return date.getTime() > comparisonDate.getTime();
+}
+
+function isOlderThanHours(value, now, hours) {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return false;
+  }
+
+  return now.getTime() - date.getTime() > hours * 60 * 60 * 1000;
 }
 
 async function latestJobRuns(prisma) {

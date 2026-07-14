@@ -102,6 +102,9 @@ STRIPE_PLUS_MONTHLY_PRICE_ID=""
 STRIPE_PLUS_YEARLY_PRICE_ID=""
 STRIPE_WEBHOOK_SECRET=""
 JOB_SECRET=""
+SCHEDULED_JOB_APP_URL=""
+ADMIN_EMAIL="liam@refreshing.media"
+ADMIN_QA_EMAIL="liam@refreshing.media"
 EMAIL_PROVIDER="smtp"
 EMAIL_FROM="Mint Binder <alerts@mintbinder.co.uk>"
 EMAIL_SMOKE_TO=""
@@ -114,6 +117,8 @@ SMTP_PASSWORD=""
 RESEND_API_KEY=""
 PRICE_ALERT_DIGEST_DRY_RUN="true"
 PRICE_ALERT_DIGEST_NOW=""
+PRICE_ALERT_DIGEST_TEST_RECIPIENT=""
+PRICE_ALERT_DIGEST_ALLOW_LIVE_RECIPIENTS="false"
 OPERATIONS_QA_NETWORK_REPAIRS="false"
 POKEMON_TCG_API_KEY=""
 POKEMON_TCG_QUERY=""
@@ -150,11 +155,16 @@ VARIANT_METADATA_REPAIR_LIMIT="500"
 VARIANT_METADATA_REPAIR_DRY_RUN="false"
 VARIANT_METADATA_REPAIR_WAIT_MS="120"
 TCGCSV_SEALED_GROUP_IDS=""
-TCGCSV_SEALED_GROUP_LIMIT=""
+TCGCSV_SEALED_GROUP_LIMIT="1"
 TCGCSV_USD_TO_GBP_RATE=""
-TCGCSV_SEALED_PRICE_ONLY_UNPRICED="true"
+TCGCSV_SEALED_PRICE_ONLY_UNPRICED="false"
 TCGCSV_SEALED_WAIT_MS="120"
 TCGCSV_SEALED_WRITE_PRICES="true"
+TCGDEX_BACKFILL_LANGUAGES="zh-cn,ko"
+TCGDEX_BACKFILL_PAGE_SIZE="250"
+TCGDEX_BACKFILL_CHUNK_PAGES="2"
+TCGDEX_BACKFILL_START_PAGE="1"
+TCGDEX_BACKFILL_WAIT_MS="250"
 TCGCSV_CARD_GROUP_IDS=""
 TCGCSV_CARD_GROUP_LIMIT=""
 TCGCSV_CARD_ONLY_UNPRICED_GROUPS="false"
@@ -281,13 +291,15 @@ Use `npm run report:catalogue-gaps` or the Operations export button to check loc
 
 For TCGCSV card-pricing enrichment, run `npm run job:tcgcsv-card-pricing`. The importer reads TCGCSV's cached TCGplayer Pokemon groups/products/prices, matches groups to local card sets, matches card products by set/name/number, and writes card price snapshots with source `tcgcsv-card`. When a matched product has multiple price subtypes, each usable subtype is stored as its own variant snapshot. Set `TCGCSV_CARD_GROUP_IDS` to a comma-separated list of TCGplayer group IDs for a targeted run, `TCGCSV_USD_TO_GBP_RATE` or `POKEMON_TCG_USD_TO_GBP_RATE` for this standalone importer, and `TCGCSV_CARD_PRICE_ONLY_UNPRICED=true` to enrich only missing card/variant snapshots. For large production catch-ups, set `TCGCSV_CARD_ONLY_UNPRICED_GROUPS=true` and `TCGCSV_CARD_MIN_UNPRICED=25` so repeat runs process matched sets with the largest remaining unpriced-card gaps first.
 
+For international catalogue backfills, use Operations or run `npm run job:live-international-catalogue-backfill` against the deployed app. By default this reruns the source-backed Simplified Chinese and Korean TCGdex imports in small chunks; set `TCGDEX_BACKFILL_LANGUAGES=ja,zh-tw,zh-cn,ko` when you deliberately want to refresh every supported international language.
+
 For Japanese card-pricing enrichment, run `npm run job:tcgcsv-japan-card-pricing` locally or `npm run job:live-japan-card-pricing` against the deployed app. This uses TCGCSV's `Pokemon Japan` category (`TCGCSV_JAPAN_CARD_CATEGORY_ID=85`), matches TCGdex-backed Japanese sets by set code where possible, and writes source `tcgcsv-japan-card` snapshots with `language=ja`. Scheduled production runs should use `TCGCSV_JAPAN_CARD_GROUP_LIMIT=1`, `TCGCSV_JAPAN_CARD_ONLY_UNPRICED_GROUPS=false`, and `TCGCSV_JAPAN_CARD_PRICE_ONLY_UNPRICED=false` so each run fills blanks and also creates fresh price-history snapshots for the oldest Japanese group.
 
 Traditional Chinese, Simplified Chinese, and Korean card-pricing enrichment does not currently have a safe automated source. Keep those pricing gaps visible in Operations and use a reviewed CSV/licensed-source workflow rather than scraping official pages or requiring Cardmarket personal/business verification.
 
 For sealed product catalogue imports, run `npm run job:sealed-tcgcsv`. The importer reads TCGCSV's cached TCGplayer Pokemon groups/products/prices, matches groups to local card sets, filters sealed products, and writes sealed-product price snapshots. Set `TCGCSV_SEALED_GROUP_IDS` to a comma-separated list of TCGplayer group IDs for a smaller import, `TCGCSV_USD_TO_GBP_RATE` or `POKEMON_TCG_USD_TO_GBP_RATE` for this standalone importer, and `TCGCSV_SEALED_PRICE_ONLY_UNPRICED=true` to enrich only products that do not already have sealed prices.
 
-For tracked sealed-pricing backfills through the same API route used by Operations, set `JOB_SECRET`, keep automatic exchange rates enabled, then run `npm run job:sealed-pricing-batch`. The helper starts the built app, posts to `/api/jobs/sealed-pricing-refresh`, records a `sealed_pricing_refresh` job run, prints the JSON result, and stops the server. Use `TCGCSV_SEALED_GROUP_LIMIT` or `TCGCSV_SEALED_GROUP_IDS` for small batches before scaling up.
+For tracked sealed-pricing backfills through the same API route used by Operations, set `JOB_SECRET`, keep automatic exchange rates enabled, then run `npm run job:sealed-pricing-batch`. The helper starts the built app, posts to `/api/jobs/sealed-pricing-refresh`, records a `sealed_pricing_refresh` job run, prints the JSON result, and stops the server. Use `TCGCSV_SEALED_GROUP_LIMIT` or `TCGCSV_SEALED_GROUP_IDS` for small batches before scaling up. Production scheduled sealed pricing should use `npm run job:live-sealed-pricing` with `TCGCSV_SEALED_GROUP_LIMIT=1` and `TCGCSV_SEALED_PRICE_ONLY_UNPRICED=false` so sealed products build price history the same way card pricing does.
 
 For production scheduled jobs, see [SCHEDULED_JOBS.md](SCHEDULED_JOBS.md). The live helpers call the deployed app instead of starting a temporary local server: `npm run job:live-health`, `npm run job:live-pricing`, `npm run job:live-japan-card-pricing`, `npm run job:live-sealed-pricing`, and `npm run job:live-price-alerts`.
 

@@ -18,6 +18,10 @@ export const defaultNotificationPreferences: NotificationPreferences = {
 
 export type NotificationPreferenceUpdate = Partial<NotificationPreferences>;
 
+export async function ensureNotificationPreferences(userId: string): Promise<NotificationPreferences> {
+  return updateNotificationPreferences(userId, {});
+}
+
 export async function getNotificationPreferences(userId: string): Promise<NotificationPreferences> {
   const rows = await prisma.$queryRaw<DbNotificationPreference[]>`
       SELECT
