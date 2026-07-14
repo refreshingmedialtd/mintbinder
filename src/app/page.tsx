@@ -489,23 +489,6 @@ const sealedProductTypes = [
   "Case",
   "Other",
 ];
-const freePlanFeatures = [
-  "Track cards and sealed products",
-  "Add manual sealed products and values",
-  "Dashboard value, gain/loss, and recent history",
-  "Collection search, filters, and storage locations",
-  "Basic collection review signals",
-  "Wishlist and set progress",
-  "CSV import, CSV export, and item-level price context",
-];
-const plusPlanFeatures = [
-  "Full portfolio analytics and value movement",
-  "Price alert emails and wishlist target digests",
-  "Insurance report export",
-  "Deeper weak-price, duplicate, and grading review insights",
-  "Richer price-confidence and collection health insights",
-  "Priority access to future advanced reporting tools",
-];
 const betaSetupDismissedStorageKey = "mintbinder-beta-setup-dismissed";
 const themeStorageKey = "mintbinder-theme";
 const defaultBinderId = "all-collection";
@@ -2232,7 +2215,6 @@ export default function Home() {
         <Sidebar
           active={appState.screen}
           alertCount={intelligence.actionQueue.length}
-          canUseOperations={operationsEnabled}
           onNavigate={navigate}
         />
         <main className="main">
@@ -2240,7 +2222,7 @@ export default function Home() {
           <LegalFooter />
         </main>
       </div>
-      <BottomNav active={appState.screen} canUseOperations={operationsEnabled} onNavigate={navigate} />
+      <BottomNav active={appState.screen} onNavigate={navigate} />
       {toast ? <div className="toast">{toast}</div> : null}
     </div>
   );
@@ -2555,28 +2537,23 @@ function Header({
 function Sidebar({
   active,
   alertCount,
-  canUseOperations,
   onNavigate,
 }: {
   active: Screen;
   alertCount: number;
-  canUseOperations: boolean;
   onNavigate: (screen: Screen) => void;
 }) {
   return (
     <aside className="sidebar" aria-label="Primary navigation">
-      <NavButton active={active === "dashboard"} icon={<LayoutDashboard />} label="Dashboard" onClick={() => onNavigate("dashboard")} />
+      <NavButton active={active === "dashboard"} icon={<LayoutDashboard />} label="Portfolio" onClick={() => onNavigate("dashboard")} />
       <NavButton active={active === "collection"} icon={<Layers3 />} label="Collection" onClick={() => onNavigate("collection")} />
-      <NavButton active={active === "binders"} icon={<BookOpen />} label="Binders" onClick={() => onNavigate("binders")} />
-      <NavButton active={active === "add"} icon={<Plus />} label="Add item" onClick={() => onNavigate("add")} />
-      <NavButton active={active === "sets" || active === "setDetail"} icon={<GalleryVerticalEnd />} label="Sets" onClick={() => onNavigate("sets")} />
+      <NavButton active={active === "add"} icon={<Plus />} label="Add" onClick={() => onNavigate("add")} />
       <NavButton active={active === "wishlist"} icon={<Heart />} label="Wishlist" onClick={() => onNavigate("wishlist")} />
-      <NavButton active={active === "alerts"} icon={<Bell />} label={`Alerts (${alertCount})`} onClick={() => onNavigate("alerts")} />
-      <NavButton active={active === "analytics"} icon={<BarChart3 />} label="Analytics" onClick={() => onNavigate("analytics")} />
-      {canUseOperations ? (
-        <NavButton active={active === "ops"} icon={<TerminalSquare />} label="Operations" onClick={() => onNavigate("ops")} />
-      ) : null}
+      <NavButton active={active === "sets" || active === "setDetail"} icon={<GalleryVerticalEnd />} label="Prices" onClick={() => onNavigate("sets")} />
       <span className="nav-divider" />
+      <NavButton active={active === "binders"} icon={<BookOpen />} label="Binders" onClick={() => onNavigate("binders")} />
+      <NavButton active={active === "alerts"} icon={<Bell />} label={`Alerts (${alertCount})`} onClick={() => onNavigate("alerts")} />
+      <NavButton active={active === "analytics"} icon={<BarChart3 />} label="Insights" onClick={() => onNavigate("analytics")} />
       <NavButton active={active === "settings"} icon={<Settings />} label="Settings" onClick={() => onNavigate("settings")} />
     </aside>
   );
@@ -2584,29 +2561,24 @@ function Sidebar({
 
 function BottomNav({
   active,
-  canUseOperations,
   onNavigate,
 }: {
   active: Screen;
-  canUseOperations: boolean;
   onNavigate: (screen: Screen) => void;
 }) {
   return (
-    <nav className={canUseOperations ? "bottom-nav admin" : "bottom-nav"} aria-label="Primary navigation">
-      <MobileNavButton active={active === "dashboard"} icon={<LayoutDashboard />} label="Home" onClick={() => onNavigate("dashboard")} />
-      <MobileNavButton active={active === "collection"} icon={<Layers3 />} label="Cards" onClick={() => onNavigate("collection")} />
-      <MobileNavButton active={active === "binders"} icon={<BookOpen />} label="Binders" onClick={() => onNavigate("binders")} />
+    <nav className="bottom-nav" aria-label="Primary navigation">
+      <MobileNavButton active={active === "dashboard"} icon={<LayoutDashboard />} label="Portfolio" onClick={() => onNavigate("dashboard")} />
+      <MobileNavButton active={active === "collection"} icon={<Layers3 />} label="Collection" onClick={() => onNavigate("collection")} />
       <button className={active === "add" ? "active add-button" : "add-button"} onClick={() => onNavigate("add")}>
         <span className="icon-wrap">
           <Plus size={20} />
         </span>
         <span>Add</span>
       </button>
-      <MobileNavButton active={active === "sets" || active === "setDetail"} icon={<GalleryVerticalEnd />} label="Sets" onClick={() => onNavigate("sets")} />
       <MobileNavButton active={active === "wishlist"} icon={<Heart />} label="Want" onClick={() => onNavigate("wishlist")} />
-      {canUseOperations ? (
-        <MobileNavButton active={active === "ops"} icon={<TerminalSquare />} label="Ops" onClick={() => onNavigate("ops")} />
-      ) : null}
+      <MobileNavButton active={active === "sets" || active === "setDetail"} icon={<GalleryVerticalEnd />} label="Prices" onClick={() => onNavigate("sets")} />
+      <MobileNavButton active={active === "settings" || active === "binders" || active === "alerts" || active === "analytics" || active === "ops"} icon={<Settings />} label="More" onClick={() => onNavigate("settings")} />
     </nav>
   );
 }
@@ -2650,6 +2622,7 @@ function MobileNavButton({
 }
 
 function DashboardScreen({
+  catalogueItems,
   collection,
   collectionEvents,
   catalogueById,
@@ -2673,25 +2646,39 @@ function DashboardScreen({
     .slice(0, 4);
   const dashboardSets = focusSets.length ? focusSets : sets.slice(0, 4);
   const gain = summary.value - summary.cost;
+  const trendDelta = portfolioHistoryDelta(intelligence.portfolioHistory);
 
   return (
     <section className="page">
       <PageHeader
-        title="Dashboard"
+        title="Portfolio"
         action={
-          <button className="button primary" onClick={() => startAdd("card")}>
-            <Plus size={17} />
-            Add item
-          </button>
+          <>
+            <button className="button" onClick={() => navigate("collection")}>
+              <Layers3 size={17} />
+              Collection
+            </button>
+            <button className="button primary" onClick={() => startAdd("card")}>
+              <Plus size={17} />
+              Add item
+            </button>
+          </>
         }
       />
 
-      <div className="stats-grid">
-        <StatCard label="Collection value" value={formatMoney(summary.value)} note={`${summary.unvalued} unvalued items`} />
-        <StatCard label="Gain/loss" value={formatMoney(gain)} note={`${formatMoney(summary.cost)} cost basis`} positive={gain >= 0} />
-        <StatCard label="Items tracked" value={summary.items.toString()} note={`${summary.cards} cards | ${summary.sealed} sealed`} />
-        <StatCard label="Wishlist" value={wishlist.length.toString()} note={`${formatMoney(wishlistTotal)} target total`} />
-      </div>
+      <PortfolioHero
+        dataNotice={dataNotice}
+        dataSource={dataSource}
+        gain={gain}
+        intelligence={intelligence}
+        isLoadingData={isLoadingData}
+        navigate={navigate}
+        startAdd={startAdd}
+        summary={summary}
+        trendDelta={trendDelta}
+        wishlistCount={wishlist.length}
+        wishlistTotal={wishlistTotal}
+      />
 
       {!collection.length ? (
         <section className="starter-panel">
@@ -2715,85 +2702,65 @@ function DashboardScreen({
         </section>
       ) : null}
 
-      <OnboardingChecklist
-        collection={collection}
-        sets={sets}
-        storageLocations={storageLocations}
-        summary={summary}
-        wishlist={wishlist}
-        navigate={navigate}
-        setAppState={setAppState}
-        startAdd={startAdd}
-      />
+      {!collection.length ? (
+        <OnboardingChecklist
+          collection={collection}
+          sets={sets}
+          storageLocations={storageLocations}
+          summary={summary}
+          wishlist={wishlist}
+          navigate={navigate}
+          setAppState={setAppState}
+          startAdd={startAdd}
+        />
+      ) : null}
 
-      <div className="dashboard-grid">
-        <section className="section-block">
-          <SectionHeader title="Recent additions" />
-          <div className="item-list">
-            {recent.length ? recent.map((item) => (
-              <OwnedItemCard
-                key={item.id}
-                item={item}
-                catalogueItem={catalogueById.get(item.catalogueId)}
-                onClick={() => {
-                  setAppState((current) => ({ ...current, selectedItemId: item.id }));
-                  navigate("item");
-                }}
-              />
-            )) : (
-              <EmptyState
-                title="No items yet"
-                description="Add your first card or sealed product to start building the dashboard."
-                action={
-                  <button className="button primary" onClick={() => startAdd("card")}>
-                    <Plus size={17} />
-                    Add first item
-                  </button>
-                }
-              />
-            )}
-          </div>
-        </section>
-
-        <div className="side-stack">
-          <section className="tool-panel">
-            <div className="panel-title-row">
-              <h2>Quick actions</h2>
-              <span className={dataSource === "database" ? "status-pill" : "tag amber"}>
-                {isLoadingData ? "Loading" : dataSource === "database" ? "Database" : "Sample"}
-              </span>
-            </div>
-            <div className="actions">
-              <button className="button primary" onClick={() => startAdd("card")}>
-                <Plus size={17} />
-                Add card
-              </button>
-              <button className="button" onClick={() => startAdd("sealed")}>
-                <PackagePlus size={17} />
-                Add sealed
-              </button>
-              <button className="button" onClick={() => navigate("wishlist")}>
-                <Heart size={17} />
-                Wishlist
-              </button>
-              <button className="button" onClick={() => navigate("alerts")}>
-                <Bell size={17} />
-                Alerts
-              </button>
-            </div>
-            {dataNotice ? <p className="muted">{dataNotice}</p> : null}
-          </section>
-
-          <section className="tool-panel">
-            <div className="panel-title-row">
-              <h2>Recent history</h2>
-              <History size={18} />
-            </div>
-            <EventList events={collectionEvents.slice(0, 4)} />
-          </section>
+      <div className="dashboard-grid portfolio-dashboard-grid">
+        <div className="section-block">
+          <TopHoldings holdings={intelligence.topHoldings} />
 
           <section className="section-block">
-            <SectionHeader title="Set progress" action={<button className="button" onClick={() => navigate("sets")}>Open sets</button>} />
+            <SectionHeader title="Recent additions" />
+            <div className="item-list">
+              {recent.length ? recent.map((item) => (
+                <OwnedItemCard
+                  key={item.id}
+                  item={item}
+                  catalogueItem={catalogueById.get(item.catalogueId)}
+                  onClick={() => {
+                    setAppState((current) => ({ ...current, selectedItemId: item.id }));
+                    navigate("item");
+                  }}
+                />
+              )) : (
+                <EmptyState
+                  title="No items yet"
+                  description="Add your first card or sealed product to start building the dashboard."
+                  action={
+                    <button className="button primary" onClick={() => startAdd("card")}>
+                      <Plus size={17} />
+                      Add first item
+                    </button>
+                  }
+                />
+              )}
+            </div>
+          </section>
+        </div>
+
+        <div className="side-stack">
+          <DashboardAttentionPanel
+            intelligence={intelligence}
+            navigate={navigate}
+            setAppState={setAppState}
+            startAdd={startAdd}
+            summary={summary}
+          />
+
+          <LanguageCoveragePanel catalogueItems={catalogueItems} sets={sets} />
+
+          <section className="section-block">
+            <SectionHeader title="Set progress" action={<button className="button" onClick={() => navigate("sets")}>Open prices</button>} />
             <div className="set-list">
               {dashboardSets.map((set) => (
                 <SetProgressCard
@@ -2807,30 +2774,230 @@ function DashboardScreen({
               ))}
             </div>
             {sets.length > dashboardSets.length ? (
-              <p className="muted">Showing {dashboardSets.length} focus sets. Open Sets for the full catalogue.</p>
+              <p className="muted">Showing {dashboardSets.length} focus sets. Open Prices for the full catalogue.</p>
             ) : null}
           </section>
 
           <section className="tool-panel">
             <div className="panel-title-row">
-              <h2>Collector pulse</h2>
-              <span className="status-pill">{intelligence.healthLabel}</span>
+              <h2>Recent history</h2>
+              <History size={18} />
             </div>
-            <MiniChart values={intelligence.valueTrend} />
-            <MetricList
-              rows={[
-                ["Health score", `${intelligence.healthScore}/100`],
-                ["Best performer", intelligence.bestPerformer ? gainLabel(intelligence.bestPerformer) : "Not enough cost data"],
-                ["Storage focus", intelligence.storageConcentration ? `${intelligence.storageConcentration.name} (${intelligence.storageConcentration.share}%)` : "No storage value yet"],
-                ["Action queue", `${intelligence.actionQueue.length} item${intelligence.actionQueue.length === 1 ? "" : "s"}`],
-              ]}
-            />
-            <button className="button full" onClick={() => navigate("analytics")}>
-              <BarChart3 size={17} />
-              Open intelligence
-            </button>
+            <EventList events={collectionEvents.slice(0, 4)} />
           </section>
         </div>
+      </div>
+    </section>
+  );
+}
+
+function PortfolioHero({
+  dataNotice,
+  dataSource,
+  gain,
+  intelligence,
+  isLoadingData,
+  navigate,
+  startAdd,
+  summary,
+  trendDelta,
+  wishlistCount,
+  wishlistTotal,
+}: {
+  dataNotice: string;
+  dataSource: AppDataSource;
+  gain: number;
+  intelligence: CollectionIntelligence;
+  isLoadingData: boolean;
+  navigate: (screen: Screen) => void;
+  startAdd: (type: ItemType) => void;
+  summary: ScreenContext["summary"];
+  trendDelta: number | null;
+  wishlistCount: number;
+  wishlistTotal: number;
+}) {
+  const coverage = intelligence.valuationCoverage.coveragePercent;
+  const latestHistory = intelligence.portfolioHistory.at(-1);
+
+  return (
+    <section className="portfolio-hero">
+      <div className="portfolio-hero-main">
+        <div className="portfolio-kicker">
+          <span className={dataSource === "database" ? "status-pill" : "tag amber"}>
+            {isLoadingData ? "Loading" : dataSource === "database" ? "Live data" : "Sample data"}
+          </span>
+          <span className="status-pill">{intelligence.healthLabel}</span>
+        </div>
+        <div>
+          <span className="portfolio-label">Collection value</span>
+          <strong className="portfolio-value">{formatMoney(summary.value)}</strong>
+          <p className="muted">
+            {summary.items} lots tracked across {summary.cards} cards and {summary.sealed} sealed products.
+          </p>
+        </div>
+        <div className="portfolio-actions">
+          <button className="button primary" onClick={() => startAdd("card")}>
+            <Plus size={17} />
+            Add card
+          </button>
+          <button className="button" onClick={() => startAdd("sealed")}>
+            <PackagePlus size={17} />
+            Add sealed
+          </button>
+          <button className="button" onClick={() => navigate("analytics")}>
+            <BarChart3 size={17} />
+            Insights
+          </button>
+        </div>
+        {dataNotice ? <p className="muted">{dataNotice}</p> : null}
+      </div>
+      <div className="portfolio-hero-side">
+        <MiniChart values={intelligence.valueTrend} />
+        <div className="portfolio-metric-grid">
+          <span>
+            <small>Gain/loss</small>
+            <strong className={gain >= 0 ? "positive" : ""}>{formatSignedMoney(gain)}</strong>
+          </span>
+          <span>
+            <small>Cost basis</small>
+            <strong>{formatMoney(summary.cost)}</strong>
+          </span>
+          <span>
+            <small>Value coverage</small>
+            <strong>{coverage}%</strong>
+          </span>
+          <span>
+            <small>Wishlist</small>
+            <strong>{wishlistCount} / {formatMoney(wishlistTotal)}</strong>
+          </span>
+          <span>
+            <small>Since first point</small>
+            <strong className={trendDelta !== null && trendDelta >= 0 ? "positive" : ""}>
+              {trendDelta === null ? "Building" : formatSignedMoney(trendDelta)}
+            </strong>
+          </span>
+          <span>
+            <small>Latest pricing point</small>
+            <strong>{latestHistory ? formatEventDate(latestHistory.observedAt) : "Pending"}</strong>
+          </span>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function DashboardAttentionPanel({
+  intelligence,
+  navigate,
+  setAppState,
+  startAdd,
+  summary,
+}: {
+  intelligence: CollectionIntelligence;
+  navigate: (screen: Screen) => void;
+  setAppState: Dispatch<SetStateAction<AppState>>;
+  startAdd: (type: ItemType) => void;
+  summary: ScreenContext["summary"];
+}) {
+  const actions = intelligence.actionQueue.slice(0, 3);
+
+  return (
+    <section className="tool-panel attention-panel">
+      <div className="panel-title-row">
+        <h2>Needs attention</h2>
+        <span className={actions.length ? "tag blue" : "tag green"}>
+          {actions.length ? `${actions.length} open` : "Clear"}
+        </span>
+      </div>
+      {actions.length ? (
+        <div className="insight-list">
+          {actions.map((action) => (
+            <article className="insight-row" key={action.id}>
+              <span className={`tag ${actionTagClass(action.tone)}`}>{action.category}</span>
+              <div>
+                <strong>{action.title}</strong>
+                <p className="muted">{action.detail}</p>
+              </div>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <p className="muted">No obvious collection issues right now.</p>
+      )}
+      <div className="attention-actions">
+        {summary.unvalued ? (
+          <button
+            className="button"
+            onClick={() =>
+              setAppState((current) => ({
+                ...current,
+                collectionFilter: "unknown",
+                collectionValueFilter: "unvalued",
+                screen: "collection",
+              }))
+            }
+          >
+            <Bell size={17} />
+            Review {summary.unvalued}
+          </button>
+        ) : null}
+        <button className="button" onClick={() => navigate("wishlist")}>
+          <Heart size={17} />
+          Wishlist
+        </button>
+        <button className="button primary" onClick={() => startAdd("card")}>
+          <Plus size={17} />
+          Add
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function LanguageCoveragePanel({
+  catalogueItems,
+  sets,
+}: {
+  catalogueItems: CatalogueItem[];
+  sets: SetProgress[];
+}) {
+  const trackedLanguages = ["en", "ja", "zh-cn", "zh-tw", "ko"];
+  const rows = trackedLanguages.map((code) => {
+    const cards = catalogueItems.filter((item) => item.type === "card" && (item.language ?? "en") === code);
+    const languageSets = sets.filter((set) => (set.language ?? "en") === code);
+    const label = CATALOGUE_LANGUAGE_OPTIONS.find((option) => option.code === code)?.label ?? code;
+    const priced = cards.filter((item) => item.hasPrice).length;
+    const imaged = cards.filter((item) => Boolean(item.image)).length;
+
+    return {
+      code,
+      imaged,
+      label,
+      priced,
+      setCount: languageSets.length,
+      total: cards.length,
+    };
+  });
+
+  return (
+    <section className="tool-panel language-coverage-panel">
+      <div className="panel-title-row">
+        <h2>Language coverage</h2>
+        <Languages size={18} />
+      </div>
+      <div className="language-coverage-list">
+        {rows.map((row) => (
+          <article className="language-coverage-row" key={row.code}>
+            <div>
+              <strong>{row.label}</strong>
+              <span>{row.setCount} sets | {formatCount(row.total)} cards</span>
+            </div>
+            <div>
+              <span>{formatPercent(row.total ? Math.round((row.imaged / row.total) * 100) : null)} images</span>
+              <span>{formatPercent(row.total ? Math.round((row.priced / row.total) * 100) : null)} priced</span>
+            </div>
+          </article>
+        ))}
       </div>
     </section>
   );
@@ -2885,7 +3052,7 @@ function OnboardingChecklist({
     },
     {
       action: () => navigate("sets"),
-      actionLabel: "Sets",
+      actionLabel: "Prices",
       done: sets.some((set) => set.owned > 0),
       detail: "Use set progress as a collection goal.",
       icon: <GalleryVerticalEnd size={16} />,
@@ -4480,6 +4647,7 @@ function AddScreen({
               <CatalogueResult
                 key={item.id}
                 item={item}
+                onQuickAdd={() => void addToCollection(item.id)}
                 selected={item.id === selected?.id}
                 onClick={() => setAppState((current) => ({ ...current, selectedCatalogueId: item.id }))}
               />
@@ -5065,7 +5233,7 @@ function SetsScreen({
 
   return (
     <section className="page">
-      <PageHeader title="Sets" />
+      <PageHeader title="Prices" />
       <section className="catalogue-toolbar">
         <label className="search-box">
           <Search size={18} />
@@ -5142,7 +5310,7 @@ function SetDetailScreen({
           action={
             <button className="button" onClick={() => navigate("sets")}>
               <ArrowLeft size={17} />
-              Sets
+              Prices
             </button>
           }
         />
@@ -5213,7 +5381,7 @@ function SetDetailScreen({
         action={
           <button className="button" onClick={() => navigate("sets")}>
             <ArrowLeft size={17} />
-            Sets
+            Prices
           </button>
         }
       />
@@ -6260,7 +6428,7 @@ function AnalyticsScreen({
   if (!appState.plus) {
     return (
       <section className="page">
-        <PageHeader title="Analytics" action={<span className="plan-pill"><Lock size={17} />Free preview</span>} />
+        <PageHeader title="Insights" action={<span className="plan-pill"><Lock size={17} />Free preview</span>} />
         <div className="stats-grid">
           <StatCard label="Health score" value={`${intelligence.healthScore}/100`} note={intelligence.healthLabel} />
           <StatCard label="Current value" value={formatMoney(summary.value)} note={`${summary.items} tracked items`} />
@@ -6332,7 +6500,7 @@ function AnalyticsScreen({
 
   return (
     <section className="page">
-      <PageHeader title="Analytics" action={<span className="plan-pill"><Sparkles size={17} />Plus active</span>} />
+      <PageHeader title="Insights" action={<span className="plan-pill"><Sparkles size={17} />Plus active</span>} />
       <div className="stats-grid">
         <StatCard label="Health score" value={`${intelligence.healthScore}/100`} note={intelligence.healthLabel} />
         <StatCard label="Current value" value={formatMoney(summary.value)} note={`${intelligence.valuationCoverage.coveragePercent}% valued`} />
@@ -7856,47 +8024,37 @@ function SettingsScreen({
 }: ScreenContext) {
   return (
     <section className="page">
-      <PageHeader title="Settings" />
+      <PageHeader
+        title="Settings"
+        action={
+          canUseOperationsForUser(viewer.role) ? (
+            <button className="button" onClick={() => navigate("ops")}>
+              <TerminalSquare size={17} />
+              Admin operations
+            </button>
+          ) : null
+        }
+      />
+      <div className="settings-overview-grid">
+        <MetricPanel
+          title="Account"
+          rows={[
+            ["Name", viewer.name],
+            ["Email", viewer.email],
+            ["Role", viewer.role === "ADMIN" ? "Admin" : "User"],
+          ]}
+        />
+        <MetricPanel
+          title="Plan"
+          rows={[
+            ["Plan", appState.plus ? "Plus" : "Free"],
+            ["Billing", billingStatusLabel(subscription)],
+            ["Currency", "\u00a3 GBP"],
+          ]}
+        />
+      </div>
       <div className="settings-columns">
         <div className="settings-stack">
-          <MetricPanel
-            title="Profile"
-            rows={[
-              ["Name", viewer.name],
-              ["Email", viewer.email],
-              ["Role", viewer.role === "ADMIN" ? "Admin" : "User"],
-              ["Currency", "\u00a3"],
-              ["Region", "United Kingdom"],
-            ]}
-          />
-          <ThemePanel
-            plus={appState.plus}
-            selectedThemeId={themeId}
-            onSelectTheme={setThemeId}
-            onStartCheckout={startPlusCheckout}
-          />
-          <PlanComparisonPanel
-            plus={appState.plus}
-            onStartCheckout={startPlusCheckout}
-          />
-          {canUseOperationsForUser(viewer.role) ? <OperationsEntryPanel onOpen={() => navigate("ops")} /> : null}
-          <DataPanel
-            plus={appState.plus}
-            onExportCollection={exportCollectionCsv}
-            onExportInsuranceReport={exportInsuranceReport}
-            onDownloadTemplate={downloadImportTemplate}
-            onImportCollection={importCollectionCsv}
-            onResetSampleData={resetSampleData}
-          />
-        </div>
-        <div className="settings-stack">
-          <MetricPanel
-            title="Subscription"
-            rows={[
-              ["Plan", appState.plus ? "Plus" : "Free"],
-              ["Billing", billingStatusLabel(subscription)],
-            ]}
-          />
           <BillingPanel
             plus={appState.plus}
             subscription={subscription}
@@ -7909,6 +8067,28 @@ function SettingsScreen({
             preferences={notificationPreferences}
             onUpdate={updateNotificationPreferences}
           />
+          <StoragePanel
+            locations={storageLocations}
+            onCreate={createStorageLocation}
+            onDelete={deleteStorageLocation}
+          />
+        </div>
+        <div className="settings-stack">
+          <SettingsShortcutsPanel navigate={navigate} />
+          <ThemePanel
+            plus={appState.plus}
+            selectedThemeId={themeId}
+            onSelectTheme={setThemeId}
+            onStartCheckout={startPlusCheckout}
+          />
+          <DataPanel
+            plus={appState.plus}
+            onExportCollection={exportCollectionCsv}
+            onExportInsuranceReport={exportInsuranceReport}
+            onDownloadTemplate={downloadImportTemplate}
+            onImportCollection={importCollectionCsv}
+            onResetSampleData={resetSampleData}
+          />
           <MetricPanel
             title="Data source"
             rows={[
@@ -7916,12 +8096,37 @@ function SettingsScreen({
               ["Status", dataNotice || "Connected"],
             ]}
           />
-          <StoragePanel
-            locations={storageLocations}
-            onCreate={createStorageLocation}
-            onDelete={deleteStorageLocation}
-          />
+          {canUseOperationsForUser(viewer.role) ? <OperationsEntryPanel onOpen={() => navigate("ops")} /> : null}
         </div>
+      </div>
+    </section>
+  );
+}
+
+function SettingsShortcutsPanel({ navigate }: { navigate: (screen: Screen) => void }) {
+  return (
+    <section className="tool-panel settings-shortcuts-panel">
+      <div className="panel-title-row">
+        <h2>More</h2>
+        <Grid2X2 size={18} />
+      </div>
+      <div className="shortcut-grid">
+        <button className="button" onClick={() => navigate("binders")}>
+          <BookOpen size={17} />
+          Binders
+        </button>
+        <button className="button" onClick={() => navigate("alerts")}>
+          <Bell size={17} />
+          Alerts
+        </button>
+        <button className="button" onClick={() => navigate("analytics")}>
+          <BarChart3 size={17} />
+          Insights
+        </button>
+        <button className="button" onClick={() => navigate("sets")}>
+          <GalleryVerticalEnd size={17} />
+          Prices
+        </button>
       </div>
     </section>
   );
@@ -8343,71 +8548,6 @@ function PreferenceToggle({
   );
 }
 
-function PlanComparisonPanel({
-  plus,
-  onStartCheckout,
-}: {
-  plus: boolean;
-  onStartCheckout: (plan: "monthly" | "yearly") => Promise<void>;
-}) {
-  return (
-    <section className="tool-panel plan-comparison-panel">
-      <div className="panel-title-row">
-        <h2>Free vs Plus</h2>
-        <span className="tag blue">Current beta split</span>
-      </div>
-      <div className="plan-comparison">
-        <article className={plus ? "plan-card" : "plan-card current"}>
-          <div className="plan-card-head">
-            <div>
-              <span className="tag">Free</span>
-              <strong>Core collection tracking</strong>
-            </div>
-            {!plus ? <span className="status-pill"><Check size={16} />Current</span> : null}
-          </div>
-          <ul>
-            {freePlanFeatures.map((feature) => (
-              <li key={feature}>
-                <Check size={16} />
-                <span>{feature}</span>
-              </li>
-            ))}
-          </ul>
-        </article>
-        <article className={plus ? "plan-card featured current" : "plan-card featured"}>
-          <div className="plan-card-head">
-            <div>
-              <span className="tag green">Plus</span>
-              <strong>£2.49 monthly or £19.99 yearly</strong>
-            </div>
-            {plus ? <span className="status-pill"><Sparkles size={16} />Active</span> : null}
-          </div>
-          <ul>
-            {plusPlanFeatures.map((feature) => (
-              <li key={feature}>
-                <Sparkles size={16} />
-                <span>{feature}</span>
-              </li>
-            ))}
-          </ul>
-          {!plus ? (
-            <div className="upgrade-actions">
-              <button className="button primary" onClick={() => void onStartCheckout("monthly")}>
-                <CreditCard size={17} />
-                Monthly
-              </button>
-              <button className="button" onClick={() => void onStartCheckout("yearly")}>
-                <Sparkles size={17} />
-                Yearly
-              </button>
-            </div>
-          ) : null}
-        </article>
-      </div>
-    </section>
-  );
-}
-
 function BillingPanel({
   plus,
   subscription,
@@ -8426,42 +8566,15 @@ function BillingPanel({
   const periodLabel = billingPeriodLabel(subscription);
 
   return (
-    <section className="tool-panel">
+    <section className="tool-panel billing-panel-compact">
       <div className="panel-title-row">
         <h2>Billing</h2>
         {plus ? <span className="plan-pill"><Sparkles size={17} />Plus</span> : <span className="plan-pill"><Lock size={17} />Free</span>}
       </div>
-      <p className="muted">
-        {plus
-          ? "Your Plus tools are active. Manage renewals, cards, and invoices through billing settings."
-          : "Upgrade when you want price-alert emails, insurance exports, and deeper collection analytics."}
-      </p>
       <div className="billing-status">
         <span><CreditCard size={16} />{billingProviderLabel(subscription.provider)}</span>
         <span><Check size={16} />{billingStatusLabel(subscription)}</span>
         {periodLabel ? <span><RefreshCw size={16} />{periodLabel}</span> : null}
-      </div>
-      <div className="billing-plan-grid">
-        <article className="billing-plan">
-          <div>
-            <span className="tag">Monthly</span>
-            <strong>£2.49</strong>
-          </div>
-          <button className="button primary" onClick={() => void onStartCheckout("monthly")} disabled={plus}>
-            <CreditCard size={17} />
-            Start monthly
-          </button>
-        </article>
-        <article className="billing-plan featured">
-          <div>
-            <span className="tag green">Best value</span>
-            <strong>£19.99</strong>
-          </div>
-          <button className="button" onClick={() => void onStartCheckout("yearly")} disabled={plus}>
-            <Sparkles size={17} />
-            Start yearly
-          </button>
-        </article>
       </div>
       <div className="feature-list">
         <span><Bell size={16} />Price alert emails</span>
@@ -8470,6 +8583,18 @@ function BillingPanel({
         <span><Mail size={16} />Wishlist target digests</span>
       </div>
       <div className="actions">
+        {!plus ? (
+          <>
+            <button className="button primary" onClick={() => void onStartCheckout("monthly")}>
+              <CreditCard size={17} />
+              Monthly
+            </button>
+            <button className="button" onClick={() => void onStartCheckout("yearly")}>
+              <Sparkles size={17} />
+              Yearly
+            </button>
+          </>
+        ) : null}
         <button className="button" onClick={() => void onOpenBillingPortal()} disabled={!plus}>
           <Settings size={17} />
           Manage billing
@@ -8790,10 +8915,12 @@ function OwnedItemCard({
 
 function CatalogueResult({
   item,
+  onQuickAdd,
   selected,
   onClick,
 }: {
   item: CatalogueItem;
+  onQuickAdd: () => void;
   selected: boolean;
   onClick: () => void;
 }) {
@@ -8801,29 +8928,34 @@ function CatalogueResult({
   const setLabel = catalogueItemSetLabel(item);
 
   return (
-    <button className={selected ? "item-card clickable selected" : "item-card clickable"} onClick={onClick}>
-      <div className="item-image">{renderItemImage(item)}</div>
-      <div className="item-main">
-        <div className="item-title-row">
-          <div>
-            <h3>{title}</h3>
-            <p className="muted">{setLabel} | {item.number}</p>
+    <article className={selected ? "item-card catalogue-result-card selected" : "item-card catalogue-result-card"}>
+      <button className="catalogue-result-main" type="button" onClick={onClick}>
+        <div className="item-image">{renderItemImage(item)}</div>
+        <div className="item-main">
+          <div className="item-title-row">
+            <div>
+              <h3>{title}</h3>
+              <p className="muted">{setLabel} | {item.number}</p>
+            </div>
+            {selected ? <span className="set-print-status owned">Selected</span> : <span className="set-print-rarity">{item.rarity}</span>}
           </div>
-          {selected ? <span className="set-print-status owned">Selected</span> : <span className="set-print-rarity">{item.rarity}</span>}
+          <p className="item-value">{formatValuation(catalogueMarketValueMinor(item))}</p>
+          {item.type === "card" && item.variantOptions?.length ? (
+            <div className="tag-row">
+              {item.language && item.language !== "en" ? (
+                <span className="tag blue">{item.languageLabel ?? item.language}</span>
+              ) : null}
+              {item.variantOptions.slice(0, 3).map((option) => (
+                <span className="tag" key={option.label}>{option.label}</span>
+              ))}
+            </div>
+          ) : null}
         </div>
-        <p className="item-value">{formatValuation(catalogueMarketValueMinor(item))}</p>
-        {item.type === "card" && item.variantOptions?.length ? (
-          <div className="tag-row">
-            {item.language && item.language !== "en" ? (
-              <span className="tag blue">{item.languageLabel ?? item.language}</span>
-            ) : null}
-            {item.variantOptions.slice(0, 3).map((option) => (
-              <span className="tag" key={option.label}>{option.label}</span>
-            ))}
-          </div>
-        ) : null}
-      </div>
-    </button>
+      </button>
+      <button className="icon-button quick-add-button" type="button" onClick={onQuickAdd} aria-label={`Quick add ${title}`}>
+        <Plus size={18} />
+      </button>
+    </article>
   );
 }
 
