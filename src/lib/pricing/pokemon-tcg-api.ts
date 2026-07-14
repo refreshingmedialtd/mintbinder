@@ -384,7 +384,7 @@ async function fetchPokemonCardsOnce({
     headers["x-api-key"] = apiKey;
   }
 
-  const response = await fetch(url, { headers });
+  const response = await fetch(url, { headers, signal: pokemonTcgFetchSignal() });
   const data = (await response.json().catch(() => ({}))) as Partial<PokemonTcgSearchResponse> & {
     error?: { message?: string };
   };
@@ -404,7 +404,21 @@ function isRetryablePokemonTcgError(error: unknown) {
     return error.status === 429 || error.status >= 500;
   }
 
-  return false;
+  return isFetchNetworkError(error);
+}
+
+function isFetchNetworkError(error: unknown) {
+  if (error instanceof DOMException && ["AbortError", "TimeoutError"].includes(error.name)) {
+    return true;
+  }
+
+  return error instanceof TypeError && /fetch|network/i.test(error.message);
+}
+
+function pokemonTcgFetchSignal() {
+  const timeoutMs = optionalPositiveInteger(process.env.POKEMON_TCG_API_TIMEOUT_MS) ?? 8000;
+
+  return AbortSignal.timeout(timeoutMs);
 }
 
 function optionalPositiveInteger(value: unknown) {

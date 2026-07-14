@@ -19,7 +19,7 @@ export type ScheduledSetPricingInput = {
 
 const defaultLimit = 8;
 const defaultPageSize = 250;
-const defaultMaxPagesPerSet = 4;
+const defaultMaxPagesPerSet = 1;
 const defaultWaitMs = 0;
 
 export function scheduledSetPricingInputFromSources({

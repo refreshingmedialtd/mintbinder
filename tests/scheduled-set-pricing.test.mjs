@@ -6,7 +6,7 @@ test("scheduled set pricing uses safe set-rotation defaults", () => {
   assert.deepEqual(scheduledSetPricingInputFromSources({ env: {} }), {
     excludeProviderIds: [],
     limit: 8,
-    maxPagesPerSet: 4,
+    maxPagesPerSet: 1,
     pageSize: 250,
     priceOnlyUnpriced: false,
     waitMs: 0,
