@@ -623,66 +623,66 @@ const binderInteriorOptions: Array<{
 const themeOptions: ThemeOption[] = [
   {
     access: "free",
-    description: "Clean daylight tracking for everyday use.",
+    description: "Dark navy workspace with violet and cyan market accents.",
     id: "light",
-    name: "Light",
-    swatches: ["#ffffff", "#dc2626", "#0f766e"],
+    name: "Pulse",
+    swatches: ["#111b27", "#8b5cf6", "#22d3ee"],
   },
   {
     access: "free",
-    description: "Low-glare tracking for late sorting sessions.",
+    description: "Near-black trading desk with cool blue signals.",
     id: "dark",
-    name: "Dark",
-    swatches: ["#111827", "#f43f5e", "#22d3ee"],
+    name: "Graphite",
+    swatches: ["#090f19", "#38bdf8", "#fb7185"],
   },
   {
     access: "plus",
-    description: "Bright red, teal, and gold for a classic collector feel.",
+    description: "Deep tournament red with gold highlights.",
     id: "league",
-    name: "League",
-    swatches: ["#fff7ed", "#dc2626", "#f59e0b"],
+    name: "League Noir",
+    swatches: ["#1b1628", "#ef4444", "#f59e0b"],
   },
   {
     access: "plus",
-    description: "Deep green and soft mint for binder-building calm.",
+    description: "Mint-green analytics on a calm dark base.",
     id: "forest",
-    name: "Forest Badge",
-    swatches: ["#f0fdf4", "#047857", "#84cc16"],
+    name: "Viridian",
+    swatches: ["#0f2a22", "#10b981", "#84cc16"],
   },
   {
     access: "plus",
-    description: "Cool blue with aqua accents for sealed-product shelves.",
+    description: "Blue and aqua for sealed-product shelves.",
     id: "ocean",
-    name: "Ocean Gym",
-    swatches: ["#eff6ff", "#2563eb", "#06b6d4"],
+    name: "Tidal",
+    swatches: ["#10243a", "#0ea5e9", "#22d3ee"],
   },
   {
     access: "plus",
-    description: "Warm red and amber for chase-card energy.",
+    description: "Warm orange and rose for chase-card energy.",
     id: "ember",
-    name: "Ember",
-    swatches: ["#fff7ed", "#ea580c", "#dc2626"],
+    name: "Ember Vault",
+    swatches: ["#2a1713", "#f97316", "#f43f5e"],
   },
   {
     access: "plus",
-    description: "Punchy yellow and blue for high-contrast scans.",
+    description: "High-contrast yellow with blue scan accents.",
     id: "electric",
-    name: "Electric Pop",
-    swatches: ["#fefce8", "#ca8a04", "#2563eb"],
+    name: "Volt",
+    swatches: ["#22230d", "#eab308", "#38bdf8"],
   },
   {
     access: "plus",
-    description: "Violet, pink, and blue for a vivid analytics mood.",
+    description: "Violet and pink for vivid analytics sessions.",
     id: "psychic",
-    name: "Psychic Neon",
-    swatches: ["#faf5ff", "#7c3aed", "#db2777"],
+    name: "Psychic Glow",
+    swatches: ["#211535", "#a855f7", "#ec4899"],
   },
   {
     access: "plus",
-    description: "Soft rose and sky accents without losing readability.",
+    description: "Rose and sky accents on a richer dark shell.",
     id: "fairy",
-    name: "Fairy Pastel",
-    swatches: ["#fff1f2", "#e11d48", "#38bdf8"],
+    name: "Fairy Flux",
+    swatches: ["#2c1830", "#f472b6", "#38bdf8"],
   },
   {
     access: "plus",
@@ -695,8 +695,8 @@ const themeOptions: ThemeOption[] = [
     access: "plus",
     description: "Crisp steel grey with blue-green controls.",
     id: "steel",
-    name: "Steel Case",
-    swatches: ["#f8fafc", "#475569", "#14b8a6"],
+    name: "Titanium",
+    swatches: ["#171d26", "#94a3b8", "#2dd4bf"],
   },
   {
     access: "plus",
@@ -709,15 +709,15 @@ const themeOptions: ThemeOption[] = [
     access: "plus",
     description: "Fresh green and sky tones for relaxed cataloguing.",
     id: "meadow",
-    name: "Meadow",
-    swatches: ["#f7fee7", "#16a34a", "#0ea5e9"],
+    name: "Meadow Glass",
+    swatches: ["#172719", "#22c55e", "#38bdf8"],
   },
   {
     access: "plus",
-    description: "Orange, pink, and blue for a warmer showcase look.",
+    description: "Warm rose and amber for a showcase look.",
     id: "sunset",
-    name: "Sunset League",
-    swatches: ["#fff7ed", "#f97316", "#2563eb"],
+    name: "Sunset Signal",
+    swatches: ["#2b1924", "#fb7185", "#f59e0b"],
   },
 ];
 const freeThemeIds = new Set<ThemeId>(["light", "dark"]);
@@ -8360,11 +8360,11 @@ function ThemePanel({
         <h2>Themes</h2>
         <span className="plan-pill">
           <Palette size={17} />
-          {plus ? "Plus palette" : "Light and dark"}
+          {plus ? "Plus palette" : "Core dark themes"}
         </span>
       </div>
       <p className="muted">
-        Free includes Light and Dark. Plus unlocks collector colour schemes for a more personal workspace.
+        Free includes Pulse and Graphite. Plus unlocks darker collector colour schemes for a more personal workspace.
       </p>
       <div className="theme-grid">
         {themeOptions.map((theme) => {
@@ -8400,7 +8400,7 @@ function ThemePanel({
         <div className="locked-preview">
           <div>
             <strong>Want the full palette?</strong>
-            <p className="muted">Plus adds a dozen extra schemes alongside analytics, alerts, and reports.</p>
+            <p className="muted">Plus adds a dozen extra dark schemes alongside analytics, alerts, and reports.</p>
           </div>
           <div className="upgrade-actions">
             <button className="button primary" onClick={() => void onStartCheckout("monthly")}>
