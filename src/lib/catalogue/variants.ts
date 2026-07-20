@@ -152,11 +152,17 @@ export function pokemonTcgImageUrlsFromProviderIds(providerIds: unknown) {
 
   const setId = providerId.slice(0, separatorIndex);
   const cardNumber = providerId.slice(separatorIndex + 1);
+  const small = `https://images.pokemontcg.io/${setId}/${cardNumber}.png`;
+  const large = `https://images.pokemontcg.io/${setId}/${cardNumber}_hires.png`;
+
+  if (!hasUsableCardImageUrl(small) || !hasUsableCardImageUrl(large)) {
+    return undefined;
+  }
 
   return {
-    large: `https://images.pokemontcg.io/${setId}/${cardNumber}_hires.png`,
+    large,
     providerId,
-    small: `https://images.pokemontcg.io/${setId}/${cardNumber}.png`,
+    small,
   };
 }
 
@@ -458,6 +464,28 @@ function providerIdValue(providerIds: unknown, key: string) {
   const value = (providerIds as Record<string, unknown>)[key];
 
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function hasUsableCardImageUrl(value?: string | null) {
+  const url = value?.trim();
+
+  return Boolean(url) && !isKnownBadCardImageUrl(url);
+}
+
+function isKnownBadCardImageUrl(value?: string | null) {
+  const url = value?.trim().toLowerCase();
+
+  if (!url) {
+    return false;
+  }
+
+  return [
+    "/mcd18/",
+    "cardback",
+    "card-back",
+    "/back.png",
+    "/back_hires.png",
+  ].some((pattern) => url.includes(pattern));
 }
 
 function defaultVariantLabel(itemType: ItemType) {

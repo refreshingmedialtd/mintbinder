@@ -177,7 +177,7 @@ export type AppCatalogueSearchData = AppCatalogueData & {
     rarity: string;
     set: string;
     sort: string;
-    type: ItemType;
+    type: ItemType | "all";
   };
   resultCount: number;
 };

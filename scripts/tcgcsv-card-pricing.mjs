@@ -88,6 +88,7 @@ export async function syncTcgcsvCardPrices(options = {}) {
   const priceOnlyUnpriced = options.priceOnlyUnpriced ?? true;
   const source = optionalString(options.source) ?? sourceForCategory(categoryId);
   const waitMs = nonNegativeInteger(options.waitMs, 120);
+  const writeImages = options.writeImages ?? true;
   const writePrices = options.writePrices ?? true;
   const usdToGbp = conversionRate(options.usdToGbpRate);
 
@@ -153,6 +154,7 @@ export async function syncTcgcsvCardPrices(options = {}) {
       productsFetched: 0,
       sampleUnmatchedProducts: [],
       source,
+      cardImagesUpdated: 0,
       writePrices,
     };
 
@@ -166,9 +168,11 @@ export async function syncTcgcsvCardPrices(options = {}) {
         language,
         source,
         usdToGbp,
+        writeImages,
         writePrices,
       });
 
+      summary.cardImagesUpdated += groupSummary.cardImagesUpdated;
       summary.cardProductsMatched += groupSummary.cardProductsMatched;
       summary.cardProductsSkipped += groupSummary.cardProductsSkipped;
       summary.cardProductsUnmatched += groupSummary.cardProductsUnmatched;
@@ -272,6 +276,7 @@ async function importCardGroup({
   language,
   source,
   usdToGbp,
+  writeImages,
   writePrices,
 }) {
   const { group, set } = match;
@@ -281,6 +286,8 @@ async function importCardGroup({
     prisma.cardPrinting.findMany({
       select: {
         id: true,
+        imageLargeUrl: true,
+        imageSmallUrl: true,
         name: true,
         number: true,
       },
@@ -294,6 +301,7 @@ async function importCardGroup({
     cardProductsMatched: 0,
     cardProductsSkipped: 0,
     cardProductsUnmatched: 0,
+    cardImagesUpdated: 0,
     pricingSnapshotsCreated: 0,
     productsFetched: productsResponse.results?.length ?? 0,
     sampleUnmatchedProducts: [],
@@ -327,6 +335,10 @@ async function importCardGroup({
     }
 
     summary.cardProductsMatched += 1;
+
+    if (writeImages && await updateTcgcsvCardImage(prisma, card, product)) {
+      summary.cardImagesUpdated += 1;
+    }
 
     if (!writePrices || !usdToGbp) {
       continue;
@@ -379,6 +391,35 @@ async function importCardGroup({
   return summary;
 }
 
+async function updateTcgcsvCardImage(prisma, card, product) {
+  const small = usableTcgcsvCardImageUrl(product.imageUrl);
+
+  if (!small) {
+    return false;
+  }
+
+  const data = {};
+
+  if (!hasUsableCardImageUrl(card.imageLargeUrl)) {
+    data.imageLargeUrl = upgradedTcgplayerCardImageUrl(small);
+  }
+
+  if (!hasUsableCardImageUrl(card.imageSmallUrl)) {
+    data.imageSmallUrl = small;
+  }
+
+  if (!Object.keys(data).length) {
+    return false;
+  }
+
+  await prisma.cardPrinting.update({
+    data,
+    where: { id: card.id },
+  });
+
+  return true;
+}
+
 async function fetchTcgcsv(url, fetchImpl) {
   const response = await fetchImpl(url, {
     headers: {
@@ -406,6 +447,34 @@ async function hasCardVariantPriceSnapshot(prisma, cardPrintingId, variantLabel)
   });
 
   return Boolean(snapshot);
+}
+
+function usableTcgcsvCardImageUrl(value) {
+  const url = String(value ?? "").trim();
+
+  return url && !isKnownBadCardImageUrl(url) ? url : undefined;
+}
+
+function upgradedTcgplayerCardImageUrl(value) {
+  return value.replace(/_(?:200w|400w)(\.[a-z0-9]+)$/i, "_in_1000x1000$1");
+}
+
+function hasUsableCardImageUrl(value) {
+  const url = String(value ?? "").trim();
+
+  return Boolean(url) && !isKnownBadCardImageUrl(url);
+}
+
+function isKnownBadCardImageUrl(value) {
+  const url = String(value ?? "").trim().toLowerCase();
+
+  return [
+    "/mcd18/",
+    "cardback",
+    "card-back",
+    "/back.png",
+    "/back_hires.png",
+  ].some((pattern) => url.includes(pattern));
 }
 
 function usableTcgcsvPrices(prices) {

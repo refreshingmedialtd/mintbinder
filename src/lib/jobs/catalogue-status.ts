@@ -118,7 +118,24 @@ async function catalogueCounts() {
           SELECT COUNT(*)::int
           FROM card_printings
           WHERE provider_ids ? 'pokemon_tcg_api'
-            AND NULLIF(BTRIM(COALESCE(image_large_url, image_small_url, '')), '') IS NOT NULL
+            AND (
+              (
+                NULLIF(BTRIM(COALESCE(image_large_url, '')), '') IS NOT NULL
+                AND LOWER(image_large_url) NOT LIKE '%/mcd18/%'
+                AND LOWER(image_large_url) NOT LIKE '%cardback%'
+                AND LOWER(image_large_url) NOT LIKE '%card-back%'
+                AND LOWER(image_large_url) NOT LIKE '%/back.png%'
+                AND LOWER(image_large_url) NOT LIKE '%/back_hires.png%'
+              )
+              OR (
+                NULLIF(BTRIM(COALESCE(image_small_url, '')), '') IS NOT NULL
+                AND LOWER(image_small_url) NOT LIKE '%/mcd18/%'
+                AND LOWER(image_small_url) NOT LIKE '%cardback%'
+                AND LOWER(image_small_url) NOT LIKE '%card-back%'
+                AND LOWER(image_small_url) NOT LIKE '%/back.png%'
+                AND LOWER(image_small_url) NOT LIKE '%/back_hires.png%'
+              )
+            )
         ) AS "cardImageCount",
         (
           SELECT COUNT(*)::int
@@ -147,7 +164,24 @@ async function catalogueCounts() {
         COUNT(DISTINCT cs.id)::int AS "setCount",
         COUNT(DISTINCT cp.id)::int AS "cardCount",
         COUNT(DISTINCT CASE
-          WHEN NULLIF(BTRIM(COALESCE(cp.image_large_url, cp.image_small_url, '')), '') IS NOT NULL
+          WHEN (
+            (
+              NULLIF(BTRIM(COALESCE(cp.image_large_url, '')), '') IS NOT NULL
+              AND LOWER(cp.image_large_url) NOT LIKE '%/mcd18/%'
+              AND LOWER(cp.image_large_url) NOT LIKE '%cardback%'
+              AND LOWER(cp.image_large_url) NOT LIKE '%card-back%'
+              AND LOWER(cp.image_large_url) NOT LIKE '%/back.png%'
+              AND LOWER(cp.image_large_url) NOT LIKE '%/back_hires.png%'
+            )
+            OR (
+              NULLIF(BTRIM(COALESCE(cp.image_small_url, '')), '') IS NOT NULL
+              AND LOWER(cp.image_small_url) NOT LIKE '%/mcd18/%'
+              AND LOWER(cp.image_small_url) NOT LIKE '%cardback%'
+              AND LOWER(cp.image_small_url) NOT LIKE '%card-back%'
+              AND LOWER(cp.image_small_url) NOT LIKE '%/back.png%'
+              AND LOWER(cp.image_small_url) NOT LIKE '%/back_hires.png%'
+            )
+          )
           THEN cp.id
         END)::int AS "cardImageCount",
         COUNT(DISTINCT ps.card_printing_id)::int AS "pricedCardCount"

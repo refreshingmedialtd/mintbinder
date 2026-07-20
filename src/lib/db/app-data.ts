@@ -66,6 +66,8 @@ type CatalogueSearchInput = {
   type?: string;
 };
 
+type CatalogueSearchType = ItemType | "all";
+
 type NormalizedCatalogueSearchInput = {
   language: string;
   limit: number;
@@ -73,7 +75,7 @@ type NormalizedCatalogueSearchInput = {
   rarity: string;
   set: string;
   sort: string;
-  type: ItemType;
+  type: CatalogueSearchType;
 };
 
 type OrderedCatalogueId = {
@@ -396,10 +398,7 @@ export async function searchCatalogueData(
   }
 
   try {
-    const catalogue =
-      query.type === "sealed"
-        ? await searchSealedProducts(userId, query)
-        : await searchCardPrintings(query);
+    const catalogue = await searchCatalogueItems(userId, query);
 
     return {
       catalogue: catalogue.slice(0, query.limit),
@@ -461,6 +460,26 @@ async function getCatalogueItems(userId: string): Promise<CatalogueItem[]> {
       mapSealedProductToCatalogueItem(product, product.priceSnapshots),
     ),
   ];
+}
+
+async function searchCatalogueItems(
+  userId: string,
+  query: NormalizedCatalogueSearchInput,
+): Promise<CatalogueItem[]> {
+  if (query.type === "card") {
+    return searchCardPrintings(query);
+  }
+
+  if (query.type === "sealed") {
+    return searchSealedProducts(userId, query);
+  }
+
+  const [cards, sealed] = await Promise.all([
+    searchCardPrintings({ ...query, type: "card" }),
+    searchSealedProducts(userId, { ...query, language: "all", type: "sealed" }),
+  ]);
+
+  return sortCatalogueSearchResults([...cards, ...sealed], query.sort);
 }
 
 async function searchCardPrintings(query: NormalizedCatalogueSearchInput): Promise<CatalogueItem[]> {
@@ -728,8 +747,18 @@ function normalizeCatalogueSearchInput(input: CatalogueSearchInput): NormalizedC
     rarity: normalizeCatalogueFacet(input.rarity),
     set: normalizeCatalogueFacet(input.set),
     sort: normalizeCatalogueSort(input.sort),
-    type: input.type === "sealed" ? "sealed" : "card",
+    type: normalizeCatalogueSearchType(input.type),
   };
+}
+
+function normalizeCatalogueSearchType(value?: string): CatalogueSearchType {
+  const normalized = value?.trim().toLowerCase();
+
+  if (normalized === "card" || normalized === "sealed") {
+    return normalized;
+  }
+
+  return "all";
 }
 
 function normalizeCatalogueFacet(value?: string) {
@@ -842,7 +871,7 @@ function filterAndSortCatalogue(
 
   return sortCatalogueSearchResults(
     catalogue.filter((item) => {
-      if (item.type !== query.type) {
+      if (query.type !== "all" && item.type !== query.type) {
         return false;
       }
 
@@ -854,7 +883,7 @@ function filterAndSortCatalogue(
         return false;
       }
 
-      if (query.language !== "all" && (item.language ?? "en") !== query.language) {
+      if (query.language !== "all" && item.type === "card" && (item.language ?? "en") !== query.language) {
         return false;
       }
 
@@ -1521,7 +1550,10 @@ function mapCardPrintingToCatalogueItem(
 ): CatalogueItem {
   const priceHistory = buildPriceHistory(prices);
   const latestPrice = latestPricePoint(priceHistory);
-  const image = card.imageLargeUrl ?? card.imageSmallUrl ?? pokemonTcgImageUrlFromProviderIds(card.providerIds);
+  const image =
+    usableCardImageUrl(card.imageLargeUrl) ??
+    usableCardImageUrl(card.imageSmallUrl) ??
+    usableCardImageUrl(pokemonTcgImageUrlFromProviderIds(card.providerIds));
   const displayName = catalogueDisplayNameForText(card.name);
   const displaySet = catalogueDisplaySetForText(card.cardSet.name);
   const rarity = displayCatalogueRarity(card.rarity);
@@ -1557,6 +1589,28 @@ function mapCardPrintingToCatalogueItem(
       variantMetadata: card.variantMetadata,
     }),
   };
+}
+
+function usableCardImageUrl(value?: string | null) {
+  const url = value?.trim();
+
+  return url && !isKnownBadCardImageUrl(url) ? url : undefined;
+}
+
+function isKnownBadCardImageUrl(value?: string | null) {
+  const url = value?.trim().toLowerCase();
+
+  if (!url) {
+    return false;
+  }
+
+  return [
+    "/mcd18/",
+    "cardback",
+    "card-back",
+    "/back.png",
+    "/back_hires.png",
+  ].some((pattern) => url.includes(pattern));
 }
 
 function mapSealedProductToCatalogueItem(

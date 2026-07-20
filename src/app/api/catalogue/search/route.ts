@@ -19,7 +19,7 @@ export async function GET(request: Request) {
     rarity: params.get("rarity") ?? "all",
     set: params.get("set") ?? "all",
     sort: params.get("sort") ?? "value-desc",
-    type: params.get("type") ?? "card",
+    type: params.get("type") ?? "all",
   });
 
   return NextResponse.json(data);

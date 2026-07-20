@@ -4045,7 +4045,6 @@ h3 {
 .storage-list,
 .event-list,
 .insight-list,
-.bar-list,
 .alert-list,
 .preset-grid,
 .gap-list,
@@ -4462,30 +4461,6 @@ h3 {
   justify-items: start;
 }
 
-.bar-row {
-  display: grid;
-  gap: 8px;
-}
-
-.bar-label {
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-}
-
-.bar-track {
-  height: 9px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: #e5e7eb;
-}
-
-.bar-track span {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: linear-gradient(90deg, var(--teal), var(--accent));
-}
-
 .storage-main p {
   margin: 0;
 }
@@ -4513,26 +4488,15 @@ h3 {
   font-weight: 900;
 }
 
-.mini-chart {
+.portfolio-value-chart.empty {
   display: grid;
-  grid-template-columns: repeat(var(--chart-count, 7), minmax(0, 1fr));
-  align-items: end;
-  gap: 7px;
-  height: 148px;
-  padding: 12px;
+  min-height: 170px;
+  place-items: center;
+  padding: 18px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: linear-gradient(180deg, var(--control), var(--surface-soft));
-}
-
-.mini-chart span {
-  min-height: 24px;
-  border-radius: 5px 5px 0 0;
-  background: linear-gradient(180deg, var(--teal), var(--blue));
-}
-
-.mini-chart.empty span {
-  background: var(--line);
+  text-align: center;
 }
 
 .price-history-chart {
@@ -4561,6 +4525,11 @@ h3 {
   display: block;
   width: 100%;
   min-height: 220px;
+  touch-action: none;
+}
+
+.price-history-chart.compact .price-history-plot svg {
+  min-height: 170px;
 }
 
 .price-history-grid-line {
@@ -4573,10 +4542,6 @@ h3 {
   fill: var(--muted);
   font-size: 13px;
   font-weight: 850;
-}
-
-.price-history-area {
-  fill: url("#price-history-area");
 }
 
 .price-history-line {
@@ -4594,7 +4559,32 @@ h3 {
   stroke-width: 4;
 }
 
-.price-history-latest-label {
+.price-history-active-dot {
+  fill: var(--surface);
+  stroke: var(--accent);
+  stroke-width: 4;
+}
+
+.price-history-crosshair {
+  stroke: var(--accent);
+  stroke-dasharray: 5 5;
+  stroke-width: 1.5;
+}
+
+.price-history-tooltip-bg {
+  fill: color-mix(in srgb, var(--surface) 94%, black 6%);
+  stroke: var(--line-strong);
+  stroke-width: 1;
+}
+
+.price-history-tooltip-date,
+.price-history-tooltip-detail {
+  fill: var(--muted);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.price-history-tooltip-value {
   fill: var(--ink);
   font-size: 15px;
   font-weight: 950;

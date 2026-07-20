@@ -331,7 +331,24 @@ async function catalogueHealthReport(prisma) {
     prisma.$queryRaw`
       SELECT
         COUNT(*)::int AS "total",
-        COUNT(*) FILTER (WHERE image_small_url IS NOT NULL OR image_large_url IS NOT NULL)::int AS "covered"
+        COUNT(*) FILTER (
+          WHERE (
+            NULLIF(BTRIM(COALESCE(image_large_url, '')), '') IS NOT NULL
+            AND LOWER(image_large_url) NOT LIKE '%/mcd18/%'
+            AND LOWER(image_large_url) NOT LIKE '%cardback%'
+            AND LOWER(image_large_url) NOT LIKE '%card-back%'
+            AND LOWER(image_large_url) NOT LIKE '%/back.png%'
+            AND LOWER(image_large_url) NOT LIKE '%/back_hires.png%'
+          )
+          OR (
+            NULLIF(BTRIM(COALESCE(image_small_url, '')), '') IS NOT NULL
+            AND LOWER(image_small_url) NOT LIKE '%/mcd18/%'
+            AND LOWER(image_small_url) NOT LIKE '%cardback%'
+            AND LOWER(image_small_url) NOT LIKE '%card-back%'
+            AND LOWER(image_small_url) NOT LIKE '%/back.png%'
+            AND LOWER(image_small_url) NOT LIKE '%/back_hires.png%'
+          )
+        )::int AS "covered"
       FROM card_printings
     `,
     prisma.$queryRaw`

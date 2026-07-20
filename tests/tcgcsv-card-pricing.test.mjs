@@ -347,11 +347,16 @@ test("rotates Japanese card pricing through unpriced and oldest-priced groups", 
 
 test("imports card price snapshots from TCGCSV payloads", async () => {
   const snapshots = [];
+  const imageUpdates = [];
   const prisma = {
     cardPrinting: {
       findMany: async () => [
-        { id: "card-1", name: "Lugia VSTAR", number: "139" },
+        { id: "card-1", imageLargeUrl: null, imageSmallUrl: "", name: "Lugia VSTAR", number: "139" },
       ],
+      update: async ({ data, where }) => {
+        imageUpdates.push({ data, where });
+        return { id: where.id, ...data };
+      },
     },
     cardSet: {
       findMany: async () => [{ id: "set-1", name: "Silver Tempest" }],
@@ -380,6 +385,7 @@ test("imports card price snapshots from TCGCSV payloads", async () => {
           results: [
             {
               extendedData: [{ name: "Number", value: "139/195" }],
+              imageUrl: "https://tcgplayer-cdn.tcgplayer.com/product/101_200w.jpg",
               name: "Lugia VSTAR",
               productId: 101,
               url: "https://example.com/product/101",
@@ -423,7 +429,17 @@ test("imports card price snapshots from TCGCSV payloads", async () => {
   assert.equal(summary.productsFetched, 2);
   assert.equal(summary.cardProductsMatched, 1);
   assert.equal(summary.cardProductsSkipped, 1);
+  assert.equal(summary.cardImagesUpdated, 1);
   assert.equal(summary.pricingSnapshotsCreated, 2);
+  assert.deepEqual(imageUpdates, [
+    {
+      data: {
+        imageLargeUrl: "https://tcgplayer-cdn.tcgplayer.com/product/101_in_1000x1000.jpg",
+        imageSmallUrl: "https://tcgplayer-cdn.tcgplayer.com/product/101_200w.jpg",
+      },
+      where: { id: "card-1" },
+    },
+  ]);
   assert.equal(snapshots[0].cardPrintingId, "card-1");
   assert.equal(snapshots[0].priceMinor, 960);
   assert.equal(snapshots[0].source, "tcgcsv-card");

@@ -44,7 +44,15 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import { signIn, signOut, useSession } from "next-auth/react";
-import type { ChangeEvent, CSSProperties, Dispatch, FormEvent, ReactNode, SetStateAction } from "react";
+import type {
+  ChangeEvent,
+  CSSProperties,
+  Dispatch,
+  FormEvent,
+  PointerEvent as ReactPointerEvent,
+  ReactNode,
+  SetStateAction,
+} from "react";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { canUseOperationsForUser, normalizeAppRole, type AppUserRole } from "@/lib/auth/roles";
 import {
@@ -262,6 +270,7 @@ type JobRunRecord = {
 
 type JobApiResult = {
   cardsFetched?: number;
+  cardImagesUpdated?: number;
   cardsUpdated?: number;
   candidatesChecked?: number;
   cardsUpserted?: number;
@@ -308,6 +317,7 @@ type JobApiResult = {
   sealedProductsUpserted?: number;
   setsUpserted?: number;
   tcgcsvProductsFetched?: number;
+  tcgcsvImageProductsFetched?: number;
   totalCount?: number;
   pokemonTcgCardsFetched?: number;
   wishlistConflictsMerged?: number;
@@ -2646,7 +2656,6 @@ function DashboardScreen({
     .slice(0, 4);
   const dashboardSets = focusSets.length ? focusSets : sets.slice(0, 4);
   const gain = summary.value - summary.cost;
-  const trendDelta = portfolioHistoryDelta(intelligence.portfolioHistory);
 
   return (
     <section className="page">
@@ -2675,7 +2684,6 @@ function DashboardScreen({
         navigate={navigate}
         startAdd={startAdd}
         summary={summary}
-        trendDelta={trendDelta}
         wishlistCount={wishlist.length}
         wishlistTotal={wishlistTotal}
       />
@@ -2800,7 +2808,6 @@ function PortfolioHero({
   navigate,
   startAdd,
   summary,
-  trendDelta,
   wishlistCount,
   wishlistTotal,
 }: {
@@ -2812,12 +2819,12 @@ function PortfolioHero({
   navigate: (screen: Screen) => void;
   startAdd: (type: ItemType) => void;
   summary: ScreenContext["summary"];
-  trendDelta: number | null;
   wishlistCount: number;
   wishlistTotal: number;
 }) {
   const coverage = intelligence.valuationCoverage.coveragePercent;
   const latestHistory = intelligence.portfolioHistory.at(-1);
+  const latestMove = portfolioLatestMove(intelligence.portfolioHistory);
 
   return (
     <section className="portfolio-hero">
@@ -2852,7 +2859,11 @@ function PortfolioHero({
         {dataNotice ? <p className="muted">{dataNotice}</p> : null}
       </div>
       <div className="portfolio-hero-side">
-        <MiniChart values={intelligence.valueTrend} />
+        <PortfolioValueLineChart
+          compact
+          currentValueMinor={summary.value}
+          history={intelligence.portfolioHistory}
+        />
         <div className="portfolio-metric-grid">
           <span>
             <small>Gain/loss</small>
@@ -2867,18 +2878,22 @@ function PortfolioHero({
             <strong>{coverage}%</strong>
           </span>
           <span>
-            <small>Wishlist</small>
-            <strong>{wishlistCount} / {formatMoney(wishlistTotal)}</strong>
+            <small>Unvalued lots</small>
+            <strong>{intelligence.valuationCoverage.unvaluedLots}</strong>
           </span>
           <span>
-            <small>Since first point</small>
-            <strong className={trendDelta !== null && trendDelta >= 0 ? "positive" : ""}>
-              {trendDelta === null ? "Building" : formatSignedMoney(trendDelta)}
+            <small>Latest move</small>
+            <strong className={latestMove !== null && latestMove >= 0 ? "positive" : ""}>
+              {latestMove === null ? "Building" : formatSignedMoney(latestMove)}
             </strong>
           </span>
           <span>
-            <small>Latest pricing point</small>
+            <small>Latest pricing</small>
             <strong>{latestHistory ? formatEventDate(latestHistory.observedAt) : "Pending"}</strong>
+          </span>
+          <span>
+            <small>Wishlist targets</small>
+            <strong>{wishlistCount} / {formatMoney(wishlistTotal)}</strong>
           </span>
         </div>
       </div>
@@ -3615,7 +3630,7 @@ function BindersScreen({
   const [openBinderId, setOpenBinderId] = useState<string | null>(null);
   const [visiblePageIndex, setVisiblePageIndex] = useState(0);
   const availableItems = useMemo(
-    () => collection.filter((item) => Boolean(catalogueById.get(item.catalogueId))),
+    () => collection.filter((item) => catalogueById.get(item.catalogueId)?.type === "card"),
     [catalogueById, collection],
   );
   const binders = useMemo(
@@ -3645,7 +3660,6 @@ function BindersScreen({
   const activeCardCount = activeBinder
     ? activeBinder.items.filter((item) => catalogueById.get(item.catalogueId)?.type === "card").length
     : 0;
-  const activeSealedCount = (activeBinder?.items.length ?? 0) - activeCardCount;
   const totalPages = Math.max(1, Math.ceil((activeBinder?.items.length ?? 0) / 9));
   const boundedPageIndex = Math.min(visiblePageIndex, totalPages - 1);
   const currentPageStart = boundedPageIndex * 9;
@@ -3760,7 +3774,7 @@ function BindersScreen({
     }
 
     if (!draftItemIds.length) {
-      showToast("Choose at least one collection item.");
+      showToast("Choose at least one card lot.");
       return;
     }
 
@@ -3872,7 +3886,7 @@ function BindersScreen({
       return;
     }
 
-    if (!window.confirm(`Delete ${activeCustomBinder.name}? This only removes the custom binder, not the collection items.`)) {
+    if (!window.confirm(`Delete ${activeCustomBinder.name}? This only removes the custom binder, not the card lots.`)) {
       return;
     }
 
@@ -3890,13 +3904,13 @@ function BindersScreen({
           action={
             <button className="button primary" onClick={() => startAdd("card")}>
               <Plus size={17} />
-              Add item
+              Add card
             </button>
           }
         />
         <EmptyState
           title="Your first binder is waiting."
-          description="Add cards or sealed products to your collection and Mint Binder will build the full collection binder automatically."
+          description="Add cards to your collection and Mint Binder will build the full collection binder automatically."
           action={
             <button className="button primary" onClick={() => startAdd("card")}>
               <Plus size={17} />
@@ -3951,7 +3965,7 @@ function BindersScreen({
           <div className="panel-title-row">
             <div>
               <h2>Create custom binder</h2>
-              <p className="muted">Pick artwork, then choose collection items for this binder.</p>
+              <p className="muted">Pick artwork, then choose card lots for this binder.</p>
             </div>
             <button className="icon-button" type="button" onClick={() => setIsCreating(false)} aria-label="Close custom binder form">
               <X size={17} />
@@ -4036,13 +4050,13 @@ function BindersScreen({
               <div className="binder-stage" style={binderStageStyle(activeBinder.artworkId, activeBinder.interiorId)}>
                 <div className="binder-stage-header">
                   <div>
-                    <p className="eyebrow">{activeBinder.isDefault ? "Full collection" : "Selected binder"}</p>
+                    <p className="eyebrow">{activeBinder.isDefault ? "Full card collection" : "Selected binder"}</p>
                     <h2>{activeBinder.name}</h2>
                     <p className="muted">{activeBinder.description}</p>
                   </div>
                   <div className="binder-stage-stats">
                     <span>{formatMoney(activeBinderValue)}</span>
-                    <small>{activeCardCount} cards | {activeSealedCount} sealed</small>
+                    <small>{activeCardCount} cards</small>
                   </div>
                 </div>
 
@@ -4120,7 +4134,7 @@ function BindersScreen({
 
               <aside className="tool-panel binder-side-panel binder-viewer-panel">
                 <div className="panel-title-row">
-                  <h2>{activeBinder.isDefault ? "Full collection" : "Binder settings"}</h2>
+                  <h2>{activeBinder.isDefault ? "Full card collection" : "Binder settings"}</h2>
                   {activeCustomBinder ? (
                     <button className="button small danger" onClick={deleteSelectedBinder} type="button">
                       <Trash2 size={15} />
@@ -4135,11 +4149,10 @@ function BindersScreen({
                       ["Lots", activeBinder.items.length],
                       ["Estimated value", formatMoney(activeBinderValue)],
                       ["Cards", activeCardCount],
-                      ["Sealed", activeSealedCount],
                     ]}
                   />
                   {activeBinder.isDefault ? (
-                    <p className="muted">This binder mirrors every active collection item. Styling and sleeve order are saved for this account.</p>
+                    <p className="muted">This binder mirrors every active card lot. Styling and sleeve order are saved for this account.</p>
                   ) : null}
                 </div>
 
@@ -4304,7 +4317,7 @@ function BinderItemPicker({
     <div className="binder-picker">
       <label className="search-box">
         <Search size={17} />
-        <input value={itemSearch} onChange={(event) => onItemSearchChange(event.target.value)} placeholder="Search collection items" />
+        <input value={itemSearch} onChange={(event) => onItemSearchChange(event.target.value)} placeholder="Search card lots" />
       </label>
       <div className="binder-picker-list">
         {items.map((item) => {
@@ -4418,12 +4431,6 @@ function AddScreen({
   const [zoomedCatalogueItemId, setZoomedCatalogueItemId] = useState<string | null>(null);
 
   useEffect(() => {
-    setCatalogueSetFilter("all");
-    setCatalogueRarityFilter("all");
-    setCatalogueLanguageFilter("all");
-  }, [appState.addType]);
-
-  useEffect(() => {
     const controller = new AbortController();
     const timeout = window.setTimeout(async () => {
       setIsSearchingCatalogue(true);
@@ -4432,12 +4439,12 @@ function AddScreen({
       try {
         const params = new URLSearchParams({
           limit: "80",
-          language: appState.addType === "card" ? catalogueLanguageFilter : "all",
+          language: catalogueLanguageFilter,
           q: addSearch.trim(),
           rarity: catalogueRarityFilter,
           set: catalogueSetFilter,
           sort: catalogueSort,
-          type: appState.addType,
+          type: "all",
         });
         const response = await fetch(`/api/catalogue/search?${params.toString()}`, {
           cache: "no-store",
@@ -4475,7 +4482,6 @@ function AddScreen({
     };
   }, [
     addSearch,
-    appState.addType,
     cacheCatalogueItems,
     catalogueLanguageFilter,
     catalogueRarityFilter,
@@ -4489,10 +4495,14 @@ function AddScreen({
   const rarityOptions = uniqueValues(results.map((item) => item.rarity)).sort((left, right) =>
     left.localeCompare(right),
   );
-  const hasNarrowedResults = Boolean(normalizedSearch) || catalogueSetFilter !== "all" || catalogueRarityFilter !== "all";
+  const hasNarrowedResults =
+    Boolean(normalizedSearch) ||
+    catalogueLanguageFilter !== "all" ||
+    catalogueSetFilter !== "all" ||
+    catalogueRarityFilter !== "all";
   const visibleResults = results;
   const selected =
-    results.find((item) => item.id === appState.selectedCatalogueId && item.type === appState.addType) ??
+    results.find((item) => item.id === appState.selectedCatalogueId) ??
     catalogueById.get(appState.selectedCatalogueId);
   const locationOptions = storageOptionNames(
     storageLocations,
@@ -4547,36 +4557,9 @@ function AddScreen({
       <div className="screen-split">
         <section className="section-block">
           <div className="add-search-sticky">
-            <div className="segmented" aria-label="Item type">
-              <button
-                className={appState.addType === "card" ? "active" : ""}
-                onClick={() =>
-                  setAppState((current) => ({
-                    ...current,
-                    addType: "card",
-                    selectedCatalogueId: "",
-                  }))
-                }
-              >
-                Card
-              </button>
-              <button
-                className={appState.addType === "sealed" ? "active" : ""}
-                onClick={() =>
-                  setAppState((current) => ({
-                    ...current,
-                    addType: "sealed",
-                    selectedCatalogueId: "",
-                  }))
-                }
-              >
-                Sealed product
-              </button>
-            </div>
-
             <label className="search-box">
               <Search size={18} />
-              <input value={addSearch} onChange={(event) => setAddSearch(event.target.value)} placeholder="Search catalogue" />
+              <input value={addSearch} onChange={(event) => setAddSearch(event.target.value)} placeholder="Search cards, sealed products, sets, or numbers" />
             </label>
 
             <div className="catalogue-controls">
@@ -4596,27 +4579,25 @@ function AddScreen({
                 </select>
               </label>
               <label className="sort-control">
-                {appState.addType === "sealed" ? "Product type" : "Rarity"}
+                Rarity / product type
                 <select value={catalogueRarityFilter} onChange={(event) => setCatalogueRarityFilter(event.target.value)}>
-                  <option value="all">{appState.addType === "sealed" ? "All product types" : "All rarities"}</option>
+                  <option value="all">All rarities and products</option>
                   {rarityOptions.map((rarity) => (
                     <option key={rarity} value={rarity}>{rarity}</option>
                   ))}
                 </select>
               </label>
-              {appState.addType === "card" ? (
-                <label className="sort-control">
-                  Language
-                  <select value={catalogueLanguageFilter} onChange={(event) => setCatalogueLanguageFilter(event.target.value)}>
-                    <option value="all">All catalogue languages</option>
-                    {CATALOGUE_LANGUAGE_OPTIONS.map((language) => (
-                      <option key={language.code} value={language.code}>
-                        {language.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              ) : null}
+              <label className="sort-control">
+                Card language
+                <select value={catalogueLanguageFilter} onChange={(event) => setCatalogueLanguageFilter(event.target.value)}>
+                  <option value="all">All catalogue languages</option>
+                  {CATALOGUE_LANGUAGE_OPTIONS.map((language) => (
+                    <option key={language.code} value={language.code}>
+                      {language.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
               <label className="sort-control">
                 Sort
                 <select value={catalogueSort} onChange={(event) => setCatalogueSort(event.target.value as CatalogueSort)}>
@@ -4632,14 +4613,12 @@ function AddScreen({
             </div>
           </div>
 
-          {appState.addType === "sealed" ? (
-            <ManualSealedProductPanel sets={sets} onCreate={createManualSealedProduct} />
-          ) : null}
+          <ManualSealedProductPanel sets={sets} onCreate={createManualSealedProduct} />
 
           <p className="result-meta">
             {isSearchingCatalogue && !visibleResults.length
               ? "Searching catalogue"
-              : `Showing ${visibleResults.length} of ${catalogueSearchInfo.resultCount} ${appState.addType === "sealed" ? "products" : "cards"}`}
+              : `Showing ${visibleResults.length} of ${catalogueSearchInfo.resultCount} catalogue items`}
             {catalogueSearchInfo.hasMore ? " | Search or filter to narrow results" : ""}
           </p>
           <div className="item-list">
@@ -4649,20 +4628,16 @@ function AddScreen({
                 item={item}
                 onQuickAdd={() => void addToCollection(item.id)}
                 selected={item.id === selected?.id}
-                onClick={() => setAppState((current) => ({ ...current, selectedCatalogueId: item.id }))}
+                onClick={() => setAppState((current) => ({ ...current, addType: item.type, selectedCatalogueId: item.id }))}
               />
             )) : (
               <EmptyState
                 title={isSearchingCatalogue ? "Searching catalogue" : "No matching catalogue items"}
                 description={
                   catalogueSearchError ||
-                  (appState.addType === "sealed"
-                    ? hasNarrowedResults
-                      ? "Try a shorter search, fewer filters, or create a private manual sealed product."
-                      : "Search by product name, product type, or related set."
-                    : hasNarrowedResults
-                      ? "Try fewer filters, a card name, set name, or collector number."
-                      : "Search by card name, set name, or collector number.")
+                  (hasNarrowedResults
+                    ? "Try fewer filters, a shorter search, or create a private manual sealed product."
+                    : "Search by card name, product name, set name, or collector number.")
                 }
               />
             )}
@@ -6423,7 +6398,7 @@ function AnalyticsScreen({
   const duplicateValue = intelligence.duplicates.reduce((total, item) => total + item.valueMinor, 0);
   const leadAction = intelligence.actionQueue[0];
   const realizedSales = intelligence.realizedSales;
-  const portfolioDelta = portfolioHistoryDelta(intelligence.portfolioHistory);
+  const portfolioLatestDelta = portfolioLatestMove(intelligence.portfolioHistory);
 
   if (!appState.plus) {
     return (
@@ -6507,9 +6482,9 @@ function AnalyticsScreen({
         <StatCard label="Gain/loss" value={formatMoney(gain)} note="Against known cost" positive={gain >= 0} />
         <StatCard
           label="Value movement"
-          value={portfolioDelta === null ? "Unknown" : formatSignedMoney(portfolioDelta)}
-          note={portfolioDelta === null ? "Needs price history" : "Since first price point"}
-          positive={portfolioDelta !== null && portfolioDelta >= 0}
+          value={portfolioLatestDelta === null ? "Unknown" : formatSignedMoney(portfolioLatestDelta)}
+          note={portfolioLatestDelta === null ? "Needs another pricing point" : "Latest pricing point"}
+          positive={portfolioLatestDelta !== null && portfolioLatestDelta >= 0}
         />
         <StatCard
           label="Sales"
@@ -7519,6 +7494,7 @@ function OperationsScreen({
                   <>
                     <span>{latestJobResult.groupsProcessed} groups</span>
                     <span>{latestJobResult.sealedProductsUpserted ?? 0} sealed</span>
+                    <span>{latestJobResult.cardImagesUpdated ?? 0} images</span>
                     <span>{latestJobResult.productsFetched ?? 0} products</span>
                   </>
                 ) : (
@@ -7536,7 +7512,10 @@ function OperationsScreen({
                     <span>{latestJobResult.mode ?? "dry_run"}</span>
                   </>
                 ) : latestJobResult.job === "card_image_repair" ? (
-                  <span>{latestJobResult.repairableCards ?? 0} repairable</span>
+                  <>
+                    <span>{latestJobResult.repairableCards ?? 0} repairable</span>
+                    <span>{latestJobResult.tcgcsvImageProductsFetched ?? 0} TCGCSV images</span>
+                  </>
                 ) : latestJobResult.job === "sealed_image_repair" ? (
                   <span>{latestJobResult.repairableProducts ?? 0} repairable</span>
                 ) : latestJobResult.job === "variant_metadata_repair" ? (
@@ -8188,11 +8167,10 @@ function PortfolioHistoryPanel({
   currentValueMinor: number;
   history: CollectionIntelligence["portfolioHistory"];
 }) {
-  const first = history[0];
   const latest = history[history.length - 1];
   const high = portfolioHistoryExtreme(history, "high");
   const low = portfolioHistoryExtreme(history, "low");
-  const delta = portfolioHistoryDelta(history);
+  const latestMove = portfolioLatestMove(history);
 
   return (
     <section className="tool-panel">
@@ -8200,8 +8178,8 @@ function PortfolioHistoryPanel({
         <h2>Portfolio value path</h2>
         <span className="status-pill">{latest ? `${history.length} points` : "No history"}</span>
       </div>
-      {history.length > 1 ? (
-        <MiniChart label="Portfolio value history chart" values={history.map((point) => point.valueMinor)} />
+      {history.length ? (
+        <PortfolioValueLineChart currentValueMinor={currentValueMinor} history={history} />
       ) : (
         <p className="muted">Run pricing imports to build a dated portfolio value history.</p>
       )}
@@ -8209,14 +8187,17 @@ function PortfolioHistoryPanel({
         rows={[
           ["Latest value", latest ? formatMoney(latest.valueMinor) : formatMoney(currentValueMinor)],
           [
-            "Since first",
-            delta === null ? "Unknown" : formatSignedMoney(delta),
-            delta !== null && delta >= 0 ? "positive" : "",
+            "Latest move",
+            latestMove === null ? "Unknown" : formatSignedMoney(latestMove),
+            latestMove !== null && latestMove >= 0 ? "positive" : "",
           ],
-          ["First point", first ? formatEventDate(first.observedAt) : "Unknown"],
+          [
+            "Range",
+            high && low ? `${formatMoney(low.valueMinor)} - ${formatMoney(high.valueMinor)}` : "Unknown",
+          ],
           ["Latest point", latest ? formatEventDate(latest.observedAt) : "Unknown"],
-          ["High", high ? formatMoney(high.valueMinor) : "Unknown"],
-          ["Low", low ? formatMoney(low.valueMinor) : "Unknown"],
+          ["High", high ? `${formatMoney(high.valueMinor)} on ${formatEventDate(high.observedAt)}` : "Unknown"],
+          ["Low", low ? `${formatMoney(low.valueMinor)} on ${formatEventDate(low.observedAt)}` : "Unknown"],
           [
             "Latest mix",
             latest
@@ -8247,16 +8228,11 @@ function PortfolioMix({
         <BarChart3 size={18} />
       </div>
       {rows.length ? (
-        <div className="bar-list">
+        <div className="metric-list">
           {rows.map((row) => (
-            <div className="bar-row" key={row.label}>
-              <div className="bar-label">
-                <strong>{row.label}</strong>
-                <span>{formatMoney(row.valueMinor)} | {row.share}%</span>
-              </div>
-              <div className="bar-track">
-                <span style={{ width: `${Math.max(4, row.share)}%` }} />
-              </div>
+            <div className="metric-row" key={row.label}>
+              <span>{row.label}</span>
+              <strong>{formatMoney(row.valueMinor)} | {row.share}%</strong>
             </div>
           ))}
         </div>
@@ -9211,23 +9187,210 @@ function EmptyState({
   );
 }
 
-function MiniChart({ label = "Value trend chart", values }: { label?: string; values?: number[] }) {
-  const source = values?.filter((value) => Number.isFinite(value)) ?? [];
-  const max = Math.max(...source, 1);
-  const chartValues = source.length ? source : [0];
+type InteractiveValueLinePoint = {
+  badge?: string;
+  badgeClassName?: string;
+  detail?: string;
+  footerDetail?: string;
+  observedAt: string;
+  source?: string;
+  valueMinor: number;
+};
+
+type InteractiveValueLineChartProps = {
+  className?: string;
+  compact?: boolean;
+  gradientId: string;
+  label: string;
+  points: InteractiveValueLinePoint[];
+};
+
+function PortfolioValueLineChart({
+  compact = false,
+  currentValueMinor,
+  history,
+}: {
+  compact?: boolean;
+  currentValueMinor: number;
+  history: CollectionIntelligence["portfolioHistory"];
+}) {
+  const chartPoints = history.map((point): InteractiveValueLinePoint => ({
+    badge: `${point.valuedLots} lots`,
+    detail: `${formatMoney(point.marketValueMinor)} market | ${formatMoney(point.manualValueMinor)} manual`,
+    footerDetail: `${point.marketLots} market | ${point.manualLots} manual`,
+    observedAt: point.observedAt,
+    source: "Portfolio value",
+    valueMinor: point.valueMinor,
+  }));
+
+  if (!chartPoints.length) {
+    return (
+      <div className={compact ? "portfolio-value-chart compact empty" : "portfolio-value-chart empty"}>
+        <p className="muted">{currentValueMinor ? "Pricing history will appear after the next run." : "No value history yet."}</p>
+      </div>
+    );
+  }
 
   return (
-    <div
-      aria-label={label}
-      className={`mini-chart${source.length ? "" : " empty"}`}
-      style={{ "--chart-count": chartValues.length } as CSSProperties}
-    >
-      {chartValues.map((value, index) => (
-        <span
-          key={`${value}-${index}`}
-          style={{ height: `${Math.max(14, Math.round((value / max) * 100))}%` }}
-        />
-      ))}
+    <InteractiveValueLineChart
+      className="portfolio-value-chart"
+      compact={compact}
+      gradientId={compact ? "portfolio-value-area-compact" : "portfolio-value-area"}
+      label="Portfolio value history line chart"
+      points={chartPoints}
+    />
+  );
+}
+
+function InteractiveValueLineChart({
+  className,
+  compact = false,
+  gradientId,
+  label,
+  points,
+}: InteractiveValueLineChartProps) {
+  const [activeIndex, setActiveIndex] = useState<number | null>(null);
+  const values = points.map((point) => point.valueMinor);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = Math.max(1, max - min);
+  const width = 720;
+  const height = compact ? 190 : 250;
+  const plot = compact
+    ? { bottom: 144, left: 58, right: 20, top: 18 }
+    : { bottom: 204, left: 58, right: 20, top: 18 };
+  const plotWidth = width - plot.left - plot.right;
+  const plotHeight = plot.bottom - plot.top;
+  const times = points.map((point) => Date.parse(point.observedAt));
+  const minTime = Math.min(...times);
+  const maxTime = Math.max(...times);
+  const timeSpan = Math.max(1, maxTime - minTime);
+  const chartPoints = points.map((point, index) => {
+    const parsed = Date.parse(point.observedAt);
+    const x =
+      points.length === 1
+        ? plot.left + plotWidth / 2
+        : Number.isFinite(parsed) && maxTime > minTime
+          ? plot.left + ((parsed - minTime) / timeSpan) * plotWidth
+          : plot.left + (index / Math.max(1, points.length - 1)) * plotWidth;
+    const y = min === max ? plot.top + plotHeight / 2 : plot.bottom - ((point.valueMinor - min) / span) * plotHeight;
+
+    return { point, x, y };
+  });
+  const linePoints = chartPoints.map((entry) => `${entry.x.toFixed(1)},${entry.y.toFixed(1)}`).join(" ");
+  const areaPath = chartPoints.length
+    ? `M ${chartPoints[0].x.toFixed(1)} ${plot.bottom} L ${linePoints.replaceAll(",", " ")} L ${chartPoints[chartPoints.length - 1].x.toFixed(1)} ${plot.bottom} Z`
+    : "";
+  const ticks = [0, 0.5, 1].map((ratio) => {
+    const value = max - (max - min) * ratio;
+    return {
+      label: formatMoney(Math.round(value)),
+      y: plot.top + plotHeight * ratio,
+    };
+  });
+  const latest = points[points.length - 1];
+  const first = points[0];
+  const activeEntry = chartPoints[activeIndex ?? chartPoints.length - 1];
+  const tooltipWidth = 190;
+  const tooltipHeight = activeEntry?.point.detail ? 66 : 52;
+  const tooltipX = activeEntry
+    ? Math.min(width - plot.right - tooltipWidth, Math.max(plot.left, activeEntry.x + (activeEntry.x > width - tooltipWidth - 32 ? -tooltipWidth - 12 : 12)))
+    : plot.left;
+  const tooltipY = activeEntry
+    ? Math.min(plot.bottom - tooltipHeight - 8, Math.max(plot.top + 8, activeEntry.y - tooltipHeight - 10))
+    : plot.top;
+
+  function handlePointerMove(event: ReactPointerEvent<SVGSVGElement>) {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const relativeX = ((event.clientX - bounds.left) / Math.max(1, bounds.width)) * width;
+    const nearestIndex = chartPoints.reduce(
+      (nearest, entry, index) =>
+        Math.abs(entry.x - relativeX) < Math.abs(chartPoints[nearest].x - relativeX) ? index : nearest,
+      0,
+    );
+
+    setActiveIndex(nearestIndex);
+  }
+
+  return (
+    <div className={`${compact ? "price-history-chart compact" : "price-history-chart"}${className ? ` ${className}` : ""}`}>
+      <div className="price-history-plot">
+        <svg
+          aria-label={label}
+          onPointerDown={handlePointerMove}
+          onPointerLeave={() => setActiveIndex(null)}
+          onPointerMove={handlePointerMove}
+          role="img"
+          viewBox={`0 0 ${width} ${height}`}
+        >
+          <defs>
+            <linearGradient id={gradientId} x1="0" x2="0" y1="0" y2="1">
+              <stop offset="0%" stopColor="var(--teal)" stopOpacity="0.32" />
+              <stop offset="100%" stopColor="var(--blue)" stopOpacity="0.04" />
+            </linearGradient>
+          </defs>
+          {ticks.map((tick) => (
+            <g key={tick.y}>
+              <line className="price-history-grid-line" x1={plot.left} x2={plot.right + plotWidth} y1={tick.y} y2={tick.y} />
+              <text className="price-history-axis-label" x={plot.left - 10} y={tick.y + 4} textAnchor="end">
+                {tick.label}
+              </text>
+            </g>
+          ))}
+          {areaPath ? <path className="price-history-area" d={areaPath} fill={`url(#${gradientId})`} /> : null}
+          {linePoints ? <polyline className="price-history-line" points={linePoints} /> : null}
+          {chartPoints.map(({ point, x, y }, index) => (
+            <circle
+              className="price-history-dot"
+              cx={x}
+              cy={y}
+              key={`${point.observedAt}-${point.valueMinor}-${index}`}
+              r={index === chartPoints.length - 1 ? 6 : 4.5}
+            />
+          ))}
+          {activeEntry ? (
+            <g>
+              <line className="price-history-crosshair" x1={activeEntry.x} x2={activeEntry.x} y1={plot.top} y2={plot.bottom} />
+              <circle className="price-history-active-dot" cx={activeEntry.x} cy={activeEntry.y} r={7} />
+              <g>
+                <rect className="price-history-tooltip-bg" height={tooltipHeight} rx={8} width={tooltipWidth} x={tooltipX} y={tooltipY} />
+                <text className="price-history-tooltip-date" x={tooltipX + 12} y={tooltipY + 19}>
+                  {formatEventDate(activeEntry.point.observedAt)}
+                </text>
+                <text className="price-history-tooltip-value" x={tooltipX + 12} y={tooltipY + 39}>
+                  {formatMoney(activeEntry.point.valueMinor)}
+                </text>
+                {activeEntry.point.detail ? (
+                  <text className="price-history-tooltip-detail" x={tooltipX + 12} y={tooltipY + 58}>
+                    {activeEntry.point.detail}
+                  </text>
+                ) : null}
+              </g>
+            </g>
+          ) : null}
+          {first ? (
+            <text className="price-history-date-label" x={plot.left} y={height - 16}>
+              {formatEventDate(first.observedAt)}
+            </text>
+          ) : null}
+          {latest ? (
+            <text className="price-history-date-label" x={width - plot.right} y={height - 16} textAnchor="end">
+              {formatEventDate(latest.observedAt)}
+            </text>
+          ) : null}
+        </svg>
+      </div>
+      {activeEntry ? (
+        <div className="price-history-chart-footer">
+          {activeEntry.point.badge ? (
+            <span className={activeEntry.point.badgeClassName ?? "status-pill"}>{activeEntry.point.badge}</span>
+          ) : null}
+          <span>{formatMoney(activeEntry.point.valueMinor)} on {formatEventDate(activeEntry.point.observedAt)}</span>
+          <span>{points.length} point{points.length === 1 ? "" : "s"}</span>
+          {activeEntry.point.footerDetail ? <span>{activeEntry.point.footerDetail}</span> : null}
+          {activeEntry.point.source ? <span>{activeEntry.point.source}</span> : null}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -9311,44 +9474,14 @@ function PriceHistoryLineChart({
   range: PriceHistoryRange;
 }) {
   const points = filterPriceHistoryByRange(history, range);
-  const values = points.map((point) => point.valueMinor);
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const span = Math.max(1, max - min);
-  const width = 720;
-  const height = 250;
-  const plot = { bottom: 204, left: 58, right: 20, top: 18 };
-  const plotWidth = width - plot.left - plot.right;
-  const plotHeight = plot.bottom - plot.top;
-  const times = points.map((point) => Date.parse(point.observedAt));
-  const minTime = Math.min(...times);
-  const maxTime = Math.max(...times);
-  const timeSpan = Math.max(1, maxTime - minTime);
-  const chartPoints = points.map((point, index) => {
-    const parsed = Date.parse(point.observedAt);
-    const x =
-      points.length === 1
-        ? plot.left + plotWidth / 2
-        : Number.isFinite(parsed) && maxTime > minTime
-          ? plot.left + ((parsed - minTime) / timeSpan) * plotWidth
-          : plot.left + (index / Math.max(1, points.length - 1)) * plotWidth;
-    const y = min === max ? plot.top + plotHeight / 2 : plot.bottom - ((point.valueMinor - min) / span) * plotHeight;
-
-    return { point, x, y };
-  });
-  const linePoints = chartPoints.map((entry) => `${entry.x.toFixed(1)},${entry.y.toFixed(1)}`).join(" ");
-  const areaPath = chartPoints.length
-    ? `M ${chartPoints[0].x.toFixed(1)} ${plot.bottom} L ${linePoints.replaceAll(",", " ")} L ${chartPoints[chartPoints.length - 1].x.toFixed(1)} ${plot.bottom} Z`
-    : "";
-  const ticks = [0, 0.5, 1].map((ratio) => {
-    const value = max - (max - min) * ratio;
-    return {
-      label: formatMoney(Math.round(value)),
-      y: plot.top + plotHeight * ratio,
-    };
-  });
-  const latest = points[points.length - 1];
-  const first = points[0];
+  const chartPoints = points.map((point): InteractiveValueLinePoint => ({
+    badge: point.confidence,
+    badgeClassName: marketConfidenceBadgeClass(point.confidence),
+    footerDetail: priceSourceLabel(point.source),
+    observedAt: point.observedAt,
+    source: point.variantLabel ?? undefined,
+    valueMinor: point.valueMinor,
+  }));
 
   return (
     <div className="price-history-chart">
@@ -9365,54 +9498,11 @@ function PriceHistoryLineChart({
           </button>
         ))}
       </div>
-      <div className="price-history-plot">
-        <svg aria-label={`Price history line chart, ${priceHistoryRangeLabel(range)}`} role="img" viewBox={`0 0 ${width} ${height}`}>
-          <defs>
-            <linearGradient id="price-history-area" x1="0" x2="0" y1="0" y2="1">
-              <stop offset="0%" stopColor="var(--teal)" stopOpacity="0.32" />
-              <stop offset="100%" stopColor="var(--blue)" stopOpacity="0.04" />
-            </linearGradient>
-          </defs>
-          {ticks.map((tick) => (
-            <g key={tick.y}>
-              <line className="price-history-grid-line" x1={plot.left} x2={plot.right + plotWidth} y1={tick.y} y2={tick.y} />
-              <text className="price-history-axis-label" x={plot.left - 10} y={tick.y + 4} textAnchor="end">
-                {tick.label}
-              </text>
-            </g>
-          ))}
-          {areaPath ? <path className="price-history-area" d={areaPath} /> : null}
-          {linePoints ? <polyline className="price-history-line" points={linePoints} /> : null}
-          {chartPoints.map(({ point, x, y }, index) => (
-            <g key={`${point.observedAt}-${point.valueMinor}-${index}`}>
-              <circle className="price-history-dot" cx={x} cy={y} r={index === chartPoints.length - 1 ? 6 : 4.5} />
-              {index === chartPoints.length - 1 ? (
-                <text className="price-history-latest-label" x={Math.min(width - 90, x + 10)} y={Math.max(28, y - 10)}>
-                  {formatMoney(point.valueMinor)}
-                </text>
-              ) : null}
-            </g>
-          ))}
-          {first ? (
-            <text className="price-history-date-label" x={plot.left} y={height - 16}>
-              {formatEventDate(first.observedAt)}
-            </text>
-          ) : null}
-          {latest ? (
-            <text className="price-history-date-label" x={width - plot.right} y={height - 16} textAnchor="end">
-              {formatEventDate(latest.observedAt)}
-            </text>
-          ) : null}
-        </svg>
-      </div>
-      {latest ? (
-        <div className="price-history-chart-footer">
-          <span className={marketConfidenceBadgeClass(latest.confidence)}>{latest.confidence}</span>
-          <span>{formatMoney(latest.valueMinor)} latest</span>
-          <span>{points.length} point{points.length === 1 ? "" : "s"}</span>
-          <span>{priceSourceLabel(latest.source)}</span>
-        </div>
-      ) : null}
+      <InteractiveValueLineChart
+        gradientId={`price-history-area-${range}`}
+        label={`Price history line chart, ${priceHistoryRangeLabel(range)}`}
+        points={chartPoints}
+      />
     </div>
   );
 }
@@ -9802,11 +9892,11 @@ function gainLabel(holding: HoldingInsight) {
   return `${holding.name} ${prefix}${formatMoney(holding.gainMinor)}`;
 }
 
-function portfolioHistoryDelta(history: CollectionIntelligence["portfolioHistory"]) {
-  const first = history[0];
+function portfolioLatestMove(history: CollectionIntelligence["portfolioHistory"]) {
+  const previous = history[history.length - 2];
   const latest = history[history.length - 1];
 
-  return first && latest ? latest.valueMinor - first.valueMinor : null;
+  return previous && latest ? latest.valueMinor - previous.valueMinor : null;
 }
 
 function portfolioHistoryExtreme(
@@ -10584,7 +10674,7 @@ function binderSummaries(
     defaultBinderSummary(orderedDefaultItems, defaultBinderSettings),
     ...customBinders.map((binder) => ({
       artworkId: binder.artworkId,
-      description: `${binder.itemIds.length} saved collection lot${binder.itemIds.length === 1 ? "" : "s"}.`,
+      description: `${binder.itemIds.length} saved card lot${binder.itemIds.length === 1 ? "" : "s"}.`,
       id: binder.id,
       interiorId: isBinderInteriorId(binder.interiorId) ? binder.interiorId : "classic",
       items: binder.itemIds.map((itemId) => collectionById.get(itemId)).filter((item): item is CollectionItem => Boolean(item)),
@@ -10610,12 +10700,12 @@ function defaultBinderSummary(
 ): BinderSummary {
   return {
     artworkId: settings.artworkId,
-    description: "Every active collection item appears here automatically.",
+    description: "Every active card lot appears here automatically.",
     id: defaultBinderId,
     interiorId: settings.interiorId,
     isDefault: true,
     items: collection,
-    name: "Full Collection",
+    name: "Full Card Collection",
   };
 }
 
