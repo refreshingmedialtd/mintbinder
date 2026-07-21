@@ -669,7 +669,7 @@ function portfolioMarketSeries(item: CatalogueItem, variant: string) {
 
   if (currentObservedAt) {
     const timestamp = Date.parse(`${currentObservedAt}T00:00:00.000Z`);
-    const currentValueMinor = catalogueValueMinorForVariant(item, variant);
+    const currentValueMinor = catalogueValueMinorForVariant(item, variant) ?? item.valueMinor;
 
     if (currentValueMinor !== undefined) {
       points.set(currentObservedAt, {
@@ -985,7 +985,7 @@ function ownedValueMinor(item: CollectionItem, catalogueItem: CatalogueItem) {
 }
 
 function catalogueMarketValueMinor(catalogueItem: CatalogueItem, variant?: string) {
-  return catalogueItem.hasPrice ? catalogueValueMinorForVariant(catalogueItem, variant) : undefined;
+  return catalogueItem.hasPrice ? catalogueValueMinorForVariant(catalogueItem, variant) ?? catalogueItem.valueMinor : undefined;
 }
 
 function catalogueValueMinorForVariant(catalogueItem: CatalogueItem, variant?: string) {

@@ -15,38 +15,35 @@ const MAX_REPAIR_LIMIT = 5000;
 const tcgcsvCardImageTargets = new Map([
   ["mcd18", { categoryId: 3, groupId: 2364 }],
 ]);
+const cardImageRepairCandidateSelect = {
+  id: true,
+  imageLargeUrl: true,
+  imageSmallUrl: true,
+  name: true,
+  number: true,
+  providerIds: true,
+} as const;
 
 export async function repairMissingPokemonTcgCardImages({
   dryRun = false,
   limit = DEFAULT_REPAIR_LIMIT,
 }: CardImageRepairOptions = {}) {
   const safeLimit = boundedPositiveInteger(limit, DEFAULT_REPAIR_LIMIT, MAX_REPAIR_LIMIT);
-  const candidates = await prisma.cardPrinting.findMany({
-    orderBy: { updatedAt: "asc" },
-    select: {
-      id: true,
-      imageLargeUrl: true,
-      imageSmallUrl: true,
-      name: true,
-      number: true,
-      providerIds: true,
-    },
-    take: safeLimit,
-    where: {
-      OR: [
-        { imageLargeUrl: null },
-        { imageLargeUrl: "" },
-        { imageSmallUrl: null },
-        { imageSmallUrl: "" },
-        { imageLargeUrl: { contains: "/mcd18/" } },
-        { imageSmallUrl: { contains: "/mcd18/" } },
-        { imageLargeUrl: { contains: "cardback", mode: "insensitive" } },
-        { imageSmallUrl: { contains: "cardback", mode: "insensitive" } },
-        { imageLargeUrl: { contains: "card-back", mode: "insensitive" } },
-        { imageSmallUrl: { contains: "card-back", mode: "insensitive" } },
-      ],
-    },
-  });
+  const [knownBadCandidates, missingCandidates] = await Promise.all([
+    prisma.cardPrinting.findMany({
+      orderBy: { updatedAt: "asc" },
+      select: cardImageRepairCandidateSelect,
+      take: safeLimit,
+      where: knownBadCardImageWhere(),
+    }),
+    prisma.cardPrinting.findMany({
+      orderBy: { updatedAt: "asc" },
+      select: cardImageRepairCandidateSelect,
+      take: safeLimit,
+      where: missingCardImageWhere(),
+    }),
+  ]);
+  const candidates = uniqueCardImageCandidates([...knownBadCandidates, ...missingCandidates]).slice(0, safeLimit);
   const tcgcsvProductsByProviderCode = await fetchKnownBadTcgcsvCardImageProducts(
     knownBadPokemonTcgImageProviderCodes(candidates.map((candidate) => candidate.providerIds)),
   );
@@ -94,6 +91,40 @@ export async function repairMissingPokemonTcgCardImages({
   };
 }
 
+function knownBadCardImageWhere() {
+  return {
+    OR: [
+      { imageLargeUrl: { contains: "/mcd18/" } },
+      { imageSmallUrl: { contains: "/mcd18/" } },
+      { imageLargeUrl: { contains: "cardback", mode: "insensitive" as const } },
+      { imageSmallUrl: { contains: "cardback", mode: "insensitive" as const } },
+      { imageLargeUrl: { contains: "card-back", mode: "insensitive" as const } },
+      { imageSmallUrl: { contains: "card-back", mode: "insensitive" as const } },
+    ],
+  };
+}
+
+function missingCardImageWhere() {
+  return {
+    OR: [
+      { imageLargeUrl: null },
+      { imageLargeUrl: "" },
+      { imageSmallUrl: null },
+      { imageSmallUrl: "" },
+    ],
+  };
+}
+
+function uniqueCardImageCandidates<T extends { id: string }>(candidates: T[]) {
+  const byId = new Map<string, T>();
+
+  for (const candidate of candidates) {
+    byId.set(candidate.id, candidate);
+  }
+
+  return Array.from(byId.values());
+}
+
 async function fetchKnownBadTcgcsvCardImageProducts(providerCodes: string[]) {
   const entries = await Promise.all(
     providerCodes.map(async (providerCode): Promise<[string, TcgcsvCardImageProduct[]]> => {
@@ -105,7 +136,10 @@ async function fetchKnownBadTcgcsvCardImageProducts(providerCodes: string[]) {
 
       try {
         const response = await fetch(`https://tcgcsv.com/tcgplayer/${target.categoryId}/${target.groupId}/products`, {
-          headers: { accept: "application/json" },
+          headers: {
+            accept: "application/json",
+            "user-agent": "MintBinderLocalImporter/0.1",
+          },
         });
 
         if (!response.ok) {

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { jobErrorStatus, requireJobSecret } from "@/lib/jobs/auth";
+import { jobErrorStatus, requireJobAccess } from "@/lib/jobs/auth";
 import { JobRunExecutionError, runTrackedJob } from "@/lib/jobs/runs";
 import {
   runScheduledSetPricing,
@@ -15,7 +15,7 @@ export const runtime = "nodejs";
 
 export async function GET(request: Request) {
   try {
-    requireJobSecret(request);
+    await requireJobAccess(request);
 
     return NextResponse.json({
       next: scheduledSetPricingInputFromSources(),
@@ -32,7 +32,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    requireJobSecret(request);
+    await requireJobAccess(request);
 
     const input = scheduledSetPricingInputFromSources({
       body: (await request.json().catch(() => ({}))) as ScheduledSetPricingBody,

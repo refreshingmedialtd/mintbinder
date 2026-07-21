@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { jobErrorStatus, requireJobSecret } from "@/lib/jobs/auth";
+import { jobErrorStatus, requireJobAccess } from "@/lib/jobs/auth";
 import { JobRunExecutionError, runTrackedJob } from "@/lib/jobs/runs";
 import { repairMissingPokemonTcgVariantMetadata } from "@/lib/jobs/variant-metadata-repair";
 
@@ -15,7 +15,7 @@ type VariantMetadataRepairBody = {
 
 export async function POST(request: Request) {
   try {
-    requireJobSecret(request);
+    await requireJobAccess(request);
 
     const body = (await request.json().catch(() => ({}))) as VariantMetadataRepairBody;
     const input = variantMetadataRepairInput(body);

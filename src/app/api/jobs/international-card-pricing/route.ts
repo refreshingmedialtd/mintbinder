@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
-import { jobErrorStatus, requireJobSecret } from "@/lib/jobs/auth";
+import { jobErrorStatus, requireJobAccess } from "@/lib/jobs/auth";
 import { JobRunExecutionError, runTrackedJob } from "@/lib/jobs/runs";
 import { ExchangeRateConfigError, resolveGbpRates } from "@/lib/pricing/exchange-rates";
 import {
@@ -28,7 +28,7 @@ type InternationalCardPricingBody = {
 
 export async function POST(request: Request) {
   try {
-    requireJobSecret(request);
+    await requireJobAccess(request);
 
     const body = (await request.json().catch(() => ({}))) as InternationalCardPricingBody;
     const input = await internationalCardPricingInput(body);

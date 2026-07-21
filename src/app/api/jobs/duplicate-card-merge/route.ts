@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { jobErrorStatus, requireJobSecret } from "@/lib/jobs/auth";
+import { jobErrorStatus, requireJobAccess } from "@/lib/jobs/auth";
 import { mergeDuplicateCard } from "@/lib/jobs/duplicate-card-merge";
 import { JobRunExecutionError, runTrackedJob } from "@/lib/jobs/runs";
 
@@ -14,7 +14,7 @@ type DuplicateCardMergeBody = {
 
 export async function POST(request: Request) {
   try {
-    requireJobSecret(request);
+    await requireJobAccess(request);
 
     const body = (await request.json().catch(() => ({}))) as DuplicateCardMergeBody;
     const input = duplicateCardMergeInput(body);

@@ -1,4 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
+import { auth } from "@/auth";
+import { canUseOperationsForUser } from "@/lib/auth/roles";
 
 export class JobConfigError extends Error {
   constructor(message: string) {
@@ -15,17 +17,49 @@ export class JobAuthError extends Error {
 }
 
 export function requireJobSecret(request: Request) {
+  if (hasValidJobSecret(request)) {
+    return;
+  }
+
+  if (!process.env.JOB_SECRET) {
+    throw new JobConfigError("JOB_SECRET is not configured.");
+  }
+
+  throw new JobAuthError("Job authentication failed.");
+}
+
+export async function requireJobAccess(request: Request) {
+  if (hasValidJobSecret(request)) {
+    return;
+  }
+
+  const session = await auth();
+
+  if (canUseOperationsForUser(session?.user?.role)) {
+    return;
+  }
+
+  if (!process.env.JOB_SECRET) {
+    throw new JobConfigError("JOB_SECRET is not configured.");
+  }
+
+  throw new JobAuthError("Job authentication failed.");
+}
+
+function hasValidJobSecret(request: Request) {
   const expected = process.env.JOB_SECRET;
 
   if (!expected) {
-    throw new JobConfigError("JOB_SECRET is not configured.");
+    return false;
   }
 
   const provided = bearerToken(request.headers.get("authorization")) ?? request.headers.get("x-job-secret");
 
-  if (!provided || !constantTimeEqual(provided, expected)) {
-    throw new JobAuthError("Job authentication failed.");
+  if (!provided) {
+    return false;
   }
+
+  return constantTimeEqual(provided, expected);
 }
 
 export function jobErrorStatus(error: unknown) {

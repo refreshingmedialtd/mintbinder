@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { jobErrorStatus, requireJobSecret } from "@/lib/jobs/auth";
+import { jobErrorStatus, requireJobAccess } from "@/lib/jobs/auth";
 import { sendEmail } from "@/lib/notifications/email";
 
 export const dynamic = "force-dynamic";
@@ -7,7 +7,7 @@ export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   try {
-    requireJobSecret(request);
+    await requireJobAccess(request);
 
     const to = process.env.EMAIL_SMOKE_TO?.trim();
     if (!to) {

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { jobErrorStatus, requireJobSecret } from "@/lib/jobs/auth";
+import { jobErrorStatus, requireJobAccess } from "@/lib/jobs/auth";
 import { repairMissingPokemonTcgCardImages } from "@/lib/jobs/card-image-repair";
 import { JobRunExecutionError, runTrackedJob } from "@/lib/jobs/runs";
 
@@ -13,7 +13,7 @@ type CardImageRepairBody = {
 
 export async function POST(request: Request) {
   try {
-    requireJobSecret(request);
+    await requireJobAccess(request);
 
     const body = (await request.json().catch(() => ({}))) as CardImageRepairBody;
     const input = cardImageRepairInput(body);

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { jobErrorStatus, requireJobSecret } from "@/lib/jobs/auth";
+import { jobErrorStatus, requireJobAccess } from "@/lib/jobs/auth";
 import { duplicateProviderReview } from "@/lib/jobs/duplicate-provider-review";
 
 export const dynamic = "force-dynamic";
@@ -7,7 +7,7 @@ export const runtime = "nodejs";
 
 export async function GET(request: Request) {
   try {
-    requireJobSecret(request);
+    await requireJobAccess(request);
 
     const params = new URL(request.url).searchParams;
     const limit = Number(params.get("limit") ?? 50);

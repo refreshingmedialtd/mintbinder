@@ -130,6 +130,40 @@ test("does not treat manual estimates as weak market confidence", () => {
   assert.equal(intelligence.valuationCoverage.manualNotesMissing, 0);
 });
 
+test("falls back to the card market value when an owned variant has no exact price", () => {
+  const pricedVariantCatalogue = catalogueItem({
+    id: "variant-priced",
+    valueMinor: 1500,
+    priceHistory: [
+      {
+        confidence: "Strong",
+        observedAt: "2026-07-01T00:00:00.000Z",
+        source: "tcgcsv-card",
+        valueMinor: 1500,
+        variantLabel: "Holofoil",
+      },
+    ],
+  });
+  const intelligence = buildCollectionIntelligence({
+    catalogueById: new Map([[pricedVariantCatalogue.id, pricedVariantCatalogue]]),
+    collection: [
+      collectionItem({
+        catalogueId: pricedVariantCatalogue.id,
+        id: "owned-normal-label",
+        variant: "Normal",
+      }),
+    ],
+    events: [],
+    sets: [],
+    storageLocations: [],
+    wishlist: [],
+  });
+
+  assert.equal(intelligence.valuationCoverage.knownLots, 1);
+  assert.equal(intelligence.valuationCoverage.unvaluedLots, 0);
+  assert.equal(intelligence.valuationCoverage.knownValueMinor, 1500);
+});
+
 test("explains wishlist and weak-confidence price alerts", () => {
   const hitCard = catalogueItem({
     id: "target-hit",

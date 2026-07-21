@@ -6730,11 +6730,6 @@ function OperationsScreen({
   }, [loadBetaStatus]);
 
   async function loadJobRuns() {
-    if (!jobSecret.trim()) {
-      showToast("Job secret required.");
-      return false;
-    }
-
     setIsBusy("runs");
     try {
       const response = await fetch("/api/jobs/runs?limit=10", {
@@ -6760,11 +6755,6 @@ function OperationsScreen({
   }
 
   async function loadCatalogueStatus(options?: { quiet?: boolean }) {
-    if (!jobSecret.trim()) {
-      showToast("Job secret required.");
-      return false;
-    }
-
     if (!options?.quiet) {
       setIsBusy("status");
     }
@@ -6905,11 +6895,6 @@ function OperationsScreen({
     kind: OperationsJobKind,
     override?: { maxPages?: number; page?: number; pageSize?: number; q?: string },
   ) {
-    if (!jobSecret.trim()) {
-      showToast("Job secret required.");
-      return false;
-    }
-
     const path =
       kind === "catalogue"
         ? "/api/jobs/catalogue-refresh"
@@ -7009,11 +6994,6 @@ function OperationsScreen({
   }
 
   async function exportCatalogueGaps() {
-    if (!jobSecret.trim()) {
-      showToast("Job secret required.");
-      return false;
-    }
-
     setIsBusy("gap-export");
     try {
       const response = await fetch("/api/jobs/catalogue-gaps", {
@@ -7039,11 +7019,6 @@ function OperationsScreen({
   }
 
   async function loadDuplicateProviderReview() {
-    if (!jobSecret.trim()) {
-      showToast("Job secret required.");
-      return false;
-    }
-
     setIsBusy("duplicate-review");
     try {
       const response = await fetch("/api/jobs/duplicate-provider-review?limit=50", {
@@ -7071,11 +7046,6 @@ function OperationsScreen({
   }
 
   async function runDuplicateCardMerge(execute: boolean) {
-    if (!jobSecret.trim()) {
-      showToast("Job secret required.");
-      return false;
-    }
-
     if (!mergePrimaryCardId.trim() || !mergeDuplicateCardId.trim()) {
       showToast("Both card IDs are required.");
       return false;
@@ -7145,7 +7115,7 @@ function OperationsScreen({
         <StatCard label="Provider total" value={formatCount(catalogueStatus?.providerTotalCount)} note="Pokemon TCG API" />
         <StatCard label="Next page" value={catalogueStatus?.nextCataloguePage?.toString() ?? "-"} note="Broad import resume point" />
         <StatCard label="Pages/job" value={maxPages.toString()} note="Capped at 20 for safety" />
-        <StatCard label="Access" value={jobSecret ? "Ready" : "Locked"} note="Requires JOB_SECRET" />
+        <StatCard label="Access" value="Admin session" note={jobSecret ? "Secret fallback active" : "No secret entry needed"} />
       </div>
 
       <div className="dashboard-grid">
@@ -7199,12 +7169,12 @@ function OperationsScreen({
             <Database size={18} />
           </div>
           <div className="field-grid">
-            <Field label="Job secret">
+            <Field label="Job secret fallback">
               <input
                 type="password"
                 value={jobSecret}
                 onChange={(event) => setJobSecret(event.currentTarget.value)}
-                placeholder="JOB_SECRET"
+                placeholder="Optional for scripts"
               />
             </Field>
             <Field label="Pokemon query">
@@ -9607,7 +9577,7 @@ function catalogueMarketValueMinor(item: CatalogueItem, variant?: string) {
     return null;
   }
 
-  return catalogueValueMinorForVariant(item, variant) ?? null;
+  return catalogueValueMinorForVariant(item, variant) ?? item.valueMinor ?? null;
 }
 
 function adjustedMarketValueMinor(
@@ -9972,10 +9942,10 @@ function wishlistSignalTagClass(status: "estimate" | "ready" | "wait" | "watch")
   return "amber";
 }
 
-function jobHeaders(secret: string) {
-  return {
-    authorization: `Bearer ${secret.trim()}`,
-  };
+function jobHeaders(secret: string): Record<string, string> {
+  const token = secret.trim();
+
+  return token ? { authorization: `Bearer ${token}` } : {};
 }
 
 function jobStatusClass(status: JobStatus) {

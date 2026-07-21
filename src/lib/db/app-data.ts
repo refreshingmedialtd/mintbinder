@@ -1831,16 +1831,12 @@ function collectionItemValueMinor(item: {
   const priceHistory = buildPriceHistory(
     item.cardPrinting?.priceSnapshots ?? item.sealedProduct?.priceSnapshots ?? [],
   );
+  const latestValue = latestPricePoint(priceHistory)?.valueMinor ?? 0;
   const unitValue = item.variantLabel
-    ? latestPricePointForVariant(priceHistory, item.variantLabel)?.valueMinor ??
-      (hasVariantAwarePrices(priceHistory) ? 0 : latestPricePoint(priceHistory)?.valueMinor ?? 0)
-    : latestPricePoint(priceHistory)?.valueMinor ?? 0;
+    ? latestPricePointForVariant(priceHistory, item.variantLabel)?.valueMinor ?? latestValue
+    : latestValue;
 
   return Math.round(unitValue * conditionValueMultiplier(enumLabel(item.condition))) * item.quantity;
-}
-
-function hasVariantAwarePrices(history: ReturnType<typeof buildPriceHistory>) {
-  return history.some((point) => point.variantLabel?.trim());
 }
 
 function conditionValueMultiplier(condition: string) {

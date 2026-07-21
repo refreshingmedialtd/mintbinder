@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
 import { buildCatalogueGapReport } from "@/lib/jobs/catalogue-gap-report";
 import { catalogueStatus } from "@/lib/jobs/catalogue-status";
-import { jobErrorStatus, requireJobSecret } from "@/lib/jobs/auth";
+import { jobErrorStatus, requireJobAccess } from "@/lib/jobs/auth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export async function GET(request: Request) {
   try {
-    requireJobSecret(request);
+    await requireJobAccess(request);
 
     const { status } = await catalogueStatus();
     const report = buildCatalogueGapReport(status);

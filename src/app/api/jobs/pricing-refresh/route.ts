@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { jobErrorStatus, requireJobSecret } from "@/lib/jobs/auth";
+import { jobErrorStatus, requireJobAccess } from "@/lib/jobs/auth";
 import { JobRunExecutionError, runTrackedJob } from "@/lib/jobs/runs";
 import {
   PricingProviderConfigError,
@@ -11,7 +11,7 @@ export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   try {
-    requireJobSecret(request);
+    await requireJobAccess(request);
 
     const body = (await request.json().catch(() => ({}))) as {
       page?: number;
