@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 const knownJobs = new Set([
   "health",
   "pricing",
+  "english-card-pricing",
   "sealed-pricing",
   "japan-card-pricing",
   "price-alerts",
@@ -71,6 +72,13 @@ export function protectedJobRequest(kind, env = process.env) {
     return {
       body: sealedPricingBody(env),
       path: "/api/jobs/sealed-pricing-refresh",
+    };
+  }
+
+  if (kind === "english-card-pricing") {
+    return {
+      body: englishCardPricingBody(env),
+      path: "/api/jobs/international-card-pricing",
     };
   }
 
@@ -499,6 +507,32 @@ function japanCardPricingBody(env) {
 
   if (writePrices !== undefined) {
     body.writePrices = writePrices;
+  }
+
+  return body;
+}
+
+function englishCardPricingBody(env) {
+  const body = {
+    categoryId: optionalPositiveInteger(env.TCGCSV_CARD_CATEGORY_ID) ?? 3,
+    groupLimit: optionalPositiveInteger(env.TCGCSV_CARD_GROUP_LIMIT) ?? 1,
+    language: optionalString(env.TCGCSV_CARD_LANGUAGE) ?? "en",
+    minUnpricedCards: optionalPositiveInteger(env.TCGCSV_CARD_MIN_UNPRICED) ?? 1,
+    onlyUnpricedGroups: false,
+    priceOnlyUnpriced: false,
+    source: optionalString(env.TCGCSV_CARD_SOURCE) ?? "tcgcsv-card",
+    waitMs: optionalNonNegativeInteger(env.TCGCSV_CARD_WAIT_MS) ?? 120,
+    writePrices: true,
+  };
+  const groupIds = listSetting(env.TCGCSV_CARD_GROUP_IDS);
+  const usdToGbpRate = optionalRate(env.TCGCSV_USD_TO_GBP_RATE);
+
+  if (groupIds.length) {
+    body.groupIds = groupIds;
+  }
+
+  if (usdToGbpRate) {
+    body.usdToGbpRate = usdToGbpRate;
   }
 
   return body;

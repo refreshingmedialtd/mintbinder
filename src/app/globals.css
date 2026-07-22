@@ -584,6 +584,12 @@ h3 {
   color: var(--amber);
 }
 
+.confidence-pill.stale {
+  background: color-mix(in srgb, #f59e0b 16%, transparent);
+  border-color: color-mix(in srgb, #f59e0b 48%, var(--border));
+  color: #fbbf24;
+}
+
 .alert-pill {
   min-width: 42px;
   justify-content: center;

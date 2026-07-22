@@ -46,7 +46,7 @@ test("builds catalogue variant options from prices and metadata", () => {
     ["Normal", "Holofoil", "Reverse Holofoil"],
   );
   assert.equal(options[1].valueMinor, 1200);
-  assert.equal(options[1].confidence, "Strong");
+  assert.equal(options[1].confidence, "Weak");
   assert.equal(options[2].valueMinor, 800);
 });
 

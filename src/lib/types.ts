@@ -37,7 +37,9 @@ export type CatalogueItem = {
   hasPrice: boolean;
   valueMinor: number;
   confidence: PriceConfidence;
+  priceMarket?: "UK" | "Europe" | "US" | "Other";
   priceSource?: string;
+  priceStatus?: "Current" | "Stale";
   priceObservedAt?: string;
   priceHistory?: PricePoint[];
   variantOptions?: CatalogueVariantOption[];

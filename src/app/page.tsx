@@ -79,6 +79,14 @@ import type {
   DuplicateProviderReviewGroup,
 } from "@/lib/catalogue/duplicate-provider-review";
 import { priceRangeMinor } from "@/lib/pricing/price-history";
+import {
+  effectivePriceConfidence,
+  preferredLatestPricePoint,
+  preferredPriceSeries,
+  priceFreshnessStatus,
+  priceMarketRole,
+  priceSourceLabel,
+} from "@/lib/pricing/market-context";
 import { buildInsuranceReportHtml } from "@/lib/reports/insurance";
 import {
   buildCollectionIntelligence,
@@ -9373,7 +9381,9 @@ function PriceTrendPanel({
   overrideValueMinor?: number;
 }) {
   const [range, setRange] = useState<PriceHistoryRange>("30d");
-  const history = item.priceHistory ?? [];
+  const allHistory = item.priceHistory ?? [];
+  const preferredHistory = preferredPriceSeries(allHistory);
+  const history = preferredHistory.length ? preferredHistory : allHistory;
   const visibleHistory = filterPriceHistoryByRange(history, range);
   const activeHistory = visibleHistory.length ? visibleHistory : history;
   const latest = activeHistory[activeHistory.length - 1];
@@ -9381,7 +9391,7 @@ function PriceTrendPanel({
   const previous = history[history.length - 2];
   const valueRange = priceRangeMinor(activeHistory);
   const delta = latest && first ? latest.valueMinor - first.valueMinor : null;
-  const overallLatest = history[history.length - 1];
+  const overallLatest = preferredLatestPricePoint(allHistory);
   const latestMove = overallLatest && previous ? overallLatest.valueMinor - previous.valueMinor : null;
   const source = overallLatest?.source ?? item.priceSource;
   const observedAt = overallLatest?.observedAt ?? item.priceObservedAt;
@@ -9400,7 +9410,8 @@ function PriceTrendPanel({
       )}
       <MetricList
         rows={[
-          ["Latest market", formatValuation(latestMarketValue)],
+          ["Latest estimate", formatValuation(latestMarketValue)],
+          ["Market basis", priceMarketRole(source)],
           ["Selected range", priceHistoryRangeLabel(range)],
           ["Range", valueRange ? `${formatMoney(valueRange.low)} - ${formatMoney(valueRange.high)}` : "Unknown"],
           [
@@ -9414,6 +9425,7 @@ function PriceTrendPanel({
             latestMove !== null && latestMove >= 0 ? "positive" : "",
           ],
           ["Observed", observedAt ? formatEventDate(observedAt) : "Unknown"],
+          ["Freshness", overallLatest ? priceFreshnessStatus(overallLatest) : "Unknown"],
           ["Source", item.hasPrice ? priceSourceLabel(source) : "No market source"],
           ...(overrideValueMinor === undefined
             ? []
@@ -9644,10 +9656,12 @@ function marketConfidenceDescription(item: CatalogueItem, marketValue?: number |
 
   const confidence = item.confidence || "Unknown";
   const source = priceSourceLabel(item.priceSource);
+  const basis = priceMarketRole(item.priceSource);
+  const freshness = item.priceStatus ?? "Unknown";
   const observed = item.priceObservedAt ? formatEventDate(item.priceObservedAt) : "unknown date";
   const reason = marketConfidenceReason(confidence);
 
-  return `Market confidence: ${confidence}. Source: ${source}. Observed: ${observed}. ${reason}`;
+  return `Market confidence: ${confidence}. Basis: ${basis}. Source: ${source}. Observed: ${observed}. Freshness: ${freshness}. ${reason}`;
 }
 
 function MarketConfidencePopover({
@@ -9690,12 +9704,20 @@ function MarketConfidencePopover({
         <strong className={marketConfidenceBadgeClass(confidence)}>{confidence}</strong>
       </span>
       <span className="market-help-row">
+        <span>Market basis</span>
+        <strong>{priceMarketRole(item.priceSource)}</strong>
+      </span>
+      <span className="market-help-row">
         <span>Source</span>
         <strong>{priceSourceLabel(item.priceSource)}</strong>
       </span>
       <span className="market-help-row">
         <span>Observed</span>
         <strong>{item.priceObservedAt ? formatEventDate(item.priceObservedAt) : "Unknown"}</strong>
+      </span>
+      <span className="market-help-row">
+        <span>Freshness</span>
+        <strong>{item.priceStatus ?? "Unknown"}</strong>
       </span>
       <span>{marketConfidenceReason(confidence)}</span>
     </span>
@@ -9756,8 +9778,12 @@ function valuationStatusLabel(item: CatalogueItem, owned?: CollectionItem) {
 
   const variantPrice = owned ? latestPricePointForCatalogueVariant(item, owned.variant) : undefined;
 
+  if ((variantPrice && priceFreshnessStatus(variantPrice) === "Stale") || (!variantPrice && item.priceStatus === "Stale")) {
+    return "Price outdated";
+  }
+
   if (variantPrice?.confidence) {
-    return `Market confidence: ${variantPrice.confidence}`;
+    return `Market confidence: ${effectivePriceConfidence(variantPrice)}`;
   }
 
   return item.hasPrice ? `Market confidence: ${item.confidence}` : "Needs estimate";
@@ -9772,6 +9798,12 @@ function valuationPillClass(item: CatalogueItem, owned?: CollectionItem) {
     return "confidence-pill missing";
   }
 
+  const variantPrice = owned ? latestPricePointForCatalogueVariant(item, owned.variant) : undefined;
+
+  if ((variantPrice && priceFreshnessStatus(variantPrice) === "Stale") || (!variantPrice && item.priceStatus === "Stale")) {
+    return "confidence-pill stale";
+  }
+
   return item.hasPrice ? "confidence-pill" : "confidence-pill missing";
 }
 
@@ -9781,6 +9813,12 @@ function valuationTagClass(item: CatalogueItem, owned?: CollectionItem) {
   }
 
   if (owned && catalogueMarketValueMinor(item, owned.variant) === null) {
+    return "tag amber";
+  }
+
+  const variantPrice = owned ? latestPricePointForCatalogueVariant(item, owned.variant) : undefined;
+
+  if ((variantPrice && priceFreshnessStatus(variantPrice) === "Stale") || (!variantPrice && item.priceStatus === "Stale")) {
     return "tag amber";
   }
 
@@ -10119,38 +10157,6 @@ function itemTypeLabel(type: string) {
   }
 
   return startCase(type);
-}
-
-function priceSourceLabel(source?: string | null) {
-  if (!source) {
-    return "Unknown";
-  }
-
-  if (source === "pokemon-tcg-api") {
-    return "Pokemon TCG API";
-  }
-
-  if (source === "pokemon-tcg-api-cardmarket") {
-    return "Cardmarket";
-  }
-
-  if (source === "tcgcsv") {
-    return "TCGCSV";
-  }
-
-  if (source === "tcgcsv-card") {
-    return "TCGCSV card";
-  }
-
-  if (source === "tcgcsv-japan-card") {
-    return "TCGCSV Japan";
-  }
-
-  if (source === "pricecharting-sealed") {
-    return "PriceCharting sealed";
-  }
-
-  return startCase(source);
 }
 
 function productTypeLabel(type: string) {

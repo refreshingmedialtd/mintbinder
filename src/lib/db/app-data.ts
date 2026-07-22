@@ -30,7 +30,13 @@ import {
 } from "@/lib/catalogue/languages";
 import { getEntitlements } from "@/lib/entitlements";
 import { getNotificationPreferences } from "@/lib/notifications/preferences";
-import { buildPriceHistory, latestPricePoint } from "@/lib/pricing/price-history";
+import { buildPriceHistory } from "@/lib/pricing/price-history";
+import {
+  effectivePriceConfidence,
+  preferredLatestPricePoint,
+  priceFreshnessStatus,
+  priceMarketForSource,
+} from "@/lib/pricing/market-context";
 import type {
   AppCatalogueData,
   AppCatalogueSearchData,
@@ -1549,7 +1555,7 @@ function mapCardPrintingToCatalogueItem(
   prices: PriceLike[] = [],
 ): CatalogueItem {
   const priceHistory = buildPriceHistory(prices);
-  const latestPrice = latestPricePoint(priceHistory);
+  const latestPrice = preferredLatestPricePoint(priceHistory);
   const image =
     usableCardImageUrl(card.imageLargeUrl) ??
     usableCardImageUrl(card.imageSmallUrl) ??
@@ -1577,8 +1583,10 @@ function mapCardPrintingToCatalogueItem(
     image,
     hasPrice: Boolean(latestPrice),
     valueMinor: latestPrice?.valueMinor ?? 0,
-    confidence: latestPrice?.confidence ?? "Weak",
+    confidence: effectivePriceConfidence(latestPrice),
+    priceMarket: latestPrice ? priceMarketForSource(latestPrice.source) : undefined,
     priceSource: latestPrice?.source,
+    priceStatus: latestPrice ? priceFreshnessStatus(latestPrice) : undefined,
     priceObservedAt: latestPrice?.observedAt,
     priceHistory: priceHistory.length ? priceHistory : undefined,
     variantOptions: buildCatalogueVariantOptions({
@@ -1624,7 +1632,7 @@ function mapSealedProductToCatalogueItem(
   prices: PriceLike[] = [],
 ): CatalogueItem {
   const priceHistory = buildPriceHistory(prices);
-  const latestPrice = latestPricePoint(priceHistory);
+  const latestPrice = preferredLatestPricePoint(priceHistory);
 
   return {
     id: product.id,
@@ -1636,8 +1644,10 @@ function mapSealedProductToCatalogueItem(
     image: product.imageUrl ?? undefined,
     hasPrice: Boolean(latestPrice),
     valueMinor: latestPrice?.valueMinor ?? 0,
-    confidence: latestPrice?.confidence ?? "Weak",
+    confidence: effectivePriceConfidence(latestPrice),
+    priceMarket: latestPrice ? priceMarketForSource(latestPrice.source) : undefined,
     priceSource: latestPrice?.source,
+    priceStatus: latestPrice ? priceFreshnessStatus(latestPrice) : undefined,
     priceObservedAt: latestPrice?.observedAt,
     priceHistory: priceHistory.length ? priceHistory : undefined,
     variantOptions: buildCatalogueVariantOptions({
@@ -1831,7 +1841,7 @@ function collectionItemValueMinor(item: {
   const priceHistory = buildPriceHistory(
     item.cardPrinting?.priceSnapshots ?? item.sealedProduct?.priceSnapshots ?? [],
   );
-  const latestValue = latestPricePoint(priceHistory)?.valueMinor ?? 0;
+  const latestValue = preferredLatestPricePoint(priceHistory)?.valueMinor ?? 0;
   const unitValue = item.variantLabel
     ? latestPricePointForVariant(priceHistory, item.variantLabel)?.valueMinor ?? latestValue
     : latestValue;

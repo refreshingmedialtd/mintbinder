@@ -228,7 +228,7 @@ test("explains wishlist and weak-confidence price alerts", () => {
   assert.equal(intelligence.priceAlerts[1].watchBandMinor, 1045);
   assert.equal(
     intelligence.priceAlerts[2].explanation,
-    "Weak confidence from TCGCSV observed 01 Jun 2026; refresh pricing or add a manual estimate.",
+    "Weak confidence from TCGplayer US market via TCGCSV (GBP converted) observed 01 Jun 2026; refresh pricing or add a manual estimate.",
   );
 });
 

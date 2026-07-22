@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { bestPokemonTcgCardPrice } from "../src/lib/pricing/pokemon-tcg-card-prices.ts";
 
-test("prefers TCGPlayer card prices when available", () => {
+test("uses TCGPlayer card prices when no European price is available", () => {
   const price = bestPokemonTcgCardPrice(
     {
       id: "base1-4",
@@ -26,7 +26,7 @@ test("prefers TCGPlayer card prices when available", () => {
   assert.equal(price?.conversionRate, 0.74);
 });
 
-test("falls back to Cardmarket card prices when TCGPlayer has no usable price", () => {
+test("prefers Cardmarket prices for UK-facing valuations when both sources are available", () => {
   const price = bestPokemonTcgCardPrice(
     {
       cardmarket: {
@@ -38,6 +38,13 @@ test("falls back to Cardmarket card prices when TCGPlayer has no usable price", 
       },
       id: "neo1-1",
       name: "Vintage card",
+      tcgplayer: {
+        prices: {
+          holofoil: {
+            market: 20,
+          },
+        },
+      },
     },
     { eurToGbp: 0.85, usdToGbp: 0.74 },
   );
@@ -46,6 +53,7 @@ test("falls back to Cardmarket card prices when TCGPlayer has no usable price", 
   assert.equal(price?.originalCurrency, "EUR");
   assert.equal(price?.originalPrice, 13.37);
   assert.equal(price?.conversionRate, 0.85);
+  assert.equal(price?.variantLabel, "Holofoil");
 });
 
 test("skips Cardmarket fallback without a EUR conversion rate", () => {

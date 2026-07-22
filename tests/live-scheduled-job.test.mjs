@@ -165,6 +165,25 @@ test("live Japanese card pricing posts to the international pricing endpoint", (
   });
 });
 
+test("live English TCGCSV pricing defaults to one history-building group", () => {
+  const request = protectedJobRequest("english-card-pricing", {});
+
+  assert.deepEqual(request, {
+    body: {
+      categoryId: 3,
+      groupLimit: 1,
+      language: "en",
+      minUnpricedCards: 1,
+      onlyUnpricedGroups: false,
+      priceOnlyUnpriced: false,
+      source: "tcgcsv-card",
+      waitMs: 120,
+      writePrices: true,
+    },
+    path: "/api/jobs/international-card-pricing",
+  });
+});
+
 test("live sealed pricing defaults to a timeout-safe history-building group rotation", () => {
   const request = protectedJobRequest("sealed-pricing", {});
 

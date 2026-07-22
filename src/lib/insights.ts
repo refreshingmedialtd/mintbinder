@@ -7,6 +7,8 @@ import type {
   StorageLocation,
   WishlistItem,
 } from "./types";
+import { catalogueValueMinorForVariant } from "./catalogue/variants.ts";
+import { preferredPriceSeries, priceSourceLabel } from "./pricing/market-context.ts";
 
 export type HoldingInsight = {
   id: string;
@@ -436,7 +438,7 @@ function wishlistAlertExplanation(deltaMinor: number) {
 }
 
 function weakConfidenceAlertExplanation(holding: HoldingInsight) {
-  const source = holding.priceSource ? ` from ${readableSource(holding.priceSource)}` : "";
+  const source = holding.priceSource ? ` from ${priceSourceLabel(holding.priceSource)}` : "";
   const observed = holding.priceObservedAt ? ` observed ${formatInsightDate(holding.priceObservedAt)}` : "";
 
   return `Weak confidence${source}${observed}; refresh pricing or add a manual estimate.`;
@@ -654,7 +656,9 @@ function portfolioMarketSeries(item: CatalogueItem, variant: string) {
   const variantHistory = normalizedVariant
     ? history.filter((point) => normalizeVariantLabel(point.variantLabel) === normalizedVariant)
     : [];
-  const sourceHistory = normalizedVariant && hasVariantAwarePrices(history) ? variantHistory : history;
+  const candidateHistory = normalizedVariant && hasVariantAwarePrices(history) ? variantHistory : history;
+  const preferredHistory = preferredPriceSeries(candidateHistory);
+  const sourceHistory = preferredHistory.length ? preferredHistory : candidateHistory;
   const points = new Map<string, PortfolioPricePoint>();
 
   for (const point of sourceHistory) {
@@ -988,30 +992,6 @@ function catalogueMarketValueMinor(catalogueItem: CatalogueItem, variant?: strin
   return catalogueItem.hasPrice ? catalogueValueMinorForVariant(catalogueItem, variant) ?? catalogueItem.valueMinor : undefined;
 }
 
-function catalogueValueMinorForVariant(catalogueItem: CatalogueItem, variant?: string) {
-  const normalizedVariant = normalizeVariantLabel(variant);
-  const priceHistory = catalogueItem.priceHistory ?? [];
-
-  if (normalizedVariant) {
-    return latestPricePointForVariant(priceHistory, variant)?.valueMinor ??
-      (hasVariantAwarePrices(priceHistory) ? undefined : catalogueItem.valueMinor);
-  }
-
-  return catalogueItem.valueMinor;
-}
-
-function latestPricePointForVariant(history: PricePoint[], variant?: string | null) {
-  const normalizedVariant = normalizeVariantLabel(variant);
-
-  if (!normalizedVariant) {
-    return undefined;
-  }
-
-  return [...history]
-    .reverse()
-    .find((point) => normalizeVariantLabel(point.variantLabel) === normalizedVariant);
-}
-
 function hasVariantAwarePrices(history: PricePoint[]) {
   return history.some((point) => normalizeVariantLabel(point.variantLabel));
 }
@@ -1075,36 +1055,4 @@ function normalizeVariantLabel(value?: string | null) {
     .replace(/\s+/g, " ")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "");
-}
-
-function readableSource(source: string) {
-  if (source === "pokemon-tcg-api") {
-    return "Pokemon TCG API";
-  }
-
-  if (source === "pokemon-tcg-api-cardmarket") {
-    return "Cardmarket";
-  }
-
-  if (source === "tcgcsv") {
-    return "TCGCSV";
-  }
-
-  if (source === "tcgcsv-card") {
-    return "TCGCSV card";
-  }
-
-  if (source === "tcgcsv-japan-card") {
-    return "TCGCSV Japan";
-  }
-
-  if (source === "pricecharting-sealed") {
-    return "PriceCharting sealed";
-  }
-
-  return source
-    .split(/[-_]/)
-    .filter(Boolean)
-    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
-    .join(" ");
 }

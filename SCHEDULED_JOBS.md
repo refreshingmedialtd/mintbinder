@@ -24,6 +24,8 @@ PRICE_ALERT_DIGEST_ALLOW_LIVE_RECIPIENTS="false"
 JOB_MONITOR_DRY_RUN="true"
 ```
 
+The deployed English pricing wrapper also refreshes one oldest-priced TCGCSV English group per hourly run. Its timeout-safe defaults are built into the live helper (`groupLimit=1`, `priceOnlyUnpriced=false`, `writePrices=true`), so this does not require another scheduled task or any new environment value.
+
 Pricing jobs fetch fresh GBP exchange rates from Frankfurter by default. Keep `POKEMON_TCG_USD_TO_GBP_RATE`, `POKEMON_TCG_EUR_TO_GBP_RATE`, and `TCGCSV_USD_TO_GBP_RATE` only as optional fallback values in case the exchange-rate provider is temporarily unavailable. Set `EXCHANGE_RATES_PROVIDER="manual"` only if you deliberately want to disable automatic exchange rates.
 
 Use `POKEMON_TCG_PRICING_STRATEGY="sets"` or leave it unset. Set rotation is the default because the Pokemon TCG API can reject deep full-catalogue page requests once the scheduler reaches later pages. The live helper asks Mint Binder to select the least-recently refreshed Pokemon TCG sets from the local database and refreshes those sets in small batches.
@@ -60,7 +62,7 @@ cd /home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder
 Expected results:
 
 - `job:live-health` returns `ok: true`.
-- `job:live-pricing` calls `/api/jobs/scheduled-set-pricing`, creates `pricing_refresh` job runs, and reports `strategy: "set-rotation"` plus the selected sets.
+- `cron-live-pricing.sh` first runs the Pokemon TCG set rotation, then refreshes one TCGCSV English group. Both calls create `pricing_refresh` job runs, and either may fail without preventing the other from being attempted.
 - `job:live-japan-card-pricing` calls `/api/jobs/international-card-pricing`, creates a `pricing_refresh` job run, and reports `categoryId: 85` plus `language: "ja"`.
 - `job:live-sealed-pricing` creates a `sealed_pricing_refresh` job run.
 - `monitor:jobs` prints a report. It can return a non-zero exit code when recent job failures exist, which is useful for alerting.
@@ -137,7 +139,8 @@ They use the same `Authorization: Bearer <JOB_SECRET>` header. Keep the request 
 
 ## Operating Notes
 
-- Scheduled card pricing writes new snapshots over time, so price history charts become more useful the longer the job runs.
+- Scheduled card pricing writes new snapshots over time, so price history charts become more useful the longer the job runs. UK-facing valuation selects current UK evidence first, then current European evidence, then converted US references. Converted US data is labelled as a reference and cannot receive a Strong UK confidence rating.
+- The existing `cron-live-pricing.sh` command now covers both Pokemon TCG API set rotation and one TCGCSV English group. Do not add a second 20i task for English TCGCSV pricing.
 - `POKEMON_TCG_SET_PRICING_LIMIT` controls how many sets a live pricing run refreshes. `POKEMON_TCG_SET_PRICING_REQUEST_LIMIT` defaults to `1`, so the live helper sends several small set-refresh requests rather than one long request. `POKEMON_TCG_PRICING_BATCH_WAIT_MS` pauses between those calls, and `POKEMON_TCG_API_RETRY_ATTEMPTS` retries transient Pokemon TCG API `429`/`5xx` responses before an individual set attempt is marked failed. Keep the hourly job history clean before raising set batch sizes further.
 - Keep `TCGCSV_SEALED_GROUP_LIMIT=1`, `TCGCSV_SEALED_PRODUCT_LIMIT=40`, `TCGCSV_SEALED_PRICE_ONLY_UNPRICED=false`, and `TCGCSV_SEALED_WRITE_PRICES=true` for hourly sealed pricing history. The live helper defaults to a 40-product batch when `TCGCSV_SEALED_PRODUCT_LIMIT` is not set, records a per-set sealed cursor, fills blanks, and writes fresh snapshots for products that already have prices without making one long web request.
 - Japanese single-card pricing uses TCGCSV's `Pokemon Japan` category (`TCGCSV_JAPAN_CARD_CATEGORY_ID=85`) and writes source `tcgcsv-japan-card` snapshots for `language=ja`. Use `TCGCSV_JAPAN_CARD_GROUP_LIMIT=1`, `TCGCSV_JAPAN_CARD_ONLY_UNPRICED_GROUPS=false`, and `TCGCSV_JAPAN_CARD_PRICE_ONLY_UNPRICED=false` for hourly production runs so each run fills missing Japanese prices and also creates fresh price-history snapshots for the oldest Japanese group.

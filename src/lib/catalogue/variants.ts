@@ -1,4 +1,8 @@
 import type { CatalogueItem, CatalogueVariantOption, ItemType, PricePoint } from "../types";
+import {
+  effectivePriceConfidence,
+  preferredLatestPricePoint,
+} from "../pricing/market-context.ts";
 
 type VariantOptionInput = {
   itemType: ItemType;
@@ -16,6 +20,7 @@ export function buildCatalogueVariantOptions({
   setName,
 }: VariantOptionInput): CatalogueVariantOption[] {
   const options = new Map<string, CatalogueVariantOption>();
+  const pricedOptions = new Map<string, { label: string; points: PricePoint[] }>();
   const specialLabels = inferredSpecialVariantLabels({ itemType, rarity, setName });
   const legacyDefaultLabel = legacyDefaultVariantLabel({ itemType, rarity, setName });
 
@@ -29,9 +34,23 @@ export function buildCatalogueVariantOptions({
       legacyDefaultLabel,
       rarity,
     });
-    options.set(normalizeVariantLabel(label), {
-      confidence: point.confidence,
-      label,
+    const normalized = normalizeVariantLabel(label);
+    const candidate = pricedOptions.get(normalized) ?? { label, points: [] };
+
+    candidate.points.push(point);
+    pricedOptions.set(normalized, candidate);
+  }
+
+  for (const [normalized, candidate] of pricedOptions) {
+    const point = preferredLatestPricePoint(candidate.points);
+
+    if (!point) {
+      continue;
+    }
+
+    options.set(normalized, {
+      confidence: effectivePriceConfidence(point),
+      label: candidate.label,
       observedAt: point.observedAt,
       source: point.source,
       valueMinor: point.valueMinor,
@@ -132,9 +151,9 @@ export function latestPricePointForVariant(history: PricePoint[], variant?: stri
     return undefined;
   }
 
-  return [...history]
-    .reverse()
-    .find((point) => normalizeVariantLabel(point.variantLabel) === normalizedVariant);
+  return preferredLatestPricePoint(
+    history.filter((point) => normalizeVariantLabel(point.variantLabel) === normalizedVariant),
+  );
 }
 
 export function pokemonTcgImageUrlsFromProviderIds(providerIds: unknown) {
