@@ -42,6 +42,8 @@ export type WishlistOpportunity = {
 
 export type PriceAlertInsight = {
   id: string;
+  catalogueId: string;
+  collectionItemId?: string;
   itemName: string;
   category: "Wishlist" | "Price confidence";
   status: "Hit" | "Watch" | "Refresh";
@@ -384,6 +386,7 @@ function priceAlertInsights({
 
       return {
         id: `wishlist-${item.id}`,
+        catalogueId: item.catalogueId,
         itemName: catalogueItem.displayName ?? catalogueItem.name,
         category: "Wishlist" as const,
         status: deltaMinor <= 0 ? "Hit" as const : "Watch" as const,
@@ -406,6 +409,8 @@ function priceAlertInsights({
     .filter((holding) => holding.valuationSource === "market" && holding.confidence === "Weak")
     .map((holding) => ({
       id: `confidence-${holding.id}`,
+      catalogueId: holding.catalogueId,
+      collectionItemId: holding.id,
       itemName: holding.name,
       category: "Price confidence" as const,
       status: "Refresh" as const,

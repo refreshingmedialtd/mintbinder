@@ -105,7 +105,7 @@ type CardPrintingWithPrices = {
   imageSmallUrl: string | null;
   providerIds: unknown;
   variantMetadata: unknown;
-  cardSet: { id: string; name: string };
+  cardSet: { id: string; name: string; language?: string | null; providerIds?: unknown };
   priceSnapshots: PriceLike[];
 };
 
@@ -1554,7 +1554,7 @@ function mapCardPrintingToCatalogueItem(
     imageSmallUrl: string | null;
     providerIds: unknown;
     variantMetadata: unknown;
-    cardSet: { id: string; name: string; language?: string | null; region?: string | null };
+    cardSet: { id: string; name: string; language?: string | null; region?: string | null; providerIds?: unknown };
   },
   prices: PriceLike[] = [],
 ): CatalogueItem {
@@ -1566,7 +1566,10 @@ function mapCardPrintingToCatalogueItem(
     usableCardImageUrl(pokemonTcgImageUrlFromProviderIds(card.providerIds)) ??
     tcgplayerCardImageUrlFromPrices(prices);
   const displayName = catalogueDisplayNameForText(card.name);
-  const displaySet = catalogueDisplaySetForText(card.cardSet.name);
+  const displaySet = catalogueDisplaySetForText(card.cardSet.name, {
+    language: card.cardSet.language ?? card.language,
+    providerCode: tcgdexProviderCode(card.cardSet.providerIds),
+  });
   const rarity = displayCatalogueRarity(card.rarity);
 
   return {
@@ -1728,6 +1731,7 @@ function mapWishlistItem(item: {
 
 function mapSetProgress(set: {
   id: string;
+  providerIds: unknown;
   name: string;
   language: string;
   region: string;
@@ -1737,11 +1741,16 @@ function mapSetProgress(set: {
   symbolImageUrl: string | null;
   total: number | null;
 }, counts: { owned: number; total: number }): SetProgress {
+  const displayName = catalogueDisplaySetForText(set.name, {
+    language: set.language,
+    providerCode: tcgdexProviderCode(set.providerIds),
+  });
+
   return {
     id: set.id,
     name: set.name,
-    displayName: catalogueDisplaySetForText(set.name),
-    localName: catalogueDisplaySetForText(set.name) ? set.name : undefined,
+    displayName,
+    localName: displayName ? set.name : undefined,
     language: set.language,
     languageLabel: catalogueLanguageLabel(set.language),
     region: set.region,
@@ -1753,6 +1762,16 @@ function mapSetProgress(set: {
     owned: counts.owned,
     total: set.total ?? counts.total,
   };
+}
+
+function tcgdexProviderCode(providerIds: unknown) {
+  if (!providerIds || typeof providerIds !== "object" || Array.isArray(providerIds)) {
+    return undefined;
+  }
+
+  const value = (providerIds as Record<string, unknown>).tcgdex;
+
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 function displayCatalogueRarity(value?: string | null) {

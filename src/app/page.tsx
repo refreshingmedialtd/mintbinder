@@ -93,7 +93,6 @@ import {
   type CollectionIntelligence,
   type HoldingInsight,
   type InsightAction,
-  type WishlistOpportunity,
 } from "@/lib/insights";
 import { sampleAppData } from "@/lib/sample-data";
 import type {
@@ -838,6 +837,10 @@ export default function Home() {
       setThemeId(storedTheme);
     }
   }, []);
+
+  useEffect(() => {
+    window.scrollTo({ left: 0, top: 0, behavior: "auto" });
+  }, [appState.screen, appState.selectedItemId, appState.selectedSetId]);
 
   useEffect(() => {
     if (!isThemeAllowed(themeId, effectivePlus)) {
@@ -2216,7 +2219,7 @@ export default function Home() {
   return (
     <div className="app-shell">
       <Header
-        alertCount={intelligence.actionQueue.length}
+        alertCount={intelligence.actionQueue.length + (effectivePlus ? intelligence.priceAlerts.length : 0)}
         canPreviewPlan={canPreviewPlan}
         plus={effectivePlus}
         previewPlus={effectivePlus}
@@ -2232,7 +2235,7 @@ export default function Home() {
       <div className="app-body">
         <Sidebar
           active={appState.screen}
-          alertCount={intelligence.actionQueue.length}
+          alertCount={intelligence.actionQueue.length + (effectivePlus ? intelligence.priceAlerts.length : 0)}
           onNavigate={navigate}
         />
         <main className="main">
@@ -6316,11 +6319,20 @@ function AlertsScreen({
   startPlusCheckout,
   setAppState,
 }: ScreenContext) {
-  const [alertView, setAlertView] = useState<"prices" | "review">("prices");
-  const alerts = intelligence.actionQueue;
+  const [alertView, setAlertView] = useState<"all" | "targets" | "prices" | "collection">("all");
+  const alerts = intelligence.actionQueue.filter((alert) => alert.category !== "Momentum");
   const priceAlerts = intelligence.priceAlerts;
-  const highImpact = alerts.filter((alert) => alert.impact === "High").length;
-  const targetHits = priceAlerts.filter((alert) => alert.status === "Hit").length;
+  const targetAlerts = priceAlerts.filter((alert) => alert.category === "Wishlist");
+  const confidenceAlerts = priceAlerts.filter((alert) => alert.category === "Price confidence");
+  const targetHits = targetAlerts.filter((alert) => alert.status === "Hit").length;
+  const visiblePriceAlerts = alertView === "all"
+    ? priceAlerts
+    : alertView === "targets"
+      ? targetAlerts
+      : alertView === "prices"
+        ? confidenceAlerts
+        : [];
+  const visibleCollectionAlerts = alertView === "all" || alertView === "collection" ? alerts : [];
 
   function openAlert(alert: InsightAction) {
     if (alert.category === "Wishlist") {
@@ -6372,11 +6384,18 @@ function AlertsScreen({
   }
 
   function openPriceAlert(alert: CollectionIntelligence["priceAlerts"][number]) {
+    if (alert.collectionItemId) {
+      setAppState((current) => ({
+        ...current,
+        screen: "item",
+        selectedItemId: alert.collectionItemId ?? current.selectedItemId,
+      }));
+      return;
+    }
+
     setAppState((current) => ({
       ...current,
-      screen: alert.category === "Wishlist" ? "wishlist" : "collection",
-      collectionFilter: alert.category === "Wishlist" ? current.collectionFilter : "all",
-      collectionValueFilter: alert.category === "Wishlist" ? current.collectionValueFilter : "weak",
+      screen: "wishlist",
     }));
   }
 
@@ -6387,40 +6406,56 @@ function AlertsScreen({
         action={
           <span className="status-pill">
             <Bell size={17} />
-            {alerts.length + priceAlerts.length} open
+            {alerts.length + (appState.plus ? priceAlerts.length : 0)} open
           </span>
         }
       />
-      <div className="stats-grid compact">
-        <StatCard label="Target hits" value={targetHits.toString()} note="At or below your buy price" positive={targetHits > 0} />
-        <StatCard label="Price checks" value={priceAlerts.length.toString()} note="Targets and weak estimates" />
-        <StatCard label="Collection reviews" value={alerts.length.toString()} note={`${highImpact} high impact`} />
+      <div className="alert-summary-strip">
+        <span><strong>{targetHits}</strong><small>targets ready to buy</small></span>
+        <span><strong>{confidenceAlerts.length}</strong><small>prices to review</small></span>
+        <span><strong>{alerts.length}</strong><small>collection actions</small></span>
       </div>
       <div className="segmented alert-view-tabs" aria-label="Alert type">
+        <button
+          aria-pressed={alertView === "all"}
+          className={alertView === "all" ? "active" : ""}
+          onClick={() => setAlertView("all")}
+          type="button"
+        >
+          All <span>{alerts.length + (appState.plus ? priceAlerts.length : 0)}</span>
+        </button>
+        <button
+          aria-pressed={alertView === "targets"}
+          className={alertView === "targets" ? "active" : ""}
+          onClick={() => setAlertView("targets")}
+          type="button"
+        >
+          Buy targets <span>{targetAlerts.length}</span>
+        </button>
         <button
           aria-pressed={alertView === "prices"}
           className={alertView === "prices" ? "active" : ""}
           onClick={() => setAlertView("prices")}
           type="button"
         >
-          Price alerts <span>{priceAlerts.length}</span>
+          Price quality <span>{confidenceAlerts.length}</span>
         </button>
         <button
-          aria-pressed={alertView === "review"}
-          className={alertView === "review" ? "active" : ""}
-          onClick={() => setAlertView("review")}
+          aria-pressed={alertView === "collection"}
+          className={alertView === "collection" ? "active" : ""}
+          onClick={() => setAlertView("collection")}
           type="button"
         >
-          Collection review <span>{alerts.length}</span>
+          Collection <span>{alerts.length}</span>
         </button>
       </div>
 
-      {alertView === "prices" ? (
+      {alertView !== "collection" ? (
         <section className="tool-panel alerts-panel">
           <div className="panel-title-row">
             <div>
-              <h2>Price alerts</h2>
-              <p className="muted">Wishlist targets and estimates that need attention.</p>
+              <h2>{alertView === "targets" ? "Buy targets" : alertView === "prices" ? "Price quality" : "Price decisions"}</h2>
+              <p className="muted">Prices that are close to your target or need a closer look.</p>
             </div>
             <span className="plan-pill"><Sparkles size={17} />Plus</span>
           </div>
@@ -6441,17 +6476,20 @@ function AlertsScreen({
                 </button>
               </div>
             </div>
-          ) : priceAlerts.length ? (
+          ) : visiblePriceAlerts.length ? (
             <div className="alert-list compact-alert-list">
-              {priceAlerts.map((alert) => (
-                <article className="alert-row compact-alert-row" key={alert.id}>
+              {visiblePriceAlerts.map((alert) => (
+                <article className={`alert-row compact-alert-row alert-${alert.status.toLowerCase()}`} key={alert.id}>
+                  <span className={`decision-icon ${alert.status === "Hit" ? "good" : alert.status === "Refresh" ? "action" : "watch"}`}>
+                    {alert.status === "Hit" ? <Check size={17} /> : alert.status === "Refresh" ? <RefreshCw size={17} /> : <Bell size={17} />}
+                  </span>
                   <div className="alert-main">
                     <div className="tag-row">
                       <span className={`tag ${priceAlertTagClass(alert.status)}`}>{alert.status}</span>
                       <span className="tag">{alert.category}</span>
                     </div>
                     <strong>{alert.itemName}</strong>
-                    <p className="muted">{alert.explanation}</p>
+                    <p className="alert-lead">{alert.explanation}</p>
                     <div className="alert-value-strip">
                       <span><small>Current</small><b>{formatMoney(alert.currentValueMinor)}</b></span>
                       {alert.targetValueMinor !== undefined ? (
@@ -6461,8 +6499,9 @@ function AlertsScreen({
                     </div>
                     {alert.priceSource ? <span className="alert-source">{priceSourceLabel(alert.priceSource)}</span> : null}
                   </div>
-                  <button className="button" onClick={() => openPriceAlert(alert)}>
+                  <button className="button small" onClick={() => openPriceAlert(alert)}>
                     {alert.category === "Wishlist" ? "View target" : "Review value"}
+                    <ArrowRight size={16} />
                   </button>
                 </article>
               ))}
@@ -6471,28 +6510,35 @@ function AlertsScreen({
             <EmptyState title="No price alerts" description="No targets or weak estimates need attention right now." />
           )}
         </section>
-      ) : (
+      ) : null}
+      {alertView === "all" || alertView === "collection" ? (
         <section className="tool-panel alerts-panel">
           <div className="panel-title-row">
             <div>
-              <h2>Collection review</h2>
-              <p className="muted">Concrete actions that improve the quality of your collection data.</p>
+              <h2>Collection actions</h2>
+              <p className="muted">Practical fixes that improve the accuracy and organisation of your collection.</p>
             </div>
-            <Sparkles size={18} />
+            <span className="status-pill">{visibleCollectionAlerts.length} open</span>
           </div>
-          {alerts.length ? (
+          {visibleCollectionAlerts.length ? (
             <div className="alert-list compact-alert-list">
-              {alerts.map((alert) => (
+              {visibleCollectionAlerts.map((alert) => (
                 <article className="alert-row compact-alert-row" key={alert.id}>
+                  <span className={`decision-icon ${alert.tone === "good" ? "good" : alert.tone === "action" ? "action" : "watch"}`}>
+                    <Info size={17} />
+                  </span>
                   <div className="alert-main">
                     <div className="tag-row">
                       <span className={`tag ${actionTagClass(alert.tone)}`}>{alert.category}</span>
                       <span className={`tag ${impactTagClass(alert.impact)}`}>{alert.impact}</span>
                     </div>
                     <strong>{alert.title}</strong>
-                    <p className="muted">{alert.detail}</p>
+                    <p className="alert-lead">{alert.detail}</p>
                   </div>
-                  <button className="button" onClick={() => openAlert(alert)}>{alert.actionLabel}</button>
+                  <button className="button small" onClick={() => openAlert(alert)}>
+                    {alert.actionLabel}
+                    <ArrowRight size={16} />
+                  </button>
                 </article>
               ))}
             </div>
@@ -6500,16 +6546,16 @@ function AlertsScreen({
             <EmptyState title="Collection review is clear" />
           )}
         </section>
-      )}
+      ) : null}
     </section>
   );
 }
 
 function AnalyticsScreen({
   appState,
-  collectionEvents,
   intelligence,
   navigate,
+  setAppState,
   startPlusCheckout,
   summary,
   wishlistTotal,
@@ -6523,64 +6569,49 @@ function AnalyticsScreen({
   if (!appState.plus) {
     return (
       <section className="page">
-        <PageHeader title="Insights" action={<span className="plan-pill"><Lock size={17} />Free preview</span>} />
-        <div className="stats-grid">
-          <StatCard label="Health score" value={`${intelligence.healthScore}/100`} note={intelligence.healthLabel} />
-          <StatCard label="Current value" value={formatMoney(summary.value)} note={`${summary.items} tracked items`} />
-          <StatCard label="Gain/loss" value={formatMoney(gain)} note="Known cost basis" positive={gain >= 0} />
-          <StatCard label="Wishlist hits" value={intelligence.wishlistOpportunities.length.toString()} note={`${formatMoney(wishlistTotal)} target list`} />
+        <PageHeader title="Insights" action={<span className="status-pill"><Lock size={17} />Free</span>} />
+        <div className="insights-summary-grid">
+          <StatCard label="Portfolio value" value={formatMoney(summary.value)} note={`${summary.items} tracked lots`} />
+          <StatCard label="Total gain/loss" value={formatSignedMoney(gain)} note={`Cost basis ${formatMoney(summary.cost)}`} positive={gain >= 0} />
+          <StatCard label="Priced holdings" value={`${intelligence.valuationCoverage.coveragePercent}%`} note={`${intelligence.valuationCoverage.knownLots} of ${intelligence.valuationCoverage.totalLots} lots`} />
+          <StatCard label="Buy targets hit" value={intelligence.wishlistOpportunities.length.toString()} note={`${formatMoney(wishlistTotal)} target list`} />
         </div>
-        <div className="screen-split">
+        <div className="insights-free-grid">
+          <TopHoldings
+            holdings={intelligence.topHoldings}
+            onOpen={(holding) => setAppState((current) => ({ ...current, screen: "item", selectedItemId: holding.id }))}
+          />
           <section className="tool-panel">
             <div className="panel-title-row">
-              <h2>Free snapshot</h2>
-              <BarChart3 size={18} />
+              <h2>Collection snapshot</h2>
+              <span className="status-pill">{intelligence.healthScore}/100</span>
             </div>
             <MetricList
               rows={[
-                ["Top holding", intelligence.topHoldings[0]?.name ?? "Add more items"],
                 ["Best performer", intelligence.bestPerformer ? gainLabel(intelligence.bestPerformer) : "Add purchase prices"],
-                ["Sales recorded", realizedSales.count],
                 ["Next action", leadAction?.title ?? "Collection looks tidy"],
-                ["Recent activity", `${intelligence.activity.last30Days} events this month`],
+                ["Needs estimate", `${intelligence.valuationCoverage.unvaluedLots} lots`],
+                ["Weak prices", `${intelligence.weakConfidence.count} holdings`],
+                ["Recent activity", `${intelligence.activity.last30Days} changes in 30 days`],
               ]}
             />
-          </section>
-          <section className="section-block">
-            <SectionHeader title="Plus unlocks" />
-            <div className="locked-list">
-              {["Value path", "Realised sales", "Action queue", "Portfolio mix", "Wishlist targets"].map((label) => (
-                <div className="locked-tile" key={label}>
-                  <strong>{label}</strong>
-                  <span className="tag red">Locked</span>
-                </div>
-              ))}
-            </div>
           </section>
           <section className="tool-panel upgrade-panel">
             <div className="panel-title-row">
-              <h2>Plus</h2>
+              <div>
+                <h2>Unlock deeper insights</h2>
+                <p className="muted">Value history, price alerts, performance and collection health in one view.</p>
+              </div>
               <span className="tag green">£19.99 yearly</span>
             </div>
-            <p className="muted">
-              Keep the free tracking tools. Add automation, richer analytics, and reports when the collection needs
-              deeper attention.
-            </p>
-            <MetricList
-              rows={[
-                ["Monthly", "£2.49"],
-                ["Yearly", "£19.99"],
-                ["Unlocks", "Trends, alerts, reports"],
-              ]}
-            />
             <div className="upgrade-actions">
               <button className="button primary" onClick={() => void startPlusCheckout("monthly")}>
                 <CreditCard size={17} />
-                Monthly
+                £2.49 monthly
               </button>
               <button className="button" onClick={() => void startPlusCheckout("yearly")}>
                 <Sparkles size={17} />
-                Yearly
+                £19.99 yearly
               </button>
               <button className="button" onClick={() => navigate("settings")}>
                 <Settings size={17} />
@@ -6595,52 +6626,112 @@ function AnalyticsScreen({
 
   return (
     <section className="page">
-      <PageHeader title="Insights" action={<span className="plan-pill"><Sparkles size={17} />Plus active</span>} />
-      <div className="stats-grid">
-        <StatCard label="Health score" value={`${intelligence.healthScore}/100`} note={intelligence.healthLabel} />
-        <StatCard label="Current value" value={formatMoney(summary.value)} note={`${intelligence.valuationCoverage.coveragePercent}% valued`} />
-        <StatCard label="Gain/loss" value={formatMoney(gain)} note="Against known cost" positive={gain >= 0} />
+      <PageHeader
+        title="Insights"
+        action={
+          <span className="status-pill">
+            <RefreshCw size={16} />
+            {intelligence.latestPricingAt ? `Priced ${formatEventDate(intelligence.latestPricingAt)}` : "Waiting for prices"}
+          </span>
+        }
+      />
+      <div className="insights-summary-grid">
+        <StatCard label="Portfolio value" value={formatMoney(summary.value)} note={`${summary.items} tracked lots`} />
         <StatCard
           label="30-day change"
           value={portfolioRangeDelta ? formatSignedMoney(portfolioRangeDelta.valueMinor) : "Unknown"}
           note={portfolioRangeDelta ? formatSignedPercent(portfolioRangeDelta.percent) : "Needs more pricing history"}
           positive={Boolean(portfolioRangeDelta && portfolioRangeDelta.valueMinor >= 0)}
         />
+        <StatCard label="Total gain/loss" value={formatSignedMoney(gain)} note={`Cost basis ${formatMoney(summary.cost)}`} positive={gain >= 0} />
         <StatCard
-          label="Sales"
-          value={formatMoney(realizedSales.proceedsMinor)}
-          note={`${realizedSales.count} recorded sale${realizedSales.count === 1 ? "" : "s"}`}
-          positive={realizedSales.gainMinor >= 0}
+          label="Priced holdings"
+          value={`${intelligence.valuationCoverage.coveragePercent}%`}
+          note={`${intelligence.valuationCoverage.knownLots} of ${intelligence.valuationCoverage.totalLots} lots`}
+          positive={intelligence.valuationCoverage.coveragePercent === 100}
         />
-        <StatCard label="Duplicates" value={intelligence.duplicates.length.toString()} note={`${formatMoney(duplicateValue)} across duplicate lots`} />
-        <StatCard label="Wishlist hits" value={intelligence.wishlistOpportunities.length.toString()} note="At or below target" />
       </div>
-      <div className="dashboard-grid">
+      <div className="insights-primary-grid">
         <PortfolioHistoryPanel history={intelligence.portfolioHistory} currentValueMinor={summary.value} />
-        <ActionQueue actions={intelligence.actionQueue} />
-        <TopHoldings holdings={intelligence.topHoldings} />
-        <PortfolioMix rows={intelligence.portfolioMix} />
-        <SalesLedger realizedSales={realizedSales} />
-        <MetricPanel
-          title="Collection review"
-          rows={[
-            ["Best performer", intelligence.bestPerformer ? gainLabel(intelligence.bestPerformer) : "Add purchase prices"],
-            ["Valuation coverage", `${intelligence.valuationCoverage.knownLots} / ${intelligence.valuationCoverage.totalLots} lots`],
-            ["Needs estimate", `${intelligence.valuationCoverage.unvaluedLots} lots`],
-            ["Manual values", `${intelligence.valuationCoverage.manualLots} lots`],
-            ["Missing value notes", intelligence.valuationCoverage.manualNotesMissing],
-            ["Weak prices", `${intelligence.weakConfidence.count} holdings`],
-            ["Grading candidates", intelligence.gradingCandidates.length],
-            ["Set focus", intelligence.setFocus ? `${intelligence.setFocus.name} (${intelligence.setFocus.remaining} left)` : "No sets loaded"],
-          ]}
+        <section className="tool-panel insights-next-actions">
+          <div className="panel-title-row">
+            <div>
+              <h2>Needs attention</h2>
+              <p className="muted">The most useful next steps for this collection.</p>
+            </div>
+            <span className="status-pill">{intelligence.actionQueue.length + intelligence.priceAlerts.length} open</span>
+          </div>
+          {intelligence.actionQueue.length || intelligence.priceAlerts.length ? (
+            <div className="decision-list">
+              {intelligence.priceAlerts.slice(0, 2).map((alert) => (
+                <button className="decision-row" key={alert.id} onClick={() => navigate("alerts")}>
+                  <span className={`decision-icon ${alert.status === "Hit" ? "good" : "watch"}`}>
+                    {alert.status === "Hit" ? <Check size={17} /> : <Bell size={17} />}
+                  </span>
+                  <span>
+                    <strong>{alert.itemName}</strong>
+                    <small>{alert.explanation}</small>
+                  </span>
+                  <ArrowRight size={17} />
+                </button>
+              ))}
+              {intelligence.actionQueue.slice(0, 3).map((action) => (
+                <button className="decision-row" key={action.id} onClick={() => navigate("alerts")}>
+                  <span className={`decision-icon ${action.tone === "good" ? "good" : action.tone === "action" ? "action" : "watch"}`}>
+                    <Info size={17} />
+                  </span>
+                  <span>
+                    <strong>{action.title}</strong>
+                    <small>{action.detail}</small>
+                  </span>
+                  <ArrowRight size={17} />
+                </button>
+              ))}
+            </div>
+          ) : (
+            <EmptyState title="Nothing needs attention" description="Your collection data and targets are up to date." />
+          )}
+          <button className="button" onClick={() => navigate("alerts")}>
+            <Bell size={17} />
+            Open alerts
+          </button>
+        </section>
+      </div>
+      <div className="insights-secondary-grid">
+        <TopHoldings
+          holdings={intelligence.topHoldings}
+          onOpen={(holding) => setAppState((current) => ({ ...current, screen: "item", selectedItemId: holding.id }))}
         />
-        <WishlistOpportunities opportunities={intelligence.wishlistOpportunities} />
         <section className="tool-panel">
           <div className="panel-title-row">
-            <h2>Activity feed</h2>
-            <History size={18} />
+            <h2>Collection health</h2>
+            <span className="status-pill">{intelligence.healthScore}/100</span>
           </div>
-          <EventList events={collectionEvents.slice(0, 6)} />
+          <MetricList
+            rows={[
+              ["Status", intelligence.healthLabel],
+              ["Needs estimate", `${intelligence.valuationCoverage.unvaluedLots} lots`],
+              ["Weak prices", `${intelligence.weakConfidence.count} holdings`],
+              ["Manual values", `${intelligence.valuationCoverage.manualLots} lots`],
+              ["Duplicates", `${intelligence.duplicates.length} groups | ${formatMoney(duplicateValue)}`],
+            ]}
+          />
+        </section>
+        <PortfolioMix rows={intelligence.portfolioMix} />
+        <section className="tool-panel">
+          <div className="panel-title-row">
+            <h2>Performance</h2>
+            <Sparkles size={18} />
+          </div>
+          <MetricList
+            rows={[
+              ["Best holding", intelligence.bestPerformer ? gainLabel(intelligence.bestPerformer) : "Add purchase prices"],
+              ["Sales proceeds", formatMoney(realizedSales.proceedsMinor)],
+              ["Realised gain", formatSignedMoney(realizedSales.gainMinor), realizedSales.gainMinor >= 0 ? "positive" : ""],
+              ["Recent activity", `${intelligence.activity.last30Days} changes in 30 days`],
+              ["Wishlist targets hit", intelligence.wishlistOpportunities.length],
+            ]}
+          />
         </section>
       </div>
     </section>
@@ -8201,33 +8292,13 @@ function SettingsShortcutsPanel({ navigate }: { navigate: (screen: Screen) => vo
   );
 }
 
-function ActionQueue({ actions }: { actions: InsightAction[] }) {
-  return (
-    <section className="tool-panel">
-      <div className="panel-title-row">
-        <h2>Action queue</h2>
-        <Sparkles size={18} />
-      </div>
-      {actions.length ? (
-        <div className="insight-list">
-          {actions.map((action) => (
-            <article className="insight-row" key={action.title}>
-              <span className={`tag ${actionTagClass(action.tone)}`}>{action.tone}</span>
-              <div>
-                <strong>{action.title}</strong>
-                <p className="muted">{action.detail}</p>
-              </div>
-            </article>
-          ))}
-        </div>
-      ) : (
-        <p className="muted">No obvious actions right now.</p>
-      )}
-    </section>
-  );
-}
-
-function TopHoldings({ holdings }: { holdings: HoldingInsight[] }) {
+function TopHoldings({
+  holdings,
+  onOpen,
+}: {
+  holdings: HoldingInsight[];
+  onOpen?: (holding: HoldingInsight) => void;
+}) {
   return (
     <section className="tool-panel">
       <div className="panel-title-row">
@@ -8235,12 +8306,22 @@ function TopHoldings({ holdings }: { holdings: HoldingInsight[] }) {
         <Layers3 size={18} />
       </div>
       {holdings.length ? (
-        <div className="metric-list">
-          {holdings.slice(0, 5).map((holding) => (
-            <div className="metric-row" key={holding.id}>
-              <span>{holding.name}</span>
-              <strong>{formatMoney(holding.valueMinor)}</strong>
-            </div>
+        <div className="holding-rank-list">
+          {holdings.slice(0, 5).map((holding, index) => (
+            <button className="holding-rank-row" disabled={!onOpen} key={holding.id} onClick={() => onOpen?.(holding)}>
+              <span className="holding-rank">{index + 1}</span>
+              <span className="holding-rank-copy">
+                <strong>{holding.name}</strong>
+                <small>{holding.set}</small>
+              </span>
+              <span className="holding-rank-value">
+                <strong>{formatMoney(holding.valueMinor)}</strong>
+                {holding.gainMinor === null ? null : (
+                  <small className={holding.gainMinor >= 0 ? "positive" : "negative"}>{formatSignedMoney(holding.gainMinor)}</small>
+                )}
+              </span>
+              {onOpen ? <ArrowRight size={17} /> : null}
+            </button>
           ))}
         </div>
       ) : (
@@ -8258,50 +8339,27 @@ function PortfolioHistoryPanel({
   history: CollectionIntelligence["portfolioHistory"];
 }) {
   const latest = history[history.length - 1];
-  const high = portfolioHistoryExtreme(history, "high");
-  const low = portfolioHistoryExtreme(history, "low");
   const rangeChange = portfolioRangeChange(history, "30d");
 
   return (
     <section className="tool-panel">
       <div className="panel-title-row">
-        <h2>Portfolio value path</h2>
-        <span className="status-pill">{latest ? `${history.length} points` : "No history"}</span>
+        <div>
+          <h2>Value history</h2>
+          <p className="muted">Portfolio value using the latest price available on each day.</p>
+        </div>
+        <span className="status-pill">{latest ? formatEventDate(latest.observedAt) : "No history"}</span>
       </div>
       {history.length ? (
         <PortfolioValueLineChart currentValueMinor={currentValueMinor} history={history} />
       ) : (
         <p className="muted">Run pricing imports to build a dated portfolio value history.</p>
       )}
-      <MetricList
-        rows={[
-          ["Latest value", latest ? formatMoney(latest.valueMinor) : formatMoney(currentValueMinor)],
-          [
-            "30-day change",
-            rangeChange ? `${formatSignedMoney(rangeChange.valueMinor)} (${formatSignedPercent(rangeChange.percent)})` : "Unknown",
-            rangeChange && rangeChange.valueMinor >= 0 ? "positive" : "",
-          ],
-          [
-            "Range",
-            high && low ? `${formatMoney(low.valueMinor)} - ${formatMoney(high.valueMinor)}` : "Unknown",
-          ],
-          ["Latest point", latest ? formatEventDate(latest.observedAt) : "Unknown"],
-          ["High", high ? `${formatMoney(high.valueMinor)} on ${formatEventDate(high.observedAt)}` : "Unknown"],
-          ["Low", low ? `${formatMoney(low.valueMinor)} on ${formatEventDate(low.observedAt)}` : "Unknown"],
-          [
-            "Latest mix",
-            latest
-              ? `${formatMoney(latest.marketValueMinor)} market | ${formatMoney(latest.manualValueMinor)} manual`
-              : "Unknown",
-          ],
-          [
-            "Valued lots",
-            latest
-              ? `${latest.valuedLots} total | ${latest.marketLots} market | ${latest.manualLots} manual`
-              : "Unknown",
-          ],
-        ]}
-      />
+      <div className="chart-summary-row">
+        <span><small>Latest value</small><strong>{latest ? formatMoney(latest.valueMinor) : formatMoney(currentValueMinor)}</strong></span>
+        <span><small>30-day change</small><strong className={rangeChange && rangeChange.valueMinor >= 0 ? "positive" : ""}>{rangeChange ? `${formatSignedMoney(rangeChange.valueMinor)} (${formatSignedPercent(rangeChange.percent)})` : "Building history"}</strong></span>
+        <span><small>Price basis</small><strong>{latest ? `${latest.marketLots} market | ${latest.manualLots} manual` : "Unknown"}</strong></span>
+      </div>
     </section>
   );
 }
@@ -8328,82 +8386,6 @@ function PortfolioMix({
         </div>
       ) : (
         <p className="muted">No portfolio mix yet.</p>
-      )}
-    </section>
-  );
-}
-
-function SalesLedger({
-  realizedSales,
-}: {
-  realizedSales: CollectionIntelligence["realizedSales"];
-}) {
-  return (
-    <section className="tool-panel">
-      <div className="panel-title-row">
-        <h2>Realised sales</h2>
-        <History size={18} />
-      </div>
-      <MetricList
-        rows={[
-          ["Proceeds", formatMoney(realizedSales.proceedsMinor)],
-          [
-            "Known basis",
-            `${formatMoney(realizedSales.basisMinor)} (${realizedSales.knownBasisCount}/${realizedSales.count})`,
-          ],
-          [
-            "Realised gain",
-            formatMoney(realizedSales.gainMinor),
-            realizedSales.gainMinor >= 0 ? "positive" : "",
-          ],
-        ]}
-      />
-      {realizedSales.sales.length ? (
-        <div className="insight-list">
-          {realizedSales.sales.map((sale) => (
-            <article className="insight-row" key={sale.id}>
-              <span className={`tag ${sale.gainMinor === null ? "amber" : sale.gainMinor >= 0 ? "green" : "red"}`}>
-                {sale.gainMinor === null ? "Basis" : sale.gainMinor >= 0 ? "Gain" : "Loss"}
-              </span>
-              <div>
-                <strong>{sale.itemName}</strong>
-                <p className="muted">
-                  {formatMoney(sale.amountMinor)} | {sale.quantity ? `Qty ${sale.quantity} | ` : ""}
-                  {sale.gainMinor === null ? "No basis" : formatMoney(sale.gainMinor)} | {formatEventDate(sale.occurredAt)}
-                </p>
-              </div>
-            </article>
-          ))}
-        </div>
-      ) : (
-        <p className="muted">Record a sale from an item detail page to build realised performance history.</p>
-      )}
-    </section>
-  );
-}
-
-function WishlistOpportunities({
-  opportunities,
-}: {
-  opportunities: WishlistOpportunity[];
-}) {
-  return (
-    <section className="tool-panel">
-      <div className="panel-title-row">
-        <h2>Wishlist targets</h2>
-        <Heart size={18} />
-      </div>
-      {opportunities.length ? (
-        <div className="metric-list">
-          {opportunities.map((opportunity) => (
-            <div className="metric-row" key={opportunity.id}>
-              <span>{opportunity.name}</span>
-              <strong>{formatMoney(opportunity.currentValueMinor)}</strong>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <p className="muted">No wishlist items are at target right now.</p>
       )}
     </section>
   );
@@ -9395,8 +9377,8 @@ function InteractiveValueLineChart({
   const width = 720;
   const height = compact ? 190 : 250;
   const plot = compact
-    ? { bottom: 144, left: 58, right: 20, top: 18 }
-    : { bottom: 204, left: 58, right: 20, top: 18 };
+    ? { bottom: 144, left: 90, right: 20, top: 18 }
+    : { bottom: 204, left: 90, right: 20, top: 18 };
   const plotWidth = width - plot.left - plot.right;
   const plotHeight = plot.bottom - plot.top;
   const times = points.map((point) => Date.parse(point.observedAt));
@@ -10085,21 +10067,6 @@ function portfolioRangeChange(
     percent: first.valueMinor > 0 ? (valueMinor / first.valueMinor) * 100 : 0,
     valueMinor,
   };
-}
-
-function portfolioHistoryExtreme(
-  history: CollectionIntelligence["portfolioHistory"],
-  kind: "high" | "low",
-) {
-  return history.reduce<CollectionIntelligence["portfolioHistory"][number] | undefined>((selected, point) => {
-    if (!selected) {
-      return point;
-    }
-
-    return kind === "high"
-      ? point.valueMinor > selected.valueMinor ? point : selected
-      : point.valueMinor < selected.valueMinor ? point : selected;
-  }, undefined);
 }
 
 function formatSignedMoney(valueMinor: number) {

@@ -202,8 +202,169 @@ export function catalogueDisplayNameForText(value?: string | null) {
   ]);
 }
 
-export function catalogueDisplaySetForText(value?: string | null) {
-  return englishDisplayText(value, [
+const INTERNATIONAL_SET_DISPLAY_NAMES = new Map<string, string>([
+  // Japanese catalogue
+  ["VSTARユニバース", "VSTAR Universe"],
+  ["きせきの結晶", "Miracle Crystal"],
+  ["さいはての攻防", "The Furthest Ends of Offense and Defense"],
+  ["まぼろしの森", "Mirage Forest"],
+  ["めざめる伝説", "Awakening Legends"],
+  ["インフェルノX", "Inferno X"],
+  ["クリムゾンヘイズ", "Crimson Haze"],
+  ["クレイバースト", "Clay Burst"],
+  ["スカーレットex", "Scarlet ex"],
+  ["スターターセット テラスタイプ：ステラ ソウブレイズex", "Starter Set Tera Type: Stellar Ceruledge ex"],
+  ["スターターセット テラスタイプ：ステラ ニンフィアex", "Starter Set Tera Type: Stellar Sylveon ex"],
+  ["スターバース", "Star Birth"],
+  ["ステラミラクル", "Stellar Miracle"],
+  ["スノーハザード", "Snow Hazard"],
+  ["テラスタルフェスex", "Terastal Festival ex"],
+  ["デッキビルドBOX ステラミラクル", "Deck Build Box Stellar Miracle"],
+  ["トリプレットビート", "Triplet Beat"],
+  ["バイオレットex", "Violet ex"],
+  ["バトルパートナーズ", "Battle Partners"],
+  ["バトルリージョン", "Battle Region"],
+  ["パラダイムトリガー", "Paradigm Trigger"],
+  ["ブラックボルト", "Black Bolt"],
+  ["ホロンの幻影", "Holon Phantoms"],
+  ["ホロンの研究塔", "Holon Research Tower"],
+  ["ホワイトフレア", "White Flare"],
+  ["ポケモンカード151", "Pokemon Card 151"],
+  ["ポケモンカード★VS", "Pokemon Card VS"],
+  ["ポケモンカード★web", "Pokemon Card web"],
+  ["ポケモンジャングル", "Pokemon Jungle"],
+  ["ムニキスゼロ", "Munikis Zero"],
+  ["メガシンフォニア", "Mega Symphonia"],
+  ["メガブレイブ", "Mega Brave"],
+  ["リーダーズスタジアム", "Leaders' Stadium"],
+  ["レイジングサーフ", "Raging Surf"],
+  ["ロケット団", "Team Rocket"],
+  ["ロケット団の栄光", "Glory of Team Rocket"],
+  ["ロケット団の逆襲", "Rocket Gang Strikes Back"],
+  ["ワイルドフォース", "Wild Force"],
+  ["伝説の飛翔", "Flight of Legends"],
+  ["化石の秘密", "Mystery of the Fossils"],
+  ["古代の咆哮", "Ancient Roar"],
+  ["地図にない町", "Town on No Map"],
+  ["基本拡張パック", "Base Expansion Pack"],
+  ["変幻の仮面", "Mask of Change"],
+  ["拡張パック", "Expansion Pack"],
+  ["未来の一閃", "Future Flash"],
+  ["楽園ドラゴーナ", "Paradise Dragona"],
+  ["海からの風", "Wind from the Sea"],
+  ["熱風のアリーナ", "Heat Wave Arena"],
+  ["神秘なる山", "Mysterious Mountains"],
+  ["蒼空の激突", "Sky-Splitting Clash"],
+  ["裂けた大地", "Split Earth"],
+  ["超電ブレイカー", "Super Electric Breaker"],
+  ["遺跡をこえて...", "Crossing the Ruins..."],
+  ["金、銀、新世界へ...", "Gold, Silver, to a New World..."],
+  ["金の空、銀の海", "Golden Sky, Silvery Ocean"],
+  ["闇、そして光へ...", "Darkness, and to Light..."],
+  ["闇からの挑戦", "Challenge from the Darkness"],
+  ["黒炎の支配者", "Ruler of the Black Flame"],
+
+  // Korean catalogue
+  ["고대의 포효", "Ancient Roar"],
+  ["미래의 일섬", "Future Flash"],
+  ["와일드포스", "Wild Force"],
+
+  // Simplified and Traditional Chinese catalogues
+  ["太晶慶典ex", "Terastal Festival ex"],
+  ["对战派对组合 奖励包", "Battle Party Combination Prize Pack"],
+  ["對戰搭檔", "Battle Partners"],
+  ["星晶奇跡", "Stellar Miracle"],
+  ["樂園騰龍", "Paradise Dragona"],
+  ["火箭隊的榮耀", "Glory of Team Rocket"],
+  ["熱風競技場", "Heat Wave Arena"],
+  ["超電突圍", "Super Electric Breaker"],
+  ["25週年收藏款", "25th Anniversary Collection"],
+  ["VMAX絕群壓軸", "VMAX Climax"],
+  ["VSTAR&VMAX 高級牌組 代歐奇希斯", "VSTAR & VMAX High Class Deck Deoxys"],
+  ["VSTAR&VMAX 高級牌組 捷拉奧拉", "VSTAR & VMAX High Class Deck Zeraora"],
+  ["VSTAR特別組合", "VSTAR Special Set"],
+  ["ex初階牌組", "ex Starter Deck"],
+  ["ex特別組合", "ex Special Set"],
+  ["一撃大師", "Single Strike Master"],
+  ["三連音爆", "Triplet Beat"],
+  ["伊布英雄", "Eevee Heroes"],
+  ["冰雪險境", "Snow Hazard"],
+  ["初階牌組100", "Starter Deck 100"],
+  ["初階牌組100 特別版", "Starter Deck 100 Special Edition"],
+  ["劍&盾", "Sword & Shield"],
+  ["劍&盾 SET A", "Sword & Shield Set A"],
+  ["劍&盾 SET B", "Sword & Shield Set B"],
+  ["匯流藝術", "Fusion Arts"],
+  ["古代咆哮", "Ancient Roar"],
+  ["噴火龍", "Charizard"],
+  ["天地萬物VSTAR", "VSTAR Universe"],
+  ["寶可夢卡牌151", "Pokemon Card 151"],
+  ["寶可夢卡牌家庭組合", "Pokemon Card Family Set"],
+  ["對戰地區", "Battle Region"],
+  ["強大", "Powerful"],
+  ["思維激盪", "Paradigm Trigger"],
+  ["挑戰", "Challenge"],
+  ["搭檔", "Partner"],
+  ["摩天巔峰", "Skyscraping Perfection"],
+  ["星星誕生", "Star Birth"],
+  ["時間觀察者", "Time Gazer"],
+  ["未來密勒頓ex", "Future Miraidon ex"],
+  ["未來閃光", "Future Flash"],
+  ["朱ex", "Scarlet ex"],
+  ["漆黑幽魂", "Jet-Black Spirit"],
+  ["激狂駭浪", "Raging Surf"],
+  ["無極力量", "Infinity Zone"],
+  ["無極力量 SET A", "Infinity Zone Set A"],
+  ["無極力量 SET B", "Infinity Zone Set B"],
+  ["特典卡 朱&紫", "Scarlet & Violet Promo"],
+  ["狂野之力", "Wild Force"],
+  ["異度審判", "Cyber Judge"],
+  ["白熱奧祕", "Incandescent Arcana"],
+  ["皮卡丘", "Pikachu"],
+  ["皮卡丘特別組合", "Pikachu Special Set"],
+  ["碟旋暴擊", "Clay Burst"],
+  ["空間魔術師", "Space Juggler"],
+  ["紫ex", "Violet ex"],
+  ["緋紅薄霧", "Crimson Haze"],
+  ["蒼空烈流", "Blue Sky Stream"],
+  ["藏瑪然特VS無極汰那", "Zamazenta vs Eternatus"],
+  ["變幻假面", "Mask of Change"],
+  ["起始組合VSTAR 路卡利歐", "VSTAR Starter Set Lucario"],
+  ["起始組合VSTAR 達克萊伊", "VSTAR Starter Set Darkrai"],
+  ["起始組合ex 呆火鱷&電龍 ex", "Starter Set ex Fuecoco & Ampharos ex"],
+  ["起始組合ex 新葉喵&路卡利歐 ex", "Starter Set ex Sprigatito & Lucario ex"],
+  ["起始組合ex 潤水鴨&謎擬Ｑ ex", "Starter Set ex Quaxly & Mimikyu ex"],
+  ["超夢", "Mewtwo"],
+  ["超夢ex", "Mewtwo ex"],
+  ["連撃大師", "Rapid Strike Master"],
+  ["進化", "Evolution"],
+  ["銀白戰槍", "Silver Lance"],
+  ["閃色寶藏ex", "Shiny Treasure ex"],
+  ["閃色明星V", "Shiny Star V"],
+  ["雙璧戰士", "Matchless Fighters"],
+  ["頂級訓練家收藏箱 VSTAR", "Premium Trainer Box VSTAR"],
+  ["頂級訓練家收藏箱ex", "Premium Trainer Box ex"],
+  ["驚天伏特攻擊", "Amazing Volt Tackle"],
+  ["骨紋巨聲鱷ex", "Skeledirge ex"],
+  ["黑夜漫遊者", "Night Wanderer"],
+  ["黑暗亡靈", "Dark Phantasma"],
+  ["黯焰支配者", "Ruler of the Black Flame"],
+]);
+
+export function catalogueDisplaySetForText(
+  value?: string | null,
+  options?: { language?: string | null; providerCode?: string | null },
+) {
+  const raw = value?.trim();
+  const exactMatch = raw
+    ? INTERNATIONAL_SET_DISPLAY_NAMES.get(raw) ?? INTERNATIONAL_SET_DISPLAY_NAMES.get(raw.normalize("NFKC"))
+    : undefined;
+
+  if (exactMatch) {
+    return exactMatch;
+  }
+
+  const translated = englishDisplayText(value, [
     ["インフェルノX", "Inferno X"],
     ["ポケモンカード151", "Pokemon Card 151"],
     ["デッキビルドBOX", "Deck Build Box "],
@@ -244,6 +405,24 @@ export function catalogueDisplaySetForText(value?: string | null) {
     ["フュージョンアーツ", "Fusion Arts"],
     ["イーブイヒーローズ", "Eevee Heroes"],
   ]);
+
+  if (translated) {
+    return translated;
+  }
+
+  if (value && /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(value)) {
+    const language = options?.language === "ja"
+      ? "Japanese"
+      : options?.language?.startsWith("zh")
+        ? "Chinese"
+        : options?.language === "ko"
+          ? "Korean"
+          : "International";
+
+    return options?.providerCode ? `${language} set ${options.providerCode}` : `${language} set`;
+  }
+
+  return undefined;
 }
 
 export function catalogueSearchTermsForQuery(value?: string | null) {
