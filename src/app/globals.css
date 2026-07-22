@@ -3856,6 +3856,34 @@ h3 {
   align-items: start;
 }
 
+.item-identity-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-block: 1px solid var(--line);
+}
+
+.item-identity-strip > span {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+  padding: 11px 14px;
+}
+
+.item-identity-strip > span + span {
+  border-left: 1px solid var(--line);
+}
+
+.item-identity-strip small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.item-identity-strip strong {
+  overflow-wrap: anywhere;
+  font-size: 14px;
+}
+
 .detail-media-stack {
   display: grid;
   gap: 14px;
@@ -4388,6 +4416,13 @@ h3 {
   align-items: start;
 }
 
+.insights-column {
+  display: grid;
+  min-width: 0;
+  gap: 14px;
+  align-content: start;
+}
+
 .insights-free-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: start;
@@ -4837,6 +4872,44 @@ h3 {
   gap: 10px;
 }
 
+.price-history-panel > .panel-title-row .muted {
+  margin-top: 3px;
+  font-size: 12px;
+}
+
+.price-history-headline {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  border-block: 1px solid var(--line);
+}
+
+.price-history-headline > span {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+  padding: 14px 16px 14px 0;
+}
+
+.price-history-headline > span + span {
+  padding-left: 16px;
+  border-left: 1px solid var(--line);
+}
+
+.price-history-headline small,
+.price-history-headline em {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 850;
+}
+
+.price-history-headline strong {
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-size: 28px;
+  line-height: 1.1;
+}
+
 .price-history-ranges {
   justify-self: start;
 }
@@ -5269,6 +5342,28 @@ h3 {
 
   .insights-free-grid .upgrade-panel {
     grid-column: auto;
+  }
+
+  .price-history-headline {
+    grid-template-columns: 1fr;
+  }
+
+  .price-history-headline > span + span {
+    padding-left: 0;
+    border-top: 1px solid var(--line);
+    border-left: 0;
+  }
+
+  .item-identity-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .item-identity-strip > span:nth-child(odd) {
+    border-left: 0;
+  }
+
+  .item-identity-strip > span:nth-child(n + 3) {
+    border-top: 1px solid var(--line);
   }
 
   .alert-summary-strip,

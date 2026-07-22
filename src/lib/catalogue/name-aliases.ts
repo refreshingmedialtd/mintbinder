@@ -1,3 +1,5 @@
+import { GENERATED_POKEMON_NAME_ALIASES } from "./pokemon-name-aliases.generated.ts";
+
 type PokemonNameAlias = {
   english: string;
   aliases: string[];
@@ -177,14 +179,15 @@ export function catalogueNameAliasesForText(value?: string | null) {
     return [];
   }
 
-  return uniqueAliasValues(
-    POKEMON_NAME_ALIASES.flatMap((entry) => {
+  return uniqueAliasValues([
+    ...POKEMON_NAME_ALIASES.flatMap((entry) => {
       const terms = [entry.english, ...entry.aliases];
       const matches = terms.some((term) => normalized.includes(normalizeAliasText(term)));
 
       return matches ? terms : [];
     }),
-  );
+    ...generatedPokemonAliasesForText(value ?? ""),
+  ]);
 }
 
 export function catalogueDisplayNameForText(value?: string | null) {
@@ -200,6 +203,30 @@ export function catalogueDisplayNameForText(value?: string | null) {
     ["VSTAR", " VSTAR"],
     ["VMAX", " VMAX"],
   ]);
+}
+
+export function catalogueDisplayCardForText(
+  value?: string | null,
+  options?: { number?: string | null; supertype?: string | null },
+) {
+  const translated = catalogueDisplayNameForText(value);
+
+  if (!value || !hasInternationalScript(value)) {
+    return translated;
+  }
+
+  if (translated && !hasInternationalScript(translated)) {
+    return translated;
+  }
+
+  const type = options?.supertype?.toLowerCase() === "trainer"
+    ? "Trainer card"
+    : options?.supertype?.toLowerCase() === "energy"
+      ? "Energy card"
+      : "Pokemon card";
+  const number = options?.number?.trim();
+
+  return number ? `${type} ${number}` : type;
 }
 
 const INTERNATIONAL_SET_DISPLAY_NAMES = new Map<string, string>([
@@ -444,7 +471,7 @@ export function catalogueSearchTermsForQuery(value?: string | null) {
     return matches ? terms : [];
   });
 
-  return uniqueAliasValues([raw, ...aliasTerms]);
+  return uniqueAliasValues([raw, ...aliasTerms, ...generatedPokemonAliasesForText(raw, true)]);
 }
 
 function englishDisplayText(value: string | null | undefined, phraseReplacements: Array<[string, string]>) {
@@ -457,12 +484,19 @@ function englishDisplayText(value: string | null | undefined, phraseReplacements
   let display = raw;
   let changed = false;
 
-  for (const [localized, english] of [...phraseReplacements, ...pokemonReplacementPairs()]) {
+  for (const [localized, english] of [...phraseReplacements, ...CURATED_POKEMON_REPLACEMENT_PAIRS]) {
     if (!display.includes(localized)) {
       continue;
     }
 
     display = display.replaceAll(localized, english);
+    changed = true;
+  }
+
+  const generatedDisplay = replaceGeneratedPokemonNames(display);
+
+  if (generatedDisplay !== display) {
+    display = generatedDisplay;
     changed = true;
   }
 
@@ -478,12 +512,94 @@ function englishDisplayText(value: string | null | undefined, phraseReplacements
     .trim();
 }
 
-function pokemonReplacementPairs() {
-  return POKEMON_NAME_ALIASES.flatMap((entry) =>
+const CURATED_POKEMON_REPLACEMENT_PAIRS = POKEMON_NAME_ALIASES.flatMap((entry) =>
     entry.aliases
       .filter((alias) => /[^\u0000-\u007f]/.test(alias) || alias !== entry.english)
       .map((alias) => [alias, entry.english] as [string, string]),
   ).sort((left, right) => right[0].length - left[0].length);
+
+const GENERATED_ALIASES_BY_FIRST_CHARACTER = generatedAliasesByFirstCharacter();
+const GENERATED_ALIASES_BY_ENGLISH = generatedAliasesByEnglish();
+
+function replaceGeneratedPokemonNames(value: string) {
+  if (!hasInternationalScript(value)) {
+    return value;
+  }
+
+  let display = value;
+
+  for (const [alias, english] of generatedPokemonCandidates(value)) {
+    if (display.includes(alias)) {
+      display = display.replaceAll(alias, english);
+    }
+  }
+
+  return display;
+}
+
+function generatedPokemonAliasesForText(value: string, includeEnglishMatches = false) {
+  const matches = generatedPokemonCandidates(value).flatMap(([alias, english]) => [alias, english]);
+
+  if (includeEnglishMatches) {
+    const normalized = normalizeAliasText(value);
+
+    for (const [english, aliases] of GENERATED_ALIASES_BY_ENGLISH) {
+      if (normalizeAliasText(english).includes(normalized) || normalized.includes(normalizeAliasText(english))) {
+        matches.push(english, ...aliases);
+      }
+    }
+  }
+
+  return matches;
+}
+
+function generatedPokemonCandidates(value: string) {
+  const candidates = new Map<string, string>();
+
+  for (const character of value) {
+    for (const [alias, english] of GENERATED_ALIASES_BY_FIRST_CHARACTER.get(character) ?? []) {
+      if (value.includes(alias)) {
+        candidates.set(alias, english);
+      }
+    }
+  }
+
+  return [...candidates.entries()].sort((left, right) => right[0].length - left[0].length);
+}
+
+function generatedAliasesByFirstCharacter() {
+  const buckets = new Map<string, Array<readonly [string, string]>>();
+
+  for (const entry of GENERATED_POKEMON_NAME_ALIASES) {
+    const [alias] = entry;
+    const firstCharacter = [...alias][0];
+
+    if (!firstCharacter) {
+      continue;
+    }
+
+    const bucket = buckets.get(firstCharacter) ?? [];
+    bucket.push(entry);
+    buckets.set(firstCharacter, bucket);
+  }
+
+  return buckets;
+}
+
+function generatedAliasesByEnglish() {
+  const aliasesByEnglish = new Map<string, string[]>();
+
+  for (const [alias, english] of GENERATED_POKEMON_NAME_ALIASES) {
+    const aliases = aliasesByEnglish.get(english) ?? [];
+    aliases.push(alias);
+    aliasesByEnglish.set(english, aliases);
+  }
+
+  return aliasesByEnglish;
+}
+
+function hasInternationalScript(value: string) {
+  return /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(value);
 }
 
 function normalizeAliasText(value?: string | null) {

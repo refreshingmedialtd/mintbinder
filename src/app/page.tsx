@@ -8,6 +8,7 @@ import {
   Bell,
   BookOpen,
   Boxes,
+  ChartNoAxesCombined,
   Check,
   CreditCard,
   Database,
@@ -60,7 +61,11 @@ import {
   catalogueVariantLabels,
   latestPricePointForCatalogueVariant,
 } from "@/lib/catalogue/variants";
-import { catalogueNameAliasesForText } from "@/lib/catalogue/name-aliases";
+import {
+  catalogueDisplayCardForText,
+  catalogueDisplaySetForText,
+  catalogueNameAliasesForText,
+} from "@/lib/catalogue/name-aliases";
 import { CATALOGUE_LANGUAGE_OPTIONS, LOT_LANGUAGE_OPTIONS } from "@/lib/catalogue/languages";
 import {
   buildCollectionCsv,
@@ -1247,7 +1252,7 @@ export default function Home() {
           selectedItemId: result.item.id,
         }));
         void refreshAppData({ quiet: true });
-        showToast(`${catalogueItem.name} added to collection.`);
+        showToast(`${catalogueItemTitle(catalogueItem)} added to collection.`);
         return;
       } catch (error) {
         console.warn("Falling back to local collection update.", error);
@@ -1277,7 +1282,7 @@ export default function Home() {
     setCollection((items) => [...items, nextItem]);
     setWishlist((items) => items.filter((item) => item.catalogueId !== catalogueId));
     setAppState((current) => ({ ...current, screen: "item", selectedItemId: nextItem.id }));
-    showToast(`${catalogueItem.name} added to collection.`);
+    showToast(`${catalogueItemTitle(catalogueItem)} added to collection.`);
   }
 
   async function createManualSealedProduct(formData: FormData) {
@@ -1377,7 +1382,7 @@ export default function Home() {
         const result = (await response.json()) as { item: WishlistItem };
 
         setWishlist((items) => [...items, result.item]);
-        showToast(`${catalogueItem.name} added to wishlist.`);
+        showToast(`${catalogueItemTitle(catalogueItem)} added to wishlist.`);
         return;
       } catch (error) {
         console.warn("Falling back to local wishlist update.", error);
@@ -1397,7 +1402,7 @@ export default function Home() {
         notes: "Added from set progress.",
       },
     ]);
-    showToast(`${catalogueItem.name} added to wishlist.`);
+    showToast(`${catalogueItemTitle(catalogueItem)} added to wishlist.`);
   }
 
   async function duplicateItem(itemId: string) {
@@ -1425,7 +1430,7 @@ export default function Home() {
         setCollection((items) => [...items, result.item]);
         setAppState((current) => ({ ...current, selectedItemId: result.item.id }));
         void refreshAppData({ quiet: true });
-        showToast(`${catalogueItem?.name ?? "Item"} duplicated.`);
+        showToast(`${catalogueItem ? catalogueItemTitle(catalogueItem) : "Item"} duplicated.`);
         return;
       } catch (error) {
         console.warn("Falling back to local duplicate.", error);
@@ -1481,7 +1486,7 @@ export default function Home() {
         const result = (await response.json()) as { item: CollectionItem };
         setCollection((items) => items.map((item) => (item.id === itemId ? result.item : item)));
         void refreshAppData({ quiet: true });
-        showToast(`${catalogueItem.name} updated.`);
+        showToast(`${catalogueItemTitle(catalogueItem)} updated.`);
         return true;
       } catch (error) {
         console.warn("Falling back to local collection update.", error);
@@ -1510,7 +1515,7 @@ export default function Home() {
     };
 
     setCollection((items) => items.map((item) => (item.id === itemId ? updated : item)));
-    showToast(`${catalogueItem.name} updated.`);
+    showToast(`${catalogueItemTitle(catalogueItem)} updated.`);
     return true;
   }
 
@@ -1571,7 +1576,7 @@ export default function Home() {
       void refreshAppData({ quiet: true });
     }
 
-    showToast(`${catalogueItem?.name ?? "Item"} removed from collection.`);
+    showToast(`${catalogueItem ? catalogueItemTitle(catalogueItem) : "Item"} removed from collection.`);
     return true;
   }
 
@@ -1627,7 +1632,7 @@ export default function Home() {
         type: "Sold",
         itemId: source.id,
         catalogueId: source.catalogueId,
-        itemName: catalogueItem?.name ?? "Collection item",
+        itemName: catalogueItem ? catalogueItemTitle(catalogueItem) : "Collection item",
         quantity: source.quantity,
         amountMinor: saleAmountMinor,
         basisMinor: source.purchasePriceMinor,
@@ -1658,7 +1663,7 @@ export default function Home() {
       void refreshAppData({ quiet: true });
     }
 
-    showToast(`${catalogueItem?.name ?? "Item"} sale recorded.`);
+    showToast(`${catalogueItem ? catalogueItemTitle(catalogueItem) : "Item"} sale recorded.`);
     return true;
   }
 
@@ -3239,7 +3244,9 @@ function CollectionScreen({
         !normalizedSearch ||
         [
           catalogueItem.name,
+          catalogueItemTitle(catalogueItem),
           catalogueItem.set,
+          catalogueItemSetLabel(catalogueItem),
           catalogueItem.number,
           catalogueItem.rarity,
           item.condition,
@@ -3257,18 +3264,21 @@ function CollectionScreen({
       return matchesFilter && matchesAdvancedFilters && matchesSearch;
     })
     .sort((left, right) => {
+      const leftName = left.catalogueItem ? catalogueItemTitle(left.catalogueItem) : "";
+      const rightName = right.catalogueItem ? catalogueItemTitle(right.catalogueItem) : "";
+
       if (appState.collectionSort === "value-asc") {
         return compareNullableNumbers(left.value, right.value, "asc");
       }
 
       if (appState.collectionSort === "name") {
-        return (left.catalogueItem?.name ?? "").localeCompare(right.catalogueItem?.name ?? "", undefined, {
+        return leftName.localeCompare(rightName, undefined, {
           numeric: true,
         });
       }
 
       if (appState.collectionSort === "name-desc") {
-        return (right.catalogueItem?.name ?? "").localeCompare(left.catalogueItem?.name ?? "", undefined, {
+        return rightName.localeCompare(leftName, undefined, {
           numeric: true,
         });
       }
@@ -3683,7 +3693,9 @@ function BindersScreen({
           const haystack = normalizeSearchText(
             [
               catalogueItem?.name,
+              catalogueItem ? catalogueItemTitle(catalogueItem) : undefined,
               catalogueItem?.set,
+              catalogueItem ? catalogueItemSetLabel(catalogueItem) : undefined,
               catalogueItem?.number,
               item.variant,
               item.grade,
@@ -4279,8 +4291,8 @@ function BinderPage({
             aria-label={
               item && catalogueItem
                 ? isArranging
-                  ? `${isLifted ? "Return" : "Move"} ${catalogueItem.name}`
-                  : `Open ${catalogueItem.name}`
+                  ? `${isLifted ? "Return" : "Move"} ${catalogueItemTitle(catalogueItem)}`
+                  : `Open ${catalogueItemTitle(catalogueItem)}`
                 : isDropTarget
                   ? `Place lifted card into slot ${offset + index + 1}`
                   : `Empty binder sleeve ${offset + index + 1}`
@@ -4294,7 +4306,7 @@ function BinderPage({
             {item && catalogueItem ? (
               <>
                 <span className="binder-pocket-image">{renderItemImage(catalogueItem)}</span>
-                <span>{catalogueItem.name}</span>
+                <span>{catalogueItemTitle(catalogueItem)}</span>
               </>
             ) : (
               <span className="binder-empty-slot">{isDropTarget ? "Place" : "Empty"}</span>
@@ -4346,8 +4358,8 @@ function BinderItemPicker({
               />
               <span className="item-image binder-picker-image">{renderItemImage(catalogueItem)}</span>
               <span>
-                <strong>{catalogueItem.name}</strong>
-                <small>{catalogueItem.set} | {item.variant} | {item.grade}</small>
+                <strong>{catalogueItemTitle(catalogueItem)}</strong>
+                <small>{catalogueItemSetLabel(catalogueItem)} | {item.variant} | {item.grade}</small>
               </span>
             </label>
           );
@@ -4383,14 +4395,14 @@ function BinderFocusModal({
 
   return (
     <div className="card-zoom-backdrop binder-focus-backdrop" onClick={onClose} role="presentation">
-      <article className="binder-focus-card" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label={`${catalogueItem.name} binder card`}>
+      <article className="binder-focus-card" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label={`${catalogueItemTitle(catalogueItem)} binder card`}>
         <button className="icon-button card-zoom-close" type="button" onClick={onClose} aria-label="Close binder card">
           <X size={18} />
         </button>
         <div className="binder-focus-image">{renderItemImage(catalogueItem)}</div>
         <div className="binder-focus-copy">
-          <h2>{catalogueItem.name}</h2>
-          <p>{catalogueItem.set} | No. {catalogueItem.number}</p>
+          <h2>{catalogueItemTitle(catalogueItem)}</h2>
+          <p>{catalogueItemSetLabel(catalogueItem)} | No. {catalogueItem.number}</p>
           <div className="tag-row">
             <span className="tag">{item.variant}</span>
             <span className="tag">{item.condition}</span>
@@ -4879,7 +4891,7 @@ function ItemDetailScreen({
   const value = getOwnedValue(owned, item);
   const cost = owned.purchasePriceMinor ?? null;
   const gain = value !== null && cost !== null ? value - cost : null;
-  const itemName = item.name;
+  const itemName = catalogueItemTitle(item);
   const locationOptions = storageOptionNames(storageLocations, owned.location);
   const itemEvents = collectionEvents.filter((event) => event.itemId === owned.id).slice(0, 6);
   const usesRawGradedPrice = usesRawMarketForGradedItem(owned, item);
@@ -4920,14 +4932,27 @@ function ItemDetailScreen({
   return (
     <section className="page">
       <PageHeader
-        title={item.name}
+        title={itemName}
         action={
-          <button className="button" onClick={() => navigate("collection")}>
-            <ArrowLeft size={17} />
-            Collection
-          </button>
+          <div className="actions">
+            <a className="button" href={ebaySoldSearchUrl(item)} rel="noreferrer" target="_blank">
+              <Search size={17} />
+              eBay solds
+            </a>
+            <button className="button" onClick={() => navigate("collection")}>
+              <ArrowLeft size={17} />
+              Collection
+            </button>
+          </div>
         }
       />
+
+      <div className="item-identity-strip" aria-label="Item identity">
+        <span><small>Set</small><strong>{catalogueItemSetLabel(item)}</strong></span>
+        <span><small>Number</small><strong>{item.number}</strong></span>
+        <span><small>{item.type === "sealed" ? "Product" : "Rarity"}</small><strong>{item.rarity}</strong></span>
+        <span><small>Language</small><strong>{item.languageLabel ?? owned.language}</strong></span>
+      </div>
 
       <div className="detail-layout">
         <div className="detail-media-stack">
@@ -4952,6 +4977,7 @@ function ItemDetailScreen({
           </section>
         </div>
         <div className="detail-stack">
+          <PriceTrendPanel item={item} overrideValueMinor={owned.overrideValueMinor} />
           <section className="tool-panel detail-action-panel">
             <div className="panel-title-row">
               <h2>Lot actions</h2>
@@ -5144,7 +5170,6 @@ function ItemDetailScreen({
               </p>
             </section>
           ) : null}
-          <PriceTrendPanel item={item} overrideValueMinor={owned.overrideValueMinor} />
           <section className="tool-panel">
             <h2>Valuation note</h2>
             <p className="muted">{owned.valuationNote || "No valuation note yet."}</p>
@@ -5515,7 +5540,7 @@ function SetDetailScreen({
                   <span className={marketValue === null ? "set-print-price missing" : "set-print-price"}>
                     <strong>{formatValuation(marketValue)}</strong>
                     <details className="market-help" onClick={(event) => event.stopPropagation()}>
-                      <summary aria-label={`Market confidence for ${item.name}`}>?</summary>
+                      <summary aria-label={`Market confidence for ${catalogueItemTitle(item)}`}>?</summary>
                       <span className="market-help-popover">
                         <MarketConfidencePopover item={item} marketValue={marketValue} />
                       </span>
@@ -5821,7 +5846,9 @@ function WishlistScreen({
 
       return [
         row.catalogueItem.name,
+        catalogueItemTitle(row.catalogueItem),
         row.catalogueItem.set,
+        catalogueItemSetLabel(row.catalogueItem),
         row.catalogueItem.number,
         row.item.priority,
         row.item.notes ?? "",
@@ -6698,41 +6725,45 @@ function AnalyticsScreen({
         </section>
       </div>
       <div className="insights-secondary-grid">
-        <TopHoldings
-          holdings={intelligence.topHoldings}
-          onOpen={(holding) => setAppState((current) => ({ ...current, screen: "item", selectedItemId: holding.id }))}
-        />
-        <section className="tool-panel">
-          <div className="panel-title-row">
-            <h2>Collection health</h2>
-            <span className="status-pill">{intelligence.healthScore}/100</span>
-          </div>
-          <MetricList
-            rows={[
-              ["Status", intelligence.healthLabel],
-              ["Needs estimate", `${intelligence.valuationCoverage.unvaluedLots} lots`],
-              ["Weak prices", `${intelligence.weakConfidence.count} holdings`],
-              ["Manual values", `${intelligence.valuationCoverage.manualLots} lots`],
-              ["Duplicates", `${intelligence.duplicates.length} groups | ${formatMoney(duplicateValue)}`],
-            ]}
+        <div className="insights-column">
+          <TopHoldings
+            holdings={intelligence.topHoldings}
+            onOpen={(holding) => setAppState((current) => ({ ...current, screen: "item", selectedItemId: holding.id }))}
           />
-        </section>
-        <PortfolioMix rows={intelligence.portfolioMix} />
-        <section className="tool-panel">
-          <div className="panel-title-row">
-            <h2>Performance</h2>
-            <Sparkles size={18} />
-          </div>
-          <MetricList
-            rows={[
-              ["Best holding", intelligence.bestPerformer ? gainLabel(intelligence.bestPerformer) : "Add purchase prices"],
-              ["Sales proceeds", formatMoney(realizedSales.proceedsMinor)],
-              ["Realised gain", formatSignedMoney(realizedSales.gainMinor), realizedSales.gainMinor >= 0 ? "positive" : ""],
-              ["Recent activity", `${intelligence.activity.last30Days} changes in 30 days`],
-              ["Wishlist targets hit", intelligence.wishlistOpportunities.length],
-            ]}
-          />
-        </section>
+          <PortfolioMix rows={intelligence.portfolioMix} />
+        </div>
+        <div className="insights-column">
+          <section className="tool-panel">
+            <div className="panel-title-row">
+              <h2>Collection health</h2>
+              <span className="status-pill">{intelligence.healthScore}/100</span>
+            </div>
+            <MetricList
+              rows={[
+                ["Status", intelligence.healthLabel],
+                ["Needs estimate", `${intelligence.valuationCoverage.unvaluedLots} lots`],
+                ["Weak prices", `${intelligence.weakConfidence.count} holdings`],
+                ["Manual values", `${intelligence.valuationCoverage.manualLots} lots`],
+                ["Duplicates", `${intelligence.duplicates.length} groups | ${formatMoney(duplicateValue)}`],
+              ]}
+            />
+          </section>
+          <section className="tool-panel">
+            <div className="panel-title-row">
+              <h2>Performance</h2>
+              <Sparkles size={18} />
+            </div>
+            <MetricList
+              rows={[
+                ["Best holding", intelligence.bestPerformer ? gainLabel(intelligence.bestPerformer) : "Add purchase prices"],
+                ["Sales proceeds", formatMoney(realizedSales.proceedsMinor)],
+                ["Realised gain", formatSignedMoney(realizedSales.gainMinor), realizedSales.gainMinor >= 0 ? "positive" : ""],
+                ["Recent activity", `${intelligence.activity.last30Days} changes in 30 days`],
+                ["Wishlist targets hit", intelligence.wishlistOpportunities.length],
+              ]}
+            />
+          </section>
+        </div>
       </div>
     </section>
   );
@@ -7920,18 +7951,21 @@ function DuplicateProviderCardReview({
   onPrepareMerge: (primaryCardId: string, duplicateCardId: string) => void;
   primaryCardId: string;
 }) {
+  const cardName = catalogueDisplayCardForText(card.name, { number: card.number }) ?? card.name;
+  const setName = catalogueDisplaySetForText(card.setName) ?? card.setName;
+
   return (
     <article className="duplicate-card-row">
       <div className="duplicate-card-thumb">
         {card.imageSmallUrl || card.imageLargeUrl ? (
           <Image
             src={card.imageSmallUrl ?? card.imageLargeUrl!}
-            alt={card.name}
+            alt={cardName}
             fill
             sizes="52px"
           />
         ) : (
-          <span>{card.name.slice(0, 1)}</span>
+          <span>{cardName.slice(0, 1)}</span>
         )}
       </div>
       <div className="duplicate-card-copy">
@@ -7940,8 +7974,8 @@ function DuplicateProviderCardReview({
           <span className="tag">{card.number}</span>
           {card.rarity ? <span className="tag blue">{card.rarity}</span> : null}
         </div>
-        <strong>{card.name}</strong>
-        <span>{card.setName}{card.series ? ` | ${card.series}` : ""}</span>
+        <strong>{cardName}</strong>
+        <span>{setName}{card.series ? ` | ${card.series}` : ""}</span>
         <code>{card.id}</code>
       </div>
       <div className="duplicate-card-metrics">
@@ -9542,12 +9576,39 @@ function PriceTrendPanel({
   const source = overallLatest?.source ?? item.priceSource;
   const observedAt = overallLatest?.observedAt ?? item.priceObservedAt;
   const latestMarketValue = overallLatest?.valueMinor ?? catalogueMarketValueMinor(item);
+  const deltaPercent = delta !== null && first?.valueMinor
+    ? (delta / first.valueMinor) * 100
+    : null;
 
   return (
-    <section className="tool-panel">
+    <section className="tool-panel price-history-panel">
       <div className="panel-title-row">
-        <h2>Price history</h2>
-        <BarChart3 size={18} />
+        <div>
+          <h2>Market price</h2>
+          <p className="muted">{priceSourceLabel(source)}{observedAt ? ` | Updated ${formatEventDate(observedAt)}` : ""}</p>
+        </div>
+        <ChartNoAxesCombined size={18} />
+      </div>
+      <div className="price-history-headline">
+        <span>
+          <small>Current estimate</small>
+          <strong>{formatValuation(latestMarketValue)}</strong>
+        </span>
+        <span>
+          <small>{priceHistoryRangeLabel(range)} change</small>
+          <strong className={delta !== null && delta >= 0 ? "positive" : ""}>
+            {delta === null
+              ? "Building history"
+              : `${formatSignedMoney(delta)}${deltaPercent === null ? "" : ` (${formatSignedPercent(deltaPercent)})`}`}
+          </strong>
+        </span>
+        {overrideValueMinor === undefined ? null : (
+          <span>
+            <small>Lot value</small>
+            <strong>{formatMoney(overrideValueMinor)}</strong>
+            <em>Manual estimate</em>
+          </span>
+        )}
       </div>
       {history.length ? (
         <PriceHistoryLineChart history={history} onRangeChange={setRange} range={range} />
@@ -9556,21 +9617,10 @@ function PriceTrendPanel({
       )}
       <MetricList
         rows={[
-          ["Latest estimate", formatValuation(latestMarketValue)],
-          ["Market basis", priceMarketRole(source)],
-          ["Selected range", priceHistoryRangeLabel(range)],
           ["Range", valueRange ? `${formatMoney(valueRange.low)} - ${formatMoney(valueRange.high)}` : "Unknown"],
-          [
-            "Since range start",
-            delta === null ? "Unknown" : `${delta >= 0 ? "+" : ""}${formatMoney(delta)}`,
-            delta !== null && delta >= 0 ? "positive" : "",
-          ],
+          ["Market basis", priceMarketRole(source)],
           ["Observed", observedAt ? formatEventDate(observedAt) : "Unknown"],
           ["Freshness", overallLatest ? priceFreshnessStatus(overallLatest) : "Unknown"],
-          ["Source", item.hasPrice ? priceSourceLabel(source) : "No market source"],
-          ...(overrideValueMinor === undefined
-            ? []
-            : [["Displayed value", "Manual estimate"] as [string, ReactNode, string?]]),
         ]}
       />
     </section>
@@ -9699,7 +9749,7 @@ function CatalogueItemImage({ item }: { item: CatalogueItem }) {
     return (
       <span className="sealed-art">
         <Boxes size={22} />
-        {item.name}
+        {catalogueItemTitle(item)}
       </span>
     );
   }
@@ -10578,6 +10628,23 @@ function catalogueItemTitle(item: CatalogueItem) {
 
 function catalogueItemSetLabel(item: CatalogueItem) {
   return item.displaySet ?? item.set;
+}
+
+function ebaySoldSearchUrl(item: CatalogueItem) {
+  const query = [
+    catalogueItemTitle(item),
+    item.number !== "Sealed" ? item.number : undefined,
+    catalogueItemSetLabel(item),
+  ].filter(Boolean).join(" ");
+  const params = new URLSearchParams({
+    _ipg: "60",
+    _nkw: query,
+    LH_Complete: "1",
+    LH_PrefLoc: "1",
+    LH_Sold: "1",
+  });
+
+  return `https://www.ebay.co.uk/sch/i.html?${params.toString()}`;
 }
 
 function setTitle(set: SetProgress) {

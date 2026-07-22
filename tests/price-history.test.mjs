@@ -88,3 +88,29 @@ test("ignores impossible prices and handles empty ranges", () => {
   );
   assert.equal(priceRangeMinor([]), null);
 });
+
+test("keeps only the latest point per source, variant, and UTC day", () => {
+  const history = buildPriceHistory([
+    {
+      priceMinor: 3000,
+      source: "tcgcsv",
+      variantLabel: "Normal",
+      observedAt: "2026-07-17T01:00:00.000Z",
+    },
+    {
+      priceMinor: 3032,
+      source: "tcgcsv",
+      variantLabel: "Normal",
+      observedAt: "2026-07-17T08:00:00.000Z",
+    },
+    {
+      priceMinor: 3100,
+      source: "tcgcsv",
+      variantLabel: "Normal",
+      observedAt: "2026-07-18T08:00:00.000Z",
+    },
+  ]);
+
+  assert.deepEqual(history.map((point) => point.valueMinor), [3032, 3100]);
+  assert.equal(history[0].observedAt, "2026-07-17T08:00:00.000Z");
+});

@@ -16,9 +16,10 @@ import {
   latestPricePointForVariant,
   pokemonTcgImageUrlFromProviderIds,
 } from "@/lib/catalogue/variants";
+import { tcgdexJapaneseImageUrlFromProviderIds } from "@/lib/catalogue/tcgdex-images";
 import {
+  catalogueDisplayCardForText,
   catalogueNameAliasesForText,
-  catalogueDisplayNameForText,
   catalogueDisplaySetForText,
   catalogueSearchTermsForQuery,
 } from "@/lib/catalogue/name-aliases";
@@ -1550,6 +1551,7 @@ function mapCardPrintingToCatalogueItem(
     region: string;
     number: string;
     rarity: string | null;
+    supertype?: string | null;
     imageLargeUrl: string | null;
     imageSmallUrl: string | null;
     providerIds: unknown;
@@ -1564,8 +1566,12 @@ function mapCardPrintingToCatalogueItem(
     usableCardImageUrl(card.imageLargeUrl) ??
     usableCardImageUrl(card.imageSmallUrl) ??
     usableCardImageUrl(pokemonTcgImageUrlFromProviderIds(card.providerIds)) ??
+    tcgdexJapaneseImageUrlFromProviderIds(card.providerIds) ??
     tcgplayerCardImageUrlFromPrices(prices);
-  const displayName = catalogueDisplayNameForText(card.name);
+  const displayName = catalogueDisplayCardForText(card.name, {
+    number: card.number,
+    supertype: card.supertype,
+  });
   const displaySet = catalogueDisplaySetForText(card.cardSet.name, {
     language: card.cardSet.language ?? card.language,
     providerCode: tcgdexProviderCode(card.cardSet.providerIds),

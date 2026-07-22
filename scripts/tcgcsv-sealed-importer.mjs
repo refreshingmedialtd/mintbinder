@@ -52,6 +52,17 @@ export async function syncTcgcsvSealedProducts(options = {}) {
           metadata: true,
           name: true,
           providerIds: true,
+          sealedProducts: {
+            where: { collectionItems: { some: { archivedAt: null } } },
+            select: {
+              priceSnapshots: {
+                where: { source: "tcgcsv" },
+                orderBy: { observedAt: "desc" },
+                take: 1,
+                select: { observedAt: true },
+              },
+            },
+          },
         },
       }),
     ]);
@@ -73,6 +84,7 @@ export async function syncTcgcsvSealedProducts(options = {}) {
       productLimit: Number.isFinite(productLimit) ? productLimit : null,
       productsProcessed: 0,
       pricingSnapshotsCreated: 0,
+      pricingSnapshotsUpdated: 0,
       productsFetched: 0,
       sealedProductsSkipped: 0,
       sealedProductsUpserted: 0,
@@ -102,6 +114,7 @@ export async function syncTcgcsvSealedProducts(options = {}) {
         summary.groupsProcessed += 1;
         summary.productsProcessed += groupSummary.productsProcessed;
         summary.pricingSnapshotsCreated += groupSummary.pricingSnapshotsCreated;
+        summary.pricingSnapshotsUpdated += groupSummary.pricingSnapshotsUpdated;
         summary.productsFetched += groupSummary.productsFetched;
         summary.sealedProductsSkipped += groupSummary.sealedProductsSkipped;
         summary.sealedProductsUpserted += groupSummary.sealedProductsUpserted;
@@ -111,6 +124,7 @@ export async function syncTcgcsvSealedProducts(options = {}) {
           groupName: match.group.name,
           nextProductIndex: groupSummary.nextProductIndex,
           pricingSnapshotsCreated: groupSummary.pricingSnapshotsCreated,
+          pricingSnapshotsUpdated: groupSummary.pricingSnapshotsUpdated,
           productsFetched: groupSummary.productsFetched,
           productsProcessed: groupSummary.productsProcessed,
           sealedProductsUpserted: groupSummary.sealedProductsUpserted,
@@ -175,10 +189,10 @@ async function importGroup({
   ]);
   const pricesByProductId = new Map();
   const products = productsResponse.results ?? [];
-  const productBatch = selectProductBatch({
+  const productBatch = selectSealedProductBatch({
+    metadata: set.metadata,
     productLimit,
     products,
-    startIndex: sealedPricingNextProductIndex(set.metadata, products.length),
   });
   const summary = {
     complete: productBatch.complete,
@@ -188,8 +202,10 @@ async function importGroup({
     productLimit: Number.isFinite(productLimit) ? productLimit : null,
     productsProcessed: productBatch.products.length,
     pricingSnapshotsCreated: 0,
+    pricingSnapshotsUpdated: 0,
     productsFetched: products.length,
-    sealedProductsSkipped: 0,
+    sealedProductsAvailable: productBatch.sealedProductsAvailable,
+    sealedProductsSkipped: productBatch.sealedProductsSkipped,
     sealedProductsUpserted: 0,
   };
 
@@ -201,11 +217,6 @@ async function importGroup({
   }
 
   for (const product of productBatch.products) {
-    if (!isSealedProduct(product)) {
-      summary.sealedProductsSkipped += 1;
-      continue;
-    }
-
     const sealedProduct = await upsertSealedProduct({ group, product, prisma, set });
 
     summary.sealedProductsUpserted += 1;
@@ -220,7 +231,8 @@ async function importGroup({
       continue;
     }
 
-    await prisma.priceSnapshot.create({
+    const snapshotResult = await writeDailySealedPriceSnapshot({
+      prisma,
       data: {
         condition: ItemCondition.SEALED,
         confidenceScore: price.confidenceScore,
@@ -241,7 +253,8 @@ async function importGroup({
         variantLabel: price.subTypeName ?? "Factory sealed",
       },
     });
-    summary.pricingSnapshotsCreated += 1;
+    summary.pricingSnapshotsCreated += snapshotResult === "created" ? 1 : 0;
+    summary.pricingSnapshotsUpdated += snapshotResult === "updated" ? 1 : 0;
   }
 
   return summary;
@@ -261,8 +274,10 @@ async function recordSealedPricingProgress({
     scheduledSealedPricingLastProductIndex: groupSummary.productBatchStartIndex,
     scheduledSealedPricingLastProductLimit: Number.isFinite(productLimit) ? productLimit : null,
     scheduledSealedPricingLastSnapshotCount: groupSummary.pricingSnapshotsCreated,
+    scheduledSealedPricingLastSnapshotUpdateCount: groupSummary.pricingSnapshotsUpdated,
     scheduledSealedPricingLastSucceededAt: attemptedAt,
     scheduledSealedPricingLastTotalProducts: groupSummary.productsFetched,
+    scheduledSealedPricingCursorVersion: 2,
     scheduledSealedPricingNextProductIndex: groupSummary.nextProductIndex,
     scheduledSealedPricingRetryAfter: null,
   });
@@ -365,13 +380,31 @@ async function fetchTcgcsv(url, fetchImpl) {
   return body;
 }
 
-function orderSealedPricingMatches(matches) {
+export function orderSealedPricingMatches(matches) {
   return [...matches].sort((left, right) =>
+    sealedOwnedRefreshPriority(left.set) - sealedOwnedRefreshPriority(right.set) ||
     sealedPricingCursorPriority(left.set.metadata) - sealedPricingCursorPriority(right.set.metadata) ||
     sealedPricingLastAttemptMs(left.set.metadata) - sealedPricingLastAttemptMs(right.set.metadata) ||
     String(left.group.name ?? "").localeCompare(String(right.group.name ?? "")) ||
     String(left.group.groupId ?? "").localeCompare(String(right.group.groupId ?? "")),
   );
+}
+
+function sealedOwnedRefreshPriority(set) {
+  const ownedProducts = Array.isArray(set.sealedProducts) ? set.sealedProducts : [];
+
+  if (!ownedProducts.length) {
+    return 1;
+  }
+
+  const oldestLatest = ownedProducts.reduce((oldestMs, product) => {
+    const observedAt = product.priceSnapshots?.[0]?.observedAt;
+    const observedMs = observedAt ? new Date(observedAt).getTime() : 0;
+
+    return Math.min(oldestMs, Number.isFinite(observedMs) ? observedMs : 0);
+  }, Number.POSITIVE_INFINITY);
+
+  return oldestLatest < Date.now() - 20 * 60 * 60 * 1000 ? 0 : 1;
 }
 
 function sealedPricingCursorPriority(metadata) {
@@ -393,6 +426,10 @@ function sealedPricingRetryInFuture(metadata) {
 }
 
 function sealedPricingNextProductIndex(metadata, productCount = Number.POSITIVE_INFINITY) {
+  if (!isObject(metadata) || metadata.scheduledSealedPricingCursorVersion !== 2) {
+    return 0;
+  }
+
   const value = isObject(metadata) ? metadata.scheduledSealedPricingNextProductIndex : undefined;
   const index = nonNegativeInteger(value, 0);
 
@@ -419,6 +456,20 @@ function selectProductBatch({ productLimit, products, startIndex }) {
     nextProductIndex,
     products: products.slice(normalizedStart, endIndex),
     startIndex: normalizedStart,
+  };
+}
+
+export function selectSealedProductBatch({ metadata, productLimit, products }) {
+  const sealedProducts = products.filter(isSealedProduct);
+
+  return {
+    ...selectProductBatch({
+      productLimit,
+      products: sealedProducts,
+      startIndex: sealedPricingNextProductIndex(metadata, sealedProducts.length),
+    }),
+    sealedProductsAvailable: sealedProducts.length,
+    sealedProductsSkipped: products.length - sealedProducts.length,
   };
 }
 
@@ -458,6 +509,35 @@ async function hasSealedPriceSnapshot(prisma, sealedProductId) {
   });
 
   return Boolean(snapshot);
+}
+
+async function writeDailySealedPriceSnapshot({ data, prisma }) {
+  const observedAt = data.observedAt instanceof Date ? data.observedAt : new Date(data.observedAt);
+  const dayStart = new Date(Date.UTC(
+    observedAt.getUTCFullYear(),
+    observedAt.getUTCMonth(),
+    observedAt.getUTCDate(),
+  ));
+  const nextDay = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
+  const existing = await prisma.priceSnapshot.findFirst({
+    select: { id: true },
+    where: {
+      itemType: data.itemType,
+      observedAt: { gte: dayStart, lt: nextDay },
+      sealedProductId: data.sealedProductId,
+      source: data.source,
+      sourceRef: data.sourceRef,
+      variantLabel: data.variantLabel,
+    },
+  });
+
+  if (existing) {
+    await prisma.priceSnapshot.update({ data, where: { id: existing.id } });
+    return "updated";
+  }
+
+  await prisma.priceSnapshot.create({ data });
+  return "created";
 }
 
 function conversionRate(value) {

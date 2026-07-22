@@ -173,7 +173,7 @@ test("imports sealed products and GBP price snapshots from TCGCSV payloads", asy
   assert.equal(summary.groupsMatched, 1);
   assert.equal(summary.groupsProcessed, 1);
   assert.equal(summary.productsFetched, 2);
-  assert.equal(summary.productsProcessed, 2);
+  assert.equal(summary.productsProcessed, 1);
   assert.equal(summary.sealedProductsSkipped, 1);
   assert.equal(summary.sealedProductsUpserted, 1);
   assert.equal(summary.pricingSnapshotsCreated, 1);
@@ -194,7 +194,10 @@ test("resumes sealed product batches from set metadata", async () => {
       findMany: async () => [
         {
           id: "set-1",
-          metadata: { scheduledSealedPricingNextProductIndex: 1 },
+          metadata: {
+            scheduledSealedPricingCursorVersion: 2,
+            scheduledSealedPricingNextProductIndex: 1,
+          },
           name: "Silver Tempest",
         },
       ],

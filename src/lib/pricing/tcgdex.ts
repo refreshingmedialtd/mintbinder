@@ -24,6 +24,7 @@ type TcgdexCardBrief = {
 
 type TcgdexCard = TcgdexCardBrief & {
   category?: string;
+  dexId?: number[];
   illustrator?: string;
   legal?: Record<string, boolean>;
   regulationMark?: string;
@@ -76,6 +77,12 @@ export async function syncTcgdexCardPages({
   for (const brief of requested) {
     const detail = await fetchTcgdexCard(resolvedLanguage.tcgdexCode, brief.id);
     const card = { ...brief, ...detail };
+
+    if (!card.image && resolvedLanguage.code !== "ja") {
+      const japaneseCard = await fetchTcgdexCardFallback("ja", brief.id);
+      card.image = japaneseCard?.image;
+      card.dexId = card.dexId ?? japaneseCard?.dexId;
+    }
 
     if (!card.name || !card.set?.id || !card.set.name) {
       cardsSkipped += 1;
@@ -191,6 +198,14 @@ async function fetchTcgdexCardList(language: string) {
 
 async function fetchTcgdexCard(language: string, id: string) {
   return fetchTcgdexJson<TcgdexCard>(`/${language}/cards/${encodeURIComponent(id)}`);
+}
+
+async function fetchTcgdexCardFallback(language: string, id: string) {
+  try {
+    return await fetchTcgdexCard(language, id);
+  } catch {
+    return undefined;
+  }
 }
 
 async function fetchTcgdexJson<T>(path: string): Promise<T> {
@@ -312,6 +327,7 @@ function cardSubtypes(card: TcgdexCard) {
 function variantMetadata(card: TcgdexCard, language: string) {
   return compactJson({
     category: card.category,
+    dexId: card.dexId,
     legal: card.legal,
     provider: "tcgdex",
     regulationMark: card.regulationMark,
