@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 const knownJobs = new Set([
   "health",
   "pricing",
+  "catalogue-discovery",
   "english-card-pricing",
   "sealed-pricing",
   "japan-card-pricing",
@@ -52,6 +53,17 @@ export async function runLiveScheduledJob({
 }
 
 export function protectedJobRequest(kind, env = process.env) {
+  if (kind === "catalogue-discovery") {
+    return {
+      body: {
+        backfillNewestMissingSet: true,
+        setPageSize: 25,
+        setsOnly: true,
+      },
+      path: "/api/jobs/catalogue-refresh",
+    };
+  }
+
   if (kind === "pricing") {
     if (pricingStrategy(env) === "sets") {
       return {

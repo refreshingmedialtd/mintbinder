@@ -148,6 +148,19 @@ test("explicit live pricing page requests remain single requests", async () => {
   });
 });
 
+test("live catalogue discovery refreshes newly announced sets", () => {
+  const request = protectedJobRequest("catalogue-discovery", {});
+
+  assert.deepEqual(request, {
+    body: {
+      backfillNewestMissingSet: true,
+      setPageSize: 25,
+      setsOnly: true,
+    },
+    path: "/api/jobs/catalogue-refresh",
+  });
+});
+
 test("live Japanese card pricing posts to the international pricing endpoint", () => {
   const request = protectedJobRequest("japan-card-pricing", {
     TCGCSV_JAPAN_CARD_GROUP_LIMIT: "3",

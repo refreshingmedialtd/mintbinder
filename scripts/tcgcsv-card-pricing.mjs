@@ -392,7 +392,11 @@ async function importCardGroup({
 }
 
 async function updateTcgcsvCardImage(prisma, card, product) {
-  const small = usableTcgcsvCardImageUrl(product.imageUrl);
+  const productId = String(product.productId ?? "").trim();
+  const fallback = /^\d+$/.test(productId)
+    ? `https://tcgplayer-cdn.tcgplayer.com/product/${productId}_200w.jpg`
+    : undefined;
+  const small = usableTcgcsvCardImageUrl(product.imageUrl) ?? fallback;
 
   if (!small) {
     return false;

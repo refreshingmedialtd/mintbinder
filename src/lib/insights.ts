@@ -90,6 +90,7 @@ export type CollectionIntelligence = {
   healthScore: number;
   healthLabel: string;
   portfolioHistory: PortfolioHistoryPoint[];
+  latestPricingAt?: string;
   valueTrend: number[];
   topHoldings: HoldingInsight[];
   bestPerformer?: HoldingInsight;
@@ -151,6 +152,7 @@ export type CollectionIntelligence = {
 };
 
 export function buildCollectionIntelligence({
+  asOf = new Date(),
   catalogueById,
   collection,
   events,
@@ -158,6 +160,7 @@ export function buildCollectionIntelligence({
   storageLocations,
   wishlist,
 }: {
+  asOf?: Date;
   catalogueById: Map<string, CatalogueItem>;
   collection: CollectionItem[];
   events: CollectionEvent[];
@@ -215,7 +218,8 @@ export function buildCollectionIntelligence({
   const storageConcentration = storageInsight(storageLocations, totalValue);
   const setFocus = setFocusInsight(sets);
   const activity = activityInsight(events);
-  const portfolioHistory = portfolioValueHistory(collection, catalogueById);
+  const portfolioHistory = portfolioValueHistory(collection, catalogueById, asOf);
+  const latestPricingAt = latestHoldingPricingAt(holdings);
   const portfolioMix = portfolioMixInsights(collection, catalogueById, totalValue);
   const realizedSales = realizedSalesInsight(events);
   const actionQueue = buildActionQueue({
@@ -246,6 +250,7 @@ export function buildCollectionIntelligence({
     healthScore,
     healthLabel: healthLabel(healthScore),
     portfolioHistory,
+    latestPricingAt,
     valueTrend: valueTrend(portfolioHistory),
     topHoldings,
     bestPerformer,
@@ -282,8 +287,8 @@ function holdingFromItem(
   return {
     id: item.id,
     catalogueId: item.catalogueId,
-    name: catalogueItem.name,
-    set: catalogueItem.set,
+    name: catalogueItem.displayName ?? catalogueItem.name,
+    set: catalogueItem.displaySet ?? catalogueItem.set,
     quantity: item.quantity,
     valueMinor,
     gainMinor: cost === undefined ? null : valueMinor - cost,
@@ -309,7 +314,7 @@ function duplicateInsights(
 
       return {
         catalogueId,
-        name: catalogueItem?.name ?? "Unknown item",
+        name: catalogueItem?.displayName ?? catalogueItem?.name ?? "Unknown item",
         lots: items.length,
         quantity: items.reduce((total, item) => total + item.quantity, 0),
         valueMinor: items.reduce(
@@ -339,7 +344,7 @@ function wishlistDealInsights(
 
       return {
         id: item.id,
-        name: catalogueItem.name,
+        name: catalogueItem.displayName ?? catalogueItem.name,
         currentValueMinor,
         targetPriceMinor,
         savingMinor: targetPriceMinor - currentValueMinor,
@@ -379,13 +384,13 @@ function priceAlertInsights({
 
       return {
         id: `wishlist-${item.id}`,
-        itemName: catalogueItem.name,
+        itemName: catalogueItem.displayName ?? catalogueItem.name,
         category: "Wishlist" as const,
         status: deltaMinor <= 0 ? "Hit" as const : "Watch" as const,
         detail:
           deltaMinor <= 0
-            ? `${catalogueItem.name} is at or below your target.`
-            : `${catalogueItem.name} is within 10% of your target.`,
+            ? `${catalogueItem.displayName ?? catalogueItem.name} is at or below your target.`
+            : `${catalogueItem.displayName ?? catalogueItem.name} is within 10% of your target.`,
         explanation: wishlistAlertExplanation(deltaMinor),
         currentValueMinor,
         deltaMinor,
@@ -582,6 +587,7 @@ function portfolioMixInsights(
 function portfolioValueHistory(
   collection: CollectionItem[],
   catalogueById: Map<string, CatalogueItem>,
+  asOf: Date,
 ): PortfolioHistoryPoint[] {
   const entries = collection
     .map((item) => portfolioHistoryEntry(item, catalogueById.get(item.catalogueId)))
@@ -592,11 +598,15 @@ function portfolioValueHistory(
   const manualDateKeys = uniqueSortedDateKeys(
     entries.flatMap((entry) => entry.kind === "manual" && entry.observedAt ? [entry.observedAt] : []),
   );
-  const dateKeys = marketDateKeys.length ? marketDateKeys : manualDateKeys;
+  const sourceDateKeys = marketDateKeys.length ? marketDateKeys : manualDateKeys;
 
-  if (!dateKeys.length) {
+  if (!sourceDateKeys.length) {
     return [];
   }
+
+  const latestDateKey = dateKey(asOf.toISOString()) ?? sourceDateKeys.at(-1)!;
+  const endDateKey = latestDateKey < sourceDateKeys[0] ? sourceDateKeys.at(-1)! : latestDateKey;
+  const dateKeys = calendarDateKeys(sourceDateKeys[0], endDateKey);
 
   return dateKeys
     .map((dateKey) => portfolioHistoryPoint(dateKey, entries))
@@ -611,6 +621,7 @@ type PortfolioHistoryEntry =
     }
   | {
       kind: "market";
+      multiplier: number;
       quantity: number;
       series: PortfolioPricePoint[];
     };
@@ -645,6 +656,7 @@ function portfolioHistoryEntry(
 
   return {
     kind: "market",
+    multiplier: conditionValueMultiplier(item.condition, catalogueItem.type),
     quantity: item.quantity,
     series,
   };
@@ -724,7 +736,7 @@ function portfolioHistoryPoint(
         return current;
       }
 
-      const valueMinor = price.valueMinor * entry.quantity;
+      const valueMinor = Math.round(price.valueMinor * entry.multiplier) * entry.quantity;
       current.marketLots += 1;
       current.marketValueMinor += valueMinor;
       current.valuedLots += 1;
@@ -755,6 +767,35 @@ function latestPriceOnOrBefore(series: PortfolioPricePoint[], timestamp: number)
   }
 
   return undefined;
+}
+
+function calendarDateKeys(startDateKey: string, endDateKey: string) {
+  const start = Date.parse(`${startDateKey}T00:00:00.000Z`);
+  const end = Date.parse(`${endDateKey}T00:00:00.000Z`);
+
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) {
+    return [startDateKey];
+  }
+
+  const keys: string[] = [];
+
+  for (let timestamp = start; timestamp <= end; timestamp += 24 * 60 * 60 * 1000) {
+    keys.push(new Date(timestamp).toISOString().slice(0, 10));
+  }
+
+  return keys;
+}
+
+function latestHoldingPricingAt(holdings: HoldingInsight[]) {
+  return holdings.reduce<string | undefined>((latest, holding) => {
+    if (!holding.priceObservedAt) {
+      return latest;
+    }
+
+    return !latest || Date.parse(holding.priceObservedAt) > Date.parse(latest)
+      ? holding.priceObservedAt
+      : latest;
+  }, undefined);
 }
 
 function realizedSalesInsight(events: CollectionEvent[]) {
@@ -985,7 +1026,32 @@ function valueTrend(history: PortfolioHistoryPoint[]) {
 function ownedValueMinor(item: CollectionItem, catalogueItem: CatalogueItem) {
   const marketValueMinor = catalogueMarketValueMinor(catalogueItem, item.variant);
 
-  return item.overrideValueMinor ?? (marketValueMinor === undefined ? undefined : marketValueMinor * item.quantity);
+  return item.overrideValueMinor ?? (
+    marketValueMinor === undefined
+      ? undefined
+      : Math.round(marketValueMinor * conditionValueMultiplier(item.condition, catalogueItem.type)) * item.quantity
+  );
+}
+
+function conditionValueMultiplier(condition: string, itemType?: CatalogueItem["type"]) {
+  if (itemType === "sealed") {
+    return 1;
+  }
+
+  const normalized = condition.trim().toLowerCase();
+  const multipliers: Record<string, number> = {
+    mint: 1.05,
+    "near mint": 1,
+    "near mint / mint": 1,
+    excellent: 0.85,
+    "light played": 0.7,
+    "lightly played": 0.7,
+    played: 0.55,
+    poor: 0.35,
+    unknown: 1,
+  };
+
+  return multipliers[normalized] ?? 1;
 }
 
 function catalogueMarketValueMinor(catalogueItem: CatalogueItem, variant?: string) {

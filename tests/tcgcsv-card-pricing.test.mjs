@@ -135,6 +135,7 @@ test("matches Pokemon Japan TCGCSV groups to TCGdex-backed Japanese sets", () =>
 });
 
 test("imports Japanese card price snapshots from the Pokemon Japan category", async () => {
+  const imageUpdates = [];
   const snapshots = [];
   const requestedUrls = [];
   const cardSetFinds = [];
@@ -143,6 +144,10 @@ test("imports Japanese card price snapshots from the Pokemon Japan category", as
       findMany: async () => [
         { id: "card-ja-1", name: "ヤンマ", number: "002" },
       ],
+      update: async ({ data, where }) => {
+        imageUpdates.push({ data, where });
+        return { id: where.id, ...data };
+      },
     },
     cardSet: {
       findMany: async (args) => {
@@ -219,6 +224,7 @@ test("imports Japanese card price snapshots from the Pokemon Japan category", as
   assert.equal(summary.language, "ja");
   assert.equal(summary.groupsMatched, 1);
   assert.equal(summary.cardProductsMatched, 1);
+  assert.equal(summary.cardImagesUpdated, 1);
   assert.equal(summary.pricingSnapshotsCreated, 1);
   assert.deepEqual(cardSetFinds[0].where, { language: "ja" });
   assert.equal(requestedUrls[0], "https://tcgcsv.com/tcgplayer/85/groups");
@@ -227,9 +233,19 @@ test("imports Japanese card price snapshots from the Pokemon Japan category", as
   assert.equal(snapshots[0].priceMinor, 400);
   assert.equal(snapshots[0].source, "tcgcsv-japan-card");
   assert.equal(snapshots[0].metadata.categoryId, 85);
+  assert.deepEqual(imageUpdates, [
+    {
+      data: {
+        imageLargeUrl: "https://tcgplayer-cdn.tcgplayer.com/product/665673_in_1000x1000.jpg",
+        imageSmallUrl: "https://tcgplayer-cdn.tcgplayer.com/product/665673_200w.jpg",
+      },
+      where: { id: "card-ja-1" },
+    },
+  ]);
 });
 
 test("rotates Japanese card pricing through unpriced and oldest-priced groups", async () => {
+  const imageUpdates = [];
   const snapshots = [];
   const requestedProductUrls = [];
   const cardsBySet = new Map([
@@ -240,6 +256,10 @@ test("rotates Japanese card pricing through unpriced and oldest-priced groups", 
   const prisma = {
     cardPrinting: {
       findMany: async ({ where }) => cardsBySet.get(where.cardSetId) ?? [],
+      update: async ({ data, where }) => {
+        imageUpdates.push({ data, where });
+        return { id: where.id, ...data };
+      },
     },
     cardSet: {
       findMany: async () => [
@@ -337,12 +357,14 @@ test("rotates Japanese card pricing through unpriced and oldest-priced groups", 
   });
 
   assert.equal(summary.groupsMatched, 2);
+  assert.equal(summary.cardImagesUpdated, 2);
   assert.equal(summary.pricingSnapshotsCreated, 2);
   assert.deepEqual(requestedProductUrls, [
     "https://tcgcsv.com/tcgplayer/85/303/products",
     "https://tcgcsv.com/tcgplayer/85/302/products",
   ]);
   assert.deepEqual(snapshots.map((snapshot) => snapshot.cardPrintingId), ["card-empty", "card-old"]);
+  assert.deepEqual(imageUpdates.map((update) => update.where.id), ["card-empty", "card-old"]);
 });
 
 test("imports card price snapshots from TCGCSV payloads", async () => {

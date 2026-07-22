@@ -20,6 +20,27 @@ type PokemonTcgSearchResponse = {
   totalCount: number;
 };
 
+type PokemonTcgSetSearchResponse = {
+  count: number;
+  data: PokemonTcgSet[];
+  page: number;
+  pageSize: number;
+  totalCount: number;
+};
+
+type PokemonTcgSet = {
+  id: string;
+  images?: {
+    logo?: string;
+    symbol?: string;
+  };
+  name: string;
+  printedTotal?: number;
+  releaseDate?: string;
+  series?: string;
+  total?: number;
+};
+
 type PokemonTcgCard = {
   artist?: string;
   cardmarket?: {
@@ -167,6 +188,146 @@ export async function syncPokemonTcgCardPages({
   }
 
   return summarizePokemonTcgPageResults({ ...paging, pages, query: q });
+}
+
+export async function syncPokemonTcgSets({
+  page = 1,
+  pageSize = 25,
+}: {
+  page?: number;
+  pageSize?: number;
+} = {}) {
+  const normalizedPage = Math.max(1, Math.floor(Number(page) || 1));
+  const normalizedPageSize = Math.min(100, Math.max(1, Math.floor(Number(pageSize) || 25)));
+  const response = await fetchPokemonSets({ page: normalizedPage, pageSize: normalizedPageSize });
+  const existingSets = await prisma.cardSet.findMany({
+    select: {
+      id: true,
+      language: true,
+      logoImageUrl: true,
+      name: true,
+      printedTotal: true,
+      providerIds: true,
+      region: true,
+      releaseDate: true,
+      series: true,
+      symbolImageUrl: true,
+      total: true,
+      _count: { select: { cardPrintings: true } },
+    },
+    where: { id: { in: response.data.map((set) => cardSetId(set.id)) } },
+  });
+  const existingById = new Map(existingSets.map((set) => [set.id, set]));
+  let setsUpserted = 0;
+
+  for (const set of response.data) {
+    const id = cardSetId(set.id);
+    const data = {
+      language: "en",
+      logoImageUrl: set.images?.logo,
+      metadata: { provider: "pokemon-tcg-api" },
+      name: set.name,
+      printedTotal: set.printedTotal,
+      providerIds: { pokemon_tcg_api: set.id },
+      region: "international",
+      releaseDate: parsePokemonDate(set.releaseDate),
+      series: set.series,
+      symbolImageUrl: set.images?.symbol,
+      total: set.total,
+    } satisfies Prisma.CardSetUncheckedCreateInput;
+    const existing = existingById.get(id);
+
+    if (existing && pokemonSetRecordMatches(existing, set)) {
+      continue;
+    }
+
+    await prisma.cardSet.upsert({
+      where: { id },
+      update: data,
+      create: { id, ...data },
+    });
+    setsUpserted += 1;
+  }
+
+  const catalogueBackfillSet = response.data
+    .map((set) => {
+      const releaseDate = parsePokemonDate(set.releaseDate);
+      const cardCount = existingById.get(cardSetId(set.id))?._count.cardPrintings ?? 0;
+      const expectedTotal = Math.max(set.total ?? 0, set.printedTotal ?? 0);
+
+      if (!releaseDate || releaseDate.getTime() > Date.now() || expectedTotal <= cardCount) {
+        return null;
+      }
+
+      return {
+        cardCount,
+        name: set.name,
+        nextPage: Math.floor(cardCount / 250) + 1,
+        providerId: set.id,
+        total: expectedTotal,
+      };
+    })
+    .find((set) => set !== null) ?? null;
+
+  return {
+    cardsFetched: 0,
+    cardsUpserted: 0,
+    catalogueBackfillSet,
+    complete: true,
+    latestSet: response.data[0]
+      ? {
+          id: response.data[0].id,
+          name: response.data[0].name,
+          releaseDate: response.data[0].releaseDate ?? null,
+        }
+      : null,
+    maxPages: 1,
+    nextPage: null,
+    page: response.page,
+    pageSize: response.pageSize,
+    pages: [],
+    pagesProcessed: 1,
+    pricingSnapshotsCreated: 0,
+    provider: "pokemon-tcg-api",
+    query: "set-discovery",
+    setsFetched: response.count,
+    setsUpserted,
+    totalCount: response.totalCount,
+  };
+}
+
+function pokemonSetRecordMatches(
+  existing: {
+    language: string;
+    logoImageUrl: string | null;
+    name: string;
+    printedTotal: number | null;
+    providerIds: Prisma.JsonValue;
+    region: string;
+    releaseDate: Date | null;
+    series: string | null;
+    symbolImageUrl: string | null;
+    total: number | null;
+  },
+  incoming: PokemonTcgSet,
+) {
+  const providerIds = isJsonObject(existing.providerIds) ? existing.providerIds : {};
+  const incomingReleaseDate = parsePokemonDate(incoming.releaseDate);
+
+  return existing.language === "en"
+    && existing.region === "international"
+    && existing.name === incoming.name
+    && existing.printedTotal === (incoming.printedTotal ?? null)
+    && existing.total === (incoming.total ?? null)
+    && existing.series === (incoming.series ?? null)
+    && existing.logoImageUrl === (incoming.images?.logo ?? null)
+    && existing.symbolImageUrl === (incoming.images?.symbol ?? null)
+    && existing.releaseDate?.getTime() === incomingReleaseDate?.getTime()
+    && providerIds.pokemon_tcg_api === incoming.id;
+}
+
+function isJsonObject(value: Prisma.JsonValue): value is Prisma.JsonObject {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 export async function syncPokemonTcgCards({
@@ -354,6 +515,52 @@ async function fetchPokemonCards({
   }
 
   throw lastError instanceof Error ? lastError : new Error("Pokemon TCG API request failed.");
+}
+
+async function fetchPokemonSets({ page, pageSize }: { page: number; pageSize: number }) {
+  const retryAttempts = optionalPositiveInteger(process.env.POKEMON_TCG_API_RETRY_ATTEMPTS) ?? 3;
+  const retryWaitMs = optionalNonNegativeInteger(process.env.POKEMON_TCG_API_RETRY_WAIT_MS) ?? 1500;
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= retryAttempts; attempt += 1) {
+    try {
+      const url = new URL("https://api.pokemontcg.io/v2/sets");
+      const apiKey = process.env.POKEMON_TCG_API_KEY;
+      const headers: Record<string, string> = { accept: "application/json" };
+
+      url.searchParams.set("page", String(page));
+      url.searchParams.set("pageSize", String(pageSize));
+      url.searchParams.set("orderBy", "-releaseDate,id");
+
+      if (apiKey) {
+        headers["x-api-key"] = apiKey;
+      }
+
+      const response = await fetch(url, { headers, signal: pokemonTcgFetchSignal() });
+      const data = (await response.json().catch(() => ({}))) as Partial<PokemonTcgSetSearchResponse> & {
+        error?: { message?: string };
+      };
+
+      if (!response.ok || !Array.isArray(data.data)) {
+        throw new PokemonTcgApiRequestError(
+          data.error?.message ?? `Pokemon TCG sets request failed with ${response.status}.`,
+          response.status,
+        );
+      }
+
+      return data as PokemonTcgSetSearchResponse;
+    } catch (error) {
+      lastError = error;
+
+      if (!isRetryablePokemonTcgError(error) || attempt >= retryAttempts) {
+        throw error;
+      }
+
+      await wait(retryWaitMs * attempt);
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error("Pokemon TCG sets request failed.");
 }
 
 async function fetchPokemonCardsOnce({

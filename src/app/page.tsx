@@ -2567,7 +2567,7 @@ function Sidebar({
       <NavButton active={active === "collection"} icon={<Layers3 />} label="Collection" onClick={() => onNavigate("collection")} />
       <NavButton active={active === "add"} icon={<Plus />} label="Add" onClick={() => onNavigate("add")} />
       <NavButton active={active === "wishlist"} icon={<Heart />} label="Wishlist" onClick={() => onNavigate("wishlist")} />
-      <NavButton active={active === "sets" || active === "setDetail"} icon={<GalleryVerticalEnd />} label="Prices" onClick={() => onNavigate("sets")} />
+      <NavButton active={active === "sets" || active === "setDetail"} icon={<GalleryVerticalEnd />} label="Sets" onClick={() => onNavigate("sets")} />
       <span className="nav-divider" />
       <NavButton active={active === "binders"} icon={<BookOpen />} label="Binders" onClick={() => onNavigate("binders")} />
       <NavButton active={active === "alerts"} icon={<Bell />} label={`Alerts (${alertCount})`} onClick={() => onNavigate("alerts")} />
@@ -2595,7 +2595,7 @@ function BottomNav({
         <span>Add</span>
       </button>
       <MobileNavButton active={active === "wishlist"} icon={<Heart />} label="Want" onClick={() => onNavigate("wishlist")} />
-      <MobileNavButton active={active === "sets" || active === "setDetail"} icon={<GalleryVerticalEnd />} label="Prices" onClick={() => onNavigate("sets")} />
+      <MobileNavButton active={active === "sets" || active === "setDetail"} icon={<GalleryVerticalEnd />} label="Sets" onClick={() => onNavigate("sets")} />
       <MobileNavButton active={active === "settings" || active === "binders" || active === "alerts" || active === "analytics" || active === "ops"} icon={<Settings />} label="More" onClick={() => onNavigate("settings")} />
     </nav>
   );
@@ -2776,7 +2776,7 @@ function DashboardScreen({
           <LanguageCoveragePanel catalogueItems={catalogueItems} sets={sets} />
 
           <section className="section-block">
-            <SectionHeader title="Set progress" action={<button className="button" onClick={() => navigate("sets")}>Open prices</button>} />
+            <SectionHeader title="Set progress" action={<button className="button" onClick={() => navigate("sets")}>Open sets</button>} />
             <div className="set-list">
               {dashboardSets.map((set) => (
                 <SetProgressCard
@@ -2790,7 +2790,7 @@ function DashboardScreen({
               ))}
             </div>
             {sets.length > dashboardSets.length ? (
-              <p className="muted">Showing {dashboardSets.length} focus sets. Open Prices for the full catalogue.</p>
+              <p className="muted">Showing {dashboardSets.length} focus sets. Open Sets for the full catalogue.</p>
             ) : null}
           </section>
 
@@ -2831,8 +2831,7 @@ function PortfolioHero({
   wishlistTotal: number;
 }) {
   const coverage = intelligence.valuationCoverage.coveragePercent;
-  const latestHistory = intelligence.portfolioHistory.at(-1);
-  const latestMove = portfolioLatestMove(intelligence.portfolioHistory);
+  const rangeChange = portfolioRangeChange(intelligence.portfolioHistory, "30d");
 
   return (
     <section className="portfolio-hero">
@@ -2890,14 +2889,14 @@ function PortfolioHero({
             <strong>{intelligence.valuationCoverage.unvaluedLots}</strong>
           </span>
           <span>
-            <small>Latest move</small>
-            <strong className={latestMove !== null && latestMove >= 0 ? "positive" : ""}>
-              {latestMove === null ? "Building" : formatSignedMoney(latestMove)}
+            <small>30-day change</small>
+            <strong className={rangeChange && rangeChange.valueMinor >= 0 ? "positive" : ""}>
+              {rangeChange ? `${formatSignedMoney(rangeChange.valueMinor)} (${formatSignedPercent(rangeChange.percent)})` : "Building"}
             </strong>
           </span>
           <span>
             <small>Latest pricing</small>
-            <strong>{latestHistory ? formatEventDate(latestHistory.observedAt) : "Pending"}</strong>
+            <strong>{intelligence.latestPricingAt ? formatEventDate(intelligence.latestPricingAt) : "Pending"}</strong>
           </span>
           <span>
             <small>Wishlist targets</small>
@@ -3075,7 +3074,7 @@ function OnboardingChecklist({
     },
     {
       action: () => navigate("sets"),
-      actionLabel: "Prices",
+      actionLabel: "Sets",
       done: sets.some((set) => set.owned > 0),
       detail: "Use set progress as a collection goal.",
       icon: <GalleryVerticalEnd size={16} />,
@@ -5209,14 +5208,41 @@ function SetsScreen({
   setAppState,
 }: ScreenContext) {
   const [sort, setSort] = useState<SetListSort>("release-desc");
+  const [languageFilter, setLanguageFilter] = useState<"en" | "ja" | "zh" | "ko">("en");
   const normalizedSetSearch = normalizeSearchText(setSearch);
+  const languageOptions: Array<{ codes: string[]; label: string; value: "en" | "ja" | "zh" | "ko" }> = [
+    { codes: ["en"], label: "English", value: "en" },
+    { codes: ["ja"], label: "Japanese", value: "ja" },
+    { codes: ["zh-cn", "zh-tw"], label: "Chinese", value: "zh" },
+    { codes: ["ko"], label: "Korean", value: "ko" },
+  ];
+  const activeLanguages = languageOptions.find((option) => option.value === languageFilter)?.codes ?? ["en"];
   const filteredSets = sets
+    .filter((set) => activeLanguages.includes(set.language ?? "en"))
     .filter((set) => matchesSetSearch(set, normalizedSetSearch))
     .sort((left, right) => sortSets(left, right, sort));
 
   return (
     <section className="page">
-      <PageHeader title="Prices" />
+      <PageHeader title="Sets" />
+      <div className="segmented set-language-tabs" aria-label="Set language">
+        {languageOptions.map((option) => {
+          const count = sets.filter((set) => option.codes.includes(set.language ?? "en")).length;
+
+          return (
+            <button
+              aria-pressed={languageFilter === option.value}
+              className={languageFilter === option.value ? "active" : ""}
+              key={option.value}
+              onClick={() => setLanguageFilter(option.value)}
+              type="button"
+            >
+              {option.label}
+              <span>{count}</span>
+            </button>
+          );
+        })}
+      </div>
       <section className="catalogue-toolbar">
         <label className="search-box">
           <Search size={18} />
@@ -5234,15 +5260,22 @@ function SetsScreen({
           </select>
         </label>
       </section>
-      <div className="set-list">
-        {filteredSets.map((set) => (
-          <SetProgressCard
-            key={set.id}
-            set={set}
-            onClick={() => setAppState({ ...appState, selectedSetId: set.id, screen: "setDetail" })}
-          />
-        ))}
-      </div>
+      <p className="set-results-summary muted">
+        {filteredSets.length} {languageOptions.find((option) => option.value === languageFilter)?.label} set{filteredSets.length === 1 ? "" : "s"}
+      </p>
+      {filteredSets.length ? (
+        <div className="set-list">
+          {filteredSets.map((set) => (
+            <SetProgressCard
+              key={set.id}
+              set={set}
+              onClick={() => setAppState({ ...appState, selectedSetId: set.id, screen: "setDetail" })}
+            />
+          ))}
+        </div>
+      ) : (
+        <EmptyState title={`No ${languageOptions.find((option) => option.value === languageFilter)?.label} sets found`} />
+      )}
     </section>
   );
 }
@@ -5293,7 +5326,7 @@ function SetDetailScreen({
           action={
             <button className="button" onClick={() => navigate("sets")}>
               <ArrowLeft size={17} />
-              Prices
+              Sets
             </button>
           }
         />
@@ -5364,7 +5397,7 @@ function SetDetailScreen({
         action={
           <button className="button" onClick={() => navigate("sets")}>
             <ArrowLeft size={17} />
-            Prices
+            Sets
           </button>
         }
       />
@@ -5447,7 +5480,7 @@ function SetDetailScreen({
 
           return (
             <article
-              aria-label={`View ${item.name}`}
+              aria-label={`View ${catalogueItemTitle(item)}`}
               className={owned ? "set-print-card owned" : wanted ? "set-print-card wanted" : "set-print-card"}
               key={item.id}
               onClick={() => setPreviewItemId(item.id)}
@@ -5464,7 +5497,7 @@ function SetDetailScreen({
               <div className="set-print-body">
                 <div className="set-print-header">
                   <div className="set-print-title">
-                    <h3>{item.name}</h3>
+                    <h3>{catalogueItemTitle(item)}</h3>
                     <p>No. {item.number}</p>
                   </div>
                   {statusLabel ? (
@@ -5487,7 +5520,7 @@ function SetDetailScreen({
                   </span>
                 </div>
                 {variants.length ? (
-                  <div className="set-print-variants" aria-label={`${item.name} variants`}>
+                  <div className="set-print-variants" aria-label={`${catalogueItemTitle(item)} variants`}>
                     {visibleVariants.map((option) => (
                       <span className="tag" key={option.label}>
                         {option.label}
@@ -5628,8 +5661,8 @@ function CataloguePreviewModal({
         <div className="catalogue-preview-content">
           <div className="catalogue-preview-title-row">
             <div>
-              <h2 id={titleId}>{item.name}</h2>
-              <p>{item.set} | No. {item.number}</p>
+              <h2 id={titleId}>{catalogueItemTitle(item)}</h2>
+              <p>{catalogueItemSetLabel(item)} | No. {item.number}</p>
             </div>
             <button
               aria-pressed={showDetails}
@@ -5646,7 +5679,7 @@ function CataloguePreviewModal({
             <span className={marketValue === null ? "set-print-price missing" : "set-print-price"}>
               <strong>{formatValuation(marketValue)}</strong>
               <details className="market-help">
-                <summary aria-label={`Market confidence for ${item.name}`}>?</summary>
+                <summary aria-label={`Market confidence for ${catalogueItemTitle(item)}`}>?</summary>
                 <span className="market-help-popover">
                   <MarketConfidencePopover item={item} marketValue={marketValue} />
                 </span>
@@ -5656,7 +5689,7 @@ function CataloguePreviewModal({
             {!owned && wanted ? <span className="set-print-status wanted"><Heart size={14} />Want</span> : null}
           </div>
           {variants.length ? (
-            <div className="catalogue-preview-variants" aria-label={`${item.name} variants`}>
+            <div className="catalogue-preview-variants" aria-label={`${catalogueItemTitle(item)} variants`}>
               {visibleVariants.map((option) => (
                 <span className="tag" key={option.label}>{option.label}</span>
               ))}
@@ -5708,15 +5741,18 @@ function CataloguePreviewModal({
 function WishlistScreen({
   appState,
   catalogueById,
+  collection,
   wishlist,
   wishlistTotal,
   addToCollection,
+  navigate,
   removeWishlistItem,
   setAppState,
   startAdd,
   updateWishlistItem,
 }: ScreenContext) {
   const [editingId, setEditingId] = useState("");
+  const [previewItemId, setPreviewItemId] = useState<string | null>(null);
   const [savingId, setSavingId] = useState("");
   const [sort, setSort] = useState<WishlistSort>("priority-desc");
   const [wishlistSearch, setWishlistSearch] = useState("");
@@ -5843,6 +5879,10 @@ function WishlistScreen({
     ...watchSignals,
     ...estimateSignals,
   ].slice(0, 4);
+  const previewItem = previewItemId ? catalogueById.get(previewItemId) : undefined;
+  const previewOwned = previewItem
+    ? collection.find((item) => item.catalogueId === previewItem.id)
+    : undefined;
 
   async function handleUpdate(event: FormEvent<HTMLFormElement>, itemId: string) {
     event.preventDefault();
@@ -5857,7 +5897,11 @@ function WishlistScreen({
 
   function renderWishlistEditForm(item: WishlistItem) {
     return (
-      <form className="form-stack wishlist-edit-form" onSubmit={(event) => void handleUpdate(event, item.id)}>
+      <form
+        className="form-stack wishlist-edit-form"
+        onClick={(event) => event.stopPropagation()}
+        onSubmit={(event) => void handleUpdate(event, item.id)}
+      >
         <div className="panel-title-row compact-row">
           <strong>Edit target</strong>
           <span className={`priority-pill priority-${item.priority.toLowerCase()}`}>{item.priority}</span>
@@ -5901,7 +5945,10 @@ function WishlistScreen({
     const isCard = mode === "card";
 
     return (
-      <div className={isCard ? "wishlist-card-actions" : "wishlist-table-actions"}>
+      <div
+        className={isCard ? "wishlist-card-actions" : "wishlist-table-actions"}
+        onClick={(event) => event.stopPropagation()}
+      >
         <button className="button primary" type="button" onClick={() => void addToCollection(row.item.catalogueId)}>
           <Check size={17} />
           Move
@@ -5936,12 +5983,25 @@ function WishlistScreen({
       row.delta === null ? "wishlist-status neutral" : row.delta >= 0 ? "wishlist-status ready" : "wishlist-status watch";
 
     return (
-      <article className="collection-lot-card wishlist-lot-card" key={row.item.id}>
+      <article
+        aria-label={`View ${catalogueItemTitle(row.catalogueItem)}`}
+        className="collection-lot-card wishlist-lot-card clickable"
+        key={row.item.id}
+        onClick={() => !row.isEditing && setPreviewItemId(row.catalogueItem.id)}
+        onKeyDown={(event) => {
+          if (!row.isEditing && (event.key === "Enter" || event.key === " ")) {
+            event.preventDefault();
+            setPreviewItemId(row.catalogueItem.id);
+          }
+        }}
+        role="button"
+        tabIndex={0}
+      >
         <div className="wishlist-card-top">
           <div className="item-image collection-lot-image">{renderItemImage(row.catalogueItem)}</div>
           <div className="wishlist-card-copy">
-            <h3>{row.catalogueItem.name}</h3>
-            <p className="collection-lot-set">{row.catalogueItem.set} | {row.catalogueItem.number}</p>
+            <h3>{catalogueItemTitle(row.catalogueItem)}</h3>
+            <p className="collection-lot-set">{catalogueItemSetLabel(row.catalogueItem)} | {row.catalogueItem.number}</p>
           </div>
           <span className={`priority-pill priority-${row.item.priority.toLowerCase()}`}>{row.item.priority}</span>
         </div>
@@ -6050,7 +6110,7 @@ function WishlistScreen({
               <h2>Target watch</h2>
               <p className="muted">
                 {wishlistInsight.targetHits
-                  ? `${wishlistInsight.targetHits} target ${wishlistInsight.targetHits === 1 ? "is" : "are"} at or below your buy price.`
+                  ? `${wishlistInsight.targetHits} ${wishlistInsight.targetHits === 1 ? "target is" : "targets are"} at or below your buy price.`
                   : "No targets are at or below your buy price yet."}
               </p>
             </div>
@@ -6070,9 +6130,9 @@ function WishlistScreen({
               <h2>Buying signals</h2>
               <p className="muted">
                 {readySignals.length
-                  ? `${readySignals.length} target ${readySignals.length === 1 ? "is" : "are"} ready now.`
+                  ? `${readySignals.length} ${readySignals.length === 1 ? "target is" : "targets are"} ready now.`
                   : watchSignals.length
-                    ? `${watchSignals.length} target ${watchSignals.length === 1 ? "is" : "are"} close to your buy price.`
+                    ? `${watchSignals.length} ${watchSignals.length === 1 ? "target is" : "targets are"} close to your buy price.`
                     : "No target is close to your buy price yet."}
               </p>
             </div>
@@ -6083,7 +6143,11 @@ function WishlistScreen({
           {buyListSignals.length ? (
             <div className="buying-signal-list">
               {buyListSignals.map((signal) => (
-                <article className={`buying-signal-row signal-${signal.status}`} key={signal.row.item.id}>
+                <article
+                  className={`buying-signal-row signal-${signal.status} clickable-row`}
+                  key={signal.row.item.id}
+                  onClick={() => setPreviewItemId(signal.row.catalogueItem.id)}
+                >
                   <div className="table-thumb">{renderItemImage(signal.row.catalogueItem)}</div>
                   <div className="buying-signal-copy">
                     <div className="tag-row">
@@ -6092,11 +6156,18 @@ function WishlistScreen({
                         {signal.row.item.priority}
                       </span>
                     </div>
-                    <strong>{signal.row.catalogueItem.name}</strong>
-                    <span>{signal.row.catalogueItem.set} | Target {formatValuation(signal.row.targetValue)} | Market {formatValuation(signal.row.currentValue)}</span>
+                    <strong>{catalogueItemTitle(signal.row.catalogueItem)}</strong>
+                    <span>{catalogueItemSetLabel(signal.row.catalogueItem)} | Target {formatValuation(signal.row.targetValue)} | Market {formatValuation(signal.row.currentValue)}</span>
                     <p className="muted">{signal.detail}</p>
                   </div>
-                  <button className="button small" type="button" onClick={() => void addToCollection(signal.row.item.catalogueId)}>
+                  <button
+                    className="button small"
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void addToCollection(signal.row.item.catalogueId);
+                    }}
+                  >
                     <Check size={15} />
                     Move
                   </button>
@@ -6136,13 +6207,25 @@ function WishlistScreen({
                   <tbody>
                     {wishlistRows.map((row) => (
                       <Fragment key={row.item.id}>
-                        <tr className="wishlist-table-row">
+                        <tr
+                          aria-label={`View ${catalogueItemTitle(row.catalogueItem)}`}
+                          className="wishlist-table-row clickable-row"
+                          onClick={() => !row.isEditing && setPreviewItemId(row.catalogueItem.id)}
+                          onKeyDown={(event) => {
+                            if (!row.isEditing && (event.key === "Enter" || event.key === " ")) {
+                              event.preventDefault();
+                              setPreviewItemId(row.catalogueItem.id);
+                            }
+                          }}
+                          role="button"
+                          tabIndex={0}
+                        >
                           <td>
                             <div className="table-item wishlist-table-item">
                               <div className="table-thumb">{renderItemImage(row.catalogueItem)}</div>
                               <div>
-                                <strong>{row.catalogueItem.name}</strong>
-                                <span>{row.catalogueItem.set} | {row.catalogueItem.number}</span>
+                                <strong>{catalogueItemTitle(row.catalogueItem)}</strong>
+                                <span>{catalogueItemSetLabel(row.catalogueItem)} | {row.catalogueItem.number}</span>
                               </div>
                             </div>
                           </td>
@@ -6196,6 +6279,33 @@ function WishlistScreen({
           />
         )}
       </div>
+      {previewItem ? (
+        <CataloguePreviewModal
+          item={previewItem}
+          owned={previewOwned}
+          wanted
+          onAdd={() => {
+            setPreviewItemId(null);
+            setAppState((current) => ({
+              ...current,
+              addType: previewItem.type,
+              selectedCatalogueId: previewItem.id,
+            }));
+            navigate("add");
+          }}
+          onClose={() => setPreviewItemId(null)}
+          onOpenOwned={() => {
+            if (!previewOwned) {
+              return;
+            }
+
+            setPreviewItemId(null);
+            setAppState((current) => ({ ...current, selectedItemId: previewOwned.id }));
+            navigate("item");
+          }}
+          onWant={() => undefined}
+        />
+      ) : null}
     </section>
   );
 }
@@ -6206,10 +6316,10 @@ function AlertsScreen({
   startPlusCheckout,
   setAppState,
 }: ScreenContext) {
+  const [alertView, setAlertView] = useState<"prices" | "review">("prices");
   const alerts = intelligence.actionQueue;
   const priceAlerts = intelligence.priceAlerts;
   const highImpact = alerts.filter((alert) => alert.impact === "High").length;
-  const watchCount = alerts.filter((alert) => alert.tone === "watch").length;
   const targetHits = priceAlerts.filter((alert) => alert.status === "Hit").length;
 
   function openAlert(alert: InsightAction) {
@@ -6272,123 +6382,125 @@ function AlertsScreen({
 
   return (
     <section className="page">
-      <PageHeader title="Alerts" action={<span className="status-pill"><Bell size={17} />{alerts.length}</span>} />
+      <PageHeader
+        title="Alerts"
+        action={
+          <span className="status-pill">
+            <Bell size={17} />
+            {alerts.length + priceAlerts.length} open
+          </span>
+        }
+      />
       <div className="stats-grid compact">
-        <StatCard label="Open alerts" value={alerts.length.toString()} note="Generated from your live collection" />
-        <StatCard label="High impact" value={highImpact.toString()} note="Worth checking first" />
-        <StatCard label="Watch items" value={watchCount.toString()} note="Useful but not urgent" />
-        <StatCard label="Price alerts" value={priceAlerts.length.toString()} note={`${targetHits} target hit${targetHits === 1 ? "" : "s"}`} />
+        <StatCard label="Target hits" value={targetHits.toString()} note="At or below your buy price" positive={targetHits > 0} />
+        <StatCard label="Price checks" value={priceAlerts.length.toString()} note="Targets and weak estimates" />
+        <StatCard label="Collection reviews" value={alerts.length.toString()} note={`${highImpact} high impact`} />
+      </div>
+      <div className="segmented alert-view-tabs" aria-label="Alert type">
+        <button
+          aria-pressed={alertView === "prices"}
+          className={alertView === "prices" ? "active" : ""}
+          onClick={() => setAlertView("prices")}
+          type="button"
+        >
+          Price alerts <span>{priceAlerts.length}</span>
+        </button>
+        <button
+          aria-pressed={alertView === "review"}
+          className={alertView === "review" ? "active" : ""}
+          onClick={() => setAlertView("review")}
+          type="button"
+        >
+          Collection review <span>{alerts.length}</span>
+        </button>
       </div>
 
-      <section className="tool-panel">
-        <div className="panel-title-row">
-          <h2>Price watchlist</h2>
-          <span className="plan-pill"><Sparkles size={17} />Plus</span>
-        </div>
-        {!appState.plus ? (
-          <div className="locked-preview">
+      {alertView === "prices" ? (
+        <section className="tool-panel alerts-panel">
+          <div className="panel-title-row">
             <div>
-              <strong>Automated price alerts are a Plus feature.</strong>
-              <p className="muted">
-                Free users can still track wishlist targets and item values. Plus adds email digests when targets hit,
-                weak prices need attention, or watched items move.
-              </p>
+              <h2>Price alerts</h2>
+              <p className="muted">Wishlist targets and estimates that need attention.</p>
             </div>
-            <div className="upgrade-actions">
-              <button className="button primary" onClick={() => void startPlusCheckout("monthly")}>
-                <CreditCard size={17} />
-                Monthly
-              </button>
-              <button className="button" onClick={() => void startPlusCheckout("yearly")}>
-                <Sparkles size={17} />
-                Yearly
-              </button>
+            <span className="plan-pill"><Sparkles size={17} />Plus</span>
+          </div>
+          {!appState.plus ? (
+            <div className="locked-preview">
+              <div>
+                <strong>Automated price alerts are a Plus feature.</strong>
+                <p className="muted">Plus adds email digests when targets hit or a weak estimate needs review.</p>
+              </div>
+              <div className="upgrade-actions">
+                <button className="button primary" onClick={() => void startPlusCheckout("monthly")}>
+                  <CreditCard size={17} />
+                  Monthly
+                </button>
+                <button className="button" onClick={() => void startPlusCheckout("yearly")}>
+                  <Sparkles size={17} />
+                  Yearly
+                </button>
+              </div>
             </div>
-          </div>
-        ) : priceAlerts.length ? (
-          <div className="alert-list">
-            {priceAlerts.map((alert) => (
-              <article className="alert-row" key={alert.id}>
-                <div className="alert-main">
-                  <div className="tag-row">
-                    <span className={`tag ${priceAlertTagClass(alert.status)}`}>{alert.status}</span>
-                    <span className="tag">{alert.category}</span>
+          ) : priceAlerts.length ? (
+            <div className="alert-list compact-alert-list">
+              {priceAlerts.map((alert) => (
+                <article className="alert-row compact-alert-row" key={alert.id}>
+                  <div className="alert-main">
+                    <div className="tag-row">
+                      <span className={`tag ${priceAlertTagClass(alert.status)}`}>{alert.status}</span>
+                      <span className="tag">{alert.category}</span>
+                    </div>
+                    <strong>{alert.itemName}</strong>
+                    <p className="muted">{alert.explanation}</p>
+                    <div className="alert-value-strip">
+                      <span><small>Current</small><b>{formatMoney(alert.currentValueMinor)}</b></span>
+                      {alert.targetValueMinor !== undefined ? (
+                        <span><small>Target</small><b>{formatMoney(alert.targetValueMinor)}</b></span>
+                      ) : null}
+                      <span><small>Checked</small><b>{alert.priceObservedAt ? formatEventDate(alert.priceObservedAt) : "Pending"}</b></span>
+                    </div>
+                    {alert.priceSource ? <span className="alert-source">{priceSourceLabel(alert.priceSource)}</span> : null}
                   </div>
-                  <strong>{alert.itemName}</strong>
-                  <p className="muted">{alert.detail}</p>
-                  <div className="alert-facts">
-                    {priceAlertFacts(alert).map(([label, value]) => (
-                      <span key={label}>
-                        <b>{label}</b>
-                        {value}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-                <button className="button" onClick={() => openPriceAlert(alert)}>
-                  {alert.actionLabel}
-                </button>
-              </article>
-            ))}
+                  <button className="button" onClick={() => openPriceAlert(alert)}>
+                    {alert.category === "Wishlist" ? "View target" : "Review value"}
+                  </button>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <EmptyState title="No price alerts" description="No targets or weak estimates need attention right now." />
+          )}
+        </section>
+      ) : (
+        <section className="tool-panel alerts-panel">
+          <div className="panel-title-row">
+            <div>
+              <h2>Collection review</h2>
+              <p className="muted">Concrete actions that improve the quality of your collection data.</p>
+            </div>
+            <Sparkles size={18} />
           </div>
-        ) : (
-          <p className="muted">No target-price or weak-confidence price alerts right now.</p>
-        )}
-      </section>
-
-      <section className="tool-panel">
-        <div className="panel-title-row">
-          <h2>Review center</h2>
-          <Sparkles size={18} />
-        </div>
-        {alerts.length ? (
-          <div className="alert-list">
-            {alerts.map((alert) => (
-              <article className="alert-row" key={alert.id}>
-                <div className="alert-main">
-                  <div className="tag-row">
-                    <span className={`tag ${actionTagClass(alert.tone)}`}>{alert.category}</span>
-                    <span className={`tag ${impactTagClass(alert.impact)}`}>{alert.impact}</span>
+          {alerts.length ? (
+            <div className="alert-list compact-alert-list">
+              {alerts.map((alert) => (
+                <article className="alert-row compact-alert-row" key={alert.id}>
+                  <div className="alert-main">
+                    <div className="tag-row">
+                      <span className={`tag ${actionTagClass(alert.tone)}`}>{alert.category}</span>
+                      <span className={`tag ${impactTagClass(alert.impact)}`}>{alert.impact}</span>
+                    </div>
+                    <strong>{alert.title}</strong>
+                    <p className="muted">{alert.detail}</p>
                   </div>
-                  <strong>{alert.title}</strong>
-                  <p className="muted">{alert.detail}</p>
-                </div>
-                <button className="button" onClick={() => openAlert(alert)}>
-                  {alert.actionLabel}
-                </button>
-              </article>
-            ))}
-          </div>
-        ) : (
-          <EmptyState title="No alerts right now" />
-        )}
-      </section>
-
-      <div className="dashboard-grid">
-        <MetricPanel
-          title="Signal summary"
-          rows={[
-            ["Valuation coverage", `${intelligence.valuationCoverage.coveragePercent}%`],
-            ["Needs estimate", intelligence.valuationCoverage.unvaluedLots],
-            ["Manual values", intelligence.valuationCoverage.manualLots],
-            ["Missing value notes", intelligence.valuationCoverage.manualNotesMissing],
-            ["Wishlist hits", intelligence.wishlistOpportunities.length],
-            ["Grading candidates", intelligence.gradingCandidates.length],
-            ["Duplicate reviews", intelligence.duplicates.length],
-            ["Weak prices", intelligence.weakConfidence.count],
-          ]}
-        />
-        <MetricPanel
-          title="Activity"
-          rows={[
-            ["Last 30 days", `${intelligence.activity.last30Days} events`],
-            ["Added", intelligence.activity.added],
-            ["Edited", intelligence.activity.edited],
-            ["Sold", intelligence.activity.sold],
-            ["Removed", intelligence.activity.removed],
-          ]}
-        />
-      </div>
+                  <button className="button" onClick={() => openAlert(alert)}>{alert.actionLabel}</button>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <EmptyState title="Collection review is clear" />
+          )}
+        </section>
+      )}
     </section>
   );
 }
@@ -6406,7 +6518,7 @@ function AnalyticsScreen({
   const duplicateValue = intelligence.duplicates.reduce((total, item) => total + item.valueMinor, 0);
   const leadAction = intelligence.actionQueue[0];
   const realizedSales = intelligence.realizedSales;
-  const portfolioLatestDelta = portfolioLatestMove(intelligence.portfolioHistory);
+  const portfolioRangeDelta = portfolioRangeChange(intelligence.portfolioHistory, "30d");
 
   if (!appState.plus) {
     return (
@@ -6489,10 +6601,10 @@ function AnalyticsScreen({
         <StatCard label="Current value" value={formatMoney(summary.value)} note={`${intelligence.valuationCoverage.coveragePercent}% valued`} />
         <StatCard label="Gain/loss" value={formatMoney(gain)} note="Against known cost" positive={gain >= 0} />
         <StatCard
-          label="Value movement"
-          value={portfolioLatestDelta === null ? "Unknown" : formatSignedMoney(portfolioLatestDelta)}
-          note={portfolioLatestDelta === null ? "Needs another pricing point" : "Latest pricing point"}
-          positive={portfolioLatestDelta !== null && portfolioLatestDelta >= 0}
+          label="30-day change"
+          value={portfolioRangeDelta ? formatSignedMoney(portfolioRangeDelta.valueMinor) : "Unknown"}
+          note={portfolioRangeDelta ? formatSignedPercent(portfolioRangeDelta.percent) : "Needs more pricing history"}
+          positive={Boolean(portfolioRangeDelta && portfolioRangeDelta.valueMinor >= 0)}
         />
         <StatCard
           label="Sales"
@@ -8082,7 +8194,7 @@ function SettingsShortcutsPanel({ navigate }: { navigate: (screen: Screen) => vo
         </button>
         <button className="button" onClick={() => navigate("sets")}>
           <GalleryVerticalEnd size={17} />
-          Prices
+          Sets
         </button>
       </div>
     </section>
@@ -8148,7 +8260,7 @@ function PortfolioHistoryPanel({
   const latest = history[history.length - 1];
   const high = portfolioHistoryExtreme(history, "high");
   const low = portfolioHistoryExtreme(history, "low");
-  const latestMove = portfolioLatestMove(history);
+  const rangeChange = portfolioRangeChange(history, "30d");
 
   return (
     <section className="tool-panel">
@@ -8165,9 +8277,9 @@ function PortfolioHistoryPanel({
         rows={[
           ["Latest value", latest ? formatMoney(latest.valueMinor) : formatMoney(currentValueMinor)],
           [
-            "Latest move",
-            latestMove === null ? "Unknown" : formatSignedMoney(latestMove),
-            latestMove !== null && latestMove >= 0 ? "positive" : "",
+            "30-day change",
+            rangeChange ? `${formatSignedMoney(rangeChange.valueMinor)} (${formatSignedPercent(rangeChange.percent)})` : "Unknown",
+            rangeChange && rangeChange.valueMinor >= 0 ? "positive" : "",
           ],
           [
             "Range",
@@ -8776,13 +8888,26 @@ function CollectionTable({
             }
 
             return (
-              <tr key={item.id}>
+              <tr
+                aria-label={`View ${catalogueItemTitle(catalogueItem)}`}
+                className="clickable-row"
+                key={item.id}
+                onClick={() => openItem(item.id)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    openItem(item.id);
+                  }
+                }}
+                role="button"
+                tabIndex={0}
+              >
                 <td>
                   <div className="table-item">
                     <div className="table-thumb">{renderItemImage(catalogueItem)}</div>
                     <div>
-                      <strong>{catalogueItem.name}</strong>
-                      <span>{catalogueItem.set} | {catalogueItem.number}</span>
+                      <strong>{catalogueItemTitle(catalogueItem)}</strong>
+                      <span>{catalogueItemSetLabel(catalogueItem)} | {catalogueItem.number}</span>
                     </div>
                   </div>
                 </td>
@@ -8792,7 +8917,17 @@ function CollectionTable({
                 <td>{formatMoney(item.purchasePriceMinor)}</td>
                 <td><strong>{formatValuation(getOwnedValue(item, catalogueItem))}</strong></td>
                 <td>{item.location}</td>
-                <td><button className="button" onClick={() => openItem(item.id)}>Open</button></td>
+                <td>
+                  <button
+                    className="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      openItem(item.id);
+                    }}
+                  >
+                    Open
+                  </button>
+                </td>
               </tr>
             );
           })}
@@ -8824,6 +8959,7 @@ function OwnedItemCard({
 
   return (
     <article
+      aria-label={`View ${catalogueItemTitle(catalogueItem)}`}
       className="collection-lot-card clickable"
       role="button"
       tabIndex={0}
@@ -8838,7 +8974,7 @@ function OwnedItemCard({
       <div className="item-image collection-lot-image">{renderItemImage(catalogueItem)}</div>
       <div className="collection-lot-body">
         <div className="collection-lot-head">
-          <h3>{catalogueItem.name}</h3>
+          <h3>{catalogueItemTitle(catalogueItem)}</h3>
           <div className="collection-lot-price">
             <strong>{formatValuation(ownedValue)}</strong>
             <details
@@ -8846,14 +8982,14 @@ function OwnedItemCard({
               onClick={(event) => event.stopPropagation()}
               onKeyDown={(event) => event.stopPropagation()}
             >
-              <summary aria-label={`Price confidence for ${catalogueItem.name}`}>?</summary>
+              <summary aria-label={`Price confidence for ${catalogueItemTitle(catalogueItem)}`}>?</summary>
               <span className="market-help-popover">
                 <MarketConfidencePopover item={catalogueItem} manualOverride={usesManualValue} marketValue={marketValue} />
               </span>
             </details>
           </div>
         </div>
-        <p className="collection-lot-set">{catalogueItem.set} | {catalogueItem.number}</p>
+        <p className="collection-lot-set">{catalogueItemSetLabel(catalogueItem)} | {catalogueItem.number}</p>
         <div className="collection-lot-meta">
           <span className="tag">{item.condition}</span>
           {variantLabel ? <span className="tag">{variantLabel}</span> : null}
@@ -9192,7 +9328,11 @@ function PortfolioValueLineChart({
   currentValueMinor: number;
   history: CollectionIntelligence["portfolioHistory"];
 }) {
-  const chartPoints = history.map((point): InteractiveValueLinePoint => ({
+  const [range, setRange] = useState<PriceHistoryRange>("30d");
+  const visibleHistory = filterDatedHistoryByRange(history, range);
+  const chartHistory = visibleHistory.length ? visibleHistory : history;
+  const change = portfolioRangeChange(history, range);
+  const chartPoints = chartHistory.map((point): InteractiveValueLinePoint => ({
     badge: `${point.valuedLots} lots`,
     detail: `${formatMoney(point.marketValueMinor)} market | ${formatMoney(point.manualValueMinor)} manual`,
     footerDetail: `${point.marketLots} market | ${point.manualLots} manual`,
@@ -9210,13 +9350,33 @@ function PortfolioValueLineChart({
   }
 
   return (
-    <InteractiveValueLineChart
-      className="portfolio-value-chart"
-      compact={compact}
-      gradientId={compact ? "portfolio-value-area-compact" : "portfolio-value-area"}
-      label="Portfolio value history line chart"
-      points={chartPoints}
-    />
+    <div className={compact ? "portfolio-chart-shell compact" : "portfolio-chart-shell"}>
+      <div className="portfolio-chart-toolbar">
+        <div className="segmented compact price-history-ranges" aria-label="Portfolio history timeframe">
+          {priceHistoryRanges.map((option) => (
+            <button
+              aria-pressed={range === option.value}
+              className={range === option.value ? "active" : ""}
+              key={option.value}
+              onClick={() => setRange(option.value)}
+              type="button"
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+        <span className={change && change.valueMinor >= 0 ? "portfolio-range-change positive" : "portfolio-range-change"}>
+          {change ? `${formatSignedMoney(change.valueMinor)} (${formatSignedPercent(change.percent)})` : "Building history"}
+        </span>
+      </div>
+      <InteractiveValueLineChart
+        className="portfolio-value-chart"
+        compact={compact}
+        gradientId={`${compact ? "portfolio-value-area-compact" : "portfolio-value-area"}-${range}`}
+        label={`Portfolio value history line chart, ${priceHistoryRangeLabel(range)}`}
+        points={chartPoints}
+      />
+    </div>
   );
 }
 
@@ -9269,8 +9429,9 @@ function InteractiveValueLineChart({
   const latest = points[points.length - 1];
   const first = points[0];
   const activeEntry = chartPoints[activeIndex ?? chartPoints.length - 1];
-  const tooltipWidth = 190;
-  const tooltipHeight = activeEntry?.point.detail ? 66 : 52;
+  const tooltipDetailLines = activeEntry?.point.detail?.split(" | ") ?? [];
+  const tooltipWidth = 214;
+  const tooltipHeight = tooltipDetailLines.length ? 54 + tooltipDetailLines.length * 14 : 52;
   const tooltipX = activeEntry
     ? Math.min(width - plot.right - tooltipWidth, Math.max(plot.left, activeEntry.x + (activeEntry.x > width - tooltipWidth - 32 ? -tooltipWidth - 12 : 12)))
     : plot.left;
@@ -9338,11 +9499,16 @@ function InteractiveValueLineChart({
                 <text className="price-history-tooltip-value" x={tooltipX + 12} y={tooltipY + 39}>
                   {formatMoney(activeEntry.point.valueMinor)}
                 </text>
-                {activeEntry.point.detail ? (
-                  <text className="price-history-tooltip-detail" x={tooltipX + 12} y={tooltipY + 58}>
-                    {activeEntry.point.detail}
+                {tooltipDetailLines.map((line, index) => (
+                  <text
+                    className="price-history-tooltip-detail"
+                    key={line}
+                    x={tooltipX + 12}
+                    y={tooltipY + 58 + index * 14}
+                  >
+                    {line}
                   </text>
-                ) : null}
+                ))}
               </g>
             </g>
           ) : null}
@@ -9388,11 +9554,9 @@ function PriceTrendPanel({
   const activeHistory = visibleHistory.length ? visibleHistory : history;
   const latest = activeHistory[activeHistory.length - 1];
   const first = activeHistory[0];
-  const previous = history[history.length - 2];
   const valueRange = priceRangeMinor(activeHistory);
   const delta = latest && first ? latest.valueMinor - first.valueMinor : null;
   const overallLatest = preferredLatestPricePoint(allHistory);
-  const latestMove = overallLatest && previous ? overallLatest.valueMinor - previous.valueMinor : null;
   const source = overallLatest?.source ?? item.priceSource;
   const observedAt = overallLatest?.observedAt ?? item.priceObservedAt;
   const latestMarketValue = overallLatest?.valueMinor ?? catalogueMarketValueMinor(item);
@@ -9419,11 +9583,6 @@ function PriceTrendPanel({
             delta === null ? "Unknown" : `${delta >= 0 ? "+" : ""}${formatMoney(delta)}`,
             delta !== null && delta >= 0 ? "positive" : "",
           ],
-          [
-            "Latest move",
-            latestMove === null ? "Unknown" : `${latestMove >= 0 ? "+" : ""}${formatMoney(latestMove)}`,
-            latestMove !== null && latestMove >= 0 ? "positive" : "",
-          ],
           ["Observed", observedAt ? formatEventDate(observedAt) : "Unknown"],
           ["Freshness", overallLatest ? priceFreshnessStatus(overallLatest) : "Unknown"],
           ["Source", item.hasPrice ? priceSourceLabel(source) : "No market source"],
@@ -9436,13 +9595,14 @@ function PriceTrendPanel({
   );
 }
 
-type PriceHistoryRange = "7d" | "30d" | "3m" | "6m" | "all";
+type PriceHistoryRange = "7d" | "30d" | "3m" | "6m" | "1y" | "all";
 
 const priceHistoryRanges: Array<{ days?: number; label: string; value: PriceHistoryRange }> = [
   { days: 7, label: "7d", value: "7d" },
   { days: 30, label: "30d", value: "30d" },
   { days: 92, label: "3m", value: "3m" },
   { days: 183, label: "6m", value: "6m" },
+  { days: 365, label: "1y", value: "1y" },
   { label: "All", value: "all" },
 ];
 
@@ -9493,6 +9653,13 @@ function filterPriceHistoryByRange(
   history: NonNullable<CatalogueItem["priceHistory"]>,
   range: PriceHistoryRange,
 ) {
+  return filterDatedHistoryByRange(history, range);
+}
+
+function filterDatedHistoryByRange<T extends { observedAt: string }>(
+  history: T[],
+  range: PriceHistoryRange,
+) {
   if (range === "all" || history.length <= 1) {
     return history;
   }
@@ -9537,7 +9704,7 @@ function CatalogueItemImage({ item }: { item: CatalogueItem }) {
         className="asset-image"
         data-item-type={item.type}
         src={image}
-        alt={item.name}
+        alt={catalogueItemTitle(item)}
         fill
         sizes="(min-width: 760px) 340px, 96px"
         unoptimized
@@ -9900,11 +10067,24 @@ function gainLabel(holding: HoldingInsight) {
   return `${holding.name} ${prefix}${formatMoney(holding.gainMinor)}`;
 }
 
-function portfolioLatestMove(history: CollectionIntelligence["portfolioHistory"]) {
-  const previous = history[history.length - 2];
-  const latest = history[history.length - 1];
+function portfolioRangeChange(
+  history: CollectionIntelligence["portfolioHistory"],
+  range: PriceHistoryRange,
+) {
+  const visible = filterDatedHistoryByRange(history, range);
+  const first = visible[0];
+  const latest = visible.at(-1);
 
-  return previous && latest ? latest.valueMinor - previous.valueMinor : null;
+  if (!first || !latest || first === latest) {
+    return null;
+  }
+
+  const valueMinor = latest.valueMinor - first.valueMinor;
+
+  return {
+    percent: first.valueMinor > 0 ? (valueMinor / first.valueMinor) * 100 : 0,
+    valueMinor,
+  };
 }
 
 function portfolioHistoryExtreme(
@@ -9926,6 +10106,12 @@ function formatSignedMoney(valueMinor: number) {
   const prefix = valueMinor > 0 ? "+" : "";
 
   return `${prefix}${formatMoney(valueMinor)}`;
+}
+
+function formatSignedPercent(value: number) {
+  const prefix = value > 0 ? "+" : "";
+
+  return `${prefix}${value.toLocaleString("en-GB", { maximumFractionDigits: 1, minimumFractionDigits: 1 })}%`;
 }
 
 function actionTagClass(tone: InsightAction["tone"]) {
@@ -9996,31 +10182,6 @@ function jobStatusClass(status: JobStatus) {
   }
 
   return "blue";
-}
-
-function priceAlertFacts(alert: CollectionIntelligence["priceAlerts"][number]) {
-  const facts: Array<[string, string]> = [
-    ["Reason", alert.explanation],
-    ["Current", formatMoney(alert.currentValueMinor)],
-  ];
-
-  if (alert.targetValueMinor !== undefined) {
-    facts.push(["Target", formatMoney(alert.targetValueMinor)]);
-  }
-
-  if (alert.status === "Watch" && alert.watchBandMinor !== undefined) {
-    facts.push(["Watch band", formatMoney(alert.watchBandMinor)]);
-  }
-
-  if (alert.priceSource) {
-    facts.push(["Source", priceSourceLabel(alert.priceSource)]);
-  }
-
-  if (alert.priceObservedAt) {
-    facts.push(["Observed", formatEventDate(alert.priceObservedAt)]);
-  }
-
-  return facts;
 }
 
 function jobTypeLabel(type: JobType) {

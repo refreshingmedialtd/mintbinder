@@ -204,6 +204,7 @@ export function catalogueDisplayNameForText(value?: string | null) {
 
 export function catalogueDisplaySetForText(value?: string | null) {
   return englishDisplayText(value, [
+    ["インフェルノX", "Inferno X"],
     ["ポケモンカード151", "Pokemon Card 151"],
     ["デッキビルドBOX", "Deck Build Box "],
     ["ハイクラスパック", "High Class Pack "],
@@ -293,6 +294,7 @@ function englishDisplayText(value: string | null | undefined, phraseReplacements
   return display
     .replace(/([A-Z])\s+(MAX|STAR)\b/g, "$1$2")
     .replace(/\b([A-Z])\s+ex\b/g, "$1 ex")
+    .replace(/([a-z])([XY])\s+ex\b/g, "$1 $2 ex")
     .replace(/\s+/g, " ")
     .trim();
 }

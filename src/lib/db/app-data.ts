@@ -12,6 +12,7 @@ import {
 import { sampleAppData } from "@/lib/sample-data";
 import {
   buildCatalogueVariantOptions,
+  catalogueValueMinorForVariant,
   latestPricePointForVariant,
   pokemonTcgImageUrlFromProviderIds,
 } from "@/lib/catalogue/variants";
@@ -56,6 +57,7 @@ type PriceLike = {
   priceMinor: number;
   confidenceScore: number;
   source: string;
+  sourceRef?: string | null;
   observedAt: Date;
   variantLabel: string | null;
 };
@@ -1020,7 +1022,9 @@ function dashboardOwnedValueMinor(item: CollectionItem, catalogueItem?: Catalogu
     return null;
   }
 
-  return Math.round(catalogueItem.valueMinor * conditionValueMultiplier(item.condition)) * item.quantity;
+  const unitValue = catalogueValueMinorForVariant(catalogueItem, item.variant) ?? catalogueItem.valueMinor;
+
+  return Math.round(unitValue * conditionValueMultiplier(item.condition)) * item.quantity;
 }
 
 export async function createCollectionItem(
@@ -1559,7 +1563,8 @@ function mapCardPrintingToCatalogueItem(
   const image =
     usableCardImageUrl(card.imageLargeUrl) ??
     usableCardImageUrl(card.imageSmallUrl) ??
-    usableCardImageUrl(pokemonTcgImageUrlFromProviderIds(card.providerIds));
+    usableCardImageUrl(pokemonTcgImageUrlFromProviderIds(card.providerIds)) ??
+    tcgplayerCardImageUrlFromPrices(prices);
   const displayName = catalogueDisplayNameForText(card.name);
   const displaySet = catalogueDisplaySetForText(card.cardSet.name);
   const rarity = displayCatalogueRarity(card.rarity);
@@ -1597,6 +1602,16 @@ function mapCardPrintingToCatalogueItem(
       variantMetadata: card.variantMetadata,
     }),
   };
+}
+
+function tcgplayerCardImageUrlFromPrices(prices: PriceLike[]) {
+  const snapshot = prices.find((price) =>
+    price.source.toLowerCase().startsWith("tcgcsv") && /^\d+$/.test(price.sourceRef?.trim() ?? ""),
+  );
+
+  return snapshot?.sourceRef
+    ? `https://tcgplayer-cdn.tcgplayer.com/product/${snapshot.sourceRef.trim()}_in_1000x1000.jpg`
+    : undefined;
 }
 
 function usableCardImageUrl(value?: string | null) {

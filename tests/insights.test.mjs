@@ -295,6 +295,7 @@ test("builds portfolio-wide value history from price snapshots", () => {
   });
 
   const intelligence = buildCollectionIntelligence({
+    asOf: new Date("2026-06-03T12:00:00.000Z"),
     catalogueById: new Map([historyCard, laterCard, manualItem].map((item) => [item.id, item])),
     collection: [
       collectionItem({
@@ -321,7 +322,13 @@ test("builds portfolio-wide value history from price snapshots", () => {
   });
 
   assert.deepEqual(
-    intelligence.portfolioHistory.map((point) => ({
+    intelligence.portfolioHistory
+      .filter((point) => [
+        "2026-04-01T00:00:00.000Z",
+        "2026-05-01T00:00:00.000Z",
+        "2026-06-01T00:00:00.000Z",
+      ].includes(point.observedAt))
+      .map((point) => ({
       manualLots: point.manualLots,
       manualValueMinor: point.manualValueMinor,
       marketLots: point.marketLots,
@@ -360,5 +367,8 @@ test("builds portfolio-wide value history from price snapshots", () => {
       },
     ],
   );
-  assert.deepEqual(intelligence.valueTrend, [5000, 5900, 6000]);
+  assert.equal(intelligence.portfolioHistory.length, 64);
+  assert.equal(intelligence.portfolioHistory.at(-1).observedAt, "2026-06-03T00:00:00.000Z");
+  assert.equal(intelligence.portfolioHistory.at(-1).valueMinor, 6000);
+  assert.equal(intelligence.valueTrend.at(-1), 6000);
 });
