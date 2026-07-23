@@ -2648,7 +2648,6 @@ function MobileNavButton({
 }
 
 function DashboardScreen({
-  catalogueItems,
   collection,
   collectionEvents,
   catalogueById,
@@ -2662,15 +2661,14 @@ function DashboardScreen({
   summary,
   intelligence,
   wishlist,
-  wishlistTotal,
   setAppState,
 }: ScreenContext) {
-  const recent = collection.slice(-6).reverse();
+  const recent = collection.slice(-5).reverse();
   const focusSets = sets
     .filter((set) => set.owned > 0)
     .sort((left, right) => completionPercent(right.owned, right.total) - completionPercent(left.owned, left.total))
-    .slice(0, 4);
-  const dashboardSets = focusSets.length ? focusSets : sets.slice(0, 4);
+    .slice(0, 3);
+  const dashboardSets = focusSets.length ? focusSets : sets.slice(0, 3);
   const gain = summary.value - summary.cost;
 
   return (
@@ -2678,16 +2676,10 @@ function DashboardScreen({
       <PageHeader
         title="Portfolio"
         action={
-          <>
-            <button className="button" onClick={() => navigate("collection")}>
-              <Layers3 size={17} />
-              Collection
-            </button>
-            <button className="button primary" onClick={() => startAdd("card")}>
-              <Plus size={17} />
-              Add item
-            </button>
-          </>
+          <button className="button primary" onClick={() => startAdd("card")}>
+            <Plus size={17} />
+            Add item
+          </button>
         }
       />
 
@@ -2698,10 +2690,7 @@ function DashboardScreen({
         intelligence={intelligence}
         isLoadingData={isLoadingData}
         navigate={navigate}
-        startAdd={startAdd}
         summary={summary}
-        wishlistCount={wishlist.length}
-        wishlistTotal={wishlistTotal}
       />
 
       {!collection.length ? (
@@ -2745,9 +2734,9 @@ function DashboardScreen({
 
           <section className="section-block">
             <SectionHeader title="Recent additions" />
-            <div className="item-list">
+            <div className="compact-item-list">
               {recent.length ? recent.map((item) => (
-                <OwnedItemCard
+                <PortfolioRecentRow
                   key={item.id}
                   item={item}
                   catalogueItem={catalogueById.get(item.catalogueId)}
@@ -2780,8 +2769,6 @@ function DashboardScreen({
             startAdd={startAdd}
             summary={summary}
           />
-
-          <LanguageCoveragePanel catalogueItems={catalogueItems} sets={sets} />
 
           <section className="section-block">
             <SectionHeader title="Set progress" action={<button className="button" onClick={() => navigate("sets")}>Open sets</button>} />
@@ -2822,10 +2809,7 @@ function PortfolioHero({
   intelligence,
   isLoadingData,
   navigate,
-  startAdd,
   summary,
-  wishlistCount,
-  wishlistTotal,
 }: {
   dataNotice: string;
   dataSource: AppDataSource;
@@ -2833,12 +2817,8 @@ function PortfolioHero({
   intelligence: CollectionIntelligence;
   isLoadingData: boolean;
   navigate: (screen: Screen) => void;
-  startAdd: (type: ItemType) => void;
   summary: ScreenContext["summary"];
-  wishlistCount: number;
-  wishlistTotal: number;
 }) {
-  const coverage = intelligence.valuationCoverage.coveragePercent;
   const rangeChange = portfolioRangeChange(intelligence.portfolioHistory, "30d");
 
   return (
@@ -2858,13 +2838,9 @@ function PortfolioHero({
           </p>
         </div>
         <div className="portfolio-actions">
-          <button className="button primary" onClick={() => startAdd("card")}>
-            <Plus size={17} />
-            Add card
-          </button>
-          <button className="button" onClick={() => startAdd("sealed")}>
-            <PackagePlus size={17} />
-            Add sealed
+          <button className="button" onClick={() => navigate("collection")}>
+            <Layers3 size={17} />
+            View collection
           </button>
           <button className="button" onClick={() => navigate("analytics")}>
             <BarChart3 size={17} />
@@ -2881,7 +2857,13 @@ function PortfolioHero({
         />
         <div className="portfolio-metric-grid">
           <span>
-            <small>Gain/loss</small>
+            <small>30-day change</small>
+            <strong className={rangeChange && rangeChange.valueMinor >= 0 ? "positive" : ""}>
+              {rangeChange ? `${formatSignedMoney(rangeChange.valueMinor)} (${formatSignedPercent(rangeChange.percent)})` : "Building"}
+            </strong>
+          </span>
+          <span>
+            <small>Total gain/loss</small>
             <strong className={gain >= 0 ? "positive" : ""}>{formatSignedMoney(gain)}</strong>
           </span>
           <span>
@@ -2889,26 +2871,8 @@ function PortfolioHero({
             <strong>{formatMoney(summary.cost)}</strong>
           </span>
           <span>
-            <small>Value coverage</small>
-            <strong>{coverage}%</strong>
-          </span>
-          <span>
-            <small>Unvalued lots</small>
-            <strong>{intelligence.valuationCoverage.unvaluedLots}</strong>
-          </span>
-          <span>
-            <small>30-day change</small>
-            <strong className={rangeChange && rangeChange.valueMinor >= 0 ? "positive" : ""}>
-              {rangeChange ? `${formatSignedMoney(rangeChange.valueMinor)} (${formatSignedPercent(rangeChange.percent)})` : "Building"}
-            </strong>
-          </span>
-          <span>
             <small>Latest pricing</small>
             <strong>{intelligence.latestPricingAt ? formatEventDate(intelligence.latestPricingAt) : "Pending"}</strong>
-          </span>
-          <span>
-            <small>Wishlist targets</small>
-            <strong>{wishlistCount} / {formatMoney(wishlistTotal)}</strong>
           </span>
         </div>
       </div>
@@ -3318,6 +3282,10 @@ function CollectionScreen({
     (total, item) => total + (getOwnedValue(item, catalogueById.get(item.catalogueId)) ?? 0),
     0,
   );
+  const collectionValue = enrichedItems.reduce((total, row) => total + (row.value ?? 0), 0);
+  const unvaluedCount = enrichedItems.filter((row) => row.value === null).length;
+  const cardLots = enrichedItems.filter((row) => row.catalogueItem?.type === "card").length;
+  const sealedLots = enrichedItems.filter((row) => row.catalogueItem?.type === "sealed").length;
   const activeFilterCount = [
     normalizedSearch.length > 0,
     appState.collectionFilter !== "all",
@@ -3383,7 +3351,6 @@ function CollectionScreen({
         title="Collection"
         action={
           <>
-            <span className="status-pill">{items.length} shown</span>
             <button className="button" onClick={() => navigate("binders")}>
               <BookOpen size={17} />
               Binders
@@ -3396,6 +3363,13 @@ function CollectionScreen({
         }
       />
 
+      <div className="summary-strip collection-summary-strip">
+        <span><small>Collection value</small><strong>{formatMoney(collectionValue)}</strong></span>
+        <span><small>Lots</small><strong>{collection.length}</strong></span>
+        <span><small>Cards / sealed</small><strong>{cardLots} / {sealedLots}</strong></span>
+        <span><small>Needs estimate</small><strong>{unvaluedCount}</strong></span>
+      </div>
+
       <div className="toolbar">
         <div className="collection-toolbar-head">
           <label className="search-box">
@@ -3407,6 +3381,29 @@ function CollectionScreen({
             />
           </label>
           <div className="toolbar-actions">
+            <label className="sort-control compact-sort-control">
+              <ArrowDownUp size={16} />
+              <span className="sr-only">Sort collection</span>
+              <select
+                value={appState.collectionSort}
+                onChange={(event) =>
+                  setAppState((current) => ({
+                    ...current,
+                    collectionSort: event.target.value as AppState["collectionSort"],
+                  }))
+                }
+              >
+                <option value="value-desc">Value high to low</option>
+                <option value="value-asc">Value low to high</option>
+                <option value="gain-desc">Gain/loss</option>
+                <option value="quantity-desc">Quantity</option>
+                <option value="name">Name A-Z</option>
+                <option value="name-desc">Name Z-A</option>
+                <option value="set">Set number low to high</option>
+                <option value="set-desc">Set number high to low</option>
+                <option value="recent">Recently added</option>
+              </select>
+            </label>
             <button className="button" onClick={() => setFiltersOpen((open) => !open)}>
               <SlidersHorizontal size={17} />
               Filters{activeFilterCount ? ` (${activeFilterCount})` : ""}
@@ -3440,34 +3437,9 @@ function CollectionScreen({
             </button>
           ))}
         </div>
-        <div className="collection-sort-row">
-          <p className="muted">
-            {items.length} of {collection.length} lots | {formatMoney(visibleValue)} visible value
-          </p>
-          <label className="sort-control">
-            <ArrowDownUp size={16} />
-            <span>Sort</span>
-            <select
-              value={appState.collectionSort}
-              onChange={(event) =>
-                setAppState((current) => ({
-                  ...current,
-                  collectionSort: event.target.value as AppState["collectionSort"],
-                }))
-              }
-            >
-              <option value="value-desc">Value high to low</option>
-              <option value="value-asc">Value low to high</option>
-              <option value="gain-desc">Gain/loss</option>
-              <option value="quantity-desc">Quantity</option>
-              <option value="name">Name A-Z</option>
-              <option value="name-desc">Name Z-A</option>
-              <option value="set">Set number low to high</option>
-              <option value="set-desc">Set number high to low</option>
-              <option value="recent">Recently added</option>
-            </select>
-          </label>
-        </div>
+        <p className="result-meta collection-result-meta">
+          {items.length} of {collection.length} lots | {formatMoney(visibleValue)} visible value
+        </p>
         {filtersOpen || activeFilterCount > 0 ? (
           <div className="filter-panel">
             <div className="field-grid">
@@ -5854,61 +5826,13 @@ function WishlistScreen({
         row.item.notes ?? "",
       ].join(" ").toLowerCase().includes(normalizedWishlistSearch);
     });
-  const buyingSignals = wishlistRows
-    .map((row) => {
-      const priorityScore = priorityRank(row.item.priority) * 20;
-      const marketValue = row.currentValue ?? 0;
+  const watchCount = wishlistRows.filter((row) => {
+    if (row.delta === null || row.delta >= 0 || !row.targetValue) {
+      return false;
+    }
 
-      if (row.delta === null) {
-        return {
-          action: "Estimate",
-          detail: "No live market value yet. Add a target note or wait for pricing coverage.",
-          row,
-          score: priorityScore + 20,
-          status: "estimate" as const,
-        };
-      }
-
-      if (row.delta >= 0) {
-        return {
-          action: "Buy",
-          detail: `${formatMoney(row.delta)} below your target price.`,
-          row,
-          score: priorityScore + 100 + Math.min(40, row.delta / 500),
-          status: "ready" as const,
-        };
-      }
-
-      const targetValue = row.targetValue ?? 0;
-      const watchBand = Math.max(500, Math.round(targetValue * 0.1));
-
-      if (targetValue > 0 && Math.abs(row.delta) <= watchBand) {
-        return {
-          action: "Watch",
-          detail: `${formatMoney(Math.abs(row.delta))} above target and inside the watch band.`,
-          row,
-          score: priorityScore + 60 + Math.min(20, marketValue / 1000),
-          status: "watch" as const,
-        };
-      }
-
-      return {
-        action: "Wait",
-        detail: `${formatMoney(Math.abs(row.delta))} above your target price.`,
-        row,
-        score: priorityScore,
-        status: "wait" as const,
-      };
-    })
-    .sort((left, right) => right.score - left.score);
-  const readySignals = buyingSignals.filter((signal) => signal.status === "ready");
-  const watchSignals = buyingSignals.filter((signal) => signal.status === "watch");
-  const estimateSignals = buyingSignals.filter((signal) => signal.status === "estimate");
-  const buyListSignals = [
-    ...readySignals,
-    ...watchSignals,
-    ...estimateSignals,
-  ].slice(0, 4);
+    return Math.abs(row.delta) <= Math.max(500, Math.round(row.targetValue * 0.1));
+  }).length;
   const previewItem = previewItemId ? catalogueById.get(previewItemId) : undefined;
   const previewOwned = previewItem
     ? collection.find((item) => item.catalogueId === previewItem.id)
@@ -5979,29 +5903,35 @@ function WishlistScreen({
         className={isCard ? "wishlist-card-actions" : "wishlist-table-actions"}
         onClick={(event) => event.stopPropagation()}
       >
-        <button className="button primary" type="button" onClick={() => void addToCollection(row.item.catalogueId)}>
+        <button
+          className={isCard ? "button primary" : "icon-button primary"}
+          type="button"
+          onClick={() => void addToCollection(row.item.catalogueId)}
+          aria-label="Move to collection"
+          title="Move to collection"
+        >
           <Check size={17} />
-          Move
+          {isCard ? "Move" : <span className="sr-only">Move to collection</span>}
         </button>
         <button
-          className="button wishlist-icon-action"
+          className={isCard ? "button wishlist-icon-action" : "icon-button"}
           type="button"
           onClick={() => setEditingId(row.item.id)}
           aria-label="Edit target"
           title="Edit target"
         >
           <Settings size={17} />
-          {isCard ? <span className="sr-only">Edit target</span> : "Edit"}
+          <span className="sr-only">Edit target</span>
         </button>
         <button
-          className="button wishlist-icon-action danger"
+          className={isCard ? "button wishlist-icon-action danger" : "icon-button danger"}
           type="button"
           onClick={() => void removeWishlistItem(row.item.id)}
           aria-label="Remove target"
           title="Remove target"
         >
           <Trash2 size={17} />
-          {isCard ? <span className="sr-only">Remove target</span> : "Remove"}
+          <span className="sr-only">Remove target</span>
         </button>
       </div>
     );
@@ -6064,20 +5994,17 @@ function WishlistScreen({
       <PageHeader
         title="Wishlist"
         action={
-          <div className="actions">
-            {wishlist.length ? <span className="status-pill">{wishlistRows.length} shown</span> : null}
-            <button className="button primary" onClick={() => startAdd("card")}>
-              <Plus size={17} />
-              Add target
-            </button>
-          </div>
+          <button className="button primary" onClick={() => startAdd("card")}>
+            <Plus size={17} />
+            Add target
+          </button>
         }
       />
-      <div className="stats-grid compact">
-        <StatCard label="Wanted" value={wishlist.length.toString()} note="Cards and sealed products" />
-        <StatCard label="Target total" value={formatMoney(wishlistTotal)} note="Based on target prices" />
-        <StatCard label="Ready" value={readySignals.length.toString()} note="At or below target" positive={readySignals.length > 0} />
-        <StatCard label="Watch band" value={watchSignals.length.toString()} note="Within 10% of target" />
+      <div className="summary-strip wishlist-overview-strip">
+        <span><small>Wanted</small><strong>{wishlist.length}</strong><em>{wishlistInsight.grailCount} grail</em></span>
+        <span><small>Target total</small><strong>{formatMoney(wishlistTotal)}</strong></span>
+        <span><small>Ready now</small><strong className={wishlistInsight.targetHits ? "positive" : ""}>{wishlistInsight.targetHits}</strong></span>
+        <span><small>Watch band</small><strong>{watchCount}</strong></span>
       </div>
       {wishlist.length ? (
         <div className="toolbar wishlist-toolbar">
@@ -6091,6 +6018,21 @@ function WishlistScreen({
               />
             </label>
             <div className="toolbar-actions">
+              <label className="sort-control compact-sort-control">
+                <ArrowDownUp size={16} />
+                <span className="sr-only">Sort wishlist</span>
+                <select value={sort} onChange={(event) => setSort(event.target.value as WishlistSort)}>
+                  <option value="priority-desc">Priority</option>
+                  <option value="target-desc">Target high to low</option>
+                  <option value="target-asc">Target low to high</option>
+                  <option value="market-desc">Market high to low</option>
+                  <option value="market-asc">Market low to high</option>
+                  <option value="set-number-asc">Set number low to high</option>
+                  <option value="set-number-desc">Set number high to low</option>
+                  <option value="name-asc">Name A-Z</option>
+                  <option value="name-desc">Name Z-A</option>
+                </select>
+              </label>
               <div className="segmented compact" aria-label="Wishlist view">
                 <button
                   className={appState.wishlistView === "list" ? "active" : ""}
@@ -6111,105 +6053,11 @@ function WishlistScreen({
               </div>
             </div>
           </div>
-          <div className="collection-sort-row">
-            <p className="muted">
-              {wishlistRows.length} of {wishlist.length} targets | {wishlistInsight.targetHits} at target
-            </p>
-            <label className="sort-control">
-              <ArrowDownUp size={16} />
-              Sort
-              <select value={sort} onChange={(event) => setSort(event.target.value as WishlistSort)}>
-                <option value="priority-desc">Priority</option>
-                <option value="target-desc">Target high to low</option>
-                <option value="target-asc">Target low to high</option>
-                <option value="market-desc">Market high to low</option>
-                <option value="market-asc">Market low to high</option>
-                <option value="set-number-asc">Set number low to high</option>
-                <option value="set-number-desc">Set number high to low</option>
-                <option value="name-asc">Name A-Z</option>
-                <option value="name-desc">Name Z-A</option>
-              </select>
-            </label>
-          </div>
+          <p className="result-meta">
+            {wishlistRows.length} of {wishlist.length} targets | {wishlistInsight.targetHits} ready now
+          </p>
         </div>
       ) : null}
-      {wishlist.length ? (
-        <section className="tool-panel wishlist-summary-panel">
-          <div className="panel-title-row">
-            <div>
-              <h2>Target watch</h2>
-              <p className="muted">
-                {wishlistInsight.targetHits
-                  ? `${wishlistInsight.targetHits} ${wishlistInsight.targetHits === 1 ? "target is" : "targets are"} at or below your buy price.`
-                  : "No targets are at or below your buy price yet."}
-              </p>
-            </div>
-            <span className="tag amber">{wishlistInsight.grailCount} grail</span>
-          </div>
-          <div className="wishlist-summary-grid">
-            <span><b>{wishlistInsight.targetHits}</b>At target</span>
-            <span><b>{wishlistInsight.pricedCount}</b>Priced</span>
-            <span><b>{wishlist.length - wishlistInsight.pricedCount}</b>Needs estimate</span>
-          </div>
-        </section>
-      ) : null}
-      {wishlist.length ? (
-        <section className="tool-panel wishlist-buy-panel">
-          <div className="panel-title-row">
-            <div>
-              <h2>Buying signals</h2>
-              <p className="muted">
-                {readySignals.length
-                  ? `${readySignals.length} ${readySignals.length === 1 ? "target is" : "targets are"} ready now.`
-                  : watchSignals.length
-                    ? `${watchSignals.length} ${watchSignals.length === 1 ? "target is" : "targets are"} close to your buy price.`
-                    : "No target is close to your buy price yet."}
-              </p>
-            </div>
-            <span className={readySignals.length ? "tag green" : "tag blue"}>
-              {readySignals.length ? "Buy" : "Watch"}
-            </span>
-          </div>
-          {buyListSignals.length ? (
-            <div className="buying-signal-list">
-              {buyListSignals.map((signal) => (
-                <article
-                  className={`buying-signal-row signal-${signal.status} clickable-row`}
-                  key={signal.row.item.id}
-                  onClick={() => setPreviewItemId(signal.row.catalogueItem.id)}
-                >
-                  <div className="table-thumb">{renderItemImage(signal.row.catalogueItem)}</div>
-                  <div className="buying-signal-copy">
-                    <div className="tag-row">
-                      <span className={`tag ${wishlistSignalTagClass(signal.status)}`}>{signal.action}</span>
-                      <span className={`priority-pill priority-${signal.row.item.priority.toLowerCase()}`}>
-                        {signal.row.item.priority}
-                      </span>
-                    </div>
-                    <strong>{catalogueItemTitle(signal.row.catalogueItem)}</strong>
-                    <span>{catalogueItemSetLabel(signal.row.catalogueItem)} | Target {formatValuation(signal.row.targetValue)} | Market {formatValuation(signal.row.currentValue)}</span>
-                    <p className="muted">{signal.detail}</p>
-                  </div>
-                  <button
-                    className="button small"
-                    type="button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      void addToCollection(signal.row.item.catalogueId);
-                    }}
-                  >
-                    <Check size={15} />
-                    Move
-                  </button>
-                </article>
-              ))}
-            </div>
-          ) : (
-            <p className="muted">Add target prices to turn wishlist rows into buying signals.</p>
-          )}
-        </section>
-      ) : null}
-
       <div className="wishlist-results">
         {wishlistRows.length ? (
           appState.wishlistView === "grid" ? (
@@ -8887,7 +8735,6 @@ function CollectionTable({
         <thead>
           <tr>
             <th>Item</th>
-            <th>Type</th>
             <th>Condition</th>
             <th>Qty</th>
             <th>Cost</th>
@@ -8927,29 +8774,56 @@ function CollectionTable({
                     </div>
                   </div>
                 </td>
-                <td>{catalogueItem.type === "sealed" ? "Sealed" : "Card"}</td>
-                <td>{item.condition}</td>
+                <td>
+                  <strong>{item.condition}</strong>
+                  <span className="table-subline">
+                    {item.grade && item.grade !== "Raw" && item.grade !== "N/A"
+                      ? item.grade
+                      : catalogueItem.type === "sealed"
+                        ? "Sealed"
+                        : item.variant}
+                  </span>
+                </td>
                 <td>{item.quantity}</td>
                 <td>{formatMoney(item.purchasePriceMinor)}</td>
                 <td><strong>{formatValuation(getOwnedValue(item, catalogueItem))}</strong></td>
                 <td>{item.location}</td>
-                <td>
-                  <button
-                    className="button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      openItem(item.id);
-                    }}
-                  >
-                    Open
-                  </button>
-                </td>
+                <td><ArrowRight className="row-chevron" size={17} /></td>
               </tr>
             );
           })}
         </tbody>
       </table>
     </div>
+  );
+}
+
+function PortfolioRecentRow({
+  item,
+  catalogueItem,
+  onClick,
+}: {
+  item: CollectionItem;
+  catalogueItem?: CatalogueItem;
+  onClick: () => void;
+}) {
+  if (!catalogueItem) {
+    return null;
+  }
+
+  return (
+    <button className="compact-item-row" type="button" onClick={onClick}>
+      <span className="compact-item-thumb">{renderItemImage(catalogueItem)}</span>
+      <span className="compact-item-copy">
+        <strong>{catalogueItemTitle(catalogueItem)}</strong>
+        <small>{catalogueItemSetLabel(catalogueItem)} | {item.condition}</small>
+      </span>
+      <span className="compact-item-value">
+        <strong>{formatValuation(getOwnedValue(item, catalogueItem))}</strong>
+        <small>Qty {item.quantity}</small>
+      </span>
+      <ArrowRight size={16} />
+    </button>
   );
 }
 
@@ -10162,22 +10036,6 @@ function priceAlertTagClass(status: CollectionIntelligence["priceAlerts"][number
 
   if (status === "Refresh") {
     return "blue";
-  }
-
-  return "amber";
-}
-
-function wishlistSignalTagClass(status: "estimate" | "ready" | "wait" | "watch") {
-  if (status === "ready") {
-    return "green";
-  }
-
-  if (status === "estimate") {
-    return "blue";
-  }
-
-  if (status === "wait") {
-    return "";
   }
 
   return "amber";
