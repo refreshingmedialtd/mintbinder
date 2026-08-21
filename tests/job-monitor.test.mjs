@@ -92,3 +92,23 @@ test("keeps alerts quiet in dry-run mode and builds safe email content", () => {
   assert.match(email.text, /Bad <provider> response/);
   assert.match(email.html, /Bad &lt;provider&gt; response/);
 });
+
+test("includes pricing-health failures in the operational alert", () => {
+  const report = buildJobMonitorReport({
+    alertTo: "liam@example.com",
+    detailLimit: 10,
+    dryRun: false,
+    failedRuns: [],
+    lookbackMinutes: 90,
+    now,
+    pricingHealth: {
+      problems: ["Sealed pricing rotation is unhealthy."],
+    },
+    staleMinutes: 45,
+    staleRuns: [],
+  });
+
+  assert.equal(report.ok, false);
+  assert.deepEqual(report.problems, ["Sealed pricing rotation is unhealthy."]);
+  assert.equal(shouldSendJobMonitorAlert(report), true);
+});

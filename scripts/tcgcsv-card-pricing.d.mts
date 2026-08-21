@@ -44,3 +44,14 @@ export function japanCardPricingOptionsFromEnv(
 export function syncTcgcsvCardPrices(
   options?: TcgcsvCardPricingOptions,
 ): Promise<TcgcsvCardPricingSummary>;
+
+export function matchTcgcsvCardProduct(product: unknown, cards: unknown[]): unknown | null;
+
+export function tcgcsvCardVariantLabel(product: unknown, subTypeName?: string | null): string;
+
+export function resolveTcgcsvVariantIdentities<T extends {
+  cardPrintingId: string;
+  product?: { productId?: number | string; name?: string; url?: string };
+  sourceRef?: string;
+  subTypeName?: string | null;
+}>(entries: T[]): Array<T & { sourceRef: string; variantLabel: string }>;

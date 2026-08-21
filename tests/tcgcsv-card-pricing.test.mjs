@@ -6,7 +6,9 @@ import {
   japanCardPricingOptionsFromEnv,
   matchTcgcsvCardGroupsToSets,
   matchTcgcsvCardProduct,
+  resolveTcgcsvVariantIdentities,
   syncTcgcsvCardPrices,
+  tcgcsvCardVariantLabel,
 } from "../scripts/tcgcsv-card-pricing.mjs";
 
 test("detects card products while excluding sealed products", () => {
@@ -73,6 +75,46 @@ test("matches TCGCSV card products to local cards by number and name", () => {
     ),
     cards[4],
   );
+});
+
+test("does not use a name fallback when TCGCSV supplies a mismatched collector number", () => {
+  const cards = [{ id: "card-162", name: "Giovanni's Charisma", number: "162" }];
+
+  assert.equal(matchTcgcsvCardProduct({
+    extendedData: [{ name: "Number", value: "197/165" }],
+    name: "Giovanni's Charisma",
+  }, cards), null);
+  assert.deepEqual(matchTcgcsvCardProduct({
+    extendedData: [{ name: "Rarity", value: "Promo" }],
+    name: "Giovanni's Charisma",
+  }, cards), cards[0]);
+});
+
+test("uses printing details and deterministic provider suffixes for parallel variants", () => {
+  assert.equal(tcgcsvCardVariantLabel({
+    name: "Giovanni's Charisma (Poke Ball Pattern)",
+  }, "Holofoil"), "Poke Ball Reverse Holofoil");
+  assert.equal(tcgcsvCardVariantLabel({
+    name: "Giovanni's Charisma (Master Ball Pattern)",
+  }, "Holofoil"), "Master Ball Reverse Holofoil");
+
+  const resolved = resolveTcgcsvVariantIdentities([
+    {
+      cardPrintingId: "card-1",
+      product: { name: "Pikachu", productId: 101 },
+      subTypeName: "Holofoil",
+    },
+    {
+      cardPrintingId: "card-1",
+      product: { name: "Pikachu", productId: 205 },
+      subTypeName: "Holofoil",
+    },
+  ]);
+
+  assert.deepEqual(resolved.map((entry) => entry.variantLabel), [
+    "Holofoil",
+    "Holofoil · TCGplayer #205",
+  ]);
 });
 
 test("matches card-only TCGCSV promo and trainer kit groups to local sets", () => {

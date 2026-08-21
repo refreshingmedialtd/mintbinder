@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { PrismaClient } from "@prisma/client";
+import { boundedJobDurationMs } from "./job-run-repair-utils.mjs";
 
 const defaultStaleMinutes = 45;
 const prisma = new PrismaClient();
@@ -46,17 +47,19 @@ try {
   const repaired = [];
 
   for (const run of staleRuns) {
-    const durationMs = Math.max(0, now.getTime() - run.startedAt.getTime());
-    const errorMessage = `Marked failed by stale job repair after ${Math.round(durationMs / 60000)} minutes without a finish timestamp.`;
+    const duration = boundedJobDurationMs(run.startedAt, now);
+    const errorMessage = `Marked failed by stale job repair after ${Math.round(duration.actualDurationMs / 60000)} minutes without a finish timestamp.`;
     const resultPayload = {
       ...(isObject(run.resultPayload) ? run.resultPayload : {}),
+      actualDurationMs: duration.actualDurationMs,
+      durationWasCapped: duration.durationWasCapped,
       repairedAt: now.toISOString(),
       repairReason: "stale_running_job",
     };
     const updated = await prisma.jobRun.update({
       where: { id: run.id },
       data: {
-        durationMs,
+        durationMs: duration.durationMs,
         errorMessage,
         finishedAt: now,
         resultPayload,

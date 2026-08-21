@@ -2,6 +2,7 @@ import "dotenv/config";
 import nodemailer from "nodemailer";
 import { PrismaClient } from "@prisma/client";
 import { pathToFileURL } from "node:url";
+import { buildPricingHealthReport, loadPricingHealthMetrics } from "./report-pricing-health.mjs";
 
 const defaultLookbackMinutes = 90;
 const defaultStaleMinutes = 45;
@@ -18,7 +19,11 @@ export async function runJobMonitor({
   sendEmail = sendMonitorEmail,
 } = {}) {
   try {
-    const runs = await loadProblemJobRuns({ detailLimit, lookbackMinutes, now, prisma, staleMinutes });
+    const [runs, pricingMetrics] = await Promise.all([
+      loadProblemJobRuns({ detailLimit, lookbackMinutes, now, prisma, staleMinutes }),
+      loadPricingHealthMetrics({ now, prisma }),
+    ]);
+    const pricingHealth = buildPricingHealthReport(pricingMetrics);
     const report = buildJobMonitorReport({
       alertTo,
       detailLimit,
@@ -26,6 +31,7 @@ export async function runJobMonitor({
       failedRuns: runs.failedRuns,
       lookbackMinutes,
       now,
+      pricingHealth,
       staleMinutes,
       staleRuns: runs.staleRuns,
     });
@@ -61,6 +67,7 @@ export function buildJobMonitorReport({
   failedRuns,
   lookbackMinutes,
   now,
+  pricingHealth,
   staleMinutes,
   staleRuns,
 }) {
@@ -73,6 +80,7 @@ export function buildJobMonitorReport({
     ...(normalizedStaleRuns.length
       ? [`${normalizedStaleRuns.length} running job run${normalizedStaleRuns.length === 1 ? "" : "s"} older than ${staleMinutes} minutes.`]
       : []),
+    ...(pricingHealth?.problems ?? []),
   ];
 
   return {
@@ -91,6 +99,7 @@ export function buildJobMonitorReport({
       count: normalizedFailedRuns.length,
       runs: normalizedFailedRuns,
     },
+    pricingHealth: pricingHealth ?? null,
     staleMinutes,
     staleRunning: {
       count: normalizedStaleRuns.length,

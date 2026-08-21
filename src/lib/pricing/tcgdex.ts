@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
+import { preserveCardSetMetadataOnUpdate } from "@/lib/pricing/card-set-metadata";
 import {
   catalogueDisplayNameForText,
   catalogueDisplaySetForText,
@@ -95,40 +96,29 @@ export async function syncTcgdexCardPages({
 
     setIds.add(setId);
 
+    const setData = {
+      language: resolvedLanguage.code,
+      logoImageUrl: card.set.logo,
+      metadata: compactJson({
+        provider: "tcgdex",
+        providerUpdatedAt: now,
+        regionLabel: resolvedLanguage.regionLabel,
+        tcgdexLanguage: resolvedLanguage.tcgdexCode,
+      }),
+      name: card.set.name,
+      printedTotal: card.set.cardCount?.official,
+      providerIds: providerIds(resolvedLanguage.code, card.set.id),
+      region: resolvedLanguage.region,
+      symbolImageUrl: card.set.symbol,
+      total: card.set.cardCount?.total,
+    };
+
     await prisma.cardSet.upsert({
       where: { id: setId },
-      update: {
-        language: resolvedLanguage.code,
-        logoImageUrl: card.set.logo,
-        metadata: compactJson({
-          provider: "tcgdex",
-          providerUpdatedAt: now,
-          regionLabel: resolvedLanguage.regionLabel,
-          tcgdexLanguage: resolvedLanguage.tcgdexCode,
-        }),
-        name: card.set.name,
-        printedTotal: card.set.cardCount?.official,
-        providerIds: providerIds(resolvedLanguage.code, card.set.id),
-        region: resolvedLanguage.region,
-        symbolImageUrl: card.set.symbol,
-        total: card.set.cardCount?.total,
-      },
+      update: preserveCardSetMetadataOnUpdate(setData),
       create: {
         id: setId,
-        language: resolvedLanguage.code,
-        logoImageUrl: card.set.logo,
-        metadata: compactJson({
-          provider: "tcgdex",
-          providerUpdatedAt: now,
-          regionLabel: resolvedLanguage.regionLabel,
-          tcgdexLanguage: resolvedLanguage.tcgdexCode,
-        }),
-        name: card.set.name,
-        printedTotal: card.set.cardCount?.official,
-        providerIds: providerIds(resolvedLanguage.code, card.set.id),
-        region: resolvedLanguage.region,
-        symbolImageUrl: card.set.symbol,
-        total: card.set.cardCount?.total,
+        ...setData,
       },
     });
 

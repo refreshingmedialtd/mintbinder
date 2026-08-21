@@ -46,6 +46,7 @@
     "monitor:jobs": "node scripts/monitor-job-runs.mjs",
     "ops:ensure-admin": "node scripts/ensure-production-admin.mjs",
     "ops:repair-stale-jobs": "node scripts/repair-stale-job-runs.mjs",
+    "ops:repair-tcgcsv-price-identities": "node scripts/repair-tcgcsv-price-identities.mjs",
     "billing:square-plans": "node scripts/setup-square-subscription-plans.mjs",
     "billing:square-smoke": "node scripts/smoke-square-billing.mjs",
     "billing:square-tunnel": "node scripts/run-square-webhook-tunnel.mjs",
@@ -82,6 +83,7 @@
     "job:pricecharting-sealed": "node scripts/import-pricecharting-sealed-prices.mjs",
     "job:sealed-tcgcsv": "node scripts/import-tcgcsv-sealed-products.mjs",
     "report:tcgcsv-card-targets": "node scripts/report-tcgcsv-card-targets.mjs",
+    "report:pricing-health": "node scripts/report-pricing-health.mjs",
     "report:catalogue-gaps": "node scripts/report-catalogue-gaps.mjs"
   },
   "dependencies": {

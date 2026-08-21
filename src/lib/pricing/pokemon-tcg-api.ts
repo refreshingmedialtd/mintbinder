@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { ItemCondition, ItemType, type Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
+import { preserveCardSetMetadataOnUpdate } from "@/lib/pricing/card-set-metadata";
 import { catalogueLanguageSearchAliases } from "@/lib/catalogue/languages";
 import { ExchangeRateConfigError, resolvePokemonPricingRates } from "@/lib/pricing/exchange-rates";
 import {
@@ -243,7 +244,7 @@ export async function syncPokemonTcgSets({
 
     await prisma.cardSet.upsert({
       where: { id },
-      update: data,
+      update: preserveCardSetMetadataOnUpdate(data),
       create: { id, ...data },
     });
     setsUpserted += 1;
@@ -358,34 +359,26 @@ export async function syncPokemonTcgCards({
 
     setIds.add(setId);
 
+    const setData = {
+      language: "en",
+      logoImageUrl: card.set.images?.logo,
+      metadata: { provider: "pokemon-tcg-api", providerUpdatedAt: new Date().toISOString() },
+      name: card.set.name,
+      printedTotal: card.set.printedTotal,
+      providerIds: { pokemon_tcg_api: card.set.id },
+      region: "international",
+      releaseDate: parsePokemonDate(card.set.releaseDate),
+      series: card.set.series,
+      symbolImageUrl: card.set.images?.symbol,
+      total: card.set.total,
+    } satisfies Prisma.CardSetUncheckedCreateInput;
+
     await prisma.cardSet.upsert({
       where: { id: setId },
-      update: {
-        language: "en",
-        logoImageUrl: card.set.images?.logo,
-        metadata: { provider: "pokemon-tcg-api", providerUpdatedAt: new Date().toISOString() },
-        name: card.set.name,
-        printedTotal: card.set.printedTotal,
-        providerIds: { pokemon_tcg_api: card.set.id },
-        region: "international",
-        releaseDate: parsePokemonDate(card.set.releaseDate),
-        series: card.set.series,
-        symbolImageUrl: card.set.images?.symbol,
-        total: card.set.total,
-      },
+      update: preserveCardSetMetadataOnUpdate(setData),
       create: {
         id: setId,
-        language: "en",
-        logoImageUrl: card.set.images?.logo,
-        metadata: { provider: "pokemon-tcg-api", providerUpdatedAt: new Date().toISOString() },
-        name: card.set.name,
-        printedTotal: card.set.printedTotal,
-        providerIds: { pokemon_tcg_api: card.set.id },
-        region: "international",
-        releaseDate: parsePokemonDate(card.set.releaseDate),
-        series: card.set.series,
-        symbolImageUrl: card.set.images?.symbol,
-        total: card.set.total,
+        ...setData,
       },
     });
   }

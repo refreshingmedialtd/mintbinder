@@ -246,11 +246,82 @@ export function matchTcgcsvCardProduct(product, cards) {
     if (byNumber.length === 1) {
       return byNumber[0];
     }
+
+    // A supplied collector number is stronger evidence than the name. Falling
+    // back to a same-name card after the number misses can attach a parallel
+    // printing to the wrong local card.
+    return null;
   }
 
   const byName = cards.filter((card) => normalizedCardName(card.name) === productName);
 
   return byName.length === 1 ? byName[0] : null;
+}
+
+export function tcgcsvCardVariantLabel(product, subTypeName) {
+  const baseLabel = optionalString(subTypeName) ?? "Normal";
+  const identityText = `${product?.name ?? ""} ${product?.url ?? ""}`
+    .toLowerCase()
+    .replace(/%20/g, " ")
+    .replace(/[-_]+/g, " ");
+
+  if (/master\s*ball(?:\s*pattern)?/.test(identityText)) {
+    return "Master Ball Reverse Holofoil";
+  }
+
+  if (/poke\s*ball(?:\s*pattern)?/.test(identityText)) {
+    return "Poke Ball Reverse Holofoil";
+  }
+
+  if (/cosmos\s*holo/.test(identityText)) {
+    return "Cosmos Holofoil";
+  }
+
+  if (/galaxy\s*holo/.test(identityText)) {
+    return "Galaxy Holofoil";
+  }
+
+  if (/cracked\s*ice\s*holo/.test(identityText)) {
+    return "Cracked Ice Holofoil";
+  }
+
+  return baseLabel;
+}
+
+export function resolveTcgcsvVariantIdentities(entries) {
+  const resolved = entries.map((entry) => ({
+    ...entry,
+    sourceRef: String(entry.product?.productId ?? entry.sourceRef ?? "").trim(),
+    variantLabel: tcgcsvCardVariantLabel(entry.product, entry.subTypeName),
+  }));
+  const byCardAndLabel = new Map();
+
+  for (const entry of resolved) {
+    const key = `${entry.cardPrintingId}\u0000${entry.variantLabel}`;
+    const group = byCardAndLabel.get(key) ?? [];
+
+    group.push(entry);
+    byCardAndLabel.set(key, group);
+  }
+
+  for (const group of byCardAndLabel.values()) {
+    const distinctRefs = [...new Set(group.map((entry) => entry.sourceRef).filter(Boolean))]
+      .sort(compareProviderRefs);
+
+    if (distinctRefs.length <= 1) {
+      continue;
+    }
+
+    const canonicalRef = distinctRefs[0];
+
+    for (const entry of group) {
+      if (entry.sourceRef && entry.sourceRef !== canonicalRef) {
+        entry.variantLabel = `${entry.variantLabel} · TCGplayer #${entry.sourceRef}`;
+      }
+    }
+  }
+
+  return resolved;
 }
 
 export function isCardProduct(product) {
@@ -314,6 +385,8 @@ async function importCardGroup({
     pricesByProductId.set(price.productId, productPrices);
   }
 
+  const matchedProducts = [];
+
   for (const product of productsResponse.results ?? []) {
     if (!isCardProduct(product)) {
       summary.cardProductsSkipped += 1;
@@ -336,6 +409,27 @@ async function importCardGroup({
 
     summary.cardProductsMatched += 1;
 
+    matchedProducts.push({
+      card,
+      prices: usableTcgcsvPrices(pricesByProductId.get(product.productId) ?? []),
+      product,
+    });
+  }
+
+  const variantIdentities = resolveTcgcsvVariantIdentities(
+    matchedProducts.flatMap(({ card, prices, product }) => prices.map((price) => ({
+      cardPrintingId: card.id,
+      product,
+      subTypeName: price.subTypeName,
+    }))),
+  );
+  const variantLabelByKey = new Map(variantIdentities.map((identity) => [
+    tcgcsvVariantIdentityKey(identity.cardPrintingId, identity.sourceRef, identity.subTypeName),
+    identity.variantLabel,
+  ]));
+
+  for (const { card, prices, product } of matchedProducts) {
+
     if (writeImages && await updateTcgcsvCardImage(prisma, card, product)) {
       summary.cardImagesUpdated += 1;
     }
@@ -344,14 +438,16 @@ async function importCardGroup({
       continue;
     }
 
-    const prices = usableTcgcsvPrices(pricesByProductId.get(product.productId) ?? []);
-
     if (!prices.length) {
       continue;
     }
 
     for (const price of prices) {
-      const variantLabel = price.subTypeName ?? "Normal";
+      const variantLabel = variantLabelByKey.get(tcgcsvVariantIdentityKey(
+        card.id,
+        String(product.productId ?? ""),
+        price.subTypeName,
+      )) ?? tcgcsvCardVariantLabel(product, price.subTypeName);
 
       if (priceOnlyUnpriced && await hasCardVariantPriceSnapshot(prisma, card.id, variantLabel)) {
         continue;
@@ -534,6 +630,21 @@ function variantSortRank(value) {
   };
 
   return ranks[normalized] ?? 60;
+}
+
+function tcgcsvVariantIdentityKey(cardPrintingId, sourceRef, subTypeName) {
+  return `${cardPrintingId}\u0000${String(sourceRef ?? "")}\u0000${String(subTypeName ?? "Normal")}`;
+}
+
+function compareProviderRefs(left, right) {
+  const leftNumber = Number(left);
+  const rightNumber = Number(right);
+
+  if (Number.isFinite(leftNumber) && Number.isFinite(rightNumber) && leftNumber !== rightNumber) {
+    return leftNumber - rightNumber;
+  }
+
+  return left.localeCompare(right);
 }
 
 function normalizedCardNumber(value) {

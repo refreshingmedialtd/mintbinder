@@ -26,9 +26,43 @@ export function buildPriceHistory(prices: PriceHistoryInput[]): PricePoint[] {
     latestBySeriesDay.set(key, point);
   }
 
-  return [...latestBySeriesDay.values()].sort(
+  return suppressTransientPriceOutliers([...latestBySeriesDay.values()]).sort(
     (left, right) => Date.parse(left.observedAt) - Date.parse(right.observedAt),
   );
+}
+
+export function suppressTransientPriceOutliers(history: PricePoint[]): PricePoint[] {
+  const bySeries = new Map<string, PricePoint[]>();
+
+  for (const point of history) {
+    const key = `${point.source}\u0000${point.variantLabel ?? ""}`;
+    const series = bySeries.get(key) ?? [];
+
+    series.push(point);
+    bySeries.set(key, series);
+  }
+
+  const kept: PricePoint[] = [];
+
+  for (const series of bySeries.values()) {
+    const sorted = [...series].sort(
+      (left, right) => Date.parse(left.observedAt) - Date.parse(right.observedAt),
+    );
+
+    for (let index = 0; index < sorted.length; index += 1) {
+      const previous = sorted[index - 1];
+      const point = sorted[index];
+      const next = sorted[index + 1];
+
+      if (previous && next && isTransientPriceOutlier(previous.valueMinor, point.valueMinor, next.valueMinor)) {
+        continue;
+      }
+
+      kept.push(point);
+    }
+  }
+
+  return kept;
 }
 
 export function latestPricePoint(history: PricePoint[]) {
@@ -100,4 +134,27 @@ function normalizeObservedAt(value?: Date | string | null) {
   }
 
   return date.toISOString();
+}
+
+function isTransientPriceOutlier(previous: number, current: number, next: number) {
+  const neighborRatio = priceRatio(previous, next);
+  const previousRatio = priceRatio(previous, current);
+  const nextRatio = priceRatio(next, current);
+  const minimumAbsoluteMove = Math.min(Math.abs(current - previous), Math.abs(current - next));
+
+  return neighborRatio <= 2
+    && previousRatio >= 10
+    && nextRatio >= 10
+    && minimumAbsoluteMove >= 2_000;
+}
+
+function priceRatio(left: number, right: number) {
+  const low = Math.min(left, right);
+  const high = Math.max(left, right);
+
+  if (low <= 0) {
+    return high > 0 ? Number.POSITIVE_INFINITY : 1;
+  }
+
+  return high / low;
 }
