@@ -54,7 +54,7 @@ import type {
   ReactNode,
   SetStateAction,
 } from "react";
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { canUseOperationsForUser, normalizeAppRole, type AppUserRole } from "@/lib/auth/roles";
 import {
   catalogueValueMinorForVariant,
@@ -3621,6 +3621,10 @@ function BindersScreen({
   const [recentMoveItemId, setRecentMoveItemId] = useState<string | null>(null);
   const [openBinderId, setOpenBinderId] = useState<string | null>(null);
   const [visiblePageIndex, setVisiblePageIndex] = useState(0);
+  const [isBinderOpening, setIsBinderOpening] = useState(false);
+  const [pageTurnDirection, setPageTurnDirection] = useState<"next" | "previous" | null>(null);
+  const [pullingItemId, setPullingItemId] = useState<string | null>(null);
+  const pageTurnTimeoutRef = useRef<number | null>(null);
   const availableItems = useMemo(
     () => collection.filter((item) => catalogueById.get(item.catalogueId)?.type === "card"),
     [catalogueById, collection],
@@ -3652,10 +3656,13 @@ function BindersScreen({
   const activeCardCount = activeBinder
     ? activeBinder.items.filter((item) => catalogueById.get(item.catalogueId)?.type === "card").length
     : 0;
-  const totalPages = Math.max(1, Math.ceil((activeBinder?.items.length ?? 0) / 9));
-  const boundedPageIndex = Math.min(visiblePageIndex, totalPages - 1);
-  const currentPageStart = boundedPageIndex * 9;
+  const totalLeafPages = Math.max(1, Math.ceil((activeBinder?.items.length ?? 0) / 9));
+  const totalSpreads = Math.max(1, Math.ceil(totalLeafPages / 2));
+  const boundedPageIndex = Math.min(visiblePageIndex, totalSpreads - 1);
+  const currentPageStart = boundedPageIndex * 18;
   const nextPageStart = currentPageStart + 9;
+  const leftPageNumber = boundedPageIndex * 2 + 1;
+  const rightPageNumber = leftPageNumber < totalLeafPages ? leftPageNumber + 1 : null;
   const normalizedItemSearch = normalizeSearchText(itemSearch);
   const pickerItems = useMemo(
     () =>
@@ -3683,6 +3690,32 @@ function BindersScreen({
   const focusedItem = focusedItemId ? activeBinder?.items.find((item) => item.id === focusedItemId) : undefined;
   const focusedCatalogueItem = focusedItem ? catalogueById.get(focusedItem.catalogueId) : undefined;
 
+  const turnBinderPages = useCallback((direction: "next" | "previous") => {
+    if (pageTurnDirection || isBinderOpening) {
+      return;
+    }
+
+    const nextSpread = direction === "next"
+      ? Math.min(totalSpreads - 1, boundedPageIndex + 1)
+      : Math.max(0, boundedPageIndex - 1);
+
+    if (nextSpread === boundedPageIndex) {
+      return;
+    }
+
+    setPageTurnDirection(direction);
+    setVisiblePageIndex(nextSpread);
+
+    if (pageTurnTimeoutRef.current !== null) {
+      window.clearTimeout(pageTurnTimeoutRef.current);
+    }
+
+    pageTurnTimeoutRef.current = window.setTimeout(() => {
+      setPageTurnDirection(null);
+      pageTurnTimeoutRef.current = null;
+    }, 720);
+  }, [boundedPageIndex, isBinderOpening, pageTurnDirection, totalSpreads]);
+
   useEffect(() => {
     if (binders.some((binder) => binder.id === appState.selectedBinderId)) {
       return;
@@ -3695,7 +3728,19 @@ function BindersScreen({
     setIsArranging(false);
     setLiftedItemId(null);
     setFocusedItemId(null);
+    setPullingItemId(null);
+    setPageTurnDirection(null);
     setVisiblePageIndex(0);
+
+    if (!activeBinder?.id) {
+      setIsBinderOpening(false);
+      return;
+    }
+
+    setIsBinderOpening(true);
+    const openingTimer = window.setTimeout(() => setIsBinderOpening(false), 920);
+
+    return () => window.clearTimeout(openingTimer);
   }, [activeBinder?.id]);
 
   useEffect(() => {
@@ -3707,12 +3752,47 @@ function BindersScreen({
   }, [binders, openBinderId]);
 
   useEffect(() => {
-    if (visiblePageIndex <= totalPages - 1) {
+    if (visiblePageIndex <= totalSpreads - 1) {
       return;
     }
 
-    setVisiblePageIndex(Math.max(0, totalPages - 1));
-  }, [totalPages, visiblePageIndex]);
+    setVisiblePageIndex(Math.max(0, totalSpreads - 1));
+  }, [totalSpreads, visiblePageIndex]);
+
+  useEffect(() => () => {
+    if (pageTurnTimeoutRef.current !== null) {
+      window.clearTimeout(pageTurnTimeoutRef.current);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!activeBinder) {
+      return;
+    }
+
+    function handleBinderKeyboard(event: KeyboardEvent) {
+      if (focusedItemId) {
+        return;
+      }
+
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        turnBinderPages("previous");
+      }
+
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        turnBinderPages("next");
+      }
+
+      if (event.key === "Escape") {
+        closeBinderViewer();
+      }
+    }
+
+    window.addEventListener("keydown", handleBinderKeyboard);
+    return () => window.removeEventListener("keydown", handleBinderKeyboard);
+  }, [activeBinder, focusedItemId, turnBinderPages]);
 
   function selectBinder(id: string) {
     setAppState((current) => ({ ...current, selectedBinderId: id }));
@@ -3729,6 +3809,7 @@ function BindersScreen({
     setIsArranging(false);
     setLiftedItemId(null);
     setFocusedItemId(null);
+    setPullingItemId(null);
   }
 
   function toggleDraftItem(itemId: string) {
@@ -3842,8 +3923,12 @@ function BindersScreen({
 
   function handleBinderSlotClick(item: CollectionItem | undefined, slotIndex: number) {
     if (!activeBinder || !isArranging) {
-      if (item) {
-        setFocusedItemId(item.id);
+      if (item && !pullingItemId) {
+        setPullingItemId(item.id);
+        window.setTimeout(() => {
+          setFocusedItemId(item.id);
+          setPullingItemId(null);
+        }, 360);
       }
       return;
     }
@@ -3934,6 +4019,18 @@ function BindersScreen({
         }
       />
 
+      <section className="binder-library-intro">
+        <div>
+          <p className="eyebrow">Your collection, shelved</p>
+          <h2>Choose a binder and open it.</h2>
+          <p>Browse card sleeves like a physical collection. Turn pages, inspect a card, or enter arrange mode to move it between pockets.</p>
+        </div>
+        <div className="binder-library-stats" aria-label="Binder library summary">
+          <span><strong>{binders.length}</strong> binder{binders.length === 1 ? "" : "s"}</span>
+          <span><strong>{availableItems.length}</strong> card lots</span>
+        </div>
+      </section>
+
       <section className="binder-shelf" aria-label="Binder shelf">
         {binders.map((binder) => (
           <button
@@ -3944,12 +4041,25 @@ function BindersScreen({
             type="button"
           >
             <span className="binder-cover-spine" />
-            <span className="binder-cover-icon"><BookOpen size={24} /></span>
+            <span className="binder-cover-rivets" aria-hidden="true" />
+            <span className="binder-cover-kicker">{binder.isDefault ? "Master collection" : "Curated binder"}</span>
+            <span className="binder-cover-icon"><Sparkles size={23} /></span>
+            <span className="binder-cover-preview" aria-hidden="true">
+              {binder.items.slice(0, 3).map((item, index) => {
+                const catalogueItem = catalogueById.get(item.catalogueId);
+
+                return catalogueItem ? (
+                  <span className={`binder-cover-card card-${index + 1}`} key={item.id}>
+                    {renderItemImage(catalogueItem)}
+                  </span>
+                ) : null;
+              })}
+            </span>
             <span className="binder-cover-label">
               <strong>{binder.name}</strong>
               <span>{binder.items.length} lot{binder.items.length === 1 ? "" : "s"}</span>
             </span>
-            <span className="binder-cover-open">Open binder</span>
+            <span className="binder-cover-open">Open <ArrowRight size={13} /></span>
           </button>
         ))}
       </section>
@@ -4025,7 +4135,7 @@ function BindersScreen({
 
       {activeBinder ? (
         <section className="binder-viewer-backdrop" onClick={closeBinderViewer} role="presentation">
-          <div className="binder-viewer" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label={`${activeBinder.name} binder`}>
+          <div className={isBinderOpening ? "binder-viewer opening" : "binder-viewer"} onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label={`${activeBinder.name} binder`}>
             <div className="binder-viewer-topbar">
               <button className="button small" type="button" onClick={closeBinderViewer}>
                 <ArrowLeft size={16} />
@@ -4078,18 +4188,21 @@ function BindersScreen({
                 <div className="binder-page-toolbar">
                   <button
                     className="button small"
-                    disabled={boundedPageIndex === 0}
-                    onClick={() => setVisiblePageIndex((current) => Math.max(0, current - 1))}
+                    disabled={boundedPageIndex === 0 || Boolean(pageTurnDirection) || isBinderOpening}
+                    onClick={() => turnBinderPages("previous")}
                     type="button"
                   >
                     <ArrowLeft size={15} />
                     Previous
                   </button>
-                  <span>Page {boundedPageIndex + 1} of {totalPages}</span>
+                  <span>
+                    Pages {leftPageNumber}{rightPageNumber ? `–${rightPageNumber}` : ""}
+                    <small> of {totalLeafPages}</small>
+                  </span>
                   <button
                     className="button small"
-                    disabled={boundedPageIndex >= totalPages - 1}
-                    onClick={() => setVisiblePageIndex((current) => Math.min(totalPages - 1, current + 1))}
+                    disabled={boundedPageIndex >= totalSpreads - 1 || Boolean(pageTurnDirection) || isBinderOpening}
+                    onClick={() => turnBinderPages("next")}
                     type="button"
                   >
                     Next
@@ -4097,32 +4210,75 @@ function BindersScreen({
                   </button>
                 </div>
 
-                <div className={isArranging ? "binder-book arranging" : "binder-book"} aria-label={`${activeBinder.name} page ${boundedPageIndex + 1}`}>
-                  <BinderPage
-                    catalogueById={catalogueById}
-                    items={activeBinder.items.slice(currentPageStart, currentPageStart + 9)}
-                    isArranging={isArranging}
-                    liftedItemId={liftedItemId}
-                    offset={currentPageStart}
-                    pageRole="primary"
-                    recentMoveItemId={recentMoveItemId}
-                    onSlotClick={handleBinderSlotClick}
-                  />
-                  <span className="binder-ring-strip" aria-hidden="true">
-                    {Array.from({ length: 5 }, (_, index) => (
-                      <span className="binder-ring" key={index} />
+                <div className="binder-book-shell">
+                  <div className="binder-opening-cover" aria-hidden="true">
+                    <span className="binder-opening-spine" />
+                    <span className="binder-opening-mark"><Sparkles size={28} /></span>
+                    <strong>{activeBinder.name}</strong>
+                    <small>{activeCardCount} cards</small>
+                  </div>
+                  <button
+                    aria-label="Turn to previous binder pages"
+                    className="binder-page-turn previous"
+                    disabled={boundedPageIndex === 0 || Boolean(pageTurnDirection) || isBinderOpening}
+                    onClick={() => turnBinderPages("previous")}
+                    type="button"
+                  >
+                    <ArrowLeft size={22} />
+                  </button>
+                  <div
+                    className={[
+                      "binder-book",
+                      isArranging ? "arranging" : "",
+                      pageTurnDirection ? `turning-${pageTurnDirection}` : "",
+                    ].filter(Boolean).join(" ")}
+                    key={`${activeBinder.id}-${boundedPageIndex}-${pageTurnDirection ?? "still"}`}
+                    aria-label={`${activeBinder.name}, pages ${leftPageNumber}${rightPageNumber ? ` and ${rightPageNumber}` : ""}`}
+                  >
+                    <BinderPage
+                      catalogueById={catalogueById}
+                      items={activeBinder.items.slice(currentPageStart, currentPageStart + 9)}
+                      isArranging={isArranging}
+                      liftedItemId={liftedItemId}
+                      offset={currentPageStart}
+                      pageNumber={leftPageNumber}
+                      pageRole="primary"
+                      pullingItemId={pullingItemId}
+                      recentMoveItemId={recentMoveItemId}
+                      onSlotClick={handleBinderSlotClick}
+                    />
+                    <span className="binder-ring-strip" aria-hidden="true">
+                      {Array.from({ length: 6 }, (_, index) => (
+                        <span className="binder-ring" key={index} />
+                      ))}
+                    </span>
+                    <BinderPage
+                      catalogueById={catalogueById}
+                      items={activeBinder.items.slice(nextPageStart, nextPageStart + 9)}
+                      isArranging={isArranging}
+                      liftedItemId={liftedItemId}
+                      offset={nextPageStart}
+                      pageNumber={rightPageNumber}
+                      pageRole="secondary"
+                      pullingItemId={pullingItemId}
+                      recentMoveItemId={recentMoveItemId}
+                      onSlotClick={handleBinderSlotClick}
+                    />
+                  </div>
+                  <button
+                    aria-label="Turn to next binder pages"
+                    className="binder-page-turn next"
+                    disabled={boundedPageIndex >= totalSpreads - 1 || Boolean(pageTurnDirection) || isBinderOpening}
+                    onClick={() => turnBinderPages("next")}
+                    type="button"
+                  >
+                    <ArrowRight size={22} />
+                  </button>
+                  <div className="binder-page-dots" aria-hidden="true">
+                    {Array.from({ length: totalSpreads }, (_, index) => (
+                      <span className={index === boundedPageIndex ? "active" : ""} key={index} />
                     ))}
-                  </span>
-                  <BinderPage
-                    catalogueById={catalogueById}
-                    items={activeBinder.items.slice(nextPageStart, nextPageStart + 9)}
-                    isArranging={isArranging}
-                    liftedItemId={liftedItemId}
-                    offset={nextPageStart}
-                    pageRole="secondary"
-                    recentMoveItemId={recentMoveItemId}
-                    onSlotClick={handleBinderSlotClick}
-                  />
+                  </div>
                 </div>
               </div>
 
@@ -4226,7 +4382,9 @@ function BinderPage({
   items,
   liftedItemId,
   offset,
+  pageNumber,
   pageRole,
+  pullingItemId,
   recentMoveItemId,
   onSlotClick,
 }: {
@@ -4235,7 +4393,9 @@ function BinderPage({
   items: CollectionItem[];
   liftedItemId: string | null;
   offset: number;
+  pageNumber: number | null;
   pageRole?: "primary" | "secondary";
+  pullingItemId: string | null;
   recentMoveItemId: string | null;
   onSlotClick: (item: CollectionItem | undefined, slotIndex: number) => void;
 }) {
@@ -4243,11 +4403,13 @@ function BinderPage({
 
   return (
     <div className={pageRole ? `binder-page ${pageRole}` : "binder-page"}>
+      <span className="binder-page-number" aria-hidden="true">{pageNumber ?? ""}</span>
       {slots.map((item, index) => {
         const catalogueItem = item ? catalogueById.get(item.catalogueId) : undefined;
         const isFilled = Boolean(item && catalogueItem);
         const isLifted = Boolean(item && item.id === liftedItemId);
         const isMoved = Boolean(item && item.id === recentMoveItemId);
+        const isPulling = Boolean(item && item.id === pullingItemId);
         const isDropTarget = Boolean(isArranging && liftedItemId && (!item || item.id !== liftedItemId));
         const pocketClassName = [
           "binder-pocket",
@@ -4255,6 +4417,7 @@ function BinderPage({
           isArranging ? "arranging" : "",
           isLifted ? "lifted" : "",
           isMoved ? "moved" : "",
+          isPulling ? "pulling" : "",
           isDropTarget ? "drop-target" : "",
         ].filter(Boolean).join(" ");
 
@@ -4277,8 +4440,14 @@ function BinderPage({
           >
             {item && catalogueItem ? (
               <>
-                <span className="binder-pocket-image">{renderItemImage(catalogueItem)}</span>
-                <span>{catalogueItemTitle(catalogueItem)}</span>
+                <span className="binder-pocket-image">
+                  {renderItemImage(catalogueItem)}
+                  <span className="binder-pocket-glint" aria-hidden="true" />
+                </span>
+                <span className="binder-pocket-caption">
+                  <strong>{catalogueItemTitle(catalogueItem)}</strong>
+                  <small>{item.variant}</small>
+                </span>
               </>
             ) : (
               <span className="binder-empty-slot">{isDropTarget ? "Place" : "Empty"}</span>

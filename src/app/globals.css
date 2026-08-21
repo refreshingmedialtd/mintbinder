@@ -2287,35 +2287,117 @@ h3 {
 }
 
 .binders-page {
-  gap: 20px;
+  gap: 24px;
+}
+
+.binder-library-intro {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  overflow: hidden;
+  padding: clamp(18px, 3vw, 30px);
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--line));
+  border-radius: 20px;
+  background:
+    radial-gradient(circle at 82% 12%, color-mix(in srgb, var(--theme-b) 24%, transparent), transparent 36%),
+    radial-gradient(circle at 8% 100%, color-mix(in srgb, var(--theme-c) 16%, transparent), transparent 32%),
+    linear-gradient(145deg, color-mix(in srgb, var(--surface) 94%, var(--theme-a)), var(--surface));
+  box-shadow: 0 20px 54px rgba(15, 23, 42, 0.1);
+}
+
+.binder-library-intro h2,
+.binder-library-intro p {
+  margin: 0;
+}
+
+.binder-library-intro h2 {
+  margin-top: 4px;
+  font-size: clamp(24px, 4vw, 40px);
+  letter-spacing: -0.04em;
+}
+
+.binder-library-intro > div:first-child > p:last-child {
+  max-width: 720px;
+  margin-top: 8px;
+  color: var(--muted);
+  line-height: 1.65;
+}
+
+.binder-library-stats {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+.binder-library-stats span {
+  display: grid;
+  min-width: 96px;
+  gap: 2px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--line));
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--surface) 78%, transparent);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 850;
+  text-align: center;
+  backdrop-filter: blur(12px);
+}
+
+.binder-library-stats strong {
+  color: var(--ink);
+  font-size: 22px;
 }
 
 .binder-shelf {
+  position: relative;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(164px, 210px));
-  gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 238px));
+  gap: 24px 18px;
   align-items: stretch;
+  padding: 14px 16px 32px;
+  perspective: 1200px;
+}
+
+.binder-shelf::after {
+  position: absolute;
+  right: 0;
+  bottom: 8px;
+  left: 0;
+  z-index: -1;
+  height: 22px;
+  border-radius: 4px 4px 12px 12px;
+  background: linear-gradient(180deg, color-mix(in srgb, #8b5e3c 72%, white), #5b3623 34%, #2d1a12);
+  box-shadow: 0 18px 24px rgba(15, 23, 42, 0.26);
+  content: "";
 }
 
 .binder-cover {
   position: relative;
   display: grid;
-  aspect-ratio: 3 / 4;
+  aspect-ratio: 3 / 4.05;
   min-height: 0;
   align-content: space-between;
   gap: 12px;
   overflow: hidden;
-  padding: 18px 16px 16px 34px;
+  padding: 18px 16px 16px 38px;
   border: 1px solid color-mix(in srgb, var(--binder-accent) 52%, var(--line));
-  border-radius: 9px;
+  border-radius: 8px 16px 16px 8px;
   background:
     linear-gradient(90deg, color-mix(in srgb, var(--binder-spine) 90%, black) 0 22px, transparent 22px),
     linear-gradient(135deg, color-mix(in srgb, var(--binder-surface) 82%, white), var(--binder-surface)),
     radial-gradient(circle at 78% 18%, color-mix(in srgb, var(--binder-accent) 32%, transparent), transparent 32%);
-  box-shadow: 0 18px 34px rgba(15, 23, 42, 0.22);
+  box-shadow:
+    -4px 8px 0 color-mix(in srgb, var(--binder-spine) 74%, black),
+    0 22px 42px rgba(15, 23, 42, 0.28);
   color: #111827;
   text-align: left;
-  transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
+  transform: rotateY(-4deg) rotateX(1deg);
+  transform-origin: left center;
+  transform-style: preserve-3d;
+  transition: transform 360ms cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 260ms ease, border-color 180ms ease;
 }
 
 .binder-cover::before,
@@ -2340,7 +2422,7 @@ h3 {
   background:
     linear-gradient(90deg, transparent, color-mix(in srgb, white 14%, transparent), transparent),
     repeating-linear-gradient(135deg, transparent 0 16px, color-mix(in srgb, var(--binder-accent) 10%, transparent) 16px 17px);
-  opacity: 0.75;
+  opacity: 0.85;
   pointer-events: none;
 }
 
@@ -2348,30 +2430,114 @@ h3 {
 .binder-cover:focus-visible,
 .binder-cover.selected {
   border-color: var(--binder-accent);
-  box-shadow: 0 22px 44px rgba(15, 23, 42, 0.3);
-  transform: translateY(-4px);
+  box-shadow:
+    -7px 10px 0 color-mix(in srgb, var(--binder-spine) 70%, black),
+    10px 30px 52px rgba(15, 23, 42, 0.34);
+  transform: translateY(-8px) rotateY(0deg) rotateX(0deg);
 }
 
 .binder-cover-spine {
   position: absolute;
   inset: 0 auto 0 0;
-  width: 20px;
+  z-index: 2;
+  width: 24px;
   background:
     linear-gradient(180deg, color-mix(in srgb, var(--binder-spine) 86%, black), var(--binder-spine)),
     repeating-linear-gradient(180deg, transparent 0 24px, color-mix(in srgb, white 18%, transparent) 24px 25px);
 }
 
+.binder-cover-rivets {
+  position: absolute;
+  top: 18px;
+  bottom: 18px;
+  left: 8px;
+  z-index: 3;
+  width: 7px;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.78) 0 1px, color-mix(in srgb, var(--binder-spine) 70%, black) 2px 3px, transparent 4px) 0 0 / 7px 50%;
+}
+
+.binder-cover-kicker {
+  position: relative;
+  z-index: 2;
+  color: color-mix(in srgb, var(--binder-spine) 78%, #111827);
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
 .binder-cover-icon {
   position: relative;
-  z-index: 1;
+  z-index: 2;
   display: grid;
   width: 42px;
   height: 42px;
   place-items: center;
   border: 1px solid color-mix(in srgb, var(--binder-accent) 60%, white);
-  border-radius: 50%;
+  border-radius: 14px;
   background: color-mix(in srgb, var(--binder-accent) 18%, white);
   color: var(--binder-spine);
+}
+
+.binder-cover-preview {
+  position: absolute;
+  top: 72px;
+  right: 11px;
+  left: 40px;
+  z-index: 1;
+  height: 46%;
+  opacity: 0.86;
+  pointer-events: none;
+}
+
+.binder-cover-card {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: block;
+  width: 42%;
+  overflow: hidden;
+  aspect-ratio: 5 / 7;
+  border: 2px solid rgba(255, 255, 255, 0.5);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.24);
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.3);
+  transform-origin: center 120%;
+  transition: transform 360ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.binder-cover-card .asset-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.binder-cover-card.card-1 {
+  transform: translate(-94%, -46%) rotate(-13deg);
+}
+
+.binder-cover-card.card-2 {
+  z-index: 2;
+  transform: translate(-50%, -54%) rotate(0deg);
+}
+
+.binder-cover-card.card-3 {
+  transform: translate(-7%, -46%) rotate(13deg);
+}
+
+.binder-cover:hover .binder-cover-card.card-1,
+.binder-cover:focus-visible .binder-cover-card.card-1 {
+  transform: translate(-104%, -52%) rotate(-17deg);
+}
+
+.binder-cover:hover .binder-cover-card.card-2,
+.binder-cover:focus-visible .binder-cover-card.card-2 {
+  transform: translate(-50%, -62%) rotate(0deg);
+}
+
+.binder-cover:hover .binder-cover-card.card-3,
+.binder-cover:focus-visible .binder-cover-card.card-3 {
+  transform: translate(3%, -52%) rotate(17deg);
 }
 
 .binder-cover-label,
@@ -2386,8 +2552,10 @@ h3 {
   padding: 10px;
   border: 1px solid color-mix(in srgb, white 70%, var(--binder-accent));
   border-radius: 7px;
-  background: color-mix(in srgb, white 88%, var(--binder-surface));
+  z-index: 4;
+  background: color-mix(in srgb, white 90%, var(--binder-surface));
   box-shadow: 0 10px 22px color-mix(in srgb, black 12%, transparent);
+  backdrop-filter: blur(7px);
 }
 
 .binder-cover-label strong {
@@ -2403,6 +2571,10 @@ h3 {
 }
 
 .binder-cover-open {
+  display: inline-flex;
+  z-index: 4;
+  align-items: center;
+  gap: 4px;
   width: max-content;
   padding: 6px 9px;
   border: 1px solid color-mix(in srgb, var(--binder-accent) 48%, white);
@@ -2503,13 +2675,14 @@ h3 {
 
 .binder-stage {
   display: grid;
-  gap: 18px;
+  gap: 14px;
   overflow: visible;
-  padding: 18px;
+  padding: clamp(14px, 2vw, 22px);
   border: 1px solid color-mix(in srgb, var(--binder-accent) 42%, var(--line));
-  border-radius: 14px;
+  border-radius: 22px;
   background:
     radial-gradient(circle at 92% 9%, color-mix(in srgb, var(--binder-accent) 20%, transparent), transparent 30%),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.018) 0 1px, transparent 1px 4px),
     linear-gradient(135deg, color-mix(in srgb, var(--binder-inner) 86%, white), var(--binder-inner));
   box-shadow:
     inset 0 0 0 1px color-mix(in srgb, white 12%, transparent),
@@ -2587,8 +2760,143 @@ h3 {
 }
 
 .binder-page-toolbar > span {
+  display: grid;
+  justify-items: center;
   font-size: 13px;
   font-weight: 950;
+}
+
+.binder-page-toolbar > span small {
+  color: rgba(248, 250, 252, 0.56);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.binder-book-shell {
+  position: relative;
+  display: grid;
+  gap: 12px;
+  padding-inline: clamp(0px, 2vw, 28px);
+  perspective: 2200px;
+}
+
+.binder-opening-cover {
+  position: absolute;
+  inset: 0 clamp(0px, 2vw, 28px) 28px;
+  z-index: 12;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 8px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--binder-accent) 56%, white);
+  border-radius: 12px 24px 24px 12px;
+  background:
+    radial-gradient(circle at 72% 24%, color-mix(in srgb, var(--binder-accent) 34%, transparent), transparent 28%),
+    repeating-linear-gradient(135deg, transparent 0 18px, color-mix(in srgb, var(--binder-accent) 10%, transparent) 18px 19px),
+    linear-gradient(145deg, color-mix(in srgb, var(--binder-surface) 86%, white), var(--binder-surface));
+  box-shadow: 0 34px 70px rgba(2, 6, 23, 0.46);
+  color: #111827;
+  opacity: 0;
+  pointer-events: none;
+  transform: rotateY(-178deg);
+  transform-origin: left center;
+}
+
+.binder-viewer.opening .binder-opening-cover {
+  animation: binderCoverOpen 900ms cubic-bezier(0.18, 0.72, 0.18, 1) both;
+}
+
+.binder-opening-spine {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 34px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--binder-spine) 82%, black), var(--binder-spine));
+  box-shadow: inset -6px 0 12px rgba(0, 0, 0, 0.18);
+}
+
+.binder-opening-mark {
+  display: grid;
+  width: 62px;
+  height: 62px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--binder-accent) 52%, white);
+  border-radius: 18px;
+  background: color-mix(in srgb, white 72%, var(--binder-accent));
+  color: var(--binder-spine);
+}
+
+.binder-opening-cover strong {
+  max-width: 70%;
+  font-size: clamp(24px, 4vw, 42px);
+  line-height: 1;
+  text-align: center;
+}
+
+.binder-opening-cover small {
+  color: #475569;
+  font-weight: 900;
+}
+
+.binder-page-turn {
+  position: absolute;
+  top: 50%;
+  z-index: 8;
+  display: grid;
+  width: 46px;
+  height: 72px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, white 20%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, #020617 68%, var(--binder-accent));
+  box-shadow: 0 12px 26px rgba(2, 6, 23, 0.32);
+  color: #fff;
+  opacity: 0.76;
+  transform: translateY(-50%);
+  transition: opacity 160ms ease, transform 160ms ease, background 160ms ease;
+}
+
+.binder-page-turn:hover,
+.binder-page-turn:focus-visible {
+  background: color-mix(in srgb, #020617 44%, var(--binder-accent));
+  opacity: 1;
+  transform: translateY(-50%) scale(1.06);
+}
+
+.binder-page-turn:disabled {
+  opacity: 0.16;
+  pointer-events: none;
+}
+
+.binder-page-turn.previous {
+  left: -6px;
+}
+
+.binder-page-turn.next {
+  right: -6px;
+}
+
+.binder-page-dots {
+  display: flex;
+  max-width: min(360px, 70vw);
+  justify-self: center;
+  gap: 5px;
+  overflow: hidden;
+}
+
+.binder-page-dots span {
+  width: 5px;
+  height: 5px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.28);
+  transition: width 180ms ease, background 180ms ease;
+}
+
+.binder-page-dots span.active {
+  width: 20px;
+  background: var(--binder-accent);
 }
 
 .binder-book {
@@ -2596,9 +2904,9 @@ h3 {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 28px minmax(0, 1fr);
   gap: 0;
-  padding: 16px;
+  padding: clamp(10px, 1.4vw, 16px);
   border: 1px solid color-mix(in srgb, var(--binder-stitch) 42%, var(--line));
-  border-radius: 18px;
+  border-radius: 20px 28px 28px 20px;
   background:
     radial-gradient(circle at 50% 6%, color-mix(in srgb, white 12%, transparent), transparent 26%),
     linear-gradient(90deg, color-mix(in srgb, black 20%, transparent), transparent 9%, transparent 91%, color-mix(in srgb, black 18%, transparent)),
@@ -2607,17 +2915,28 @@ h3 {
     inset 0 0 0 1px color-mix(in srgb, white 8%, transparent),
     inset 0 22px 40px color-mix(in srgb, black 16%, transparent);
   perspective: 1400px;
+  transform-style: preserve-3d;
+}
+
+.binder-book.turning-next .binder-page.secondary {
+  animation: binderTurnNext 680ms cubic-bezier(0.22, 0.75, 0.18, 1) both;
+  transform-origin: left center;
+}
+
+.binder-book.turning-previous .binder-page.primary {
+  animation: binderTurnPrevious 680ms cubic-bezier(0.22, 0.75, 0.18, 1) both;
+  transform-origin: right center;
 }
 
 .binder-page {
   position: relative;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  min-height: 470px;
-  padding: 16px;
+  gap: clamp(6px, 0.9vw, 10px);
+  min-height: 500px;
+  padding: clamp(10px, 1.2vw, 16px);
   border: 1px solid color-mix(in srgb, var(--binder-stitch) 34%, var(--line));
-  border-radius: 13px 5px 5px 13px;
+  border-radius: 15px 6px 6px 15px;
   background:
     linear-gradient(90deg, color-mix(in srgb, var(--binder-inner) 10%, transparent), transparent 13%),
     repeating-linear-gradient(135deg, transparent 0 18px, color-mix(in srgb, var(--binder-stitch) 9%, transparent) 18px 19px),
@@ -2625,14 +2944,44 @@ h3 {
   box-shadow:
     inset 0 0 0 1px color-mix(in srgb, white 24%, transparent),
     0 14px 28px color-mix(in srgb, black 12%, transparent);
-  animation: binderPageOpen 520ms cubic-bezier(0.2, 0.75, 0.2, 1) both;
+  animation: binderPageOpen 560ms cubic-bezier(0.2, 0.75, 0.2, 1) both;
   transform-origin: center left;
+  transform-style: preserve-3d;
+}
+
+.binder-page::after {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  border-radius: inherit;
+  background:
+    linear-gradient(112deg, transparent 8%, rgba(255, 255, 255, 0.12) 34%, transparent 52%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.06), transparent 16% 86%, rgba(15, 23, 42, 0.08));
+  content: "";
+  opacity: 0.68;
+  pointer-events: none;
+}
+
+.binder-page-number {
+  position: absolute;
+  right: 14px;
+  bottom: 5px;
+  z-index: 5;
+  color: color-mix(in srgb, var(--binder-stitch) 78%, var(--muted));
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: 0.08em;
 }
 
 .binder-ring-strip + .binder-page {
   animation-delay: 90ms;
   border-radius: 5px 13px 13px 5px;
   transform-origin: center right;
+}
+
+.binder-page.secondary .binder-page-number {
+  right: auto;
+  left: 14px;
 }
 
 .binder-ring-strip {
@@ -2649,13 +2998,11 @@ h3 {
 }
 
 .binder-ring {
-  width: 11px;
-  height: 11px;
-  border: 1px solid color-mix(in srgb, white 34%, var(--binder-ring));
+  width: 30px;
+  height: 12px;
+  border: 3px solid color-mix(in srgb, white 34%, var(--binder-ring));
   border-radius: 999px;
-  background:
-    radial-gradient(circle at 34% 30%, color-mix(in srgb, white 72%, transparent), transparent 32%),
-    linear-gradient(135deg, color-mix(in srgb, var(--binder-ring) 82%, white), color-mix(in srgb, var(--binder-ring) 82%, black));
+  background: transparent;
   box-shadow:
     inset 0 -1px 2px color-mix(in srgb, black 28%, transparent),
     0 5px 12px color-mix(in srgb, black 20%, transparent);
@@ -2665,13 +3012,13 @@ h3 {
   position: relative;
   display: grid;
   min-width: 0;
-  min-height: 146px;
+  min-height: 150px;
   align-content: start;
   gap: 6px;
-  overflow: visible;
-  padding: 8px;
+  overflow: hidden;
+  padding: 6px;
   border: 1px solid color-mix(in srgb, var(--binder-stitch) 58%, transparent);
-  border-radius: 6px;
+  border-radius: 8px;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.28), transparent 38%),
     linear-gradient(135deg, transparent 0 48%, color-mix(in srgb, white 20%, transparent) 48% 52%, transparent 52%),
@@ -2680,14 +3027,20 @@ h3 {
   font-size: 11px;
   font-weight: 850;
   text-align: left;
-  transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.42),
+    inset 0 -5px 9px rgba(15, 23, 42, 0.08);
+  transition: transform 220ms cubic-bezier(0.2, 0.75, 0.2, 1), border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
 }
 
 .binder-pocket.filled:hover,
 .binder-pocket.filled:focus-visible {
   border-color: var(--binder-accent);
   background: color-mix(in srgb, var(--binder-accent) 12%, var(--control));
-  transform: translateY(-6px) scale(1.02);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.54),
+    0 12px 24px rgba(15, 23, 42, 0.18);
+  transform: translateY(-5px) scale(1.025);
 }
 
 .binder-book.arranging .binder-pocket.filled:hover,
@@ -2704,12 +3057,23 @@ h3 {
 
 .binder-pocket.lifted {
   z-index: 4;
+  overflow: visible;
   border-color: var(--binder-accent);
 }
 
 .binder-pocket.lifted .binder-pocket-image {
   z-index: 4;
   animation: cardPullFromSleeve 260ms cubic-bezier(0.2, 0.75, 0.2, 1) both;
+}
+
+.binder-pocket.pulling {
+  z-index: 9;
+  overflow: visible;
+}
+
+.binder-pocket.pulling .binder-pocket-image {
+  z-index: 9;
+  animation: cardPullForInspection 380ms cubic-bezier(0.18, 0.82, 0.2, 1) both;
 }
 
 .binder-pocket.moved .binder-pocket-image {
@@ -2728,6 +3092,61 @@ h3 {
   transform-origin: center bottom;
 }
 
+.binder-pocket-glint {
+  position: absolute;
+  inset: -40% -90%;
+  z-index: 2;
+  background: linear-gradient(105deg, transparent 42%, rgba(255, 255, 255, 0.42) 48%, rgba(255, 255, 255, 0.08) 54%, transparent 60%);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-42%);
+}
+
+.binder-pocket.filled:hover .binder-pocket-glint,
+.binder-pocket.filled:focus-visible .binder-pocket-glint {
+  animation: binderCardGlint 900ms ease both;
+}
+
+.binder-pocket-caption {
+  position: absolute;
+  right: 7px;
+  bottom: 7px;
+  left: 7px;
+  z-index: 5;
+  display: grid;
+  gap: 1px;
+  padding: 18px 7px 6px;
+  border-radius: 0 0 5px 5px;
+  background: linear-gradient(180deg, transparent, rgba(2, 6, 23, 0.82));
+  color: #fff;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(6px);
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.binder-pocket-caption strong,
+.binder-pocket-caption small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.binder-pocket-caption strong {
+  font-size: 10px;
+}
+
+.binder-pocket-caption small {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 9px;
+}
+
+.binder-pocket.filled:hover .binder-pocket-caption,
+.binder-pocket.filled:focus-visible .binder-pocket-caption {
+  opacity: 1;
+  transform: translateY(0);
+}
+
 .binder-pocket-image .asset-image,
 .binder-picker-image .asset-image,
 .binder-focus-image .asset-image {
@@ -2741,7 +3160,10 @@ h3 {
   min-height: 100%;
   place-items: center;
   border: 1px dashed color-mix(in srgb, var(--line) 80%, transparent);
-  border-radius: 5px;
+  border-radius: 6px;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.1), transparent 46%),
+    repeating-linear-gradient(45deg, transparent 0 12px, color-mix(in srgb, var(--binder-stitch) 7%, transparent) 12px 13px);
   color: color-mix(in srgb, var(--muted) 70%, transparent);
 }
 
@@ -2817,14 +3239,16 @@ h3 {
     radial-gradient(circle at 50% 0, color-mix(in srgb, var(--theme-b) 14%, transparent), transparent 36%),
     color-mix(in srgb, var(--body-start) 92%, rgba(2, 6, 23, 0.76));
   backdrop-filter: blur(10px);
+  animation: binderBackdropIn 280ms ease both;
 }
 
 .binder-viewer {
   display: grid;
   gap: 16px;
   min-height: 100dvh;
-  padding: 18px;
+  padding: clamp(10px, 1.6vw, 18px);
   color: var(--ink);
+  animation: binderViewerIn 420ms cubic-bezier(0.2, 0.75, 0.2, 1) both;
 }
 
 .binder-viewer-topbar {
@@ -2837,7 +3261,7 @@ h3 {
   align-items: center;
   padding: 10px;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 16px;
   background: color-mix(in srgb, var(--surface) 90%, transparent);
   box-shadow: 0 12px 34px rgba(15, 23, 42, 0.18);
   backdrop-filter: blur(14px);
@@ -2850,7 +3274,7 @@ h3 {
 
 .binder-viewer-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(320px, 380px);
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 350px);
   gap: 18px;
   align-items: start;
 }
@@ -2864,6 +3288,10 @@ h3 {
   top: 92px;
   max-height: calc(100dvh - 110px);
   overflow: auto;
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 100% 0, color-mix(in srgb, var(--theme-b) 11%, transparent), transparent 30%),
+    var(--surface);
 }
 
 .binder-focus-card {
@@ -2876,8 +3304,10 @@ h3 {
   overflow: auto;
   padding: 20px;
   border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--surface);
+  border-radius: 22px;
+  background:
+    radial-gradient(circle at 0 0, color-mix(in srgb, var(--theme-b) 13%, transparent), transparent 30%),
+    var(--surface);
   box-shadow: 0 24px 80px rgba(2, 6, 23, 0.46);
   animation: binderCardLift 260ms cubic-bezier(0.2, 0.75, 0.2, 1) both;
 }
@@ -2888,8 +3318,20 @@ h3 {
   min-height: 430px;
   place-items: center;
   overflow: hidden;
-  border-radius: 9px;
-  background: var(--surface-soft);
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at 50% 40%, color-mix(in srgb, var(--theme-c) 14%, transparent), transparent 38%),
+    var(--surface-soft);
+  perspective: 1200px;
+}
+
+.binder-focus-image .asset-image {
+  width: min(88%, 340px);
+  height: auto;
+  max-height: 88%;
+  filter: drop-shadow(0 22px 24px rgba(15, 23, 42, 0.28));
+  object-fit: contain;
+  animation: binderInspectedCard 620ms cubic-bezier(0.18, 0.82, 0.2, 1) both;
 }
 
 .binder-focus-copy {
@@ -2922,6 +3364,90 @@ h3 {
   }
 }
 
+@keyframes binderBackdropIn {
+  from {
+    opacity: 0;
+    backdrop-filter: blur(0);
+  }
+
+  to {
+    opacity: 1;
+    backdrop-filter: blur(10px);
+  }
+}
+
+@keyframes binderViewerIn {
+  from {
+    opacity: 0;
+    transform: translateY(18px) scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes binderCoverOpen {
+  0% {
+    opacity: 1;
+    transform: rotateY(0deg) scale(0.94);
+  }
+
+  18% {
+    opacity: 1;
+    transform: rotateY(-5deg) scale(1);
+  }
+
+  76% {
+    opacity: 1;
+    transform: rotateY(-158deg) scale(1);
+  }
+
+  100% {
+    opacity: 0;
+    transform: rotateY(-178deg) scale(1);
+  }
+}
+
+@keyframes binderTurnNext {
+  from {
+    opacity: 0.45;
+    filter: brightness(0.72);
+    transform: rotateY(-82deg) translateX(-3%);
+  }
+
+  60% {
+    opacity: 1;
+    filter: brightness(1.03);
+  }
+
+  to {
+    opacity: 1;
+    filter: brightness(1);
+    transform: rotateY(0deg) translateX(0);
+  }
+}
+
+@keyframes binderTurnPrevious {
+  from {
+    opacity: 0.45;
+    filter: brightness(0.72);
+    transform: rotateY(82deg) translateX(3%);
+  }
+
+  60% {
+    opacity: 1;
+    filter: brightness(1.03);
+  }
+
+  to {
+    opacity: 1;
+    filter: brightness(1);
+    transform: rotateY(0deg) translateX(0);
+  }
+}
+
 @keyframes binderCardLift {
   from {
     opacity: 0;
@@ -2942,6 +3468,57 @@ h3 {
   to {
     transform: translateY(-20px) scale(1.08) rotate(-1.4deg);
     box-shadow: 0 18px 28px color-mix(in srgb, black 28%, transparent);
+  }
+}
+
+@keyframes cardPullForInspection {
+  0% {
+    filter: brightness(1);
+    transform: translateY(0) scale(1) rotate(0deg);
+  }
+
+  68% {
+    filter: brightness(1.05);
+    transform: translateY(-72px) scale(1.11) rotate(-1.2deg);
+  }
+
+  100% {
+    filter: brightness(1.08);
+    opacity: 0;
+    transform: translateY(-108px) scale(1.16) rotate(-1.8deg);
+  }
+}
+
+@keyframes binderCardGlint {
+  from {
+    opacity: 0;
+    transform: translateX(-42%);
+  }
+
+  36% {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+    transform: translateX(42%);
+  }
+}
+
+@keyframes binderInspectedCard {
+  from {
+    opacity: 0;
+    transform: translateY(80px) rotateX(8deg) rotateZ(-2deg) scale(0.88);
+  }
+
+  72% {
+    opacity: 1;
+    transform: translateY(-5px) rotateX(0deg) rotateZ(0.5deg) scale(1.015);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) rotateX(0deg) rotateZ(0deg) scale(1);
   }
 }
 
@@ -5487,6 +6064,20 @@ h3 {
     width: min(72vw, 320px);
   }
 
+  .binder-library-intro {
+    display: grid;
+    align-items: start;
+  }
+
+  .binder-library-stats {
+    width: 100%;
+  }
+
+  .binder-library-stats span {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
   .binder-shelf {
     grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
   }
@@ -5536,11 +6127,23 @@ h3 {
 
   .binder-book {
     grid-template-columns: 1fr;
-    gap: 10px;
+    gap: 12px;
+    border-radius: 16px;
   }
 
-  .binder-ring-strip,
-  .binder-page.secondary {
+  .binder-book-shell {
+    padding-inline: 0;
+  }
+
+  .binder-opening-cover {
+    inset: 0 0 28px;
+  }
+
+  .binder-page-turn {
+    display: none;
+  }
+
+  .binder-ring-strip {
     display: none;
   }
 
@@ -5549,6 +6152,11 @@ h3 {
     padding: 10px;
     gap: 8px;
     border-radius: 13px;
+    transform-origin: center;
+  }
+
+  .binder-page.secondary {
+    display: grid;
   }
 
   .binder-pocket {
@@ -5658,8 +6266,24 @@ h3 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .binder-library-stats {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .binder-cover {
     aspect-ratio: 3 / 3.5;
+    padding: 14px 12px 14px 28px;
+  }
+
+  .binder-cover-preview {
+    top: 64px;
+    height: 44%;
+  }
+
+  .binder-cover-preview .binder-cover-card:first-child,
+  .binder-cover-preview .binder-cover-card:last-child {
+    opacity: 0.8;
   }
 
   .binder-cover-label strong {
@@ -5681,6 +6305,35 @@ h3 {
 
   .binder-focus-image {
     min-height: 300px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .binder-cover,
+  .binder-cover-card,
+  .binder-open-inline,
+  .binder-pocket,
+  .binder-pocket .asset-image,
+  .binder-page-turn,
+  .binder-viewer,
+  .binder-focus-card {
+    transition-duration: 0.01ms !important;
+  }
+
+  .binder-viewer-backdrop,
+  .binder-viewer,
+  .binder-opening-cover,
+  .binder-book.turning-next,
+  .binder-book.turning-previous,
+  .binder-pocket.pulling .asset-image,
+  .binder-pocket-image::after,
+  .binder-focus-card {
+    animation: none !important;
+  }
+
+  .binder-opening-cover {
+    visibility: hidden;
+    opacity: 0;
   }
 }
 
