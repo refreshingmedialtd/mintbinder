@@ -140,12 +140,21 @@ export async function loadPricingHealthMetrics({ now = new Date(), prisma }) {
         FROM recent_jobs
         CROSS JOIN LATERAL jsonb_array_elements(COALESCE(result_payload->'groupResults', '[]'::jsonb)) result
         WHERE result->>'setId' IS NOT NULL
+
+        UNION
+
+        SELECT id::text AS set_id
+        FROM card_sets
+        WHERE metadata->>'scheduledSealedPricingLastAttemptAt' >= ${rotationSince.toISOString()}
       )
       SELECT
-        (SELECT COUNT(*)::int FROM card_sets cs WHERE EXISTS (
-          SELECT 1 FROM sealed_products sp
-          WHERE sp.related_card_set_id = cs.id AND sp.provider_ids ? 'tcgcsv'
-        )) AS "availableSets",
+        (SELECT COUNT(*)::int FROM card_sets cs WHERE
+          cs.metadata ? 'scheduledSealedPricingGroupId'
+          OR EXISTS (
+            SELECT 1 FROM sealed_products sp
+            WHERE sp.related_card_set_id = cs.id AND sp.provider_ids ? 'tcgcsv'
+          )
+        ) AS "availableSets",
         (SELECT COUNT(*)::int FROM recent_jobs) AS jobs,
         (SELECT COUNT(*)::int FROM visited) AS "uniqueSets",
         (SELECT COUNT(*)::int FROM recent_jobs
