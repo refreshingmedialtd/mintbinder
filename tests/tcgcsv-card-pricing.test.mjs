@@ -117,6 +117,27 @@ test("uses printing details and deterministic provider suffixes for parallel var
   ]);
 });
 
+test("preserves an existing generic variant identity when a new lower provider ID appears", () => {
+  const resolved = resolveTcgcsvVariantIdentities([
+    {
+      cardPrintingId: "card-1",
+      preserveBaseLabel: true,
+      product: { name: "Pikachu", productId: 205 },
+      subTypeName: "Holofoil",
+    },
+    {
+      cardPrintingId: "card-1",
+      product: { name: "Pikachu", productId: 101 },
+      subTypeName: "Holofoil",
+    },
+  ]);
+
+  assert.deepEqual(resolved.map((entry) => entry.variantLabel), [
+    "Holofoil",
+    "Holofoil · TCGplayer #101",
+  ]);
+});
+
 test("matches card-only TCGCSV promo and trainer kit groups to local sets", () => {
   const sets = [
     { id: "set-tk2a", name: "EX Trainer Kit 2 Plusle", providerId: "tk2a" },

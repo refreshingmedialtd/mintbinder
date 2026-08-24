@@ -66,18 +66,25 @@ export async function syncTcgcsvSealedProducts(options = {}) {
         },
       }),
     ]);
+    const matchedGroups = matchTcgcsvGroupsToSets(groups.results ?? [], sets)
+      .filter(({ group, set }) =>
+        (groupIds.size === 0 || groupIds.has(String(group.groupId))) &&
+        !sealedPricingRetryInFuture(set.metadata)
+      );
+    const deferredKnownEmptyGroups = groupIds.size === 0
+      ? matchedGroups.filter(({ set }) => sealedPricingEmptyInFuture(set.metadata))
+      : [];
     const availableMatches = orderSealedPricingMatches(
-      matchTcgcsvGroupsToSets(groups.results ?? [], sets)
-        .filter(({ group, set }) =>
-          (groupIds.size === 0 || groupIds.has(String(group.groupId))) &&
-          !sealedPricingRetryInFuture(set.metadata)
-        ),
+      matchedGroups.filter(({ set }) =>
+        groupIds.size > 0 || !sealedPricingEmptyInFuture(set.metadata)
+      ),
     );
     const matches = availableMatches.slice(0, groupLimit);
     const summary = {
       failedGroups: 0,
       groupResults: [],
       groupsAvailable: availableMatches.length,
+      groupsDeferredKnownEmpty: deferredKnownEmptyGroups.length,
       groupsMatched: matches.length,
       groupsProcessed: 0,
       priceOnlyUnpriced,
@@ -127,6 +134,7 @@ export async function syncTcgcsvSealedProducts(options = {}) {
           pricingSnapshotsUpdated: groupSummary.pricingSnapshotsUpdated,
           productsFetched: groupSummary.productsFetched,
           productsProcessed: groupSummary.productsProcessed,
+          sealedProductsAvailable: groupSummary.sealedProductsAvailable,
           sealedProductsUpserted: groupSummary.sealedProductsUpserted,
           setId: match.set.id,
           setName: match.set.name,
@@ -276,9 +284,13 @@ async function recordSealedPricingProgress({
     scheduledSealedPricingLastSnapshotCount: groupSummary.pricingSnapshotsCreated,
     scheduledSealedPricingLastSnapshotUpdateCount: groupSummary.pricingSnapshotsUpdated,
     scheduledSealedPricingLastSucceededAt: attemptedAt,
+    scheduledSealedPricingLastSealedProductCount: groupSummary.sealedProductsAvailable,
     scheduledSealedPricingLastTotalProducts: groupSummary.productsFetched,
     scheduledSealedPricingCursorVersion: 2,
     scheduledSealedPricingNextProductIndex: groupSummary.nextProductIndex,
+    scheduledSealedPricingEmptyUntil: groupSummary.complete && groupSummary.sealedProductsAvailable === 0
+      ? new Date(Date.parse(attemptedAt) + 30 * 24 * 60 * 60 * 1000).toISOString()
+      : null,
     scheduledSealedPricingRetryAfter: null,
   });
 }
@@ -318,6 +330,7 @@ async function upsertSealedProduct({ group, product, prisma, set }) {
   const existing = await prisma.sealedProduct.findFirst({
     select: {
       id: true,
+      metadata: true,
       providerIds: true,
     },
     where: {
@@ -339,6 +352,7 @@ async function upsertSealedProduct({ group, product, prisma, set }) {
   const data = {
     imageUrl: upgradedImageUrl(product.imageUrl),
     metadata: {
+      ...(isObject(existing?.metadata) ? existing.metadata : {}),
       groupId: group.groupId,
       groupName: group.name,
       provider: "tcgcsv",
@@ -420,6 +434,13 @@ function sealedPricingLastAttemptMs(metadata) {
 
 function sealedPricingRetryInFuture(metadata) {
   const value = isObject(metadata) ? metadata.scheduledSealedPricingRetryAfter : null;
+  const ms = value ? Date.parse(String(value)) : NaN;
+
+  return Number.isFinite(ms) && ms > Date.now();
+}
+
+function sealedPricingEmptyInFuture(metadata) {
+  const value = isObject(metadata) ? metadata.scheduledSealedPricingEmptyUntil : null;
   const ms = value ? Date.parse(String(value)) : NaN;
 
   return Number.isFinite(ms) && ms > Date.now();

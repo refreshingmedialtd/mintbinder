@@ -77,6 +77,28 @@ test("matches TCGCSV group names to local set names", () => {
   );
 });
 
+test("maps TCGCSV EX-era group names to the platform's vintage set names", () => {
+  assert.deepEqual(
+    matchTcgcsvGroupsToSets(
+      [
+        { abbreviation: "HL", groupId: 1416, name: "EX Hidden Legends" },
+        { abbreviation: "MA", groupId: 1377, name: "EX Team Magma vs Team Aqua" },
+        { abbreviation: "RS", groupId: 1393, name: "EX Ruby and Sapphire" },
+      ],
+      [
+        { id: "hidden", name: "Hidden Legends" },
+        { id: "magma", name: "Team Magma vs Team Aqua" },
+        { id: "ruby", name: "Ruby & Sapphire" },
+      ],
+    ),
+    [
+      { group: { abbreviation: "HL", groupId: 1416, name: "EX Hidden Legends" }, set: { id: "hidden", name: "Hidden Legends" } },
+      { group: { abbreviation: "MA", groupId: 1377, name: "EX Team Magma vs Team Aqua" }, set: { id: "magma", name: "Team Magma vs Team Aqua" } },
+      { group: { abbreviation: "RS", groupId: 1393, name: "EX Ruby and Sapphire" }, set: { id: "ruby", name: "Ruby & Sapphire" } },
+    ],
+  );
+});
+
 test("selects the strongest usable TCGCSV sealed price", () => {
   assert.deepEqual(
     bestTcgcsvPrice([
@@ -180,6 +202,8 @@ test("imports sealed products and GBP price snapshots from TCGCSV payloads", asy
   assert.equal(summary.groupResults[0].nextProductIndex, 0);
   assert.equal(metadataUpdates[0].where.id, "set-1");
   assert.equal(metadataUpdates[0].data.metadata.scheduledSealedPricingNextProductIndex, 0);
+  assert.equal(metadataUpdates[0].data.metadata.scheduledSealedPricingLastSealedProductCount, 1);
+  assert.equal(metadataUpdates[0].data.metadata.scheduledSealedPricingEmptyUntil, null);
   assert.equal(upserts[0].productType, "BOOSTER_BOX");
   assert.equal(upserts[0].metadata.upc, "123");
   assert.equal(snapshots[0].priceMinor, 8000);
@@ -283,6 +307,83 @@ test("resumes sealed product batches from set metadata", async () => {
   assert.equal(summary.groupResults[0].complete, true);
 });
 
+test("defers confirmed zero-sealed groups while retaining an explicit recheck override", async () => {
+  const future = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+  const requestedUrls = [];
+  const prisma = {
+    cardSet: {
+      findMany: async () => [
+        {
+          id: "promo-set",
+          metadata: { scheduledSealedPricingEmptyUntil: future },
+          name: "Black Star Promos",
+        },
+        { id: "healthy-set", metadata: {}, name: "Silver Tempest" },
+      ],
+      update: async ({ data, where }) => ({ id: where.id, ...data }),
+    },
+    priceSnapshot: {
+      create: async ({ data }) => ({ id: "snapshot-1", ...data }),
+      findFirst: async () => null,
+    },
+    sealedProduct: {
+      findFirst: async () => null,
+      upsert: async ({ create }) => ({ id: create.id }),
+    },
+  };
+  const fetchImpl = async (url) => {
+    requestedUrls.push(url);
+
+    if (url.endsWith("/groups")) {
+      return okResponse({
+        results: [
+          { groupId: 1, name: "Black Star Promos" },
+          { groupId: 2, name: "SWSH12: Silver Tempest" },
+        ],
+        success: true,
+      });
+    }
+
+    if (url.endsWith("/2/products") || url.endsWith("/2/prices")) {
+      return okResponse({ results: [], success: true });
+    }
+
+    throw new Error(`Unexpected request ${url}`);
+  };
+
+  const summary = await syncTcgcsvSealedProducts({
+    fetchImpl,
+    groupLimit: 1,
+    prisma,
+    usdToGbpRate: 0.8,
+    waitMs: 0,
+    writePrices: false,
+  });
+
+  assert.equal(summary.groupsDeferredKnownEmpty, 1);
+  assert.equal(summary.groupResults[0].setId, "healthy-set");
+  assert.equal(requestedUrls.some((url) => url.includes("/1/")), false);
+
+  const explicit = await syncTcgcsvSealedProducts({
+    fetchImpl: async (url) => {
+      if (url.endsWith("/groups")) {
+        return okResponse({ results: [{ groupId: 1, name: "Black Star Promos" }], success: true });
+      }
+
+      return okResponse({ results: [], success: true });
+    },
+    groupIds: ["1"],
+    groupLimit: 1,
+    prisma,
+    usdToGbpRate: 0.8,
+    waitMs: 0,
+    writePrices: false,
+  });
+
+  assert.equal(explicit.groupsDeferredKnownEmpty, 0);
+  assert.equal(explicit.groupResults[0].setId, "promo-set");
+});
+
 test("reads sealed import options from env", () => {
   assert.deepEqual(
     sealedImportOptionsFromEnv({
@@ -302,3 +403,11 @@ test("reads sealed import options from env", () => {
     },
   );
 });
+
+function okResponse(body) {
+  return {
+    json: async () => body,
+    ok: true,
+    status: 200,
+  };
+}

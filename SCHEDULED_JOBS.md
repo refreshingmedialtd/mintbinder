@@ -19,6 +19,11 @@ TCGCSV_SEALED_GROUP_LIMIT="1"
 TCGCSV_SEALED_PRICE_ONLY_UNPRICED="false"
 TCGCSV_SEALED_WRITE_PRICES="true"
 TCGCSV_SEALED_WAIT_MS="120"
+CARDTRADER_API_TOKEN="<bearer token from CardTrader account settings>"
+CARDTRADER_SEALED_SET_LIMIT="1"
+CARDTRADER_SEALED_PRODUCT_LIMIT="5"
+CARDTRADER_SEALED_PRICE_ONLY_UNPRICED="false"
+CARDTRADER_SEALED_WRITE_PRICES="true"
 PRICE_ALERT_DIGEST_DRY_RUN="true"
 PRICE_ALERT_DIGEST_ALLOW_LIVE_RECIPIENTS="false"
 JOB_MONITOR_DRY_RUN="true"
@@ -64,7 +69,7 @@ Expected results:
 - `job:live-health` returns `ok: true`.
 - `cron-live-pricing.sh` first runs the Pokemon TCG set rotation, then refreshes one TCGCSV English group. Both calls create `pricing_refresh` job runs, and either may fail without preventing the other from being attempted.
 - `job:live-japan-card-pricing` calls `/api/jobs/international-card-pricing`, creates a `pricing_refresh` job run, and reports `categoryId: 85` plus `language: "ja"`.
-- `job:live-sealed-pricing` creates a `sealed_pricing_refresh` job run.
+- `job:live-sealed-pricing` creates a `sealed_pricing_refresh` job run. With `CARDTRADER_API_TOKEN` configured, its result also contains a successful `secondSource` object for `cardtrader-sealed`.
 - `monitor:jobs` prints a report. It can return a non-zero exit code when recent job failures exist, which is useful for alerting.
 
 ## Recommended Initial Schedule
@@ -142,7 +147,8 @@ They use the same `Authorization: Bearer <JOB_SECRET>` header. Keep the request 
 - Scheduled card pricing writes new snapshots over time, so price history charts become more useful the longer the job runs. UK-facing valuation selects current UK evidence first, then current European evidence, then converted US references. Converted US data is labelled as a reference and cannot receive a Strong UK confidence rating.
 - The existing `cron-live-pricing.sh` command now covers both Pokemon TCG API set rotation and one TCGCSV English group. Do not add a second 20i task for English TCGCSV pricing.
 - `POKEMON_TCG_SET_PRICING_LIMIT` controls how many sets a live pricing run refreshes. `POKEMON_TCG_SET_PRICING_REQUEST_LIMIT` defaults to `1`, so the live helper sends several small set-refresh requests rather than one long request. `POKEMON_TCG_PRICING_BATCH_WAIT_MS` pauses between those calls, and `POKEMON_TCG_API_RETRY_ATTEMPTS` retries transient Pokemon TCG API `429`/`5xx` responses before an individual set attempt is marked failed. Keep the hourly job history clean before raising set batch sizes further.
-- Keep `TCGCSV_SEALED_GROUP_LIMIT=1`, `TCGCSV_SEALED_PRODUCT_LIMIT=40`, `TCGCSV_SEALED_PRICE_ONLY_UNPRICED=false`, and `TCGCSV_SEALED_WRITE_PRICES=true` for hourly sealed pricing history. The live helper defaults to a 40-product batch when `TCGCSV_SEALED_PRODUCT_LIMIT` is not set, records a per-set sealed cursor, fills blanks, and writes fresh snapshots for products that already have prices without making one long web request.
+- Keep `TCGCSV_SEALED_GROUP_LIMIT=1`, `TCGCSV_SEALED_PRODUCT_LIMIT=40`, `TCGCSV_SEALED_PRICE_ONLY_UNPRICED=false`, and `TCGCSV_SEALED_WRITE_PRICES=true` for hourly sealed pricing history. The live helper defaults to a 40-product batch when `TCGCSV_SEALED_PRODUCT_LIMIT` is not set, records a per-set sealed cursor, fills blanks, and writes fresh snapshots for products that already have prices without making one long web request. A successfully scanned group with no sealed products receives a 30-day cooldown so card-only promo/subset catalogues do not consume hourly rotation slots; an explicit `TCGCSV_SEALED_GROUP_IDS` request bypasses that cooldown for manual rechecks.
+- CardTrader is the independent European sealed source. Keep its scheduled batch at one set and five products until observed latency is established. Matches are accepted only when the CardTrader blueprint carries the same TCGplayer product ID already stored on the sealed product; marketplace references use eligible English listings and are stored as a separate `cardtrader-sealed` series.
 - Japanese single-card pricing uses TCGCSV's `Pokemon Japan` category (`TCGCSV_JAPAN_CARD_CATEGORY_ID=85`) and writes source `tcgcsv-japan-card` snapshots for `language=ja`. Use `TCGCSV_JAPAN_CARD_GROUP_LIMIT=1`, `TCGCSV_JAPAN_CARD_ONLY_UNPRICED_GROUPS=false`, and `TCGCSV_JAPAN_CARD_PRICE_ONLY_UNPRICED=false` for hourly production runs so each run fills missing Japanese prices and also creates fresh price-history snapshots for the oldest Japanese group.
 - Traditional Chinese, Simplified Chinese, and Korean pricing should stay as visible gaps until a reviewed CSV/licensed source is available. Do not scrape official pages or require Cardmarket personal/business verification for this lane.
 - Review Operations job history after the first few scheduled runs. Do not enable live recipient emails until pricing and monitor jobs are consistently clean.

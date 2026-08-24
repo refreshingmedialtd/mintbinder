@@ -2948,55 +2948,6 @@ function DashboardAttentionPanel({
   );
 }
 
-function LanguageCoveragePanel({
-  catalogueItems,
-  sets,
-}: {
-  catalogueItems: CatalogueItem[];
-  sets: SetProgress[];
-}) {
-  const trackedLanguages = ["en", "ja", "zh-cn", "zh-tw", "ko"];
-  const rows = trackedLanguages.map((code) => {
-    const cards = catalogueItems.filter((item) => item.type === "card" && (item.language ?? "en") === code);
-    const languageSets = sets.filter((set) => (set.language ?? "en") === code);
-    const label = CATALOGUE_LANGUAGE_OPTIONS.find((option) => option.code === code)?.label ?? code;
-    const priced = cards.filter((item) => item.hasPrice).length;
-    const imaged = cards.filter((item) => Boolean(item.image)).length;
-
-    return {
-      code,
-      imaged,
-      label,
-      priced,
-      setCount: languageSets.length,
-      total: cards.length,
-    };
-  });
-
-  return (
-    <section className="tool-panel language-coverage-panel">
-      <div className="panel-title-row">
-        <h2>Language coverage</h2>
-        <Languages size={18} />
-      </div>
-      <div className="language-coverage-list">
-        {rows.map((row) => (
-          <article className="language-coverage-row" key={row.code}>
-            <div>
-              <strong>{row.label}</strong>
-              <span>{row.setCount} sets | {formatCount(row.total)} cards</span>
-            </div>
-            <div>
-              <span>{formatPercent(row.total ? Math.round((row.imaged / row.total) * 100) : null)} images</span>
-              <span>{formatPercent(row.total ? Math.round((row.priced / row.total) * 100) : null)} priced</span>
-            </div>
-          </article>
-        ))}
-      </div>
-    </section>
-  );
-}
-
 function OnboardingChecklist({
   collection,
   navigate,

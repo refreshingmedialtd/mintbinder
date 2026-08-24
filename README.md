@@ -181,6 +181,15 @@ TCGCSV_JAPAN_CARD_PRICE_ONLY_UNPRICED="false"
 TCGCSV_JAPAN_CARD_WAIT_MS="120"
 TCGCSV_JAPAN_CARD_WRITE_PRICES="true"
 TCGCSV_JAPAN_USD_TO_GBP_RATE=""
+CARDTRADER_API_TOKEN=""
+CARDTRADER_SEALED_ENABLED=""
+CARDTRADER_SEALED_SET_LIMIT="1"
+CARDTRADER_SEALED_PRODUCT_LIMIT="5"
+CARDTRADER_SEALED_PRICE_ONLY_UNPRICED="false"
+CARDTRADER_SEALED_WAIT_MS="150"
+CARDTRADER_SEALED_WRITE_PRICES="true"
+CARDTRADER_EUR_TO_GBP_RATE=""
+CARDTRADER_USD_TO_GBP_RATE=""
 PRICECHARTING_API_TOKEN=""
 PRICECHARTING_USD_TO_GBP_RATE=""
 PRICECHARTING_SEALED_LIMIT="25"
@@ -301,9 +310,9 @@ For sealed product catalogue imports, run `npm run job:sealed-tcgcsv`. The impor
 
 For tracked sealed-pricing backfills through the same API route used by Operations, set `JOB_SECRET`, keep automatic exchange rates enabled, then run `npm run job:sealed-pricing-batch`. The helper starts the built app, posts to `/api/jobs/sealed-pricing-refresh`, records a `sealed_pricing_refresh` job run, prints the JSON result, and stops the server. Use `TCGCSV_SEALED_GROUP_LIMIT`, `TCGCSV_SEALED_GROUP_IDS`, or `TCGCSV_SEALED_PRODUCT_LIMIT` for small batches before scaling up. Production scheduled sealed pricing should use `npm run job:live-sealed-pricing` with `TCGCSV_SEALED_GROUP_LIMIT=1`, `TCGCSV_SEALED_PRODUCT_LIMIT=40`, and `TCGCSV_SEALED_PRICE_ONLY_UNPRICED=false` so sealed products build price history the same way card pricing does. The live helper defaults to `TCGCSV_SEALED_PRODUCT_LIMIT=40` if the env value is absent.
 
-For production scheduled jobs, see [SCHEDULED_JOBS.md](SCHEDULED_JOBS.md). The live helpers call the deployed app instead of starting a temporary local server: `npm run job:live-health`, `npm run job:live-pricing`, `npm run job:live-english-card-pricing`, `npm run job:live-japan-card-pricing`, `npm run job:live-sealed-pricing`, and `npm run job:live-price-alerts`.
+For production scheduled jobs, see [SCHEDULED_JOBS.md](SCHEDULED_JOBS.md). The live helpers call the deployed app instead of starting a temporary local server: `npm run job:live-health`, `npm run job:live-pricing`, `npm run job:live-english-card-pricing`, `npm run job:live-japan-card-pricing`, `npm run job:live-sealed-pricing`, and `npm run job:live-price-alerts`. When `CARDTRADER_API_TOKEN` is configured, the sealed-pricing route also rotates through a small CardTrader batch. It matches CardTrader blueprints to the existing TCGplayer product ID, derives a conservative European marketplace reference from eligible English listings, and records it separately as `cardtrader-sealed`. Obtain the bearer token from the settings page of the CardTrader account used by the service; leave `CARDTRADER_SEALED_ENABLED` empty to enable the lane automatically when the token exists.
 
-For PriceCharting sealed-price enrichment, run `npm run job:pricecharting-sealed`. The importer uses the official PriceCharting Prices API, checks unpriced sealed products, searches by UPC first and then by conservative sealed-product name matching, and writes source `pricecharting-sealed` snapshots from the `new-price` field only. Set `PRICECHARTING_API_TOKEN`, keep `PRICECHARTING_SEALED_WAIT_MS=1100` or higher for the API rate limit, and use `PRICECHARTING_SEALED_LIMIT` for small controlled batches.
+The older PriceCharting adapter remains available for explicitly licensed internal use via `npm run job:pricecharting-sealed`, but it is intentionally not part of the public platform's scheduled workflow. PriceCharting's current terms require express written permission before its price data is displayed in third-party public software.
 
 For the `mintbinder.co.uk` domain setup batch, create and verify the 20i sender mailbox, confirm SPF/DKIM/DMARC, update `EMAIL_FROM` and SMTP settings, configure the production Square webhook URL, update the beta-draft privacy/terms/non-affiliation pages with final contact details, and wire those URLs into monitoring and operational runbooks.
 

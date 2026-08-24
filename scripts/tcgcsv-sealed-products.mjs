@@ -110,6 +110,7 @@ export function groupDisplayName(groupName) {
   return String(groupName ?? "")
     .replace(/^.*?:\s*/, "")
     .replace(/^[A-Z0-9]+(?:\s+[A-Z0-9]+)?\s+-\s+/, "")
+    .replace(/^EX\s+/i, "")
     .trim();
 }
 

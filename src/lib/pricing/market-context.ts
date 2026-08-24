@@ -16,7 +16,7 @@ export function priceMarketForSource(source?: string | null): PriceMarket {
     return "UK";
   }
 
-  if (normalized.includes("cardmarket")) {
+  if (normalized.includes("cardmarket") || normalized.includes("cardtrader")) {
     return "Europe";
   }
 
@@ -82,6 +82,10 @@ export function priceSourceLabel(source?: string | null) {
 
   if (normalized === "pricecharting-sealed") {
     return "PriceCharting US sealed market (GBP converted)";
+  }
+
+  if (normalized === "cardtrader-sealed") {
+    return "CardTrader European sealed marketplace (GBP converted)";
   }
 
   if (normalized === "pulse-uk") {

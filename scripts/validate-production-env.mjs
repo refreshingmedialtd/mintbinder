@@ -130,11 +130,10 @@ if (manualExchangeRates) {
   );
 }
 warnIf(
-  !normalized("PRICECHARTING_API_TOKEN"),
-  "PRICECHARTING_API_TOKEN",
-  "PriceCharting sealed-price enrichment is unavailable without a token.",
+  !normalized("CARDTRADER_API_TOKEN") && !normalized("CARDTRADER_TOKEN"),
+  "CARDTRADER_API_TOKEN",
+  "CardTrader sealed-price enrichment is unavailable without a bearer token from the service account settings.",
 );
-warnPositiveNumber("PRICECHARTING_USD_TO_GBP_RATE", "PriceCharting can fall back to other USD rates, but a dedicated rate is cleaner.");
 
 const blockers = checks.filter((check) => check.level === "blocker");
 const warnings = checks.filter((check) => check.level === "warning");
@@ -250,14 +249,6 @@ function positiveNumber(key, message) {
   const number = Number(value);
   if (!value || !Number.isFinite(number) || number <= 0) {
     blocker(key, message);
-  }
-}
-
-function warnPositiveNumber(key, message) {
-  const value = normalized(key);
-  const number = Number(value);
-  if (!value || !Number.isFinite(number) || number <= 0) {
-    warning(key, message);
   }
 }
 

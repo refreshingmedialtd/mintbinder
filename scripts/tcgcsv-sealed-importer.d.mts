@@ -14,12 +14,14 @@ export type TcgcsvSealedImportSummary = {
   failedGroups: number;
   groupResults: Array<Record<string, unknown>>;
   groupsAvailable: number;
+  groupsDeferredKnownEmpty: number;
   groupsMatched: number;
   groupsProcessed: number;
   priceOnlyUnpriced: boolean;
   productLimit: number | null;
   productsProcessed: number;
   pricingSnapshotsCreated: number;
+  pricingSnapshotsUpdated: number;
   productsFetched: number;
   sealedProductsSkipped: number;
   sealedProductsUpserted: number;

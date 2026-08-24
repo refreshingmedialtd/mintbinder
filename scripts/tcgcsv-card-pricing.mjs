@@ -146,6 +146,7 @@ export async function syncTcgcsvCardPrices(options = {}) {
       groupsAvailable: availableMatches.length,
       groupsMatched: matches.length,
       groupsProcessed: 0,
+      identitySnapshotsRelabelled: 0,
       language,
       minUnpricedCards,
       onlyUnpricedGroups,
@@ -177,6 +178,7 @@ export async function syncTcgcsvCardPrices(options = {}) {
       summary.cardProductsSkipped += groupSummary.cardProductsSkipped;
       summary.cardProductsUnmatched += groupSummary.cardProductsUnmatched;
       summary.groupsProcessed += 1;
+      summary.identitySnapshotsRelabelled += groupSummary.identitySnapshotsRelabelled;
       summary.pricingSnapshotsCreated += groupSummary.pricingSnapshotsCreated;
       summary.productsFetched += groupSummary.productsFetched;
       summary.sampleUnmatchedProducts.push(...groupSummary.sampleUnmatchedProducts);
@@ -312,7 +314,12 @@ export function resolveTcgcsvVariantIdentities(entries) {
       continue;
     }
 
-    const canonicalRef = distinctRefs[0];
+    const preservedRefs = [...new Set(group
+      .filter((entry) => entry.preserveBaseLabel)
+      .map((entry) => entry.sourceRef)
+      .filter(Boolean))]
+      .sort(compareProviderRefs);
+    const canonicalRef = preservedRefs[0] ?? distinctRefs[0];
 
     for (const entry of group) {
       if (entry.sourceRef && entry.sourceRef !== canonicalRef) {
@@ -373,6 +380,7 @@ async function importCardGroup({
     cardProductsSkipped: 0,
     cardProductsUnmatched: 0,
     cardImagesUpdated: 0,
+    identitySnapshotsRelabelled: 0,
     pricingSnapshotsCreated: 0,
     productsFetched: productsResponse.results?.length ?? 0,
     sampleUnmatchedProducts: [],
@@ -416,13 +424,25 @@ async function importCardGroup({
     });
   }
 
-  const variantIdentities = resolveTcgcsvVariantIdentities(
-    matchedProducts.flatMap(({ card, prices, product }) => prices.map((price) => ({
+  const incomingVariantIdentities = matchedProducts.flatMap(({ card, prices, product }) => prices.map((price) => ({
       cardPrintingId: card.id,
       product,
       subTypeName: price.subTypeName,
-    }))),
-  );
+    })));
+  const existingVariantIdentities = await loadExistingTcgcsvVariantIdentities({
+    cardPrintingIds: [...new Set(matchedProducts.map(({ card }) => card.id))],
+    prisma,
+    source,
+  });
+  const variantIdentities = resolveTcgcsvVariantIdentities([
+    ...existingVariantIdentities,
+    ...incomingVariantIdentities,
+  ]);
+  summary.identitySnapshotsRelabelled = await reconcileExistingTcgcsvVariantIdentities({
+    identities: variantIdentities.filter((identity) => identity.existingVariantLabel),
+    prisma,
+    source,
+  });
   const variantLabelByKey = new Map(variantIdentities.map((identity) => [
     tcgcsvVariantIdentityKey(identity.cardPrintingId, identity.sourceRef, identity.subTypeName),
     identity.variantLabel,
@@ -470,6 +490,7 @@ async function importCardGroup({
             originalCurrency: "USD",
             originalPrice: price.usd,
             priceSource: "TCGCSV TCGplayer market",
+            baseVariantLabel: tcgcsvCardVariantLabel(product, price.subTypeName),
             subTypeName: price.subTypeName,
             tcgplayerUrl: product.url,
           },
@@ -485,6 +506,82 @@ async function importCardGroup({
   }
 
   return summary;
+}
+
+async function loadExistingTcgcsvVariantIdentities({ cardPrintingIds, prisma, source }) {
+  if (!cardPrintingIds.length || typeof prisma.priceSnapshot.findMany !== "function") {
+    return [];
+  }
+
+  const snapshots = await prisma.priceSnapshot.findMany({
+    distinct: ["cardPrintingId", "sourceRef", "variantLabel"],
+    select: {
+      cardPrintingId: true,
+      metadata: true,
+      sourceRef: true,
+      variantLabel: true,
+    },
+    where: {
+      cardPrintingId: { in: cardPrintingIds },
+      itemType: ItemType.CARD,
+      source,
+      sourceRef: { not: null },
+    },
+  });
+
+  return snapshots.map((snapshot) => {
+    const metadata = isObject(snapshot.metadata) ? snapshot.metadata : {};
+    const baseVariantLabel = optionalString(metadata.baseVariantLabel) ??
+      stripTcgplayerIdentitySuffix(snapshot.variantLabel);
+
+    return {
+      cardPrintingId: snapshot.cardPrintingId,
+      existingVariantLabel: snapshot.variantLabel,
+      preserveBaseLabel: snapshot.variantLabel === baseVariantLabel,
+      product: {
+        name: metadata.tcgplayerUrl,
+        productId: snapshot.sourceRef,
+        url: metadata.tcgplayerUrl,
+      },
+      sourceRef: snapshot.sourceRef,
+      subTypeName: optionalString(metadata.subTypeName) ?? baseVariantLabel,
+    };
+  });
+}
+
+async function reconcileExistingTcgcsvVariantIdentities({ identities, prisma, source }) {
+  if (typeof prisma.priceSnapshot.updateMany !== "function") {
+    return 0;
+  }
+
+  const operations = [...new Map(identities
+    .filter((identity) => identity.existingVariantLabel !== identity.variantLabel)
+    .map((identity) => [
+      `${identity.cardPrintingId}\u0000${identity.sourceRef}\u0000${identity.existingVariantLabel}`,
+      identity,
+    ])).values()];
+  let updated = 0;
+
+  for (const operation of operations) {
+    const result = await prisma.priceSnapshot.updateMany({
+      data: { variantLabel: operation.variantLabel },
+      where: {
+        cardPrintingId: operation.cardPrintingId,
+        itemType: ItemType.CARD,
+        source,
+        sourceRef: operation.sourceRef,
+        variantLabel: operation.existingVariantLabel,
+      },
+    });
+
+    updated += result.count;
+  }
+
+  return updated;
+}
+
+function stripTcgplayerIdentitySuffix(value) {
+  return String(value ?? "Normal").replace(/\s+·\s+TCGplayer\s+#\d+$/i, "").trim() || "Normal";
 }
 
 async function updateTcgcsvCardImage(prisma, card, product) {
@@ -807,6 +904,10 @@ function optionalString(value) {
   const trimmed = String(value ?? "").trim();
 
   return trimmed || undefined;
+}
+
+function isObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function nonNegativeInteger(value, fallback) {
