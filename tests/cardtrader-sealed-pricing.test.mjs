@@ -108,11 +108,11 @@ test("imports a CardTrader sealed marketplace snapshot by direct TCGplayer ident
     assert.equal(init.headers.authorization, "Bearer token");
 
     if (url.pathname.endsWith("/games")) {
-      return jsonResponse([{ id: 5, name: "Pokemon" }]);
+      return jsonResponse([{ id: 15, name: "pokemon-tcg", display_name: "Pokémon" }]);
     }
 
     if (url.pathname.endsWith("/expansions")) {
-      return jsonResponse([{ game_id: 5, id: 10, name: "Silver Tempest" }]);
+      return jsonResponse([{ game_id: 15, id: 10, name: "Silver Tempest" }]);
     }
 
     if (url.pathname.endsWith("/blueprints/export")) {

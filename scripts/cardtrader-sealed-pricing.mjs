@@ -7,6 +7,7 @@ import { booleanSetting, positiveInteger } from "./catalogue-batch-options.mjs";
 import { groupDisplayName, normalizedSetName } from "./tcgcsv-sealed-products.mjs";
 
 const cardTraderBaseUrl = "https://api.cardtrader.com/api/v2";
+const pokemonGameId = 5;
 const sourceName = "cardtrader-sealed";
 
 export function cardTraderSealedOptionsFromEnv(env = process.env) {
@@ -23,7 +24,7 @@ export function cardTraderSealedOptionsFromEnv(env = process.env) {
     usdToGbpRate: conversionRate(env.CARDTRADER_USD_TO_GBP_RATE) ??
       conversionRate(env.TCGCSV_USD_TO_GBP_RATE) ??
       conversionRate(env.POKEMON_TCG_USD_TO_GBP_RATE),
-    waitMs: nonNegativeInteger(env.CARDTRADER_SEALED_WAIT_MS, 150),
+    waitMs: nonNegativeInteger(env.CARDTRADER_SEALED_WAIT_MS, 1_000),
     writePrices: booleanSetting(env.CARDTRADER_SEALED_WRITE_PRICES, true),
   };
 }
@@ -36,7 +37,7 @@ export async function syncCardTraderSealedPrices(options = {}) {
   const priceOnlyUnpriced = options.priceOnlyUnpriced ?? false;
   const setLimit = positiveInteger(options.setLimit, 1);
   const token = stringSetting(options.token);
-  const waitMs = nonNegativeInteger(options.waitMs, 150);
+  const waitMs = nonNegativeInteger(options.waitMs, 1_000);
   const writePrices = options.writePrices ?? true;
   const rates = {
     EUR: conversionRate(options.eurToGbpRate),
@@ -116,9 +117,10 @@ export async function syncCardTraderSealedPrices(options = {}) {
       request("/games"),
       request("/expansions"),
     ]);
-    const pokemonGame = asArray(games).find((game) =>
-      normalizedText(game.name ?? game.display_name) === "pokemon"
-    );
+    const availableGames = asArray(games);
+    const pokemonGame = availableGames.find((game) =>
+      [game.name, game.display_name].some((value) => normalizedText(value) === "pokemon")
+    ) ?? availableGames.find((game) => String(game.id) === String(pokemonGameId));
 
     if (!pokemonGame?.id) {
       throw new Error("CardTrader did not return a Pokemon game identifier.");
@@ -402,13 +404,20 @@ async function fetchCardTrader({ fetchImpl, params, path, token }) {
       "user-agent": "MintBinder/0.1 sealed-pricing",
     },
   });
-  const body = await response.json().catch(() => ({}));
 
   if (!response.ok) {
     throw new Error(`CardTrader request failed with HTTP ${response.status} for ${path}.`);
   }
 
-  return body;
+  try {
+    return await response.json();
+  } catch {
+    const contentType = response.headers?.get?.("content-type") || "unknown content type";
+
+    throw new Error(
+      `CardTrader returned an invalid JSON response for ${path} (${contentType}).`,
+    );
+  }
 }
 
 function convertedListingPrice(offer, rates) {
@@ -438,6 +447,8 @@ function normalizedExpansionName(value) {
 
 function normalizedText(value) {
   return String(value ?? "")
+    .normalize("NFKD")
+    .replace(/\p{M}+/gu, "")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "")
     .trim();
