@@ -117,18 +117,20 @@ export async function syncCardTraderSealedPrices(options = {}) {
       request("/games"),
       request("/expansions"),
     ]);
-    const availableGames = asArray(games);
+    const availableGames = cardTraderCollection(games, "games");
     const pokemonGame = availableGames.find((game) =>
       [game.name, game.display_name].some((value) => normalizedText(value) === "pokemon")
     ) ?? availableGames.find((game) => String(game.id) === String(pokemonGameId));
-
-    if (!pokemonGame?.id) {
-      throw new Error("CardTrader did not return a Pokemon game identifier.");
-    }
-
-    const pokemonExpansions = asArray(expansions).filter((expansion) =>
-      String(expansion.game_id) === String(pokemonGame.id)
+    const resolvedPokemonGameId = pokemonGame?.id ?? pokemonGameId;
+    const pokemonExpansions = cardTraderCollection(expansions, "expansions").filter((expansion) =>
+      String(expansion.game_id) === String(resolvedPokemonGameId)
     );
+
+    if (!pokemonExpansions.length) {
+      throw new Error(
+        `CardTrader did not return Pokemon expansions (games: ${jsonShape(games)}; expansions: ${jsonShape(expansions)}).`,
+      );
+    }
     const bySet = groupBy(selectedCandidates, (product) => product.relatedCardSet.id);
 
     for (const setCandidates of bySet.values()) {
@@ -152,9 +154,9 @@ export async function syncCardTraderSealedPrices(options = {}) {
         continue;
       }
 
-      const blueprints = asArray(await request("/blueprints/export", {
+      const blueprints = cardTraderCollection(await request("/blueprints/export", {
         expansion_id: expansion.id,
-      }));
+      }), "blueprints");
       const blueprintByTcgplayerId = new Map(
         blueprints
           .filter((blueprint) => blueprint.tcg_player_id)
@@ -489,6 +491,40 @@ function groupBy(values, keyForValue) {
 
 function asArray(value) {
   return Array.isArray(value) ? value : [];
+}
+
+function cardTraderCollection(value, resourceName) {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (!isObject(value)) {
+    return [];
+  }
+
+  for (const key of [resourceName, "data", "results", "items"]) {
+    if (Array.isArray(value[key])) {
+      return value[key];
+    }
+  }
+
+  const values = Object.values(value);
+
+  return values.length > 0 && values.every(isObject) ? values : [];
+}
+
+function jsonShape(value) {
+  if (Array.isArray(value)) {
+    return `array(${value.length})`;
+  }
+
+  if (isObject(value)) {
+    const keys = Object.keys(value).slice(0, 8);
+
+    return `object(${keys.join(",") || "no keys"})`;
+  }
+
+  return value === null ? "null" : typeof value;
 }
 
 function conversionRate(value) {

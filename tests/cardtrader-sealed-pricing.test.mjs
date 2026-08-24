@@ -108,16 +108,20 @@ test("imports a CardTrader sealed marketplace snapshot by direct TCGplayer ident
     assert.equal(init.headers.authorization, "Bearer token");
 
     if (url.pathname.endsWith("/games")) {
-      return jsonResponse([{ id: 15, name: "pokemon-tcg", display_name: "Pokémon" }]);
+      return jsonResponse({ data: [{ id: 15, name: "pokemon-tcg", display_name: "Pokémon" }] });
     }
 
     if (url.pathname.endsWith("/expansions")) {
-      return jsonResponse([{ game_id: 15, id: 10, name: "Silver Tempest" }]);
+      return jsonResponse({
+        expansions: [{ game_id: 15, id: 10, name: "Silver Tempest" }],
+      });
     }
 
     if (url.pathname.endsWith("/blueprints/export")) {
       assert.equal(url.searchParams.get("expansion_id"), "10");
-      return jsonResponse([{ id: 20, name: "Silver Tempest Booster Box", tcg_player_id: "100" }]);
+      return jsonResponse({
+        results: [{ id: 20, name: "Silver Tempest Booster Box", tcg_player_id: "100" }],
+      });
     }
 
     assert.equal(url.pathname.endsWith("/marketplace/products"), true);
