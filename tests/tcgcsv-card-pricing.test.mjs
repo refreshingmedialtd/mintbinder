@@ -546,6 +546,9 @@ test("reads card pricing options from env", () => {
       TCGCSV_USD_TO_GBP_RATE: "0.8",
     }),
     {
+      apiRetryAttempts: 3,
+      apiRetryWaitMs: 500,
+      apiTimeoutMs: 10_000,
       categoryId: 3,
       groupIds: ["3170", "6052"],
       groupLimit: 2,
@@ -570,6 +573,9 @@ test("reads Japanese card pricing options from env", () => {
       TCGCSV_JAPAN_USD_TO_GBP_RATE: "0.77",
     }),
     {
+      apiRetryAttempts: 3,
+      apiRetryWaitMs: 500,
+      apiTimeoutMs: 10_000,
       categoryId: 85,
       groupIds: [],
       groupLimit: 4,

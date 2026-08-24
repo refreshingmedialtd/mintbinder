@@ -6,6 +6,7 @@ import {
   type PokemonTcgVariantMetadataSource,
   type VariantMetadataRepairCandidate,
 } from "../catalogue/variant-metadata-repair";
+import { fetchWithPolicy } from "../http/fetch-with-policy";
 
 export type VariantMetadataRepairOptions = {
   dryRun?: boolean;
@@ -119,13 +120,22 @@ async function fetchPokemonTcgCardVariantMetadata(
   fetchImpl: typeof fetch,
   timeoutMs: number,
 ): Promise<PokemonTcgVariantMetadataSource> {
-  const response = await fetchImpl(`https://api.pokemontcg.io/v2/cards/${encodeURIComponent(providerId)}`, {
-    headers: {
-      accept: "application/json",
-      ...(process.env.POKEMON_TCG_API_KEY ? { "x-api-key": process.env.POKEMON_TCG_API_KEY } : {}),
+  const response = await fetchWithPolicy(
+    `https://api.pokemontcg.io/v2/cards/${encodeURIComponent(providerId)}`,
+    {
+      headers: {
+        accept: "application/json",
+        ...(process.env.POKEMON_TCG_API_KEY ? { "x-api-key": process.env.POKEMON_TCG_API_KEY } : {}),
+      },
     },
-    signal: AbortSignal.timeout(timeoutMs),
-  });
+    {
+      fetchImpl,
+      maxResponseBytes: 2 * 1024 * 1024,
+      provider: "Pokemon TCG card metadata",
+      retryAttempts: 1,
+      timeoutMs,
+    },
+  );
   const body = await response.json().catch(() => ({})) as {
     data?: PokemonTcgVariantMetadataSource;
     error?: { message?: string };

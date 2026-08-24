@@ -1,5 +1,6 @@
-import { SubscriptionPlan, SubscriptionStatus } from "@prisma/client";
-import { prisma } from "@/lib/db/prisma";
+import { prisma } from "./db/prisma.ts";
+import { effectivePlusAccessWhere, hasEffectivePlusAccess } from "./billing/effective-access.ts";
+export { entitlementStatus } from "./entitlement-status.ts";
 
 export type Entitlement =
   | "exports.insurance_report"
@@ -16,13 +17,24 @@ export type EntitlementResult = {
   entitlements: Record<Entitlement, boolean>;
 };
 
-const activeStatuses = new Set<SubscriptionStatus>([
-  SubscriptionStatus.ACTIVE,
-  SubscriptionStatus.TRIALING,
-]);
-
 export async function getEntitlements(userId: string): Promise<EntitlementResult> {
-  const subscription = await prisma.subscription.findFirst({
+  const now = new Date();
+  const activePlus = await prisma.subscription.findFirst({
+    where: {
+      userId,
+      ...effectivePlusAccessWhere(now),
+    },
+    orderBy: { updatedAt: "desc" },
+    select: {
+      cancelAtPeriodEnd: true,
+      currentPeriodEnd: true,
+      plan: true,
+      provider: true,
+      providerSubscriptionId: true,
+      status: true,
+    },
+  });
+  const subscription = activePlus ?? await prisma.subscription.findFirst({
     where: { userId },
     orderBy: { updatedAt: "desc" },
     select: {
@@ -34,10 +46,7 @@ export async function getEntitlements(userId: string): Promise<EntitlementResult
       status: true,
     },
   });
-  const isPlus =
-    Boolean(subscription && activeStatuses.has(subscription.status)) &&
-    (subscription?.plan === SubscriptionPlan.PLUS_MONTHLY ||
-      subscription?.plan === SubscriptionPlan.PLUS_YEARLY);
+  const isPlus = hasEffectivePlusAccess(subscription, now);
 
   return {
     cancelAtPeriodEnd: subscription?.cancelAtPeriodEnd ?? false,
@@ -64,8 +73,4 @@ export async function requireEntitlement(userId: string, entitlement: Entitlemen
   }
 
   return result;
-}
-
-export function entitlementStatus(error: unknown) {
-  return error instanceof Error && error.name === "EntitlementError" ? 403 : 400;
 }

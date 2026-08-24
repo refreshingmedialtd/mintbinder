@@ -1,4 +1,6 @@
 import nodemailer from "nodemailer";
+import { smtpSecurityOptions } from "@/lib/notifications/smtp-policy";
+import { fetchWithPolicy } from "@/lib/http/fetch-with-policy";
 
 type SendEmailInput = {
   html: string;
@@ -69,7 +71,7 @@ async function sendResendEmail({
     headers["idempotency-key"] = idempotencyKey;
   }
 
-  const response = await fetch("https://api.resend.com/emails", {
+  const response = await fetchWithPolicy("https://api.resend.com/emails", {
     method: "POST",
     headers,
     body: JSON.stringify({
@@ -79,6 +81,11 @@ async function sendResendEmail({
       text,
       to,
     }),
+  }, {
+    provider: "Resend",
+    retryAttempts: positiveInteger(process.env.EMAIL_RETRY_ATTEMPTS, 2),
+    retryWaitMs: positiveInteger(process.env.EMAIL_RETRY_WAIT_MS, 400),
+    timeoutMs: positiveInteger(process.env.EMAIL_REQUEST_TIMEOUT_MS, 10_000),
   });
   const data = (await response.json().catch(() => ({}))) as ResendResponse;
 
@@ -106,14 +113,18 @@ async function sendSmtpEmail({
   }
 
   const port = smtpPort();
+  const security = smtpSecurityOptions(port, process.env.SMTP_SECURE);
   const transporter = nodemailer.createTransport({
     host,
     port,
-    secure: booleanSetting(process.env.SMTP_SECURE, port === 465),
+    ...security,
     auth: {
       user,
       pass,
     },
+    connectionTimeout: positiveInteger(process.env.EMAIL_REQUEST_TIMEOUT_MS, 10_000),
+    greetingTimeout: positiveInteger(process.env.EMAIL_REQUEST_TIMEOUT_MS, 10_000),
+    socketTimeout: positiveInteger(process.env.EMAIL_SOCKET_TIMEOUT_MS, 20_000),
   });
   const info = await transporter.sendMail({
     from,
@@ -159,10 +170,7 @@ function smtpPort() {
   return Number.isFinite(port) && port > 0 ? port : 465;
 }
 
-function booleanSetting(value: string | undefined, fallback: boolean) {
-  if (!value) {
-    return fallback;
-  }
-
-  return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
+function positiveInteger(value: string | undefined, fallback: number) {
+  const number = Number.parseInt(value ?? "", 10);
+  return Number.isFinite(number) && number > 0 ? number : fallback;
 }

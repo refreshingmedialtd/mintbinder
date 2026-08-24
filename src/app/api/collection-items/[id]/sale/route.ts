@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { sellCollectionItem } from "@/lib/db/app-data";
+import { accountMutationGuard } from "@/lib/auth/mutation-guard";
+import { mutationErrorResponse } from "@/lib/http/mutation-error-response";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +17,10 @@ export async function POST(request: Request, context: RouteContext) {
     if (!session?.user?.id) {
       return NextResponse.json({ error: "Authentication required." }, { status: 401 });
     }
+    const mutationError = await accountMutationGuard({
+      isEmailVerified: session.user.isEmailVerified, request, userId: session.user.id,
+    });
+    if (mutationError) return mutationError;
 
     const { id } = await context.params;
     const body = await request.json();
@@ -23,8 +29,6 @@ export async function POST(request: Request, context: RouteContext) {
 
     return NextResponse.json({ ok: true });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unable to record sale.";
-
-    return NextResponse.json({ error: message }, { status: 400 });
+    return mutationErrorResponse(error, "Unable to record sale.");
   }
 }

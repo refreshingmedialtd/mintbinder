@@ -36,11 +36,11 @@ Do not paste real secret values into logs, screenshots, tickets, or documentatio
 Core app:
 
 - `DATABASE_URL`: hosted PostgreSQL connection string.
-- `AUTH_SECRET`: high-entropy secret, at least 32 characters.
+- `AUTH_SECRET`: high-entropy secret, at least 32 characters, generated independently from `JOB_SECRET`.
 - `AUTH_URL`: final production app origin, HTTPS.
 - `AUTH_TRUST_HOST=true`.
 - `NEXT_PUBLIC_APP_URL`: same HTTPS origin as `AUTH_URL`.
-- `JOB_SECRET`: high-entropy secret for protected Operations/job routes.
+- `JOB_SECRET`: a separate high-entropy secret for protected Operations/job routes. Rotate both secrets if one value was ever reused or exposed.
 - `SCHEDULED_JOB_APP_URL=https://mintbinder.co.uk` for live scheduled job helpers.
 
 Billing:
@@ -54,9 +54,10 @@ Billing:
 - `SQUARE_PLUS_MONTHLY_AMOUNT_MINOR=249`.
 - `SQUARE_PLUS_YEARLY_AMOUNT_MINOR=1999`.
 - `SQUARE_CURRENCY=GBP`.
-- `SQUARE_WEBHOOK_NOTIFICATION_URL`: `https://final-domain/api/billing/webhook`.
+- `SQUARE_WEBHOOK_NOTIFICATION_URL`: `https://final-domain/api/billing/webhook/square`.
 - `SQUARE_WEBHOOK_SIGNATURE_KEY`: production webhook signature key.
 - `SQUARE_WEBHOOK_SUBSCRIPTION_ID`: production webhook subscription ID.
+- `SQUARE_PAYMENT_CORRELATION_VERIFIED=true`: set only after a hosted sandbox checkout proves `payment.created`/`payment.updated` correlation to the intended Mint Binder account. Checkout fails closed while false or absent.
 
 Email and alerts:
 
@@ -87,6 +88,8 @@ Pricing:
 - `TCGCSV_USD_TO_GBP_RATE`: optional fallback USD conversion rate for TCGCSV imports.
 - `PRICECHARTING_API_TOKEN`: optional until that paid source is available.
 - `PRICECHARTING_USD_TO_GBP_RATE`: positive current conversion rate when PriceCharting is active.
+- `PRICECHARTING_SEALED_WRITE_PRICES`: keep `false` until PriceCharting has granted the required third-party display permission and a dry-run mapping review has been approved.
+- `PRICECHARTING_GRADED_ENABLED`: keep `false` until PriceCharting has granted the required third-party display permission and a dry-run mapping review has been approved.
 
 ## First Staging Deploy Order
 
@@ -94,7 +97,7 @@ Pricing:
 2. Create the staging database and add `DATABASE_URL`.
 3. Add all non-payment production-like env vars with staging-safe values.
 4. Run `npm run db:deploy`.
-5. Seed or create one admin user.
+5. Register the intended staging operator normally, then promote it with `npm run ops:ensure-admin`. The demo seed is development-only and must not be enabled on staging or production.
 6. Run `npm run build`.
 7. Run `npm run qa:beta` against staging with `BETA_QA_BASE_URL`.
 8. Run `npm run qa:admin` against staging data.
@@ -111,14 +114,15 @@ Pricing:
 5. Run `npm run db:deploy`.
 6. Deploy the app.
    - 20i Git Version Control should use `/home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/deploy-20i.sh` as the deployment script path. Verify each deploy by checking the expected route exists on `https://mintbinder.co.uk`.
-   - The script should rebuild the app and reload the registered PM2 process. If the deploy output does not show `Reloading Mint Binder runtime via PM2`, restart the registered NodeJS app manually before testing.
+   - The script rebuilds the app, packages a release-local standalone runtime, reloads the registered PM2 process, and verifies that `/api/health` reports the deployed commit. It uses 20i's global PM2 command when visible and otherwise the locked project-local PM2 client, so the non-login deployment shell does not depend on PATH setup. It fails before migration if neither client can see the registered app.
 7. Run `npm run qa:beta` against the production URL.
 8. Run `npm run qa:admin` against production data.
 9. Run Square hosted-checkout browser smoke for monthly and yearly plans.
-10. Confirm Square webhook delivery updates the in-app subscription state.
-11. Run price-alert dry run, then controlled live smoke with `PRICE_ALERT_DIGEST_TEST_RECIPIENT`.
-12. Keep `PRICE_ALERT_DIGEST_ALLOW_LIVE_RECIPIENTS=false` until the first beta group is approved.
-13. Turn on uptime/error/job/webhook alerts.
+10. Schedule `scripts/cron-billing-checkout-retirement.sh` every ten minutes and verify one expired sandbox link is provider-checked and retired.
+11. Confirm Square webhook delivery updates the in-app subscription state.
+12. Run price-alert dry run, then controlled live smoke with `PRICE_ALERT_DIGEST_TEST_RECIPIENT`.
+13. Keep `PRICE_ALERT_DIGEST_ALLOW_LIVE_RECIPIENTS=false` until the first beta group is approved.
+14. Turn on uptime/error/job/webhook alerts.
 
 ## Database Migration Policy
 
@@ -178,7 +182,7 @@ After any production catalogue or pricing import, run:
 npm run report:catalogue-gaps
 ```
 
-Expected remaining gaps: older/legacy card pricing, selected promos, and sealed products without usable TCGCSV prices. Use PriceCharting or another sealed-price provider for the next major sealed-pricing lift.
+Expected remaining gaps: older/legacy card pricing, selected promos, and sealed products without usable TCGCSV or CardTrader prices. PriceCharting must remain non-writing unless its required third-party display permission has been obtained.
 
 For recurring pricing maintenance, use [SCHEDULED_JOBS.md](SCHEDULED_JOBS.md). The preferred English card-pricing schedule calls `npm run job:live-pricing` hourly with `POKEMON_TCG_PRICING_STRATEGY=sets` and `POKEMON_TCG_SET_PRICING_LIMIT=8`, which posts to `/api/jobs/scheduled-set-pricing` in one-set timeout-safe batches; that route selects the least-recently refreshed Pokemon TCG sets from the production database, writes new snapshots, and avoids deep full-catalogue provider pages. Japanese pricing uses `npm run job:live-japan-card-pricing` hourly with `TCGCSV_JAPAN_CARD_GROUP_LIMIT=1`, `TCGCSV_JAPAN_CARD_ONLY_UNPRICED_GROUPS=false`, and `TCGCSV_JAPAN_CARD_PRICE_ONLY_UNPRICED=false`; Traditional Chinese, Simplified Chinese, and Korean pricing should remain visible as gaps until a reviewed CSV/licensed source is available.
 
@@ -187,11 +191,13 @@ For recurring pricing maintenance, use [SCHEDULED_JOBS.md](SCHEDULED_JOBS.md). T
 For `mintbinder.co.uk`:
 
 - Set `NEXT_PUBLIC_APP_URL` and `AUTH_URL` to the final HTTPS origin.
-- Create or update the Square production webhook subscription at `/api/billing/webhook`.
+- Create or update the Square production webhook subscription at `/api/billing/webhook/square`, and keep Stripe configured at `/api/billing/webhook/stripe` for as long as any historical Stripe subscription may still send lifecycle events. Webhook ingestion is deliberately independent of `BILLING_PROVIDER`.
 - Copy the production `SQUARE_WEBHOOK_SIGNATURE_KEY`.
 - Copy the production `SQUARE_WEBHOOK_SUBSCRIPTION_ID`.
-- Confirm Square events include `subscription.created`, `subscription.updated`, and `invoice.payment_made`.
+- Confirm Square events include `subscription.created`, `subscription.updated`, `invoice.payment_made`, `payment.created`, and `payment.updated`.
+- Complete a disposable hosted sandbox checkout whose buyer phone creates or selects a different Square customer; verify the signed payment note maps that customer and grants the intended account exactly once before setting `SQUARE_PAYMENT_CORRELATION_VERIFIED=true`.
 - Complete one monthly and one yearly hosted checkout smoke.
+- Before changing any provider price ID/plan variation, Square amount, or currency, disable new checkout and retire every open checkout first. Each attempt keeps its purchase-time provider price/variation (and Square amount/currency) snapshot so an in-flight or already-paid checkout reconciles against what the buyer actually saw, not the new environment values. Run the protected checkout-retirement job and resolve every live or ambiguous attempt before applying the configuration change.
 - Confirm cancellation keeps Plus active until the paid-through date.
 
 ## Email Domain Batch
@@ -239,23 +245,26 @@ For the 20i deployment script field, use the absolute path:
 /home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/deploy-20i.sh
 ```
 
-The script runs:
+The script runs, in fail-closed order:
 
 ```sh
-npm install --include=dev --no-audit --no-fund
+npm ci --include=dev --no-audit --no-fund
 npm run db:generate
-npm run db:deploy
+npm run qa:deployment-env
 npm run build
+node scripts/package-next-release.mjs
+npm run db:deploy
 pm2 reload <registered app> --update-env
+node scripts/verify-runtime-build.mjs
 ```
 
-Expected behaviour: after Git deploy, 20i should run the script from the repository root, apply pending Prisma migrations, rebuild `.next`, and restart or refresh the registered NodeJS app so new Next routes are available. The custom `app.js` entrypoint pins Next's runtime directory to the repository folder so 20i's working directory cannot make the app read the wrong `.next` output.
+Expected behaviour: after Git deploy, 20i should run the script from the repository root, validate configuration, build Next's standalone output, copy it (including its traced dependencies, public files, and hashed assets) into `.next-releases/<commit>/runtime`, apply pending Prisma migrations only after a successful build and registered-app preflight, and reload the registered NodeJS app with that release directory. Runtime verification must report the deployed commit. If activation or verification fails and the previous build is still present, the script restores the previous build metadata/environment, reloads that release-local runtime, verifies the rollback, and still exits failed so the incident is visible.
 
 The custom server also forces `Cache-Control: no-store` headers on normal app/API routes so the HTML app shell is not cached across deploys. Hashed Next static assets under `/_next/static/` remain cacheable.
 
-Note: the first successful script run auto-installed missing build-time dev dependencies because `NODE_ENV=production` had been set before dependency installation, leaving `package.json` and `package-lock.json` modified on the server. The script now restores those files and installs with dev dependencies before building. Avoid `npm ci` or `rm -rf .next` in the live app directory: both can temporarily remove files that the currently running Node process may still need.
+Note: the first successful script run auto-installed missing build-time dev dependencies because `NODE_ENV=production` had been set before dependency installation, leaving `package.json` and `package-lock.json` modified on the server. The script now restores those files and installs with dev dependencies before building. Active and rollback web runtimes no longer use that shared dependency tree: every new release contains the exact traced runtime dependencies produced by its own build. The root `app.js` is a dependency-free launcher. The pre-standalone `.next` build is deliberately not advertised as an automatic rollback because build staging replaces it; deploy the first transition in a maintenance window with a verified database restore point. Automatic immutable rollback is available after that transition succeeds and a second standalone release is deployed.
 
-Follow-up to confirm with support if needed: whether 20i exposes a preferred restart command if the PM2 reload fallback does not refresh the registered NodeJS app.
+The first deploy with this layout must show `Registered runtime preflight passed` before migration and `Verified Mint Binder runtime commit ...` after reload. A deployment without both checks is considered failed.
 
 ## Monitoring And Recovery
 

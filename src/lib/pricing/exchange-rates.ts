@@ -1,3 +1,5 @@
+import { fetchWithPolicy } from "../http/fetch-with-policy.ts";
+
 export class ExchangeRateConfigError extends Error {
   constructor(message: string) {
     super(message);
@@ -125,10 +127,16 @@ async function frankfurterGbpRates({
   url.searchParams.set("from", "GBP");
   url.searchParams.set("to", currencies.join(","));
 
-  const response = await fetchImpl(url, {
+  const response = await fetchWithPolicy(url, {
     headers: {
       accept: "application/json",
     },
+  }, {
+    fetchImpl,
+    maxResponseBytes: 1_000_000,
+    provider: "Frankfurter exchange rates",
+    retryAttempts: 1,
+    timeoutMs: boundedTimeout(env.EXCHANGE_RATES_TIMEOUT_MS, 10_000),
   });
   const data = (await response.json().catch(() => ({}))) as {
     date?: unknown;
@@ -249,4 +257,11 @@ function setting(value: unknown) {
 
 function roundRate(value: number) {
   return Math.round(value * 1_000_000) / 1_000_000;
+}
+
+function boundedTimeout(value: unknown, fallback: number) {
+  const milliseconds = Number(value);
+  return Number.isFinite(milliseconds)
+    ? Math.max(100, Math.min(30_000, Math.floor(milliseconds)))
+    : fallback;
 }

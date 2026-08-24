@@ -4,6 +4,8 @@ import { jobErrorResultPayload } from "../src/lib/jobs/error-payload.ts";
 import { isJobRunType } from "../src/lib/jobs/types.ts";
 
 test("recognizes supported job run types", () => {
+  assert.equal(isJobRunType("billing_checkout_retirement"), true);
+  assert.equal(isJobRunType("password_reset_delivery"), true);
   assert.equal(isJobRunType("price_alerts"), true);
   assert.equal(isJobRunType("catalogue_refresh"), true);
   assert.equal(isJobRunType("pricing_refresh"), true);

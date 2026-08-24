@@ -329,7 +329,7 @@ async function replaySquareSubscriptionWebhook({
     merchant_id: "local_square_activation_qa",
     type: "subscription.updated",
   });
-  const response = await fetch("http://127.0.0.1:3000/api/billing/webhook", {
+  const response = await fetch("http://127.0.0.1:3000/api/billing/webhook/square", {
     body: payload,
     headers: {
       "content-type": "application/json",

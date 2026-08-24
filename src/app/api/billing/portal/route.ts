@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
+import { accountMutationGuard } from "@/lib/auth/mutation-guard";
 import { getBillingCustomer } from "@/lib/billing/customers";
 import { billingErrorStatus } from "@/lib/billing/errors";
 import { activeBillingProvider } from "@/lib/billing/provider";
@@ -15,6 +16,10 @@ export async function POST(request: Request) {
     if (!session?.user?.id) {
       return NextResponse.json({ error: "Authentication required." }, { status: 401 });
     }
+    const mutationError = await accountMutationGuard({
+      isEmailVerified: session.user.isEmailVerified, request, userId: session.user.id,
+    });
+    if (mutationError) return mutationError;
 
     const provider = activeBillingProvider();
     const customerId = await getBillingCustomer(session.user.id);

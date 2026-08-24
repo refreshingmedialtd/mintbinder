@@ -6,5 +6,5 @@ export class BillingConfigError extends Error {
 }
 
 export function billingErrorStatus(error: unknown) {
-  return error instanceof BillingConfigError ? 501 : 400;
+  return error instanceof BillingConfigError ? 501 : 500;
 }

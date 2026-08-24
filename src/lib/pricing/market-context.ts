@@ -84,6 +84,10 @@ export function priceSourceLabel(source?: string | null) {
     return "PriceCharting US sealed market (GBP converted)";
   }
 
+  if (normalized === "pricecharting-graded-card") {
+    return "PriceCharting US graded-card market (GBP converted)";
+  }
+
   if (normalized === "cardtrader-sealed") {
     return "CardTrader European sealed marketplace (GBP converted)";
   }

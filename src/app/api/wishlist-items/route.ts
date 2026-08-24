@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { createWishlistItem, deleteWishlistItem, updateWishlistItem } from "@/lib/db/app-data";
+import { accountMutationGuard } from "@/lib/auth/mutation-guard";
+import { mutationErrorResponse } from "@/lib/http/mutation-error-response";
 
 export const dynamic = "force-dynamic";
 
@@ -11,15 +13,17 @@ export async function POST(request: Request) {
     if (!session?.user?.id) {
       return NextResponse.json({ error: "Authentication required." }, { status: 401 });
     }
+    const mutationError = await accountMutationGuard({
+      isEmailVerified: session.user.isEmailVerified, request, userId: session.user.id,
+    });
+    if (mutationError) return mutationError;
 
     const body = await request.json();
     const item = await createWishlistItem(session.user.id, String(body.catalogueId ?? ""));
 
     return NextResponse.json({ item });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unable to create wishlist item.";
-
-    return NextResponse.json({ error: message }, { status: 400 });
+    return mutationErrorResponse(error, "Unable to create wishlist item.");
   }
 }
 
@@ -30,6 +34,10 @@ export async function DELETE(request: Request) {
     if (!session?.user?.id) {
       return NextResponse.json({ error: "Authentication required." }, { status: 401 });
     }
+    const mutationError = await accountMutationGuard({
+      isEmailVerified: session.user.isEmailVerified, request, userId: session.user.id,
+    });
+    if (mutationError) return mutationError;
 
     const id = new URL(request.url).searchParams.get("id");
 
@@ -41,9 +49,7 @@ export async function DELETE(request: Request) {
 
     return NextResponse.json({ ok: true });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unable to delete wishlist item.";
-
-    return NextResponse.json({ error: message }, { status: 400 });
+    return mutationErrorResponse(error, "Unable to delete wishlist item.");
   }
 }
 
@@ -54,6 +60,10 @@ export async function PATCH(request: Request) {
     if (!session?.user?.id) {
       return NextResponse.json({ error: "Authentication required." }, { status: 401 });
     }
+    const mutationError = await accountMutationGuard({
+      isEmailVerified: session.user.isEmailVerified, request, userId: session.user.id,
+    });
+    if (mutationError) return mutationError;
 
     const body = await request.json();
     const id = String(body.id ?? "");
@@ -66,8 +76,6 @@ export async function PATCH(request: Request) {
 
     return NextResponse.json({ item });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unable to update wishlist item.";
-
-    return NextResponse.json({ error: message }, { status: 400 });
+    return mutationErrorResponse(error, "Unable to update wishlist item.");
   }
 }

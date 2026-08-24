@@ -7,6 +7,8 @@ export type PricePoint = {
   confidence: PriceConfidence;
   source: string;
   variantLabel?: string;
+  gradedCompany?: string;
+  gradedScore?: number;
 };
 
 export type CatalogueVariantOption = {
@@ -84,6 +86,43 @@ export type SetProgress = {
   symbolImage?: string;
   owned: number;
   total: number;
+};
+
+export type ActiveSetGoal = {
+  id: string;
+  cardSetId: string;
+  targetCompletionPercent: number;
+  wishlistPriority: WishlistItem["priority"];
+  createdAt: string;
+  updatedAt: string;
+  set: {
+    id: string;
+    name: string;
+    language: string;
+    region: string;
+    series?: string;
+    releaseDate?: string;
+    printedTotal?: number;
+    total?: number;
+    symbolImageUrl?: string;
+    logoImageUrl?: string;
+  };
+};
+
+export type SetGoalResponse = {
+  goal: ActiveSetGoal | null;
+};
+
+export type SetGoalWishlistBulkResult = {
+  activeSetId: string;
+  requested: number;
+  selected: number;
+  added: number;
+  alreadyWishlisted: number;
+  ownedSkipped: number;
+  outsideActiveSetSkipped: number;
+  concurrentDuplicatesSkipped: number;
+  cappedAt: number;
 };
 
 export type StorageLocation = {
@@ -172,15 +211,20 @@ export type AppCatalogueData = {
 
 export type AppCatalogueSearchData = AppCatalogueData & {
   hasMore: boolean;
+  nextOffset: number | null;
   query: {
     language: string;
     limit: number;
+    offset: number;
     q: string;
     rarity: string;
     set: string;
     sort: string;
     type: ItemType | "all";
   };
+  returned: number;
+  windowExhausted: boolean;
+  /** @deprecated Use returned. Kept for existing clients. */
   resultCount: number;
 };
 

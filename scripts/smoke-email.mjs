@@ -1,5 +1,6 @@
 import "dotenv/config";
 import nodemailer from "nodemailer";
+import { smtpSecurityOptions } from "./smtp-policy.mjs";
 
 const provider = emailProvider();
 const from = required("EMAIL_FROM", "Set EMAIL_FROM to a verified sender, for example Mint Binder <alerts@mintbinder.co.uk>.");
@@ -55,10 +56,11 @@ async function sendSmtpSmoke(message) {
   const user = required("SMTP_USER", "Set SMTP_USER to the 20i mailbox username.");
   const pass = required("SMTP_PASSWORD", "Set SMTP_PASSWORD to the 20i mailbox password.");
   const port = smtpPort();
+  const security = smtpSecurityOptions(port, process.env.SMTP_SECURE);
   const transporter = nodemailer.createTransport({
     host,
     port,
-    secure: booleanSetting(process.env.SMTP_SECURE, port === 465),
+    ...security,
     auth: {
       user,
       pass,
@@ -127,14 +129,6 @@ function smtpPort() {
   const port = Number.parseInt(process.env.SMTP_PORT ?? "", 10);
 
   return Number.isFinite(port) && port > 0 ? port : 465;
-}
-
-function booleanSetting(value, fallback) {
-  if (!value) {
-    return fallback;
-  }
-
-  return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
 }
 
 function escapeHtml(value) {

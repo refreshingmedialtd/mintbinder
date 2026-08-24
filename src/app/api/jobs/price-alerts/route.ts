@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 import { jobErrorStatus, requireJobAccess } from "@/lib/jobs/auth";
 import { JobRunExecutionError, runTrackedJob } from "@/lib/jobs/runs";
-import { sendPriceAlertDigests } from "@/lib/notifications/price-alerts";
+import {
+  assertPriceAlertDigestHealthy,
+  sendPriceAlertDigests,
+} from "@/lib/notifications/price-alerts";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -17,13 +20,17 @@ export async function POST(request: Request) {
     };
     const now = parseOptionalDate(body.now);
     const { jobRun, result } = await runTrackedJob({
-      input: body,
+      input: {
+        dryRun: body.dryRun === true,
+        now: body.now,
+        testRecipientConfigured: Boolean(body.testRecipient?.trim()),
+      },
       type: "price_alerts",
-      task: () => sendPriceAlertDigests({
+      task: async () => assertPriceAlertDigestHealthy(await sendPriceAlertDigests({
         dryRun: body.dryRun === true,
         now,
         testRecipient: body.testRecipient,
-      }),
+      })),
     });
 
     return NextResponse.json({ ...result, jobRun });

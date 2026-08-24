@@ -394,6 +394,9 @@ test("reads sealed import options from env", () => {
       TCGCSV_USD_TO_GBP_RATE: "0.8",
     }),
     {
+      apiRetryAttempts: 3,
+      apiRetryWaitMs: 500,
+      apiTimeoutMs: 10_000,
       groupIds: ["3170", "6052"],
       groupLimit: 2,
       priceOnlyUnpriced: false,

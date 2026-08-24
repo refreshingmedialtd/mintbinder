@@ -16,7 +16,10 @@ export async function GET() {
 
     await requireEntitlement(session.user.id, "pricing.alerts");
 
-    const data = await getAppData(session.user.id);
+    const data = await getAppData(session.user.id, {
+      catalogueScope: "referenced",
+      fallback: "throw",
+    });
     const intelligence = buildCollectionIntelligence({
       catalogueById: new Map(data.catalogue.map((item) => [item.id, item])),
       collection: data.collection,
@@ -28,8 +31,15 @@ export async function GET() {
 
     return NextResponse.json({ alerts: intelligence.priceAlerts });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unable to load price alerts.";
+    const status = entitlementStatus(error);
 
-    return NextResponse.json({ error: message }, { status: entitlementStatus(error) });
+    if (status === 500) {
+      console.error("Unable to load price alerts.", error);
+    }
+
+    return NextResponse.json(
+      { error: status === 403 ? "Plus subscription required." : "Unable to load price alerts." },
+      { status },
+    );
   }
 }

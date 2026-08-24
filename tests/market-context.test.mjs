@@ -78,5 +78,6 @@ test("labels market scope honestly and keeps one coherent price series", () => {
   assert.equal(priceMarketRole("cardtrader-sealed"), "European market estimate");
   assert.match(priceSourceLabel("tcgcsv-card"), /US market/);
   assert.match(priceSourceLabel("cardtrader-sealed"), /European sealed marketplace/);
+  assert.match(priceSourceLabel("pricecharting-graded-card"), /US graded-card market/);
   assert.deepEqual(preferredPriceSeries(history, now), [history[2]]);
 });

@@ -5,6 +5,7 @@ import {
   cancelCurrentSquareSubscription,
   getCurrentBillingSubscription,
 } from "@/lib/billing/subscription-management";
+import { accountMutationGuard } from "@/lib/auth/mutation-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -33,6 +34,10 @@ export async function PATCH(request: Request) {
     if (!session?.user?.id) {
       return NextResponse.json({ error: "Authentication required." }, { status: 401 });
     }
+    const mutationError = await accountMutationGuard({
+      isEmailVerified: session.user.isEmailVerified, request, userId: session.user.id,
+    });
+    if (mutationError) return mutationError;
 
     const body = await request.json().catch(() => ({})) as { action?: string };
 

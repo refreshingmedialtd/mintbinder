@@ -1,0 +1,89 @@
+.shell {
+  align-items: center;
+  background:
+    radial-gradient(circle at 18% 16%, rgba(53, 177, 154, 0.18), transparent 34rem),
+    linear-gradient(145deg, #f7f5ed, #e9f3ef);
+  color: #173336;
+  display: flex;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 24px;
+}
+
+.card {
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(28, 93, 86, 0.14);
+  border-radius: 28px;
+  box-shadow: 0 28px 90px rgba(17, 55, 52, 0.14);
+  max-width: 580px;
+  padding: clamp(30px, 6vw, 58px);
+  width: 100%;
+}
+
+.eyebrow {
+  color: #19776e;
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  margin: 0 0 18px;
+  text-transform: uppercase;
+}
+
+.card h1 {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(2.2rem, 8vw, 4rem);
+  letter-spacing: -0.04em;
+  line-height: 0.98;
+  margin: 0;
+}
+
+.card p:not(.eyebrow) {
+  color: #546b6b;
+  font-size: 1rem;
+  line-height: 1.7;
+  margin: 22px 0 0;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 30px;
+}
+
+.actions a,
+.actions button {
+  background: #176f68;
+  border: 0;
+  border-radius: 999px;
+  color: white;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 750;
+  padding: 12px 20px;
+  text-decoration: none;
+}
+
+.actions a:focus-visible,
+.actions button:focus-visible {
+  outline: 3px solid rgba(23, 111, 104, 0.28);
+  outline-offset: 3px;
+}
+
+.loader {
+  animation: spin 0.9s linear infinite;
+  border: 3px solid rgba(23, 111, 104, 0.16);
+  border-radius: 50%;
+  border-top-color: #176f68;
+  height: 34px;
+  margin-bottom: 24px;
+  width: 34px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loader { animation: none; }
+}

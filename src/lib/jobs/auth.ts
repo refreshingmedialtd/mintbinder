@@ -63,6 +63,10 @@ function hasValidJobSecret(request: Request) {
 }
 
 export function jobErrorStatus(error: unknown) {
+  if (error instanceof Error && error.name === "JobRunOverlapError") {
+    return 409;
+  }
+
   if (error instanceof JobConfigError) {
     return 501;
   }

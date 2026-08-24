@@ -1,17 +1,27 @@
-import { NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { getCatalogueData } from "@/lib/db/app-data";
+import {
+  databaseReadUnavailableResponse,
+  privateReadJson,
+} from "@/lib/http/private-read-response";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const session = await auth();
+  try {
+    const session = await auth();
 
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+    if (!session?.user?.id) {
+      return privateReadJson({ error: "Authentication required." }, 401);
+    }
+
+    return privateReadJson(
+      {
+        error: "The unbounded catalogue endpoint has been retired. Use catalogue search or set reads.",
+      },
+      410,
+    );
+  } catch (error) {
+    console.error("Unable to authorize the retired catalogue endpoint.", error);
+    return databaseReadUnavailableResponse("Catalogue data is temporarily unavailable.");
   }
-
-  const data = await getCatalogueData(session.user.id);
-
-  return NextResponse.json(data);
 }

@@ -131,6 +131,7 @@ test("imports PriceCharting sealed price snapshots", async () => {
     token: "token",
     usdToGbpRate: 0.8,
     waitMs: 0,
+    writePrices: true,
   });
 
   assert.equal(summary.candidatesChecked, 1);

@@ -10,16 +10,17 @@ import {
   Boxes,
   ChartNoAxesCombined,
   Check,
+  Copy,
   CreditCard,
   Database,
   Download,
+  ExternalLink,
   GalleryVerticalEnd,
   Grid2X2,
   Heart,
   History,
   Info,
   Layers3,
-  Languages,
   List,
   LayoutDashboard,
   LogIn,
@@ -27,16 +28,20 @@ import {
   MapPin,
   Mail,
   Lock,
+  Minus,
   Palette,
   Paintbrush,
   PackagePlus,
   Plus,
   RefreshCw,
+  Save,
   Search,
   Settings,
+  Share2,
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
+  Target,
   TerminalSquare,
   Trash2,
   Upload,
@@ -44,6 +49,8 @@ import {
   X,
 } from "lucide-react";
 import Image from "next/image";
+import Link from "next/link";
+import dynamic from "next/dynamic";
 import { signIn, signOut, useSession } from "next-auth/react";
 import type {
   ChangeEvent,
@@ -62,37 +69,35 @@ import {
   latestPricePointForCatalogueVariant,
 } from "@/lib/catalogue/variants";
 import {
-  catalogueDisplayCardForText,
-  catalogueDisplaySetForText,
   catalogueNameAliasesForText,
 } from "@/lib/catalogue/name-aliases";
+import { isOptimizableCatalogueImageUrl } from "@/lib/catalogue/image-url";
 import { CATALOGUE_LANGUAGE_OPTIONS, LOT_LANGUAGE_OPTIONS } from "@/lib/catalogue/languages";
+import { chunkCatalogueLookupIds } from "@/lib/catalogue/lookup";
 import {
   buildCollectionCsv,
   buildCollectionImportTemplateCsv,
-  parseCollectionImportCsv,
+  inspectCollectionImportCsv,
   type CollectionImportRow,
 } from "@/lib/csv";
 import { completionPercent, formatMoney } from "@/lib/format";
-import {
-  catalogueGapRecommendations,
-  type CatalogueGapRecommendation,
-} from "@/lib/jobs/catalogue-gap-report";
-import type {
-  DuplicateProviderReview,
-  DuplicateProviderReviewCard,
-  DuplicateProviderReviewGroup,
-} from "@/lib/catalogue/duplicate-provider-review";
-import { priceRangeMinor } from "@/lib/pricing/price-history";
+import { priceConfidenceFromScore, priceRangeMinor } from "@/lib/pricing/price-history";
 import {
   effectivePriceConfidence,
   preferredLatestPricePoint,
   preferredPriceSeries,
   priceFreshnessStatus,
+  priceMarketForSource,
   priceMarketRole,
   priceSourceLabel,
 } from "@/lib/pricing/market-context";
 import { buildInsuranceReportHtml } from "@/lib/reports/insurance";
+import {
+  appRouteHistoryMode,
+  buildAppRoutePath,
+  parseAppRouteState,
+  type AppRouteState,
+} from "@/lib/navigation/app-route-state";
 import {
   buildCollectionIntelligence,
   type CollectionIntelligence,
@@ -107,16 +112,37 @@ import type {
   AppDashboardData,
   AppDataSource,
   AppSubscription,
+  ActiveSetGoal,
   CatalogueItem,
   CollectionEvent,
   CollectionItem,
   ItemType,
   NotificationPreferences,
   Screen,
+  SetGoalResponse,
+  SetGoalWishlistBulkResult,
   SetProgress,
   StorageLocation,
   WishlistItem,
 } from "@/lib/types";
+
+const LazyOperationsScreen = dynamic(
+  () => import("@/components/operations-screen").then((module) => module.OperationsScreen),
+  {
+    loading: () => (
+      <section aria-busy="true" aria-live="polite" className="page">
+        <div className="empty-state compact">
+          <strong>Loading operations</strong>
+          <span>Preparing the administration tools.</span>
+        </div>
+      </section>
+    ),
+  },
+);
+
+const developmentSamplePreviewEnabled =
+  process.env.NODE_ENV === "development" &&
+  process.env.NEXT_PUBLIC_MINTBINDER_ENABLE_DEV_SAMPLE_FALLBACK === "true";
 
 type AppState = {
   screen: Screen;
@@ -150,10 +176,39 @@ type AppState = {
 type Viewer = {
   name: string;
   email: string;
+  emailVerified: boolean;
   role: AppUserRole;
 };
 
 type AuthMode = "sign-in" | "register";
+type ToastTone = "error" | "success" | "warning";
+type ToastMessage = {
+  message: string;
+  tone: ToastTone;
+};
+type CollectionImportPreviewRow = {
+  catalogueId: string;
+  errors: string[];
+  itemName?: string;
+  rowNumber: number;
+};
+type CollectionImportPreview = {
+  importableCount: number;
+  rows: CollectionImportPreviewRow[];
+  skippedCount: number;
+  totalCount: number;
+};
+type CollectionImportResult = {
+  failed: number;
+  imported: number;
+  skipped: number;
+};
+type DetailedPricePoint = NonNullable<CatalogueItem["priceHistory"]>[number] & {
+  bucket?: string;
+  currency?: string;
+  pointCount?: number;
+  sampleSize?: number | null;
+};
 type CatalogueSort =
   | "set-number"
   | "set-number-asc"
@@ -214,36 +269,42 @@ type ThemeId =
   | "ghost"
   | "meadow"
   | "sunset";
-type JobType =
-  | "price_alerts"
-  | "card_image_repair"
-  | "catalogue_refresh"
-  | "pricing_refresh"
-  | "sealed_image_repair"
-  | "sealed_pricing_refresh"
-  | "variant_metadata_repair";
-type OperationsJobKind =
-  | "alerts"
-  | "card-image-repair"
-  | "catalogue"
-  | "international-catalogue"
-  | "pricing"
-  | "sealed"
-  | "sealed-image-repair"
-  | "variant-metadata-repair";
-type JobStatus = "running" | "succeeded" | "failed";
-type ImportPreset = {
-  expectedTotal: number;
-  label: string;
-  note: string;
-  query: string;
-  setNames: string[];
-};
 
 type BinderArtworkId = "mint" | "vault" | "sunburst" | "ocean" | "rose" | "midnight";
 type BinderInteriorId = "classic" | "graphite" | "felt" | "cream" | "crimson" | "carbon";
+type BinderVisibility = "private" | "unlisted";
+
+type BinderSlotRecord = {
+  collectionItemId: string | null;
+  copyIndex: number | null;
+  id?: string;
+  note?: string | null;
+  position: number;
+};
+
+type BinderPageRecord = {
+  id?: string;
+  position: number;
+  slots: BinderSlotRecord[];
+};
 
 type CustomBinder = {
+  artworkId: BinderArtworkId;
+  coverStyle: string;
+  createdAt: string;
+  description: string;
+  id: string;
+  interiorId: BinderInteriorId;
+  isDefault: boolean;
+  legacySource?: string;
+  name: string;
+  pages: BinderPageRecord[];
+  shareSlug?: string;
+  updatedAt: string;
+  visibility: BinderVisibility;
+};
+
+type LegacyStoredBinder = {
   artworkId: BinderArtworkId;
   createdAt: string;
   id: string;
@@ -266,193 +327,12 @@ type BinderSummary = {
   isDefault?: boolean;
   items: CollectionItem[];
   name: string;
+  pages: BinderPageRecord[];
+  shareSlug?: string;
+  slots: Array<BinderSlotRecord & { item?: CollectionItem }>;
+  visibility: BinderVisibility;
 };
 
-type JobRunRecord = {
-  id: string;
-  jobType: JobType;
-  status: JobStatus;
-  requestPayload: unknown;
-  resultPayload: unknown;
-  errorMessage?: string;
-  startedAt: string;
-  finishedAt?: string;
-  durationMs?: number;
-};
-
-type JobApiResult = {
-  cardsFetched?: number;
-  cardImagesUpdated?: number;
-  cardsUpdated?: number;
-  candidatesChecked?: number;
-  cardsUpserted?: number;
-  canMerge?: boolean;
-  collectionItemsMoved?: number;
-  collectionItemsToMove?: number;
-  complete?: boolean;
-  duplicateCardDeleted?: boolean;
-  dryRun?: boolean;
-  duplicateCardCount?: number;
-  duplicateCardId?: string;
-  duplicateGroupCount?: number;
-  duplicateCardWillBeDeleted?: boolean;
-  error?: string;
-  errors?: string[];
-  groupsAvailable?: number;
-  groupsMatched?: number;
-  groupsProcessed?: number;
-  groupsFetched?: number;
-  imageFieldsUpdated?: number;
-  job?: string;
-  jobRun?: JobRunRecord;
-  maxPages?: number;
-  nextPage?: number | null;
-  page?: number;
-  pageSize?: number;
-  priceOnlyUnpriced?: boolean;
-  priceSnapshotsMoved?: number;
-  priceSnapshotsToMove?: number;
-  primaryCardId?: string;
-  highRiskGroupCount?: number;
-  lowRiskGroupCount?: number;
-  pagesProcessed?: number;
-  pricingSnapshotsCreated?: number;
-  productsFetched?: number;
-  query?: string;
-  mediumRiskGroupCount?: number;
-  mode?: string;
-  report?: string;
-  repairableCards?: number;
-  repairableProducts?: number;
-  sealedProductsSkipped?: number;
-  sealedProductsUpdated?: number;
-  sealedProductsUpserted?: number;
-  setsUpserted?: number;
-  tcgcsvProductsFetched?: number;
-  tcgcsvImageProductsFetched?: number;
-  totalCount?: number;
-  pokemonTcgCardsFetched?: number;
-  wishlistConflictsMerged?: number;
-  wishlistConflictsToMerge?: number;
-  wishlistItemsMoved?: number;
-  wishlistItemsToMove?: number;
-  writePrices?: boolean;
-};
-
-type PricingBySeriesGap = {
-  cardCount: number;
-  pricedCardCount: number;
-  pricingCoveragePercent: number | null;
-  series: string;
-  unpricedCardCount: number;
-};
-
-type PricingBySourceSummary = {
-  itemType: string;
-  pricedItemCount: number;
-  priceSnapshotCount: number;
-  source: string;
-};
-
-type PricingByLanguageGap = {
-  cardCount: number;
-  cardImageCount: number;
-  cardImageCoveragePercent: number | null;
-  language: string;
-  languageLabel: string;
-  pricedCardCount: number;
-  pricingCoveragePercent: number | null;
-  region: string;
-  regionLabel: string;
-  setCount: number;
-  unpricedCardCount: number;
-};
-
-type SealedPricingByProductTypeGap = {
-  pricedSealedProductCount: number;
-  productType: string;
-  sealedPriceSnapshotCount: number;
-  sealedPricingCoveragePercent: number | null;
-  sealedProductCount: number;
-  unpricedSealedProductCount: number;
-};
-
-type CatalogueStatusRecord = {
-  cardCount: number;
-  cardImageCount: number;
-  cardImageCoveragePercent: number | null;
-  cardMissingImageCount: number;
-  cardMissingVariantMetadataCount: number;
-  cardVariantMetadataCount: number;
-  cardVariantMetadataCoveragePercent: number | null;
-  coveragePercent: number | null;
-  duplicateProviderIdCount: number;
-  latestCatalogueResult: JobApiResult | null;
-  latestPricingResult: JobApiResult | null;
-  latestSealedPricingResult: JobApiResult | null;
-  nextCataloguePage: number | null;
-  priceSnapshotCount: number;
-  pricedCardCount: number;
-  pricedSealedProductCount: number;
-  pricingByLanguage: PricingByLanguageGap[];
-  pricingBySeries: PricingBySeriesGap[];
-  pricingBySource: PricingBySourceSummary[];
-  pricingCoveragePercent: number | null;
-  providerTotalCount: number | null;
-  sealedPricingByProductType: SealedPricingByProductTypeGap[];
-  sealedPriceSnapshotCount: number;
-  sealedImageCount: number;
-  sealedImageCoveragePercent: number | null;
-  sealedMissingImageCount: number;
-  sealedPricingCoveragePercent: number | null;
-  sealedProductCount: number;
-  setCount: number;
-};
-
-type CatalogueStatusApiResult = {
-  error?: string;
-  latestCatalogueRun?: JobRunRecord | null;
-  latestPricingRun?: JobRunRecord | null;
-  latestSealedPricingRun?: JobRunRecord | null;
-  status?: CatalogueStatusRecord;
-};
-
-type BetaEnvironmentSnapshot = {
-  appUrl: string;
-  authUrl: string;
-  billingProvider: string;
-  databaseConfigured: boolean;
-  emailProvider: string;
-  emailSmokeToConfigured: boolean;
-  jobMonitorDryRun: boolean;
-  jobSecretConfigured: boolean;
-  priceAlertAllowLiveRecipients: boolean;
-  priceAlertDryRun: boolean;
-  squareEnvironment: string;
-};
-
-type BetaLaunchCheck = {
-  detail: string;
-  label: string;
-  level: "good" | "watch" | "action";
-  passed: boolean;
-};
-
-type BetaStatusApiResult = {
-  catalogue?: CatalogueStatusApiResult;
-  env?: BetaEnvironmentSnapshot;
-  error?: string;
-  generatedAt?: string;
-  jobRuns?: JobRunRecord[];
-  launchChecks?: BetaLaunchCheck[];
-};
-
-type ResumeJob = {
-  kind: "catalogue" | "pricing";
-  nextPage: number;
-  pageSize: number;
-  query?: string;
-};
 
 type ThemeOption = {
   access: "free" | "plus";
@@ -516,6 +396,7 @@ const themeStorageKey = "mintbinder-theme";
 const defaultBinderId = "all-collection";
 const binderStoragePrefix = "mintbinder-binders";
 const defaultBinderSettingsStoragePrefix = "mintbinder-default-binder";
+const binderMigrationStoragePrefix = "mintbinder-server-binder-migration-v1";
 const defaultBinderSettingsFallback: DefaultBinderSettings = {
   artworkId: "mint",
   interiorId: "classic",
@@ -744,40 +625,10 @@ const themeOptions: ThemeOption[] = [
 ];
 const freeThemeIds = new Set<ThemeId>(["light", "dark"]);
 
-const importPresets: ImportPreset[] = [
-  {
-    expectedTotal: 207,
-    label: "151",
-    note: "Scarlet & Violet special set",
-    query: "set.id:sv3pt5",
-    setNames: ["151"],
-  },
-  {
-    expectedTotal: 237,
-    label: "Evolving Skies",
-    note: "Sword & Shield chase set",
-    query: "set.id:swsh7",
-    setNames: ["Evolving Skies"],
-  },
-  {
-    expectedTotal: 160,
-    label: "Crown Zenith",
-    note: "Main Crown Zenith set",
-    query: "set.id:swsh12pt5",
-    setNames: ["Crown Zenith"],
-  },
-  {
-    expectedTotal: 70,
-    label: "Crown Zenith GG",
-    note: "Galarian Gallery subset",
-    query: "set.id:swsh12pt5gg",
-    setNames: ["Crown Zenith Galarian Gallery"],
-  },
-];
-
 export default function Home() {
   const { data: session, status } = useSession();
   const [appState, setAppState] = useState(initialState);
+  const [isAppRouteHydrated, setIsAppRouteHydrated] = useState(false);
   const [catalogueItems, setCatalogueItems] = useState<CatalogueItem[]>([]);
   const [catalogueComplete, setCatalogueComplete] = useState(false);
   const [loadedCatalogueSetNames, setLoadedCatalogueSetNames] = useState<string[]>([]);
@@ -794,27 +645,127 @@ export default function Home() {
   const [themeId, setThemeId] = useState<ThemeId>("light");
   const [isLoadingData, setIsLoadingData] = useState(true);
   const [isLoadingCatalogue, setIsLoadingCatalogue] = useState(false);
-  const [toast, setToast] = useState("");
+  const [toast, setToast] = useState<ToastMessage | null>(null);
   const [authMode, setAuthMode] = useState<AuthMode>("sign-in");
-  const [signInEmail, setSignInEmail] = useState("liam@example.com");
-  const [signInName, setSignInName] = useState("Liam");
-  const [signInPassword, setSignInPassword] = useState("MintBinder2026!");
+  const [signInEmail, setSignInEmail] = useState("");
+  const [signInName, setSignInName] = useState("");
+  const [signInPassword, setSignInPassword] = useState("");
+  const [signInPasswordConfirmation, setSignInPasswordConfirmation] = useState("");
   const [signInError, setSignInError] = useState("");
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [collectionSearch, setCollectionSearch] = useState("");
   const [addSearch, setAddSearch] = useState("");
   const [setSearch, setSetSearch] = useState("");
   const [plusPreviewOverride, setPlusPreviewOverride] = useState<boolean | null>(null);
+  const [activeSetGoal, setActiveSetGoal] = useState<ActiveSetGoal | null>(null);
+  const [isLoadingSetGoal, setIsLoadingSetGoal] = useState(false);
+  const [activeSetGoalNotice, setActiveSetGoalNotice] = useState("");
   const [customBinders, setCustomBinders] = useState<CustomBinder[]>([]);
-  const [customBindersLoaded, setCustomBindersLoaded] = useState(false);
-  const [defaultBinderSettings, setDefaultBinderSettings] =
-    useState<DefaultBinderSettings>(defaultBinderSettingsFallback);
-  const [defaultBinderSettingsLoaded, setDefaultBinderSettingsLoaded] = useState(false);
+  const [isLoadingBinders, setIsLoadingBinders] = useState(false);
+  const [binderNotice, setBinderNotice] = useState("");
+  const toastTimeoutRef = useRef<number | null>(null);
+  const binderLoadKeyRef = useRef("");
+  const isInitialAppRouteSyncRef = useRef(true);
+  const previousAppRouteStateRef = useRef<AppRouteState | null>(null);
 
-  const showToast = useCallback((message: string) => {
-    setToast(message);
-    window.setTimeout(() => setToast(""), 2400);
+  const showToast = useCallback((message: string, tone: ToastTone = "success") => {
+    if (toastTimeoutRef.current !== null) {
+      window.clearTimeout(toastTimeoutRef.current);
+    }
+
+    setToast({ message, tone });
+    toastTimeoutRef.current = window.setTimeout(() => {
+      setToast(null);
+      toastTimeoutRef.current = null;
+    }, tone === "error" ? 5200 : 3200);
   }, []);
+
+  useEffect(() => () => {
+    if (toastTimeoutRef.current !== null) {
+      window.clearTimeout(toastTimeoutRef.current);
+    }
+  }, []);
+
+  useEffect(() => {
+    const applyBrowserRoute = () => {
+      const route = parseAppRouteState(window.location.search);
+      setAppState((current) => ({ ...current, ...route }));
+    };
+
+    applyBrowserRoute();
+    setIsAppRouteHydrated(true);
+    window.addEventListener("popstate", applyBrowserRoute);
+    return () => window.removeEventListener("popstate", applyBrowserRoute);
+  }, []);
+
+  useEffect(() => {
+    if (!isAppRouteHydrated) {
+      return;
+    }
+
+    const routeState: AppRouteState = {
+      screen: appState.screen,
+      selectedBinderId: appState.selectedBinderId,
+      selectedItemId: appState.selectedItemId,
+      selectedSetId: appState.selectedSetId,
+    };
+    const nextPath = buildAppRoutePath(
+      window.location.pathname,
+      window.location.search,
+      routeState,
+      window.location.hash,
+    );
+    const currentPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+
+    if (nextPath !== currentPath) {
+      const currentHistoryState =
+        window.history.state && typeof window.history.state === "object" ? window.history.state : {};
+      const method = appRouteHistoryMode(
+        previousAppRouteStateRef.current,
+        routeState,
+        isInitialAppRouteSyncRef.current,
+      );
+      window.history[method]({ ...currentHistoryState, mintBinderRoute: true }, "", nextPath);
+    }
+
+    previousAppRouteStateRef.current = routeState;
+    isInitialAppRouteSyncRef.current = false;
+  }, [
+    appState.screen,
+    appState.selectedBinderId,
+    appState.selectedItemId,
+    appState.selectedSetId,
+    isAppRouteHydrated,
+  ]);
+
+  const reloadActiveSetGoal = useCallback(async (options?: { quiet?: boolean }) => {
+    setIsLoadingSetGoal(true);
+    try {
+      const response = await fetch("/api/set-goal", { cache: "no-store" });
+      const body = (await response.json().catch(() => ({}))) as SetGoalResponse & { error?: string };
+      if (!response.ok) throw new Error(body.error ?? `Set goal load failed with ${response.status}.`);
+      setActiveSetGoal(body.goal ?? null);
+      setActiveSetGoalNotice("");
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "The active set goal could not be loaded.";
+      setActiveSetGoalNotice(message);
+      if (!options?.quiet) showToast(message, "error");
+      return false;
+    } finally {
+      setIsLoadingSetGoal(false);
+    }
+  }, [showToast]);
+
+  useEffect(() => {
+    if (status !== "authenticated") {
+      setActiveSetGoal(null);
+      setActiveSetGoalNotice("");
+      return;
+    }
+
+    void reloadActiveSetGoal({ quiet: true });
+  }, [reloadActiveSetGoal, status]);
 
   const catalogueById = useMemo(() => {
     return new Map(catalogueItems.map((item) => [item.id, item]));
@@ -823,6 +774,7 @@ export default function Home() {
   const viewer: Viewer = {
     name: session?.user?.name || "Collector",
     email: session?.user?.email || "",
+    emailVerified: session?.user?.isEmailVerified === true,
     role: normalizeAppRole(session?.user?.role),
   };
   const operationsEnabled = canUseOperationsForUser(viewer.role);
@@ -857,39 +809,106 @@ export default function Home() {
     window.localStorage.setItem(themeStorageKey, themeId);
   }, [effectivePlus, themeId]);
 
+  const reloadBinders = useCallback(async (options?: { quiet?: boolean }) => {
+    setIsLoadingBinders(true);
+
+    try {
+      const binders = await fetchServerBinders();
+      setCustomBinders(binders);
+      setBinderNotice("");
+
+      if (!options?.quiet) {
+        showToast("Binders refreshed across devices.");
+      }
+
+      return true;
+    } catch (error) {
+      console.warn("Unable to refresh binders.", error);
+      setBinderNotice(error instanceof Error ? error.message : "Binders could not be loaded.");
+
+      if (!options?.quiet) {
+        showToast(error instanceof Error ? error.message : "Binders could not be loaded.", "error");
+      }
+
+      return false;
+    } finally {
+      setIsLoadingBinders(false);
+    }
+  }, [showToast]);
+
   useEffect(() => {
     if (status !== "authenticated") {
+      binderLoadKeyRef.current = "";
       setCustomBinders([]);
-      setCustomBindersLoaded(false);
-      setDefaultBinderSettings(defaultBinderSettingsFallback);
-      setDefaultBinderSettingsLoaded(false);
+      setBinderNotice("");
       return;
     }
 
-    setCustomBinders(readStoredBinders(binderStorageKey(viewer.email)));
-    setCustomBindersLoaded(true);
-    setDefaultBinderSettings(readStoredDefaultBinderSettings(defaultBinderSettingsStorageKey(viewer.email)));
-    setDefaultBinderSettingsLoaded(true);
-  }, [status, viewer.email]);
-
-  useEffect(() => {
-    if (!customBindersLoaded || status !== "authenticated") {
+    if (isLoadingData) {
       return;
     }
 
-    window.localStorage.setItem(binderStorageKey(viewer.email), JSON.stringify(customBinders));
-  }, [customBinders, customBindersLoaded, status, viewer.email]);
+    const hasCardCollection = collection.some((item) => catalogueById.get(item.catalogueId)?.type === "card");
+    const loadKey = `${viewer.email.trim().toLowerCase()}:${hasCardCollection ? "cards" : "empty"}`;
 
-  useEffect(() => {
-    if (!defaultBinderSettingsLoaded || status !== "authenticated") {
+    if (binderLoadKeyRef.current === loadKey) {
       return;
     }
 
-    window.localStorage.setItem(
-      defaultBinderSettingsStorageKey(viewer.email),
-      JSON.stringify(defaultBinderSettings),
-    );
-  }, [defaultBinderSettings, defaultBinderSettingsLoaded, status, viewer.email]);
+    binderLoadKeyRef.current = loadKey;
+    let cancelled = false;
+
+    async function loadAndMigrateBinders() {
+      setIsLoadingBinders(true);
+      setBinderNotice("");
+
+      try {
+        const legacyBinders = readStoredBinders(binderStorageKey(viewer.email));
+        const legacyDefault = readStoredDefaultBinderSettings(defaultBinderSettingsStorageKey(viewer.email));
+        const migrationKey = binderMigrationStorageKey(viewer.email);
+        const migrationPending = window.localStorage.getItem(migrationKey) !== "1";
+        let binders = await fetchServerBinders();
+
+        if (migrationPending && (legacyBinders.length || legacyDefault.itemIds.length || (!binders.length && hasCardCollection))) {
+          const migration = await migrateLegacyBinders({
+            binders,
+            collection: collection.filter((item) => catalogueById.get(item.catalogueId)?.type === "card"),
+            legacyBinders,
+            legacyDefault,
+          });
+          binders = migration.binders;
+
+          if (migration.complete) {
+            window.localStorage.setItem(migrationKey, "1");
+          }
+
+          if (!cancelled && migration.migratedCount) {
+            showToast(`${migration.migratedCount} local binder${migration.migratedCount === 1 ? "" : "s"} moved to secure cross-device storage.`);
+          }
+        }
+
+        if (!cancelled) {
+          setCustomBinders(binders);
+        }
+      } catch (error) {
+        console.warn("Unable to load or migrate binders.", error);
+
+        if (!cancelled) {
+          binderLoadKeyRef.current = "";
+          setBinderNotice(error instanceof Error ? error.message : "Binders could not be loaded.");
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingBinders(false);
+        }
+      }
+    }
+
+    void loadAndMigrateBinders();
+    return () => {
+      cancelled = true;
+    };
+  }, [catalogueById, collection, isLoadingData, showToast, status, viewer.email]);
 
   const applyAppData = useCallback((data: AppData) => {
     setCatalogueItems((current) =>
@@ -981,47 +1000,61 @@ export default function Home() {
     [applyAppData, applyEmptyAppData],
   );
 
-  const loadCatalogueData = useCallback(
-    async (options?: { force?: boolean; quiet?: boolean }) => {
-      if (catalogueComplete && !options?.force) {
-        return catalogueItems;
-      }
+  const loadCatalogueItemsByIds = useCallback(
+    async (ids: string[], options?: { quiet?: boolean }) => {
+      const requestedIds = Array.from(new Set(ids.map((id) => id.trim()).filter(Boolean)));
+      const catalogueById = new Map(catalogueItems.map((item) => [item.id, item]));
+      const missingIds = requestedIds.filter((id) => !catalogueById.has(id));
 
-      if (isLoadingCatalogue) {
-        return null;
+      if (!missingIds.length || dataSource !== "database") {
+        return requestedIds.flatMap((id) => {
+          const item = catalogueById.get(id);
+          return item ? [item] : [];
+        });
       }
-
-      setIsLoadingCatalogue(true);
 
       try {
-        const response = await fetch("/api/catalogue", { cache: "no-store" });
+        const loaded: CatalogueItem[] = [];
 
-        if (!response.ok) {
-          throw new Error(`Catalogue request failed with ${response.status}`);
+        for (const batch of chunkCatalogueLookupIds(missingIds)) {
+          const response = await fetch("/api/catalogue/search", {
+            body: JSON.stringify({ ids: batch }),
+            cache: "no-store",
+            headers: { "content-type": "application/json" },
+            method: "POST",
+          });
+
+          if (!response.ok) {
+            throw new Error(`Catalogue lookup failed with ${response.status}`);
+          }
+
+          const data = (await response.json()) as AppCatalogueData;
+          loaded.push(...data.catalogue);
+          setDataSource(data.source);
+          setDataNotice(data.notice ?? "");
         }
 
-        const data = (await response.json()) as AppCatalogueData;
+        for (const item of loaded) {
+          catalogueById.set(item.id, item);
+        }
 
-        setCatalogueItems(data.catalogue);
-        setCatalogueComplete(true);
-        setLoadedCatalogueSetNames([]);
-        setDataSource(data.source);
-        setDataNotice(data.notice ?? "");
+        setCatalogueItems((current) => mergeCatalogueItems(current, loaded));
 
-        return data.catalogue;
+        return requestedIds.flatMap((id) => {
+          const item = catalogueById.get(id);
+          return item ? [item] : [];
+        });
       } catch (error) {
-        console.warn("Catalogue API load failed.", error);
+        console.warn("Bounded catalogue lookup failed.", error);
 
         if (!options?.quiet) {
-          showToast("Could not load the full catalogue yet.");
+          showToast("Could not validate those catalogue items yet.", "error");
         }
 
         return null;
-      } finally {
-        setIsLoadingCatalogue(false);
       }
     },
-    [catalogueComplete, catalogueItems, isLoadingCatalogue, showToast],
+    [catalogueItems, dataSource, showToast],
   );
 
   const loadSetCatalogueData = useCallback(
@@ -1076,7 +1109,7 @@ export default function Home() {
         console.warn("Set catalogue API load failed.", error);
 
         if (!options?.quiet) {
-          showToast("Could not load cards for this set yet.");
+          showToast("Could not load cards for this set yet.", "error");
         }
 
         return null;
@@ -1110,16 +1143,6 @@ export default function Home() {
   }, [refreshAppData, session?.user?.id, status]);
 
   useEffect(() => {
-    if (status !== "authenticated") {
-      return;
-    }
-
-    if (appState.screen === "ops") {
-      void loadCatalogueData({ quiet: true });
-    }
-  }, [appState.screen, loadCatalogueData, status]);
-
-  useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const billing = params.get("billing");
 
@@ -1131,7 +1154,7 @@ export default function Home() {
       showToast("Checkout complete. Waiting for billing confirmation.");
       void refreshAppData({ quiet: true });
     } else if (billing === "cancelled") {
-      showToast("Checkout cancelled.");
+      showToast("Checkout cancelled.", "warning");
     } else if (billing === "portal") {
       showToast("Billing portal closed.");
       void refreshAppData({ quiet: true });
@@ -1140,7 +1163,11 @@ export default function Home() {
     params.delete("billing");
     params.delete("session_id");
     const nextQuery = params.toString();
-    window.history.replaceState(null, "", `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ""}`);
+    window.history.replaceState(
+      window.history.state,
+      "",
+      `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ""}${window.location.hash}`,
+    );
   }, [refreshAppData, showToast]);
 
   const summary = useMemo(() => {
@@ -1205,7 +1232,8 @@ export default function Home() {
   async function addToCollection(catalogueId: string, formData?: FormData) {
     const catalogueItem = catalogueById.get(catalogueId);
     if (!catalogueItem) {
-      return;
+      showToast("That catalogue item is no longer available. Search again and retry.", "error");
+      return false;
     }
 
     const payload = {
@@ -1219,6 +1247,7 @@ export default function Home() {
         String(formData?.get("variant") ?? "") ||
         (catalogueItem.type === "sealed" ? "Factory sealed" : "Standard"),
       paid: String(formData?.get("paid") ?? ""),
+      purchaseDate: String(formData?.get("purchaseDate") ?? ""),
       overrideValue: String(formData?.get("overrideValue") ?? ""),
       valuationNote: String(formData?.get("valuationNote") ?? ""),
       location: String(formData?.get("location") ?? "Unassigned"),
@@ -1253,10 +1282,11 @@ export default function Home() {
         }));
         void refreshAppData({ quiet: true });
         showToast(`${catalogueItemTitle(catalogueItem)} added to collection.`);
-        return;
+        return true;
       } catch (error) {
-        console.warn("Falling back to local collection update.", error);
-        showToast("Database save failed, so this change is local for now.");
+        console.warn("Collection save failed.", error);
+        showToast("Save failed. Nothing was added; your details are still here so you can retry.", "error");
+        return false;
       }
     }
 
@@ -1272,7 +1302,7 @@ export default function Home() {
       grade: catalogueItem.type === "sealed" ? "N/A" : "Raw",
       purchasePriceMinor:
         paidValue !== undefined && Number.isFinite(paidValue) ? paidValue : undefined,
-      purchaseDate: new Date().toISOString().slice(0, 10),
+      purchaseDate: payload.purchaseDate || undefined,
       overrideValueMinor: moneyInputToMinor(payload.overrideValue),
       valuationNote: payload.valuationNote || undefined,
       location: payload.location,
@@ -1283,6 +1313,7 @@ export default function Home() {
     setWishlist((items) => items.filter((item) => item.catalogueId !== catalogueId));
     setAppState((current) => ({ ...current, screen: "item", selectedItemId: nextItem.id }));
     showToast(`${catalogueItemTitle(catalogueItem)} added to collection.`);
+    return true;
   }
 
   async function createManualSealedProduct(formData: FormData) {
@@ -1293,7 +1324,7 @@ export default function Home() {
     const notes = String(formData.get("notes") ?? "").trim();
 
     if (!name) {
-      showToast("Sealed product name is required.");
+      showToast("Sealed product name is required.", "error");
       return false;
     }
 
@@ -1328,7 +1359,7 @@ export default function Home() {
         return true;
       } catch (error) {
         console.warn("Unable to create sealed product.", error);
-        showToast("Sealed product could not be created.");
+        showToast("Sealed product could not be created. Nothing was saved; please retry.", "error");
         return false;
       }
     }
@@ -1363,8 +1394,8 @@ export default function Home() {
   async function addToWishlist(catalogueId: string) {
     const catalogueItem = catalogueById.get(catalogueId);
     if (!catalogueItem || wishlist.some((item) => item.catalogueId === catalogueId)) {
-      showToast("That item is already on the wishlist.");
-      return;
+      showToast("That item is already on the wishlist.", "warning");
+      return false;
     }
 
     if (dataSource === "database") {
@@ -1383,10 +1414,11 @@ export default function Home() {
 
         setWishlist((items) => [...items, result.item]);
         showToast(`${catalogueItemTitle(catalogueItem)} added to wishlist.`);
-        return;
+        return true;
       } catch (error) {
-        console.warn("Falling back to local wishlist update.", error);
-        showToast("Database save failed, so this wishlist change is local for now.");
+        console.warn("Wishlist save failed.", error);
+        showToast("Wishlist save failed. Nothing was changed; please retry.", "error");
+        return false;
       }
     }
 
@@ -1403,6 +1435,7 @@ export default function Home() {
       },
     ]);
     showToast(`${catalogueItemTitle(catalogueItem)} added to wishlist.`);
+    return true;
   }
 
   async function duplicateItem(itemId: string) {
@@ -1433,8 +1466,9 @@ export default function Home() {
         showToast(`${catalogueItem ? catalogueItemTitle(catalogueItem) : "Item"} duplicated.`);
         return;
       } catch (error) {
-        console.warn("Falling back to local duplicate.", error);
-        showToast("Database duplicate failed, so this duplicate is local for now.");
+        console.warn("Collection duplicate failed.", error);
+        showToast("Duplicate failed. Nothing was changed; please retry.", "error");
+        return;
       }
     }
 
@@ -1463,6 +1497,7 @@ export default function Home() {
       language: String(formData.get("language") ?? source.language),
       variant: String(formData.get("variant") ?? source.variant),
       paid: String(formData.get("paid") ?? ""),
+      purchaseDate: String(formData.get("purchaseDate") ?? source.purchaseDate ?? ""),
       gradeCompany: String(formData.get("gradeCompany") ?? gradeCompanyFromLabel(source.grade)),
       gradeScore: String(formData.get("gradeScore") ?? gradeScoreFromLabel(source.grade)),
       overrideValue: String(formData.get("overrideValue") ?? moneyInputValue(source.overrideValueMinor)),
@@ -1489,8 +1524,9 @@ export default function Home() {
         showToast(`${catalogueItemTitle(catalogueItem)} updated.`);
         return true;
       } catch (error) {
-        console.warn("Falling back to local collection update.", error);
-        showToast("Database update failed, so this change is local for now.");
+        console.warn("Collection update failed.", error);
+        showToast("Update failed. Nothing was changed; your edits remain available to retry.", "error");
+        return false;
       }
     }
 
@@ -1504,9 +1540,7 @@ export default function Home() {
       variant: payload.variant,
       purchasePriceMinor:
         paidValue !== undefined && Number.isFinite(paidValue) ? paidValue : undefined,
-      purchaseDate: paidValue !== undefined && Number.isFinite(paidValue)
-        ? new Date().toISOString().slice(0, 10)
-        : undefined,
+      purchaseDate: payload.purchaseDate || undefined,
       grade: gradeLabelFromForm(payload.gradeCompany, payload.gradeScore, catalogueItem.type),
       overrideValueMinor: moneyInputToMinor(payload.overrideValue),
       valuationNote: payload.valuationNote || undefined,
@@ -1541,8 +1575,9 @@ export default function Home() {
 
         removedInDatabase = true;
       } catch (error) {
-        console.warn("Falling back to local collection removal.", error);
-        showToast("Database remove failed, so this change is local for now.");
+        console.warn("Collection remove failed.", error);
+        showToast("Remove failed. The lot is still in your collection; please retry.", "error");
+        return false;
       }
     }
 
@@ -1591,7 +1626,15 @@ export default function Home() {
     const soldDate = String(formData.get("occurredAt") ?? dateStamp());
     const amount = String(formData.get("amount") ?? "");
     const notes = String(formData.get("notes") ?? "").trim();
+    const saleQuantity = Math.min(
+      source.quantity,
+      Math.max(1, Math.trunc(Number(formData.get("quantity") ?? source.quantity) || 1)),
+    );
     const saleAmountMinor = moneyInputToMinor(amount);
+    const soldBasisMinor = source.purchasePriceMinor === undefined
+      ? undefined
+      : Math.round(source.purchasePriceMinor * (saleQuantity / source.quantity));
+    const remainingQuantity = source.quantity - saleQuantity;
     let recordedInDatabase = false;
 
     if (dataSource === "database") {
@@ -1603,6 +1646,7 @@ export default function Home() {
             amount,
             notes,
             occurredAt: soldDate,
+            quantity: saleQuantity,
           }),
         });
 
@@ -1612,17 +1656,30 @@ export default function Home() {
 
         recordedInDatabase = true;
       } catch (error) {
-        console.warn("Falling back to local sale recording.", error);
-        showToast("Database sale save failed, so this sale is local for now.");
+        console.warn("Sale save failed.", error);
+        showToast("Sale save failed. The lot was not changed; please retry.", "error");
+        return false;
       }
     }
 
     setCollection((items) => {
-      const nextItems = items.filter((item) => item.id !== itemId);
+      const nextItems = remainingQuantity > 0
+        ? items.map((item) =>
+          item.id === itemId
+            ? {
+                ...item,
+                purchasePriceMinor: item.purchasePriceMinor === undefined
+                  ? undefined
+                  : Math.max(0, item.purchasePriceMinor - (soldBasisMinor ?? 0)),
+                quantity: remainingQuantity,
+              }
+            : item,
+        )
+        : items.filter((item) => item.id !== itemId);
       setAppState((current) => ({
         ...current,
-        screen: "collection",
-        selectedItemId: nextItems[0]?.id ?? "",
+        screen: remainingQuantity > 0 ? "item" : "collection",
+        selectedItemId: remainingQuantity > 0 ? itemId : nextItems[0]?.id ?? "",
       }));
       return nextItems;
     });
@@ -1633,9 +1690,9 @@ export default function Home() {
         itemId: source.id,
         catalogueId: source.catalogueId,
         itemName: catalogueItem ? catalogueItemTitle(catalogueItem) : "Collection item",
-        quantity: source.quantity,
+        quantity: saleQuantity,
         amountMinor: saleAmountMinor,
-        basisMinor: source.purchasePriceMinor,
+        basisMinor: soldBasisMinor,
         currency: saleAmountMinor === undefined ? undefined : "GBP",
         occurredAt: soldDate,
         notes: notes || undefined,
@@ -1643,7 +1700,7 @@ export default function Home() {
       ...events,
     ]);
 
-    if (catalogueItem?.type === "card") {
+    if (remainingQuantity === 0 && catalogueItem?.type === "card") {
       const stillOwned = collection.some(
         (item) => item.id !== source.id && item.catalogueId === source.catalogueId,
       );
@@ -1663,11 +1720,18 @@ export default function Home() {
       void refreshAppData({ quiet: true });
     }
 
-    showToast(`${catalogueItem ? catalogueItemTitle(catalogueItem) : "Item"} sale recorded.`);
+    showToast(
+      `${catalogueItem ? catalogueItemTitle(catalogueItem) : "Item"} sale recorded${remainingQuantity ? `; ${remainingQuantity} remaining` : ""}.`,
+    );
     return true;
   }
 
   function resetSampleData() {
+    if (!developmentSamplePreviewEnabled) {
+      showToast("Sample preview is only available in an explicitly enabled local development build.", "error");
+      return;
+    }
+
     setCatalogueItems(sampleAppData.catalogue);
     setCatalogueComplete(true);
     setLoadedCatalogueSetNames([]);
@@ -1680,7 +1744,7 @@ export default function Home() {
     setDataSource(sampleAppData.source);
     setDataNotice(sampleAppData.notice ?? "");
     setAppState(initialState);
-    showToast("Sample data reset.");
+    showToast("Sample preview loaded locally. Your saved collection was not changed.", "warning");
   }
 
   async function removeWishlistItem(id: string, options?: { quiet?: boolean }) {
@@ -1694,10 +1758,11 @@ export default function Home() {
           throw new Error(`Delete wishlist item failed with ${response.status}`);
         }
       } catch (error) {
-        console.warn("Falling back to local wishlist deletion.", error);
+        console.warn("Wishlist delete failed.", error);
         if (!options?.quiet) {
-          showToast("Database delete failed, so this change is local for now.");
+          showToast("Wishlist delete failed. The target is still saved; please retry.", "error");
         }
+        return;
       }
     }
 
@@ -1739,8 +1804,9 @@ export default function Home() {
         showToast("Wishlist target updated.");
         return true;
       } catch (error) {
-        console.warn("Falling back to local wishlist update.", error);
-        showToast("Database save failed, so this wishlist target is local for now.");
+        console.warn("Wishlist update failed.", error);
+        showToast("Wishlist update failed. Nothing was changed; please retry.", "error");
+        return false;
       }
     }
 
@@ -1768,7 +1834,7 @@ export default function Home() {
     };
 
     if (!payload.name) {
-      showToast("Storage location needs a name.");
+      showToast("Storage location needs a name.", "error");
       return false;
     }
 
@@ -1790,8 +1856,9 @@ export default function Home() {
         showToast(`${result.location.name} added to storage.`);
         return true;
       } catch (error) {
-        console.warn("Falling back to local storage location update.", error);
-        showToast("Database save failed, so this storage location is local for now.");
+        console.warn("Storage location save failed.", error);
+        showToast("Storage save failed. Nothing was added; please retry.", "error");
+        return false;
       }
     }
 
@@ -1836,8 +1903,9 @@ export default function Home() {
 
         deletedInDatabase = true;
       } catch (error) {
-        console.warn("Falling back to local storage location deletion.", error);
-        showToast("Database delete failed, so this storage change is local for now.");
+        console.warn("Storage location delete failed.", error);
+        showToast("Storage delete failed. The location and its assignments were not changed.", "error");
+        return false;
       }
     }
 
@@ -1869,7 +1937,7 @@ export default function Home() {
 
   async function exportInsuranceReport() {
     if (!appState.plus) {
-      showToast("Insurance reports are a Plus feature.");
+      showToast("Insurance reports are a Plus feature.", "warning");
       setAppState((current) => ({ ...current, screen: "analytics" }));
       return;
     }
@@ -1888,7 +1956,7 @@ export default function Home() {
         return;
       } catch (error) {
         console.warn("Insurance report export failed.", error);
-        showToast(error instanceof Error ? error.message : "Could not export insurance report.");
+        showToast(error instanceof Error ? error.message : "Could not export insurance report.", "error");
         return;
       }
     }
@@ -1936,7 +2004,7 @@ export default function Home() {
       window.location.assign(body.url);
     } catch (error) {
       console.warn("Unable to start billing checkout.", error);
-      showToast(error instanceof Error ? error.message : "Unable to start checkout.");
+      showToast(error instanceof Error ? error.message : "Unable to start checkout.", "error");
     }
   }
 
@@ -1966,7 +2034,7 @@ export default function Home() {
       showToast(body.message ?? "Billing is managed in Mint Binder during beta.");
     } catch (error) {
       console.warn("Unable to open billing management.", error);
-      showToast(error instanceof Error ? error.message : "Unable to open billing portal.");
+      showToast(error instanceof Error ? error.message : "Unable to open billing portal.", "error");
     }
   }
 
@@ -2000,7 +2068,7 @@ export default function Home() {
       showToast(body.message ?? "Plus renewal cancelled.");
     } catch (error) {
       console.warn("Unable to cancel Plus renewal.", error);
-      showToast(error instanceof Error ? error.message : "Unable to cancel Plus renewal.");
+      showToast(error instanceof Error ? error.message : "Unable to cancel Plus renewal.", "error");
     }
   }
 
@@ -2023,7 +2091,7 @@ export default function Home() {
         return true;
       } catch (error) {
         console.warn("Unable to update notification preferences.", error);
-        showToast(error instanceof Error ? error.message : "Unable to update notification preferences.");
+        showToast(error instanceof Error ? error.message : "Unable to update notification preferences.", "error");
         return false;
       }
     }
@@ -2038,44 +2106,113 @@ export default function Home() {
     showToast("Collection import template downloaded.");
   }
 
-  async function importCollectionCsv(file: File) {
+  async function previewCollectionCsv(file: File): Promise<CollectionImportPreview | null> {
     try {
-      const rows = parseCollectionImportCsv(await file.text());
-      const fullCatalogue = catalogueComplete ? catalogueItems : await loadCatalogueData({ quiet: true });
-      const catalogueLookup = new Map((fullCatalogue ?? catalogueItems).map((item) => [item.id, item]));
-      const importableRows = rows.filter((row) => catalogueLookup.has(row.catalogueId));
-      const skipped = rows.length - importableRows.length;
+      const inspection = inspectCollectionImportCsv(await file.text());
 
-      if (!rows.length) {
-        showToast("No import rows found in that CSV.");
-        return false;
+      if (!inspection.totalRows) {
+        showToast("No import rows found in that CSV.", "error");
+        return null;
       }
+
+      const matchedCatalogue = await loadCatalogueItemsByIds(
+        inspection.rows.map((entry) => entry.row.catalogueId),
+        { quiet: true },
+      );
+
+      if (!matchedCatalogue) {
+        showToast("The catalogue lookup failed, so this import cannot be validated yet.", "error");
+        return null;
+      }
+
+      const catalogueLookup = new Map(matchedCatalogue.map((item) => [item.id, item]));
+      const previewRows = inspection.rows.map((entry): CollectionImportPreviewRow => {
+        const catalogueItem = catalogueLookup.get(entry.row.catalogueId);
+        const errors = [...entry.errors];
+
+        if (entry.row.catalogueId && !catalogueItem) {
+          errors.push("Catalogue item was not found.");
+        }
+
+        return {
+          catalogueId: entry.row.catalogueId,
+          errors,
+          itemName: catalogueItem ? catalogueItemTitle(catalogueItem) : undefined,
+          rowNumber: entry.rowNumber,
+        };
+      });
+      const importableCount = previewRows.filter((row) => row.errors.length === 0).length;
+
+      return {
+        importableCount,
+        rows: previewRows,
+        skippedCount: previewRows.length - importableCount,
+        totalCount: inspection.totalRows,
+      };
+    } catch (error) {
+      console.warn("Collection CSV preview failed.", error);
+      showToast("Could not read that CSV. Check the template and try again.", "error");
+      return null;
+    }
+  }
+
+  async function importCollectionCsv(file: File): Promise<CollectionImportResult> {
+    const emptyResult = { failed: 0, imported: 0, skipped: 0 };
+
+    try {
+      const inspection = inspectCollectionImportCsv(await file.text());
+      const matchedCatalogue = await loadCatalogueItemsByIds(
+        inspection.rows.map((entry) => entry.row.catalogueId),
+        { quiet: true },
+      );
+
+      if (!matchedCatalogue) {
+        showToast("The catalogue lookup failed. Nothing was imported.", "error");
+        return { ...emptyResult, failed: inspection.totalRows };
+      }
+
+      const catalogueLookup = new Map(matchedCatalogue.map((item) => [item.id, item]));
+      const importableRows = inspection.rows
+        .filter((entry) => entry.errors.length === 0 && catalogueLookup.has(entry.row.catalogueId))
+        .map((entry) => entry.row);
+      const skipped = inspection.totalRows - importableRows.length;
 
       if (!importableRows.length) {
-        showToast("No rows matched the current catalogue.");
-        return false;
+        showToast("No validated rows matched the current catalogue. Nothing was imported.", "error");
+        return { ...emptyResult, skipped };
       }
+
+      let failed = 0;
+      let imported = 0;
 
       if (dataSource === "database") {
         const importedItems: CollectionItem[] = [];
 
         for (const row of importableRows) {
-          const response = await fetch("/api/collection-items", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify(importPayload(row)),
-          });
+          try {
+            const response = await fetch("/api/collection-items", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify(importPayload(row)),
+            });
 
-          if (!response.ok) {
-            throw new Error(`Import row failed with ${response.status}`);
+            if (!response.ok) {
+              throw new Error(`Import row failed with ${response.status}`);
+            }
+
+            const result = (await response.json()) as { item: CollectionItem };
+            importedItems.push(result.item);
+            imported += 1;
+          } catch (error) {
+            console.warn(`Collection CSV row for ${row.catalogueId} failed.`, error);
+            failed += 1;
           }
-
-          const result = (await response.json()) as { item: CollectionItem };
-          importedItems.push(result.item);
         }
 
-        setCollection((items) => [...items, ...importedItems]);
-        void refreshAppData({ quiet: true });
+        if (importedItems.length) {
+          setCollection((items) => [...items, ...importedItems]);
+          void refreshAppData({ quiet: true });
+        }
       } else {
         const importedAt = Date.now();
         const importedItems = importableRows.map((row, index) => {
@@ -2090,9 +2227,9 @@ export default function Home() {
             condition: row.condition,
             language: row.language,
             variant: row.variant,
-            grade: catalogueItem?.type === "sealed" ? "N/A" : "Raw",
+            grade: catalogueItem?.type === "sealed" ? "N/A" : row.grade || "Raw",
             purchasePriceMinor: paidValue,
-            purchaseDate: paidValue === undefined ? undefined : new Date().toISOString().slice(0, 10),
+            purchaseDate: row.purchaseDate || undefined,
             overrideValueMinor: overrideValue,
             valuationNote: row.valuationNote || undefined,
             location: row.location,
@@ -2101,14 +2238,27 @@ export default function Home() {
         });
 
         setCollection((items) => [...items, ...importedItems]);
+        imported = importedItems.length;
       }
 
-      showToast(`${importableRows.length} rows imported${skipped ? `, ${skipped} skipped` : ""}.`);
-      return true;
+      const result = { failed, imported, skipped };
+
+      if (!imported) {
+        showToast(`Import failed for ${failed} row${failed === 1 ? "" : "s"}. Nothing was added.`, "error");
+      } else if (failed || skipped) {
+        showToast(
+          `${imported} imported, ${skipped} skipped, ${failed} failed. Review the CSV before retrying failed rows.`,
+          "warning",
+        );
+      } else {
+        showToast(`${imported} row${imported === 1 ? "" : "s"} imported.`);
+      }
+
+      return result;
     } catch (error) {
       console.warn("Collection CSV import failed.", error);
-      showToast("Could not import that CSV.");
-      return false;
+      showToast("Could not import that CSV. Nothing new was saved by this attempt.", "error");
+      return { ...emptyResult, failed: 1 };
     }
   }
 
@@ -2117,22 +2267,37 @@ export default function Home() {
     setIsSigningIn(true);
     setSignInError("");
 
-    const result = await signIn("credentials", {
-      email: signInEmail,
-      password: signInPassword,
-      mode: authMode,
-      name: signInName,
-      redirect: false,
-    });
+    if (authMode === "register" && signInPassword !== signInPasswordConfirmation) {
+      setIsSigningIn(false);
+      setSignInError("Passwords do not match.");
+      return;
+    }
 
-    setIsSigningIn(false);
+    try {
+      const result = await signIn("credentials", {
+        email: signInEmail,
+        password: signInPassword,
+        mode: authMode,
+        name: signInName,
+        redirect: false,
+      });
 
-    if (result?.error) {
+      if (!result?.error) {
+        setSignInPassword("");
+        setSignInPasswordConfirmation("");
+        return;
+      }
+
       setSignInError(
         authMode === "register"
           ? "Could not create that account."
           : "Could not sign in with those details.",
       );
+    } catch (error) {
+      console.warn("Authentication request failed.", error);
+      setSignInError("Authentication is temporarily unavailable. Please try again.");
+    } finally {
+      setIsSigningIn(false);
     }
   }
 
@@ -2146,19 +2311,23 @@ export default function Home() {
         name={signInName}
         notice={status === "loading" ? "Checking for an existing session. You can still sign in." : ""}
         password={signInPassword}
+        passwordConfirmation={signInPasswordConfirmation}
         onAuthModeChange={(mode) => {
           setAuthMode(mode);
           setSignInError("");
+          setSignInPasswordConfirmation("");
         }}
         onEmailChange={setSignInEmail}
         onNameChange={setSignInName}
         onPasswordChange={setSignInPassword}
+        onPasswordConfirmationChange={setSignInPasswordConfirmation}
         onSubmit={handleSignIn}
       />
     );
   }
 
   const context = {
+    activeSetGoal,
     appState: effectiveAppState,
     viewer,
     cacheCatalogueItems,
@@ -2167,7 +2336,7 @@ export default function Home() {
     catalogueComplete,
     collection,
     customBinders,
-    defaultBinderSettings,
+    binderNotice,
     storageLocations,
     collectionEvents,
     notificationPreferences,
@@ -2176,6 +2345,8 @@ export default function Home() {
     dataSource,
     dataNotice,
     isLoadingData,
+    isLoadingBinders,
+    isLoadingSetGoal,
     isLoadingCatalogue,
     collectionSearch,
     setCollectionSearch,
@@ -2192,7 +2363,6 @@ export default function Home() {
     addToCollection,
     createManualSealedProduct,
     setCustomBinders,
-    setDefaultBinderSettings,
     updateCollectionItem,
     archiveCollectionItem,
     recordCollectionSale,
@@ -2209,15 +2379,20 @@ export default function Home() {
     cancelPlusSubscription,
     updateNotificationPreferences,
     downloadImportTemplate,
+    previewCollectionCsv,
     importCollectionCsv,
     setThemeId,
     setAppState,
     showToast,
     resetSampleData,
+    reloadActiveSetGoal,
+    reloadBinders,
     refreshAppData,
-    loadCatalogueData,
     loadSetCatalogueData,
     loadedCatalogueSetNames,
+    setActiveSetGoal,
+    activeSetGoalNotice,
+    setActiveSetGoalNotice,
     themeId,
   };
 
@@ -2243,18 +2418,29 @@ export default function Home() {
           alertCount={intelligence.actionQueue.length + (effectivePlus ? intelligence.priceAlerts.length : 0)}
           onNavigate={navigate}
         />
-        <main className="main">
+        <main aria-busy={isLoadingData} className="main">
           {renderScreen(context)}
           <LegalFooter />
         </main>
       </div>
       <BottomNav active={appState.screen} onNavigate={navigate} />
-      {toast ? <div className="toast">{toast}</div> : null}
+      {toast ? (
+        <div
+          aria-atomic="true"
+          aria-live={toast.tone === "error" ? "assertive" : "polite"}
+          className={`toast ${toast.tone}`}
+          role={toast.tone === "error" ? "alert" : "status"}
+        >
+          {toast.message}
+        </div>
+      ) : null}
     </div>
   );
 }
 
 type ScreenContext = {
+  activeSetGoal: ActiveSetGoal | null;
+  activeSetGoalNotice: string;
   appState: AppState;
   viewer: Viewer;
   cacheCatalogueItems: (items: CatalogueItem[]) => void;
@@ -2263,7 +2449,7 @@ type ScreenContext = {
   catalogueComplete: boolean;
   collection: CollectionItem[];
   customBinders: CustomBinder[];
-  defaultBinderSettings: DefaultBinderSettings;
+  binderNotice: string;
   storageLocations: StorageLocation[];
   collectionEvents: CollectionEvent[];
   notificationPreferences: NotificationPreferences;
@@ -2272,6 +2458,8 @@ type ScreenContext = {
   dataSource: AppDataSource;
   dataNotice: string;
   isLoadingData: boolean;
+  isLoadingBinders: boolean;
+  isLoadingSetGoal: boolean;
   isLoadingCatalogue: boolean;
   loadedCatalogueSetNames: string[];
   collectionSearch: string;
@@ -2293,14 +2481,13 @@ type ScreenContext = {
   intelligence: CollectionIntelligence;
   wishlist: WishlistItem[];
   wishlistTotal: number;
-  addToCollection: (catalogueId: string, formData?: FormData) => Promise<void>;
+  addToCollection: (catalogueId: string, formData?: FormData) => Promise<boolean>;
   createManualSealedProduct: (formData: FormData) => Promise<boolean>;
   setCustomBinders: Dispatch<SetStateAction<CustomBinder[]>>;
-  setDefaultBinderSettings: Dispatch<SetStateAction<DefaultBinderSettings>>;
   updateCollectionItem: (itemId: string, formData: FormData) => Promise<boolean>;
   archiveCollectionItem: (itemId: string) => Promise<boolean>;
   recordCollectionSale: (itemId: string, formData: FormData) => Promise<boolean>;
-  addToWishlist: (catalogueId: string) => Promise<void>;
+  addToWishlist: (catalogueId: string) => Promise<boolean>;
   duplicateItem: (itemId: string) => Promise<void>;
   removeWishlistItem: (id: string, options?: { quiet?: boolean }) => Promise<void>;
   updateWishlistItem: (id: string, formData: FormData) => Promise<boolean>;
@@ -2313,17 +2500,21 @@ type ScreenContext = {
   cancelPlusSubscription: () => Promise<void>;
   updateNotificationPreferences: (preferences: NotificationPreferences) => Promise<boolean>;
   downloadImportTemplate: () => void;
-  importCollectionCsv: (file: File) => Promise<boolean>;
+  previewCollectionCsv: (file: File) => Promise<CollectionImportPreview | null>;
+  importCollectionCsv: (file: File) => Promise<CollectionImportResult>;
   setThemeId: Dispatch<SetStateAction<ThemeId>>;
   setAppState: Dispatch<SetStateAction<AppState>>;
-  showToast: (message: string) => void;
+  showToast: (message: string, tone?: ToastTone) => void;
   resetSampleData: () => void;
+  reloadActiveSetGoal: (options?: { quiet?: boolean }) => Promise<boolean>;
+  reloadBinders: (options?: { quiet?: boolean }) => Promise<boolean>;
   refreshAppData: (options?: { quiet?: boolean }) => Promise<boolean>;
-  loadCatalogueData: (options?: { force?: boolean; quiet?: boolean }) => Promise<CatalogueItem[] | null>;
   loadSetCatalogueData: (
     setName: string,
     options?: { force?: boolean; quiet?: boolean; setId?: string },
   ) => Promise<CatalogueItem[] | null>;
+  setActiveSetGoal: Dispatch<SetStateAction<ActiveSetGoal | null>>;
+  setActiveSetGoalNotice: Dispatch<SetStateAction<string>>;
   themeId: ThemeId;
 };
 
@@ -2348,7 +2539,12 @@ function renderScreen(context: ScreenContext) {
     case "analytics":
       return <AnalyticsScreen {...context} />;
     case "ops":
-      return canUseOperationsForUser(context.viewer.role) ? <OperationsScreen {...context} /> : <OperationsLockedScreen />;
+      return canUseOperationsForUser(context.viewer.role) ? (
+        <LazyOperationsScreen
+          refreshAppData={context.refreshAppData}
+          showToast={context.showToast}
+        />
+      ) : <OperationsLockedScreen />;
     case "settings":
       return <SettingsScreen {...context} />;
     case "dashboard":
@@ -2365,10 +2561,12 @@ function SignInScreen({
   name,
   notice,
   password,
+  passwordConfirmation,
   onAuthModeChange,
   onEmailChange,
   onNameChange,
   onPasswordChange,
+  onPasswordConfirmationChange,
   onSubmit,
 }: {
   authMode: AuthMode;
@@ -2378,12 +2576,18 @@ function SignInScreen({
   name: string;
   notice: string;
   password: string;
+  passwordConfirmation: string;
   onAuthModeChange: (value: AuthMode) => void;
   onEmailChange: (value: string) => void;
   onNameChange: (value: string) => void;
   onPasswordChange: (value: string) => void;
+  onPasswordConfirmationChange: (value: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
+  const [showPassword, setShowPassword] = useState(false);
+  const passwordConfirmationEntered = authMode === "register" && passwordConfirmation.length > 0;
+  const passwordsMatch = passwordConfirmationEntered && password === passwordConfirmation;
+
   return (
     <main className="auth-shell">
       <div className="auth-stack">
@@ -2395,6 +2599,7 @@ function SignInScreen({
           </div>
           <div className="segmented" aria-label="Authentication mode">
             <button
+              aria-pressed={authMode === "sign-in"}
               className={authMode === "sign-in" ? "active" : ""}
               type="button"
               onClick={() => onAuthModeChange("sign-in")}
@@ -2402,6 +2607,7 @@ function SignInScreen({
               Sign in
             </button>
             <button
+              aria-pressed={authMode === "register"}
               className={authMode === "register" ? "active" : ""}
               type="button"
               onClick={() => onAuthModeChange("register")}
@@ -2409,9 +2615,14 @@ function SignInScreen({
               Create account
             </button>
           </div>
-          {notice ? <p className="auth-notice">{notice}</p> : null}
+          {notice ? <p className="auth-notice" role="status">{notice}</p> : null}
           <Field label="Email">
             <input
+              autoComplete="email"
+              autoCapitalize="none"
+              inputMode="email"
+              name="email"
+              spellCheck={false}
               type="email"
               value={email}
               onChange={(event) => onEmailChange(event.target.value)}
@@ -2420,7 +2631,9 @@ function SignInScreen({
           </Field>
           <Field label="Password">
             <input
-              type="password"
+              autoComplete={authMode === "register" ? "new-password" : "current-password"}
+              name="password"
+              type={showPassword ? "text" : "password"}
               value={password}
               onChange={(event) => onPasswordChange(event.target.value)}
               minLength={8}
@@ -2428,15 +2641,54 @@ function SignInScreen({
             />
           </Field>
           {authMode === "register" ? (
+            <Field label="Confirm password">
+              <input
+                aria-describedby={passwordConfirmationEntered ? "password-confirmation-status" : undefined}
+                aria-invalid={passwordConfirmationEntered && !passwordsMatch}
+                autoComplete="new-password"
+                name="passwordConfirmation"
+                type={showPassword ? "text" : "password"}
+                value={passwordConfirmation}
+                onChange={(event) => onPasswordConfirmationChange(event.target.value)}
+                minLength={8}
+                required
+              />
+            </Field>
+          ) : null}
+          {passwordConfirmationEntered ? (
+            <p
+              className={passwordsMatch ? "auth-confirmation valid" : "auth-confirmation invalid"}
+              id="password-confirmation-status"
+              role="status"
+            >
+              {passwordsMatch ? "Passwords match." : "Passwords do not match yet."}
+            </p>
+          ) : null}
+          <label className="check-row auth-password-visibility">
+            <input
+              checked={showPassword}
+              onChange={(event) => setShowPassword(event.currentTarget.checked)}
+              type="checkbox"
+            />
+            <span>Show password</span>
+          </label>
+          {authMode === "sign-in" ? (
+            <Link className="auth-secondary-link" href="/auth/forgot-password">
+              Forgot your password?
+            </Link>
+          ) : null}
+          {authMode === "register" ? (
             <Field label="Display name">
               <input
+                autoComplete="name"
+                name="name"
                 value={name}
                 onChange={(event) => onNameChange(event.target.value)}
                 required
               />
             </Field>
           ) : null}
-          {error ? <p className="auth-error">{error}</p> : null}
+          {error ? <p className="auth-error" role="alert">{error}</p> : null}
           <button className="button primary full" type="submit" disabled={isSubmitting}>
             {authMode === "register" ? <UserRound size={17} /> : <LogIn size={17} />}
             {isSubmitting
@@ -2596,7 +2848,11 @@ function BottomNav({
     <nav className="bottom-nav" aria-label="Primary navigation">
       <MobileNavButton active={active === "dashboard"} icon={<LayoutDashboard />} label="Portfolio" onClick={() => onNavigate("dashboard")} />
       <MobileNavButton active={active === "collection"} icon={<Layers3 />} label="Collection" onClick={() => onNavigate("collection")} />
-      <button className={active === "add" ? "active add-button" : "add-button"} onClick={() => onNavigate("add")}>
+      <button
+        aria-current={active === "add" ? "page" : undefined}
+        className={active === "add" ? "active add-button" : "add-button"}
+        onClick={() => onNavigate("add")}
+      >
         <span className="icon-wrap">
           <Plus size={20} />
         </span>
@@ -2621,7 +2877,7 @@ function NavButton({
   onClick: () => void;
 }) {
   return (
-    <button className={active ? "nav-button active" : "nav-button"} onClick={onClick}>
+    <button aria-current={active ? "page" : undefined} className={active ? "nav-button active" : "nav-button"} onClick={onClick}>
       {icon}
       <span>{label}</span>
     </button>
@@ -2640,7 +2896,7 @@ function MobileNavButton({
   onClick: () => void;
 }) {
   return (
-    <button className={active ? "active" : ""} onClick={onClick}>
+    <button aria-current={active ? "page" : undefined} className={active ? "active" : ""} onClick={onClick}>
       {icon}
       <span>{label}</span>
     </button>
@@ -2651,15 +2907,17 @@ function DashboardScreen({
   collection,
   collectionEvents,
   catalogueById,
+  dataSource,
   sets,
   storageLocations,
-  dataSource,
   dataNotice,
   isLoadingData,
   navigate,
+  refreshAppData,
   startAdd,
   summary,
   intelligence,
+  viewer,
   wishlist,
   setAppState,
 }: ScreenContext) {
@@ -2670,6 +2928,7 @@ function DashboardScreen({
     .slice(0, 3);
   const dashboardSets = focusSets.length ? focusSets : sets.slice(0, 3);
   const gain = summary.value - summary.cost;
+  const hasDataLoadError = dataSource === "database" && Boolean(dataNotice) && !isLoadingData;
 
   return (
     <section className="page">
@@ -2690,10 +2949,11 @@ function DashboardScreen({
         intelligence={intelligence}
         isLoadingData={isLoadingData}
         navigate={navigate}
+        onRetry={() => void refreshAppData()}
         summary={summary}
       />
 
-      {!collection.length ? (
+      {!collection.length && !hasDataLoadError ? (
         <section className="starter-panel">
           <div>
             <span className="tag blue">First run</span>
@@ -2715,9 +2975,10 @@ function DashboardScreen({
         </section>
       ) : null}
 
-      {!collection.length ? (
+      {!hasDataLoadError ? (
         <OnboardingChecklist
           collection={collection}
+          ownerEmail={viewer.email}
           sets={sets}
           storageLocations={storageLocations}
           summary={summary}
@@ -2809,6 +3070,7 @@ function PortfolioHero({
   intelligence,
   isLoadingData,
   navigate,
+  onRetry,
   summary,
 }: {
   dataNotice: string;
@@ -2817,16 +3079,18 @@ function PortfolioHero({
   intelligence: CollectionIntelligence;
   isLoadingData: boolean;
   navigate: (screen: Screen) => void;
+  onRetry: () => void;
   summary: ScreenContext["summary"];
 }) {
   const rangeChange = portfolioRangeChange(intelligence.portfolioHistory, "30d");
+  const hasDataLoadError = dataSource === "database" && Boolean(dataNotice) && !isLoadingData;
 
   return (
     <section className="portfolio-hero">
       <div className="portfolio-hero-main">
         <div className="portfolio-kicker">
-          <span className={dataSource === "database" ? "status-pill" : "tag amber"}>
-            {isLoadingData ? "Loading" : dataSource === "database" ? "Live data" : "Sample data"}
+          <span className={hasDataLoadError ? "tag red" : dataSource === "database" ? "status-pill" : "tag amber"}>
+            {isLoadingData ? "Loading" : hasDataLoadError ? "Data unavailable" : dataSource === "database" ? "Live data" : "Sample data"}
           </span>
           <span className="status-pill">{intelligence.healthLabel}</span>
         </div>
@@ -2847,7 +3111,15 @@ function PortfolioHero({
             Insights
           </button>
         </div>
-        {dataNotice ? <p className="muted">{dataNotice}</p> : null}
+        {hasDataLoadError ? (
+          <div className="data-error-state" role="alert">
+            <p>{dataNotice}</p>
+            <button className="button small" type="button" onClick={onRetry}>
+              <RefreshCw size={16} />
+              Retry data load
+            </button>
+          </div>
+        ) : dataNotice ? <p className="muted">{dataNotice}</p> : null}
       </div>
       <div className="portfolio-hero-side">
         <PortfolioValueLineChart
@@ -2951,6 +3223,7 @@ function DashboardAttentionPanel({
 function OnboardingChecklist({
   collection,
   navigate,
+  ownerEmail,
   sets,
   setAppState,
   startAdd,
@@ -2960,6 +3233,7 @@ function OnboardingChecklist({
 }: {
   collection: CollectionItem[];
   navigate: (screen: Screen) => void;
+  ownerEmail: string;
   sets: SetProgress[];
   setAppState: Dispatch<SetStateAction<AppState>>;
   startAdd: (type: ItemType) => void;
@@ -3022,17 +3296,18 @@ function OnboardingChecklist({
   const nextStep = steps.find((step) => !step.done);
   const isComplete = completed === steps.length;
   const [isDismissed, setIsDismissed] = useState(false);
+  const dismissalStorageKey = `${betaSetupDismissedStorageKey}:${ownerEmail.trim().toLowerCase() || "local"}`;
 
   useEffect(() => {
-    setIsDismissed(window.localStorage.getItem(betaSetupDismissedStorageKey) === "1");
-  }, []);
+    setIsDismissed(window.localStorage.getItem(dismissalStorageKey) === "1");
+  }, [dismissalStorageKey]);
 
   function dismissSetup() {
-    window.localStorage.setItem(betaSetupDismissedStorageKey, "1");
+    window.localStorage.setItem(dismissalStorageKey, "1");
     setIsDismissed(true);
   }
 
-  if (isComplete && isDismissed) {
+  if (isDismissed) {
     return null;
   }
 
@@ -3047,11 +3322,9 @@ function OnboardingChecklist({
           <span className={isComplete ? "tag green" : "tag blue"}>
             {isComplete ? "Ready" : "Setup"}
           </span>
-          {isComplete ? (
-            <button className="icon-button setup-dismiss-button" type="button" onClick={dismissSetup} aria-label="Hide collection setup">
-              <X size={16} />
-            </button>
-          ) : null}
+          <button className="icon-button setup-dismiss-button" type="button" onClick={dismissSetup} aria-label="Hide collection setup">
+            <X size={16} />
+          </button>
         </div>
       </div>
       <div className="setup-checklist-list">
@@ -3549,40 +3822,47 @@ function CollectionScreen({
 
 function BindersScreen({
   appState,
+  binderNotice,
   catalogueById,
   collection,
   customBinders,
-  defaultBinderSettings,
+  isLoadingBinders,
+  reloadBinders,
   setAppState,
   setCustomBinders,
-  setDefaultBinderSettings,
   showToast,
   startAdd,
   navigate,
 }: ScreenContext) {
   const [isCreating, setIsCreating] = useState(false);
+  const [isCreatingBinder, setIsCreatingBinder] = useState(false);
+  const [isSavingBinder, setIsSavingBinder] = useState(false);
+  const [isDeletingBinder, setIsDeletingBinder] = useState(false);
+  const [binderSaveState, setBinderSaveState] = useState<"idle" | "dirty" | "saving" | "saved" | "error">("idle");
+  const [binderSaveError, setBinderSaveError] = useState("");
   const [draftName, setDraftName] = useState("");
   const [draftArtworkId, setDraftArtworkId] = useState<BinderArtworkId>("mint");
-  const [draftInteriorId, setDraftInteriorId] = useState<BinderInteriorId>("classic");
-  const [draftItemIds, setDraftItemIds] = useState<string[]>([]);
+  const [draftCopyCounts, setDraftCopyCounts] = useState<Record<string, number>>({});
   const [itemSearch, setItemSearch] = useState("");
   const [focusedItemId, setFocusedItemId] = useState<string | null>(null);
   const [isArranging, setIsArranging] = useState(false);
-  const [liftedItemId, setLiftedItemId] = useState<string | null>(null);
-  const [recentMoveItemId, setRecentMoveItemId] = useState<string | null>(null);
+  const [liftedSlotIndex, setLiftedSlotIndex] = useState<number | null>(null);
+  const [recentMoveSlotIndex, setRecentMoveSlotIndex] = useState<number | null>(null);
   const [openBinderId, setOpenBinderId] = useState<string | null>(null);
   const [visiblePageIndex, setVisiblePageIndex] = useState(0);
   const [isBinderOpening, setIsBinderOpening] = useState(false);
   const [pageTurnDirection, setPageTurnDirection] = useState<"next" | "previous" | null>(null);
-  const [pullingItemId, setPullingItemId] = useState<string | null>(null);
+  const [pullingSlotIndex, setPullingSlotIndex] = useState<number | null>(null);
   const pageTurnTimeoutRef = useRef<number | null>(null);
+  const swipeStartXRef = useRef<number | null>(null);
+  const isMobileBinder = useMediaQuery("(max-width: 759px)");
   const availableItems = useMemo(
     () => collection.filter((item) => catalogueById.get(item.catalogueId)?.type === "card"),
     [catalogueById, collection],
   );
   const binders = useMemo(
-    () => binderSummaries(availableItems, customBinders, defaultBinderSettings),
-    [availableItems, customBinders, defaultBinderSettings],
+    () => binderSummaries(availableItems, customBinders),
+    [availableItems, customBinders],
   );
   const selectedBinder = useMemo(
     () =>
@@ -3596,6 +3876,7 @@ function BindersScreen({
     () => (openBinderId ? binders.find((binder) => binder.id === openBinderId) ?? null : null),
     [binders, openBinderId],
   );
+  const binderViewerRef = useDialogFocus<HTMLDivElement>(Boolean(activeBinder && !focusedItemId));
   const activeCustomBinder = useMemo(
     () => (activeBinder ? customBinders.find((binder) => binder.id === activeBinder.id) : undefined),
     [activeBinder, customBinders],
@@ -3607,13 +3888,14 @@ function BindersScreen({
   const activeCardCount = activeBinder
     ? activeBinder.items.filter((item) => catalogueById.get(item.catalogueId)?.type === "card").length
     : 0;
-  const totalLeafPages = Math.max(1, Math.ceil((activeBinder?.items.length ?? 0) / 9));
+  const totalLeafPages = Math.max(1, activeBinder?.pages.length ?? 1);
   const totalSpreads = Math.max(1, Math.ceil(totalLeafPages / 2));
-  const boundedPageIndex = Math.min(visiblePageIndex, totalSpreads - 1);
-  const currentPageStart = boundedPageIndex * 18;
+  const totalPageViews = isMobileBinder ? totalLeafPages : totalSpreads;
+  const boundedPageIndex = Math.min(visiblePageIndex, totalPageViews - 1);
+  const currentPageStart = boundedPageIndex * (isMobileBinder ? 9 : 18);
   const nextPageStart = currentPageStart + 9;
-  const leftPageNumber = boundedPageIndex * 2 + 1;
-  const rightPageNumber = leftPageNumber < totalLeafPages ? leftPageNumber + 1 : null;
+  const leftPageNumber = isMobileBinder ? boundedPageIndex + 1 : boundedPageIndex * 2 + 1;
+  const rightPageNumber = !isMobileBinder && leftPageNumber < totalLeafPages ? leftPageNumber + 1 : null;
   const normalizedItemSearch = normalizeSearchText(itemSearch);
   const pickerItems = useMemo(
     () =>
@@ -3647,7 +3929,7 @@ function BindersScreen({
     }
 
     const nextSpread = direction === "next"
-      ? Math.min(totalSpreads - 1, boundedPageIndex + 1)
+      ? Math.min(totalPageViews - 1, boundedPageIndex + 1)
       : Math.max(0, boundedPageIndex - 1);
 
     if (nextSpread === boundedPageIndex) {
@@ -3665,23 +3947,41 @@ function BindersScreen({
       setPageTurnDirection(null);
       pageTurnTimeoutRef.current = null;
     }, 720);
-  }, [boundedPageIndex, isBinderOpening, pageTurnDirection, totalSpreads]);
+  }, [boundedPageIndex, isBinderOpening, pageTurnDirection, totalPageViews]);
+
+  const closeBinderViewer = useCallback(() => {
+    if (
+      (binderSaveState === "dirty" || binderSaveState === "error") &&
+      !window.confirm("Close this binder without saving its latest layout changes?")
+    ) {
+      return;
+    }
+
+    setOpenBinderId(null);
+    setIsArranging(false);
+    setLiftedSlotIndex(null);
+    setFocusedItemId(null);
+    setPullingSlotIndex(null);
+  }, [binderSaveState]);
 
   useEffect(() => {
     if (binders.some((binder) => binder.id === appState.selectedBinderId)) {
       return;
     }
 
-    setAppState((current) => ({ ...current, selectedBinderId: defaultBinderId }));
+    const fallbackBinder = binders.find((binder) => binder.isDefault) ?? binders[0];
+    setAppState((current) => ({ ...current, selectedBinderId: fallbackBinder?.id ?? "" }));
   }, [appState.selectedBinderId, binders, setAppState]);
 
   useEffect(() => {
     setIsArranging(false);
-    setLiftedItemId(null);
+    setLiftedSlotIndex(null);
     setFocusedItemId(null);
-    setPullingItemId(null);
+    setPullingSlotIndex(null);
     setPageTurnDirection(null);
     setVisiblePageIndex(0);
+    setBinderSaveState("idle");
+    setBinderSaveError("");
 
     if (!activeBinder?.id) {
       setIsBinderOpening(false);
@@ -3695,6 +3995,17 @@ function BindersScreen({
   }, [activeBinder?.id]);
 
   useEffect(() => {
+    if (binderSaveState !== "dirty" && binderSaveState !== "error") return;
+
+    function warnAboutUnsavedLayout(event: BeforeUnloadEvent) {
+      event.preventDefault();
+    }
+
+    window.addEventListener("beforeunload", warnAboutUnsavedLayout);
+    return () => window.removeEventListener("beforeunload", warnAboutUnsavedLayout);
+  }, [binderSaveState]);
+
+  useEffect(() => {
     if (!openBinderId || binders.some((binder) => binder.id === openBinderId)) {
       return;
     }
@@ -3703,12 +4014,12 @@ function BindersScreen({
   }, [binders, openBinderId]);
 
   useEffect(() => {
-    if (visiblePageIndex <= totalSpreads - 1) {
+    if (visiblePageIndex <= totalPageViews - 1) {
       return;
     }
 
-    setVisiblePageIndex(Math.max(0, totalSpreads - 1));
-  }, [totalSpreads, visiblePageIndex]);
+    setVisiblePageIndex(Math.max(0, totalPageViews - 1));
+  }, [totalPageViews, visiblePageIndex]);
 
   useEffect(() => () => {
     if (pageTurnTimeoutRef.current !== null) {
@@ -3743,7 +4054,7 @@ function BindersScreen({
 
     window.addEventListener("keydown", handleBinderKeyboard);
     return () => window.removeEventListener("keydown", handleBinderKeyboard);
-  }, [activeBinder, focusedItemId, turnBinderPages]);
+  }, [activeBinder, closeBinderViewer, focusedItemId, turnBinderPages]);
 
   function selectBinder(id: string) {
     setAppState((current) => ({ ...current, selectedBinderId: id }));
@@ -3755,24 +4066,27 @@ function BindersScreen({
     setVisiblePageIndex(0);
   }
 
-  function closeBinderViewer() {
-    setOpenBinderId(null);
-    setIsArranging(false);
-    setLiftedItemId(null);
-    setFocusedItemId(null);
-    setPullingItemId(null);
+  function setDraftBinderItemCopyCount(itemId: string, count: number) {
+    const owned = collection.find((item) => item.id === itemId);
+    const boundedCount = Math.max(0, Math.min(Math.floor(count), owned?.quantity ?? 0));
+    setDraftCopyCounts((current) => {
+      if (!boundedCount) {
+        const next = { ...current };
+        delete next[itemId];
+        return next;
+      }
+
+      return { ...current, [itemId]: boundedCount };
+    });
   }
 
-  function toggleDraftItem(itemId: string) {
-    setDraftItemIds((current) =>
-      current.includes(itemId) ? current.filter((id) => id !== itemId) : [...current, itemId],
-    );
-  }
-
-  function toggleSelectedBinderItem(itemId: string) {
+  function setSelectedBinderItemCopyCount(itemId: string, count: number) {
     if (!activeCustomBinder) {
       return;
     }
+
+    const owned = collection.find((item) => item.id === itemId);
+    const boundedCount = Math.max(0, Math.min(Math.floor(count), owned?.quantity ?? 0));
 
     setCustomBinders((current) =>
       current.map((binder) => {
@@ -3780,139 +4094,174 @@ function BindersScreen({
           return binder;
         }
 
-        const itemIds = binder.itemIds.includes(itemId)
-          ? binder.itemIds.filter((id) => id !== itemId)
-          : [...binder.itemIds, itemId];
+        let pages = cloneBinderPages(binder.pages);
+        const existingSlots = pages.flatMap((page) => page.slots)
+          .filter((slot) => slot.collectionItemId === itemId);
 
-        return { ...binder, itemIds };
+        existingSlots.forEach((slot, index) => {
+          if (index < boundedCount) {
+            slot.copyIndex = index + 1;
+          } else {
+            Object.assign(slot, emptyBinderSlot(slot.position));
+          }
+        });
+
+        for (let copyIndex = existingSlots.length + 1; copyIndex <= boundedCount; copyIndex += 1) {
+          pages = placeBinderCopyInFirstBlank(pages, itemId, copyIndex);
+        }
+
+        return { ...binder, pages };
       }),
     );
+    setBinderSaveState("dirty");
+    setBinderSaveError("");
   }
 
-  function createBinder(event: FormEvent<HTMLFormElement>) {
+  async function createBinder(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    if (isCreatingBinder) {
+      return;
+    }
 
     const name = draftName.trim();
 
     if (!name) {
-      showToast("Binder needs a name.");
+      showToast("Binder needs a name.", "error");
       return;
     }
 
-    if (!draftItemIds.length) {
-      showToast("Choose at least one card lot.");
+    const selectedDraftCopies = Object.entries(draftCopyCounts).filter(([, count]) => count > 0);
+    if (!selectedDraftCopies.length) {
+      showToast("Choose at least one card copy.", "error");
       return;
     }
 
-    const binder: CustomBinder = {
-      artworkId: draftArtworkId,
-      createdAt: new Date().toISOString(),
-      id: `binder-${Date.now()}`,
-      interiorId: draftInteriorId,
-      itemIds: draftItemIds.filter((id) => visibleItemIds.has(id)),
-      name,
-    };
-
-    setCustomBinders((current) => [...current, binder]);
-    setAppState((current) => ({ ...current, selectedBinderId: binder.id }));
-    setOpenBinderId(binder.id);
-    setVisiblePageIndex(0);
-    setDraftName("");
-    setDraftArtworkId("mint");
-    setDraftInteriorId("classic");
-    setDraftItemIds([]);
-    setIsCreating(false);
-    showToast(`${binder.name} created.`);
+    setIsCreatingBinder(true);
+    try {
+      const created = await createServerBinder({
+        artworkId: draftArtworkId,
+        description: "A curated card binder.",
+        name,
+      });
+      const entries = selectedDraftCopies
+        .filter(([id]) => visibleItemIds.has(id))
+        .flatMap(([collectionItemId, count]) =>
+          Array.from({ length: count }, (_, index) => ({ collectionItemId, copyIndex: index + 1 })),
+        );
+      const binder = await replaceServerBinderLayout(created.id, buildBinderPages(entries));
+      setCustomBinders((current) => [...current.map((item) => ({ ...item, isDefault: binder.isDefault ? false : item.isDefault })), binder]);
+      setAppState((current) => ({ ...current, selectedBinderId: binder.id }));
+      setOpenBinderId(binder.id);
+      setVisiblePageIndex(0);
+      setDraftName("");
+      setDraftArtworkId("mint");
+      setDraftCopyCounts({});
+      setIsCreating(false);
+      setBinderSaveState("saved");
+      showToast(`${binder.name} created and synced.`);
+    } catch (error) {
+      console.warn("Binder creation failed.", error);
+      showToast(error instanceof Error ? error.message : "Binder could not be created.", "error");
+      void reloadBinders({ quiet: true });
+    } finally {
+      setIsCreatingBinder(false);
+    }
   }
 
-  function updateActiveBinderAppearance(next: Partial<Pick<CustomBinder, "artworkId" | "interiorId">>) {
-    if (!activeBinder) {
+  async function updateActiveBinderAppearance(artworkId: BinderArtworkId) {
+    if (!activeCustomBinder || isSavingBinder) {
       return;
     }
 
-    if (activeBinder.id === defaultBinderId) {
-      setDefaultBinderSettings((current) => ({ ...current, ...next }));
-      return;
-    }
-
-    if (!activeCustomBinder) {
-      return;
-    }
-
-    setCustomBinders((current) =>
-      current.map((binder) =>
-        binder.id === activeCustomBinder.id
+    setIsSavingBinder(true);
+    try {
+      const updated = await patchServerBinder(activeCustomBinder.id, {
+        coverStyle: serverCoverStyleFromArtwork(artworkId),
+      });
+      setCustomBinders((current) => current.map((binder) =>
+        binder.id === updated.id
           ? {
-              ...binder,
-              ...next,
+              ...updated,
+              pages: binderSaveState === "dirty" || binderSaveState === "error" ? binder.pages : updated.pages,
             }
           : binder,
-      ),
-    );
+      ));
+      setBinderSaveError("");
+      showToast("Binder artwork saved.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Binder artwork could not be saved.";
+      setBinderSaveError(message);
+      showToast(message, "error");
+    } finally {
+      setIsSavingBinder(false);
+    }
   }
 
-  function updateActiveBinderOrder(nextItemIds: string[]) {
-    if (!activeBinder) {
-      return;
-    }
-
-    if (activeBinder.id === defaultBinderId) {
-      setDefaultBinderSettings((current) => ({ ...current, itemIds: nextItemIds }));
-      return;
-    }
-
-    if (!activeCustomBinder) {
-      return;
-    }
-
-    setCustomBinders((current) =>
-      current.map((binder) =>
-        binder.id === activeCustomBinder.id ? { ...binder, itemIds: nextItemIds } : binder,
-      ),
-    );
-  }
-
-  function handleBinderSlotClick(item: CollectionItem | undefined, slotIndex: number) {
+  function handleBinderSlotClick(slot: BinderSummary["slots"][number] | undefined, slotIndex: number) {
+    const item = slot?.item;
     if (!activeBinder || !isArranging) {
-      if (item && !pullingItemId) {
-        setPullingItemId(item.id);
+      if (item && pullingSlotIndex === null) {
+        setPullingSlotIndex(slotIndex);
         window.setTimeout(() => {
           setFocusedItemId(item.id);
-          setPullingItemId(null);
+          setPullingSlotIndex(null);
         }, 360);
       }
       return;
     }
 
-    if (!liftedItemId) {
+    if (liftedSlotIndex === null) {
       if (!item) {
         return;
       }
 
-      setLiftedItemId(item.id);
+      setLiftedSlotIndex(slotIndex);
       return;
     }
 
-    if (item?.id === liftedItemId) {
-      setLiftedItemId(null);
+    if (slotIndex === liftedSlotIndex) {
+      setLiftedSlotIndex(null);
       return;
     }
 
-    const nextItemIds = moveBinderItemToSlot(
-      activeBinder.items.map((binderItem) => binderItem.id),
-      liftedItemId,
-      slotIndex,
-      visibleItemIds,
-    );
-
-    updateActiveBinderOrder(nextItemIds);
-    setRecentMoveItemId(liftedItemId);
-    window.setTimeout(() => setRecentMoveItemId(null), 520);
-    setLiftedItemId(null);
+    if (!activeCustomBinder) return;
+    const pages = swapBinderSlots(activeCustomBinder.pages, liftedSlotIndex, slotIndex);
+    setCustomBinders((current) => current.map((binder) => (binder.id === activeCustomBinder.id ? { ...binder, pages } : binder)));
+    setBinderSaveState("dirty");
+    setBinderSaveError("");
+    setRecentMoveSlotIndex(slotIndex);
+    window.setTimeout(() => setRecentMoveSlotIndex(null), 520);
+    setLiftedSlotIndex(null);
   }
 
-  function deleteSelectedBinder() {
-    if (!activeCustomBinder) {
+  async function saveActiveBinderLayout() {
+    if (!activeCustomBinder || !["dirty", "error"].includes(binderSaveState) || isSavingBinder) return;
+    setIsSavingBinder(true);
+    setBinderSaveState("saving");
+    try {
+      const updated = await replaceServerBinderLayout(activeCustomBinder.id, activeCustomBinder.pages);
+      setCustomBinders((current) => current.map((binder) => (binder.id === updated.id ? updated : binder)));
+      setBinderSaveState("saved");
+      setBinderSaveError("");
+      showToast("Binder layout saved across devices.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Binder layout could not be saved.";
+      setBinderSaveState("error");
+      setBinderSaveError(message);
+      showToast(message, "error");
+    } finally {
+      setIsSavingBinder(false);
+    }
+  }
+
+  async function deleteSelectedBinder() {
+    if (!activeCustomBinder || isDeletingBinder) {
+      return;
+    }
+
+    if (customBinders.length <= 1) {
+      showToast("Create another binder before deleting your only binder.", "error");
       return;
     }
 
@@ -3920,10 +4269,26 @@ function BindersScreen({
       return;
     }
 
-    setCustomBinders((current) => current.filter((binder) => binder.id !== activeCustomBinder.id));
-    setAppState((current) => ({ ...current, selectedBinderId: defaultBinderId }));
-    setOpenBinderId(null);
-    showToast(`${activeCustomBinder.name} removed.`);
+    setIsDeletingBinder(true);
+    try {
+      await deleteServerBinder(activeCustomBinder.id);
+      const remaining = customBinders.filter((binder) => binder.id !== activeCustomBinder.id);
+      const replacement = activeCustomBinder.isDefault
+        ? [...remaining].sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))[0]
+        : remaining.find((binder) => binder.isDefault) ?? remaining[0];
+      setCustomBinders(remaining.map((binder) => ({
+        ...binder,
+        isDefault: activeCustomBinder.isDefault ? binder.id === replacement?.id : binder.isDefault,
+      })));
+      setAppState((current) => ({ ...current, selectedBinderId: replacement?.id ?? "" }));
+      setOpenBinderId(null);
+      showToast(`${activeCustomBinder.name} removed.`);
+      void reloadBinders({ quiet: true });
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Binder could not be deleted.", "error");
+    } finally {
+      setIsDeletingBinder(false);
+    }
   }
 
   if (!availableItems.length) {
@@ -3958,6 +4323,10 @@ function BindersScreen({
         title="Binders"
         action={
           <>
+            <button className="button" disabled={isLoadingBinders} onClick={() => void reloadBinders()}>
+              <RefreshCw className={isLoadingBinders ? "spin" : ""} size={17} />
+              {isLoadingBinders ? "Syncing" : "Refresh"}
+            </button>
             <button className="button" onClick={() => navigate("collection")}>
               <Layers3 size={17} />
               Collection
@@ -3970,6 +4339,16 @@ function BindersScreen({
         }
       />
 
+      {binderNotice ? (
+        <div className="data-error-state" role="alert">
+          <p>{binderNotice} Your legacy browser copy has not been removed.</p>
+          <button className="button small" type="button" onClick={() => void reloadBinders()}>
+            <RefreshCw size={16} />
+            Retry binder sync
+          </button>
+        </div>
+      ) : null}
+
       <section className="binder-library-intro">
         <div>
           <p className="eyebrow">Your collection, shelved</p>
@@ -3977,7 +4356,7 @@ function BindersScreen({
           <p>Browse card sleeves like a physical collection. Turn pages, inspect a card, or enter arrange mode to move it between pockets.</p>
         </div>
         <div className="binder-library-stats" aria-label="Binder library summary">
-          <span><strong>{binders.length}</strong> binder{binders.length === 1 ? "" : "s"}</span>
+          <span><strong>{isLoadingBinders ? "…" : binders.length}</strong> binder{binders.length === 1 ? "" : "s"}</span>
           <span><strong>{availableItems.length}</strong> card lots</span>
         </div>
       </section>
@@ -4000,7 +4379,7 @@ function BindersScreen({
                 const catalogueItem = catalogueById.get(item.catalogueId);
 
                 return catalogueItem ? (
-                  <span className={`binder-cover-card card-${index + 1}`} key={item.id}>
+                  <span className={`binder-cover-card card-${index + 1}`} key={`${item.id}-${index}`}>
                     {renderItemImage(catalogueItem)}
                   </span>
                 ) : null;
@@ -4008,7 +4387,7 @@ function BindersScreen({
             </span>
             <span className="binder-cover-label">
               <strong>{binder.name}</strong>
-              <span>{binder.items.length} lot{binder.items.length === 1 ? "" : "s"}</span>
+              <span>{binder.items.length} card cop{binder.items.length === 1 ? "y" : "ies"}</span>
             </span>
             <span className="binder-cover-open">Open <ArrowRight size={13} /></span>
           </button>
@@ -4049,36 +4428,18 @@ function BindersScreen({
                   ))}
                 </div>
               </Field>
-              <Field label="Internal material">
-                <div className="binder-interior-grid" role="radiogroup" aria-label="Binder internal material">
-                  {binderInteriorOptions.map((interior) => (
-                    <button
-                      aria-checked={draftInteriorId === interior.id}
-                      className={draftInteriorId === interior.id ? "binder-interior-option selected" : "binder-interior-option"}
-                      key={interior.id}
-                      onClick={() => setDraftInteriorId(interior.id)}
-                      role="radio"
-                      style={binderInteriorStyle(interior.id)}
-                      type="button"
-                    >
-                      <span className="binder-interior-swatch" />
-                      <span>{interior.name}</span>
-                    </button>
-                  ))}
-                </div>
-              </Field>
-              <button className="button primary full" type="submit">
+              <button className="button primary full" type="submit" disabled={isCreatingBinder}>
                 <Check size={17} />
-                Create binder
+                {isCreatingBinder ? "Creating and syncing" : "Create binder"}
               </button>
             </div>
             <BinderItemPicker
               catalogueById={catalogueById}
               itemSearch={itemSearch}
               items={pickerItems}
-              selectedItemIds={draftItemIds}
+              selectedCopyCounts={draftCopyCounts}
               onItemSearchChange={setItemSearch}
-              onToggleItem={toggleDraftItem}
+              onSetItemCopyCount={setDraftBinderItemCopyCount}
             />
           </form>
         </section>
@@ -4086,7 +4447,15 @@ function BindersScreen({
 
       {activeBinder ? (
         <section className="binder-viewer-backdrop" onClick={closeBinderViewer} role="presentation">
-          <div className={isBinderOpening ? "binder-viewer opening" : "binder-viewer"} onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label={`${activeBinder.name} binder`}>
+          <div
+            aria-label={`${activeBinder.name} binder`}
+            aria-modal="true"
+            className={isBinderOpening ? "binder-viewer opening" : "binder-viewer"}
+            onClick={(event) => event.stopPropagation()}
+            ref={binderViewerRef}
+            role="dialog"
+            tabIndex={-1}
+          >
             <div className="binder-viewer-topbar">
               <button className="button small" type="button" onClick={closeBinderViewer}>
                 <ArrowLeft size={16} />
@@ -4121,7 +4490,7 @@ function BindersScreen({
                     type="button"
                     onClick={() => {
                       setIsArranging((current) => !current);
-                      setLiftedItemId(null);
+                      setLiftedSlotIndex(null);
                     }}
                   >
                     <ArrowDownUp size={15} />
@@ -4129,7 +4498,7 @@ function BindersScreen({
                   </button>
                   <span>
                     {isArranging
-                      ? liftedItemId
+                      ? liftedSlotIndex !== null
                         ? "Choose a sleeve to place the lifted card."
                         : "Click a card to lift it out of its sleeve."
                       : "Move cards between sleeves without opening the lot modal."}
@@ -4152,7 +4521,7 @@ function BindersScreen({
                   </span>
                   <button
                     className="button small"
-                    disabled={boundedPageIndex >= totalSpreads - 1 || Boolean(pageTurnDirection) || isBinderOpening}
+                    disabled={boundedPageIndex >= totalPageViews - 1 || Boolean(pageTurnDirection) || isBinderOpening}
                     onClick={() => turnBinderPages("next")}
                     type="button"
                   >
@@ -4185,17 +4554,27 @@ function BindersScreen({
                     ].filter(Boolean).join(" ")}
                     key={`${activeBinder.id}-${boundedPageIndex}-${pageTurnDirection ?? "still"}`}
                     aria-label={`${activeBinder.name}, pages ${leftPageNumber}${rightPageNumber ? ` and ${rightPageNumber}` : ""}`}
+                    onPointerDown={(event) => {
+                      if (isMobileBinder && event.pointerType === "touch") swipeStartXRef.current = event.clientX;
+                    }}
+                    onPointerUp={(event) => {
+                      if (!isMobileBinder || swipeStartXRef.current === null) return;
+                      const distance = event.clientX - swipeStartXRef.current;
+                      swipeStartXRef.current = null;
+                      if (Math.abs(distance) < 48) return;
+                      turnBinderPages(distance < 0 ? "next" : "previous");
+                    }}
                   >
                     <BinderPage
                       catalogueById={catalogueById}
-                      items={activeBinder.items.slice(currentPageStart, currentPageStart + 9)}
+                      slots={activeBinder.slots.slice(currentPageStart, currentPageStart + 9)}
                       isArranging={isArranging}
-                      liftedItemId={liftedItemId}
+                      liftedSlotIndex={liftedSlotIndex}
                       offset={currentPageStart}
                       pageNumber={leftPageNumber}
                       pageRole="primary"
-                      pullingItemId={pullingItemId}
-                      recentMoveItemId={recentMoveItemId}
+                      pullingSlotIndex={pullingSlotIndex}
+                      recentMoveSlotIndex={recentMoveSlotIndex}
                       onSlotClick={handleBinderSlotClick}
                     />
                     <span className="binder-ring-strip" aria-hidden="true">
@@ -4205,28 +4584,28 @@ function BindersScreen({
                     </span>
                     <BinderPage
                       catalogueById={catalogueById}
-                      items={activeBinder.items.slice(nextPageStart, nextPageStart + 9)}
+                      slots={activeBinder.slots.slice(nextPageStart, nextPageStart + 9)}
                       isArranging={isArranging}
-                      liftedItemId={liftedItemId}
+                      liftedSlotIndex={liftedSlotIndex}
                       offset={nextPageStart}
                       pageNumber={rightPageNumber}
                       pageRole="secondary"
-                      pullingItemId={pullingItemId}
-                      recentMoveItemId={recentMoveItemId}
+                      pullingSlotIndex={pullingSlotIndex}
+                      recentMoveSlotIndex={recentMoveSlotIndex}
                       onSlotClick={handleBinderSlotClick}
                     />
                   </div>
                   <button
                     aria-label="Turn to next binder pages"
                     className="binder-page-turn next"
-                    disabled={boundedPageIndex >= totalSpreads - 1 || Boolean(pageTurnDirection) || isBinderOpening}
+                    disabled={boundedPageIndex >= totalPageViews - 1 || Boolean(pageTurnDirection) || isBinderOpening}
                     onClick={() => turnBinderPages("next")}
                     type="button"
                   >
                     <ArrowRight size={22} />
                   </button>
                   <div className="binder-page-dots" aria-hidden="true">
-                    {Array.from({ length: totalSpreads }, (_, index) => (
+                    {Array.from({ length: totalPageViews }, (_, index) => (
                       <span className={index === boundedPageIndex ? "active" : ""} key={index} />
                     ))}
                   </div>
@@ -4237,9 +4616,15 @@ function BindersScreen({
                 <div className="panel-title-row">
                   <h2>{activeBinder.isDefault ? "Full card collection" : "Binder settings"}</h2>
                   {activeCustomBinder ? (
-                    <button className="button small danger" onClick={deleteSelectedBinder} type="button">
+                    <button
+                      className="button small danger"
+                      disabled={isDeletingBinder || customBinders.length <= 1}
+                      onClick={() => void deleteSelectedBinder()}
+                      title={customBinders.length <= 1 ? "Create another binder before deleting your only binder." : undefined}
+                      type="button"
+                    >
                       <Trash2 size={15} />
-                      Delete
+                      {isDeletingBinder ? "Deleting" : "Delete"}
                     </button>
                   ) : null}
                 </div>
@@ -4247,15 +4632,36 @@ function BindersScreen({
                 <div className="binder-summary-list">
                   <MetricList
                     rows={[
-                      ["Lots", activeBinder.items.length],
+                      ["Filled pockets", activeBinder.items.length],
                       ["Estimated value", formatMoney(activeBinderValue)],
                       ["Cards", activeCardCount],
                     ]}
                   />
-                  {activeBinder.isDefault ? (
-                    <p className="muted">This binder mirrors every active card lot. Styling and sleeve order are saved for this account.</p>
-                  ) : null}
+                  <p className="muted">Layout, blank pockets, and copy numbers sync securely across your signed-in devices.</p>
                 </div>
+
+                <BinderSyncControls
+                  binder={activeCustomBinder}
+                  error={binderSaveError}
+                  isBusy={isSavingBinder}
+                  onBinderChange={(updated) => {
+                    setCustomBinders((current) => current.map((binder) =>
+                      binder.id === updated.id
+                        ? {
+                            ...updated,
+                            pages: binderSaveState === "dirty" || binderSaveState === "error" ? binder.pages : updated.pages,
+                          }
+                        : { ...binder, isDefault: updated.isDefault ? false : binder.isDefault },
+                    ));
+                  }}
+                  onError={(message) => {
+                    setBinderSaveError(message);
+                    showToast(message, "error");
+                  }}
+                  onSaveLayout={() => void saveActiveBinderLayout()}
+                  saveState={binderSaveState}
+                  showToast={showToast}
+                />
 
                 <div className="binder-appearance-editor">
                   <Field label="Outside artwork">
@@ -4265,31 +4671,14 @@ function BindersScreen({
                           aria-checked={activeBinder.artworkId === artwork.id}
                           className={activeBinder.artworkId === artwork.id ? "binder-artwork-option selected" : "binder-artwork-option"}
                           key={artwork.id}
-                          onClick={() => updateActiveBinderAppearance({ artworkId: artwork.id })}
+                          disabled={isSavingBinder}
+                          onClick={() => void updateActiveBinderAppearance(artwork.id)}
                           role="radio"
                           style={binderArtworkStyle(artwork.id)}
                           type="button"
                         >
                           <Paintbrush size={15} />
                           <span>{artwork.name}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </Field>
-                  <Field label="Inside material">
-                    <div className="binder-interior-grid compact" role="radiogroup" aria-label="Selected binder internal material">
-                      {binderInteriorOptions.map((interior) => (
-                        <button
-                          aria-checked={activeBinder.interiorId === interior.id}
-                          className={activeBinder.interiorId === interior.id ? "binder-interior-option selected" : "binder-interior-option"}
-                          key={interior.id}
-                          onClick={() => updateActiveBinderAppearance({ interiorId: interior.id })}
-                          role="radio"
-                          style={binderInteriorStyle(interior.id)}
-                          type="button"
-                        >
-                          <span className="binder-interior-swatch" />
-                          <span>{interior.name}</span>
                         </button>
                       ))}
                     </div>
@@ -4301,9 +4690,9 @@ function BindersScreen({
                     catalogueById={catalogueById}
                     itemSearch={itemSearch}
                     items={pickerItems}
-                    selectedItemIds={activeCustomBinder.itemIds}
+                    selectedCopyCounts={binderCopyCounts(activeCustomBinder.pages)}
                     onItemSearchChange={setItemSearch}
-                    onToggleItem={toggleSelectedBinderItem}
+                    onSetItemCopyCount={setSelectedBinderItemCopyCount}
                   />
                 ) : null}
               </aside>
@@ -4330,38 +4719,40 @@ function BindersScreen({
 function BinderPage({
   catalogueById,
   isArranging,
-  items,
-  liftedItemId,
+  slots,
+  liftedSlotIndex,
   offset,
   pageNumber,
   pageRole,
-  pullingItemId,
-  recentMoveItemId,
+  pullingSlotIndex,
+  recentMoveSlotIndex,
   onSlotClick,
 }: {
   catalogueById: Map<string, CatalogueItem>;
   isArranging: boolean;
-  items: CollectionItem[];
-  liftedItemId: string | null;
+  slots: BinderSummary["slots"];
+  liftedSlotIndex: number | null;
   offset: number;
   pageNumber: number | null;
   pageRole?: "primary" | "secondary";
-  pullingItemId: string | null;
-  recentMoveItemId: string | null;
-  onSlotClick: (item: CollectionItem | undefined, slotIndex: number) => void;
+  pullingSlotIndex: number | null;
+  recentMoveSlotIndex: number | null;
+  onSlotClick: (slot: BinderSummary["slots"][number] | undefined, slotIndex: number) => void;
 }) {
-  const slots = Array.from({ length: 9 }, (_, index) => items[index]);
+  const visibleSlots = Array.from({ length: 9 }, (_, index) => slots[index]);
 
   return (
     <div className={pageRole ? `binder-page ${pageRole}` : "binder-page"}>
       <span className="binder-page-number" aria-hidden="true">{pageNumber ?? ""}</span>
-      {slots.map((item, index) => {
+      {visibleSlots.map((slot, index) => {
+        const item = slot?.item;
         const catalogueItem = item ? catalogueById.get(item.catalogueId) : undefined;
         const isFilled = Boolean(item && catalogueItem);
-        const isLifted = Boolean(item && item.id === liftedItemId);
-        const isMoved = Boolean(item && item.id === recentMoveItemId);
-        const isPulling = Boolean(item && item.id === pullingItemId);
-        const isDropTarget = Boolean(isArranging && liftedItemId && (!item || item.id !== liftedItemId));
+        const globalSlotIndex = offset + index;
+        const isLifted = Boolean(item && globalSlotIndex === liftedSlotIndex);
+        const isMoved = Boolean(item && globalSlotIndex === recentMoveSlotIndex);
+        const isPulling = Boolean(item && globalSlotIndex === pullingSlotIndex);
+        const isDropTarget = Boolean(isArranging && liftedSlotIndex !== null && globalSlotIndex !== liftedSlotIndex);
         const pocketClassName = [
           "binder-pocket",
           isFilled ? "filled" : "",
@@ -4385,8 +4776,8 @@ function BinderPage({
             }
             className={pocketClassName}
             disabled={!isFilled && !isDropTarget}
-            key={item?.id ?? `empty-${offset + index}`}
-            onClick={() => onSlotClick(item, offset + index)}
+            key={`${globalSlotIndex}-${slot?.collectionItemId ?? "empty"}-${slot?.copyIndex ?? 0}`}
+            onClick={() => onSlotClick(slot, globalSlotIndex)}
             type="button"
           >
             {item && catalogueItem ? (
@@ -4397,7 +4788,7 @@ function BinderPage({
                 </span>
                 <span className="binder-pocket-caption">
                   <strong>{catalogueItemTitle(catalogueItem)}</strong>
-                  <small>{item.variant}</small>
+                  <small>{item.variant}{slot?.copyIndex ? ` · Copy ${slot.copyIndex}` : ""}</small>
                 </span>
               </>
             ) : (
@@ -4410,28 +4801,161 @@ function BinderPage({
   );
 }
 
+function BinderSyncControls({
+  binder,
+  error,
+  isBusy,
+  onBinderChange,
+  onError,
+  onSaveLayout,
+  saveState,
+  showToast,
+}: {
+  binder?: CustomBinder;
+  error: string;
+  isBusy: boolean;
+  onBinderChange: (binder: CustomBinder) => void;
+  onError: (message: string) => void;
+  onSaveLayout: () => void;
+  saveState: "idle" | "dirty" | "saving" | "saved" | "error";
+  showToast: (message: string, tone?: ToastTone) => void;
+}) {
+  const [name, setName] = useState(binder?.name ?? "");
+  const [description, setDescription] = useState(binder?.description ?? "");
+  const [isUpdating, setIsUpdating] = useState(false);
+
+  useEffect(() => {
+    setName(binder?.name ?? "");
+    setDescription(binder?.description ?? "");
+  }, [binder?.description, binder?.id, binder?.name]);
+
+  if (!binder) return null;
+
+  async function updateMetadata(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!binder || isUpdating || isBusy) return;
+    setIsUpdating(true);
+    try {
+      const updated = await patchServerBinder(binder.id, { description, name });
+      onBinderChange(updated);
+      showToast("Binder details saved.");
+    } catch (updateError) {
+      onError(updateError instanceof Error ? updateError.message : "Binder details could not be saved.");
+    } finally {
+      setIsUpdating(false);
+    }
+  }
+
+  async function updateAccess(next: Partial<{ isDefault: boolean; visibility: BinderVisibility }>) {
+    if (!binder || isUpdating || isBusy) return;
+    setIsUpdating(true);
+    try {
+      const updated = await patchServerBinder(binder.id, next);
+      onBinderChange(updated);
+      showToast(next.isDefault ? "Default binder updated." : updated.visibility === "unlisted" ? "Private sharing link enabled." : "Binder is private again.");
+    } catch (updateError) {
+      onError(updateError instanceof Error ? updateError.message : "Binder access could not be updated.");
+    } finally {
+      setIsUpdating(false);
+    }
+  }
+
+  async function copyShareLink() {
+    if (!binder?.shareSlug) return;
+    const relativeUrl = `/shared/binders/${binder.shareSlug}`;
+    const url = typeof window === "undefined" ? relativeUrl : `${window.location.origin}${relativeUrl}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      showToast("Private binder link copied.");
+    } catch {
+      onError("The share link could not be copied. Open it and copy the browser address instead.");
+    }
+  }
+
+  const sharePath = binder.shareSlug ? `/shared/binders/${binder.shareSlug}` : "";
+  const statusLabel = saveState === "dirty"
+    ? "Unsaved layout changes"
+    : saveState === "saving"
+      ? "Saving layout"
+      : saveState === "saved"
+        ? "Saved across devices"
+        : saveState === "error"
+          ? "Save failed"
+          : "Synced";
+
+  return (
+    <section className="binder-sync-panel" aria-label="Binder sync and sharing">
+      <div className="binder-save-row">
+        <span className={`binder-save-state ${saveState}`} role="status">{statusLabel}</span>
+        <button className="button primary small" type="button" disabled={!["dirty", "error"].includes(saveState) || isBusy || isUpdating} onClick={onSaveLayout}>
+          <Save size={15} />
+          {saveState === "error" ? "Retry save" : "Save layout"}
+        </button>
+      </div>
+      {error ? <p className="binder-save-error" role="alert">{error}</p> : null}
+      <form className="form-stack" onSubmit={updateMetadata}>
+        <Field label="Binder name">
+          <input value={name} maxLength={80} onChange={(event) => setName(event.target.value)} required />
+        </Field>
+        <Field label="Description">
+          <textarea value={description} maxLength={500} onChange={(event) => setDescription(event.target.value)} placeholder="What belongs in this binder?" />
+        </Field>
+        <button className="button small" type="submit" disabled={isUpdating || isBusy || (!name.trim())}>
+          <Check size={15} />
+          {isUpdating ? "Saving" : "Save details"}
+        </button>
+      </form>
+      <div className="binder-access-controls">
+        <button className="button small" type="button" disabled={binder.isDefault || isUpdating || isBusy} onClick={() => void updateAccess({ isDefault: true })}>
+          <BookOpen size={15} />
+          {binder.isDefault ? "Default binder" : "Make default"}
+        </button>
+        <button
+          className={binder.visibility === "unlisted" ? "button small primary" : "button small"}
+          type="button"
+          disabled={isUpdating || isBusy}
+          onClick={() => void updateAccess({ visibility: binder.visibility === "unlisted" ? "private" : "unlisted" })}
+        >
+          <Share2 size={15} />
+          {binder.visibility === "unlisted" ? "Disable sharing" : "Create private link"}
+        </button>
+      </div>
+      {binder.visibility === "unlisted" && sharePath ? (
+        <div className="binder-share-link">
+          <code>{sharePath}</code>
+          <button className="icon-button" type="button" onClick={() => void copyShareLink()} aria-label="Copy binder share link">
+            <Copy size={16} />
+          </button>
+          <a className="icon-button" href={sharePath} target="_blank" rel="noreferrer" aria-label="Open shared binder">
+            <ExternalLink size={16} />
+          </a>
+          <small>Anyone with this hard-to-guess link can view the binder. It is not publicly listed.</small>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function BinderItemPicker({
   catalogueById,
   itemSearch,
   items,
-  selectedItemIds,
+  selectedCopyCounts,
   onItemSearchChange,
-  onToggleItem,
+  onSetItemCopyCount,
 }: {
   catalogueById: Map<string, CatalogueItem>;
   itemSearch: string;
   items: CollectionItem[];
-  selectedItemIds: string[];
+  selectedCopyCounts: Record<string, number>;
   onItemSearchChange: (value: string) => void;
-  onToggleItem: (itemId: string) => void;
+  onSetItemCopyCount: (itemId: string, count: number) => void;
 }) {
-  const selectedIds = new Set(selectedItemIds);
-
   return (
     <div className="binder-picker">
       <label className="search-box">
         <Search size={17} />
-        <input value={itemSearch} onChange={(event) => onItemSearchChange(event.target.value)} placeholder="Search card lots" />
+        <input value={itemSearch} onChange={(event) => onItemSearchChange(event.target.value)} placeholder="Search owned cards" />
       </label>
       <div className="binder-picker-list">
         {items.map((item) => {
@@ -4441,19 +4965,37 @@ function BinderItemPicker({
             return null;
           }
 
+          const selectedCount = Math.min(item.quantity, selectedCopyCounts[item.id] ?? 0);
+
           return (
-            <label className="binder-picker-row" key={item.id}>
-              <input
-                checked={selectedIds.has(item.id)}
-                onChange={() => onToggleItem(item.id)}
-                type="checkbox"
-              />
+            <div className={selectedCount ? "binder-picker-row selected" : "binder-picker-row"} key={item.id}>
               <span className="item-image binder-picker-image">{renderItemImage(catalogueItem)}</span>
-              <span>
+              <span className="binder-picker-copy-details">
                 <strong>{catalogueItemTitle(catalogueItem)}</strong>
                 <small>{catalogueItemSetLabel(catalogueItem)} | {item.variant} | {item.grade}</small>
               </span>
-            </label>
+              <div className="binder-copy-stepper" aria-label={`Copies of ${catalogueItemTitle(catalogueItem)} in binder`}>
+                <button
+                  aria-label={`Remove one copy of ${catalogueItemTitle(catalogueItem)}`}
+                  className="icon-button"
+                  disabled={selectedCount === 0}
+                  onClick={() => onSetItemCopyCount(item.id, selectedCount - 1)}
+                  type="button"
+                >
+                  <Minus size={15} />
+                </button>
+                <output aria-live="polite">{selectedCount} / {item.quantity}</output>
+                <button
+                  aria-label={`Add one copy of ${catalogueItemTitle(catalogueItem)}`}
+                  className="icon-button"
+                  disabled={selectedCount >= item.quantity}
+                  onClick={() => onSetItemCopyCount(item.id, selectedCount + 1)}
+                  type="button"
+                >
+                  <Plus size={15} />
+                </button>
+              </div>
+            </div>
           );
         })}
       </div>
@@ -4473,6 +5015,7 @@ function BinderFocusModal({
   onOpenItem: () => void;
 }) {
   const value = getOwnedValue(item, catalogueItem);
+  const dialogRef = useDialogFocus<HTMLElement>(true);
 
   useEffect(() => {
     function closeOnEscape(event: KeyboardEvent) {
@@ -4487,7 +5030,15 @@ function BinderFocusModal({
 
   return (
     <div className="card-zoom-backdrop binder-focus-backdrop" onClick={onClose} role="presentation">
-      <article className="binder-focus-card" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label={`${catalogueItemTitle(catalogueItem)} binder card`}>
+      <article
+        aria-label={`${catalogueItemTitle(catalogueItem)} binder card`}
+        aria-modal="true"
+        className="binder-focus-card"
+        onClick={(event) => event.stopPropagation()}
+        ref={dialogRef}
+        role="dialog"
+        tabIndex={-1}
+      >
         <button className="icon-button card-zoom-close" type="button" onClick={onClose} aria-label="Close binder card">
           <X size={18} />
         </button>
@@ -4520,6 +5071,7 @@ function AddScreen({
   appState,
   cacheCatalogueItems,
   catalogueById,
+  dataSource,
   sets,
   storageLocations,
   addSearch,
@@ -4535,30 +5087,64 @@ function AddScreen({
   const [catalogueLanguageFilter, setCatalogueLanguageFilter] = useState("all");
   const [catalogueSort, setCatalogueSort] = useState<CatalogueSort>("value-desc");
   const [catalogueSearchResults, setCatalogueSearchResults] = useState<CatalogueItem[]>([]);
-  const [catalogueSearchInfo, setCatalogueSearchInfo] = useState({ hasMore: false, resultCount: 0 });
+  const [catalogueSearchInfo, setCatalogueSearchInfo] = useState({
+    hasMore: false,
+    nextOffset: null as number | null,
+    returned: 0,
+    windowExhausted: false,
+  });
   const [catalogueSearchError, setCatalogueSearchError] = useState("");
+  const [catalogueSearchNotice, setCatalogueSearchNotice] = useState("");
+  const [catalogueLoadMoreError, setCatalogueLoadMoreError] = useState("");
   const [isSearchingCatalogue, setIsSearchingCatalogue] = useState(false);
+  const [isLoadingMoreCatalogue, setIsLoadingMoreCatalogue] = useState(false);
   const [addCondition, setAddCondition] = useState("Near mint");
   const [addQuantity, setAddQuantity] = useState(1);
   const [addVariant, setAddVariant] = useState<string | undefined>(undefined);
   const [addLanguage, setAddLanguage] = useState("English");
+  const [isSaving, setIsSaving] = useState(false);
+  const [isSavingWishlist, setIsSavingWishlist] = useState(false);
+  const [quickAddId, setQuickAddId] = useState<string | null>(null);
   const [zoomedCatalogueItemId, setZoomedCatalogueItemId] = useState<string | null>(null);
+  const catalogueLoadMoreAbortRef = useRef<AbortController | null>(null);
+  const catalogueQuerySignature = [
+    addSearch.trim(),
+    appState.addType,
+    catalogueLanguageFilter,
+    catalogueRarityFilter,
+    catalogueSetFilter,
+    catalogueSort,
+  ].join("\u0000");
+  const catalogueQuerySignatureRef = useRef(catalogueQuerySignature);
+  const catalogueSelectionQueryRef = useRef(catalogueQuerySignature);
+  catalogueQuerySignatureRef.current = catalogueQuerySignature;
 
   useEffect(() => {
+    if (catalogueSelectionQueryRef.current !== catalogueQuerySignature) {
+      setAppState((current) => ({ ...current, selectedCatalogueId: "" }));
+      catalogueSelectionQueryRef.current = catalogueQuerySignature;
+    }
+    catalogueLoadMoreAbortRef.current?.abort();
+    catalogueLoadMoreAbortRef.current = null;
+    setCatalogueSearchResults([]);
+    setCatalogueSearchInfo({ hasMore: false, nextOffset: null, returned: 0, windowExhausted: false });
+    setCatalogueSearchError("");
+    setCatalogueSearchNotice("");
+    setCatalogueLoadMoreError("");
+    setIsSearchingCatalogue(true);
+    setIsLoadingMoreCatalogue(false);
     const controller = new AbortController();
     const timeout = window.setTimeout(async () => {
-      setIsSearchingCatalogue(true);
-      setCatalogueSearchError("");
-
       try {
         const params = new URLSearchParams({
           limit: "80",
           language: catalogueLanguageFilter,
+          offset: "0",
           q: addSearch.trim(),
           rarity: catalogueRarityFilter,
           set: catalogueSetFilter,
           sort: catalogueSort,
-          type: "all",
+          type: appState.addType,
         });
         const response = await fetch(`/api/catalogue/search?${params.toString()}`, {
           cache: "no-store",
@@ -4571,8 +5157,18 @@ function AddScreen({
 
         const data = (await response.json()) as AppCatalogueSearchData;
 
+        if (dataSource === "database" && data.source !== "database") {
+          throw new Error(data.notice ?? "The live catalogue could not be reached. Sample search results were hidden.");
+        }
+
         setCatalogueSearchResults(data.catalogue);
-        setCatalogueSearchInfo({ hasMore: data.hasMore, resultCount: data.resultCount });
+        setCatalogueSearchInfo({
+          hasMore: data.hasMore,
+          nextOffset: data.nextOffset,
+          returned: data.returned,
+          windowExhausted: data.windowExhausted,
+        });
+        setCatalogueSearchNotice(data.notice ?? "");
         cacheCatalogueItems(data.catalogue);
       } catch (error) {
         if (controller.signal.aborted) {
@@ -4580,9 +5176,9 @@ function AddScreen({
         }
 
         console.warn("Catalogue search failed.", error);
-        setCatalogueSearchError("Catalogue search is not available right now.");
+        setCatalogueSearchError(error instanceof Error ? error.message : "Catalogue search is not available right now.");
         setCatalogueSearchResults([]);
-        setCatalogueSearchInfo({ hasMore: false, resultCount: 0 });
+        setCatalogueSearchInfo({ hasMore: false, nextOffset: null, returned: 0, windowExhausted: false });
       } finally {
         if (!controller.signal.aborted) {
           setIsSearchingCatalogue(false);
@@ -4593,22 +5189,29 @@ function AddScreen({
     return () => {
       window.clearTimeout(timeout);
       controller.abort();
+      catalogueLoadMoreAbortRef.current?.abort();
+      catalogueLoadMoreAbortRef.current = null;
     };
   }, [
     addSearch,
+    appState.addType,
     cacheCatalogueItems,
     catalogueLanguageFilter,
     catalogueRarityFilter,
     catalogueSetFilter,
     catalogueSort,
+    catalogueQuerySignature,
+    dataSource,
+    setAppState,
   ]);
 
   const results = catalogueSearchResults;
   const normalizedSearch = normalizeSearchText(addSearch);
   const setOptionGroups = groupedSetOptions(sets.map((item) => item.name), sets);
-  const rarityOptions = uniqueValues(results.map((item) => item.rarity)).sort((left, right) =>
-    left.localeCompare(right),
-  );
+  const rarityOptions = uniqueValues([
+    ...results.map((item) => item.rarity),
+    catalogueRarityFilter === "all" ? "" : catalogueRarityFilter,
+  ]).sort((left, right) => left.localeCompare(right));
   const hasNarrowedResults =
     Boolean(normalizedSearch) ||
     catalogueLanguageFilter !== "all" ||
@@ -4647,19 +5250,109 @@ function AddScreen({
     setAddLanguage(selected?.languageLabel ?? "English");
   }, [selected?.id, selected?.languageLabel, selected?.type]);
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!selected) {
+    if (!selected || isSaving) {
       return;
     }
 
-    void addToCollection(selected.id, new FormData(event.currentTarget));
+    setIsSaving(true);
+    await addToCollection(selected.id, new FormData(event.currentTarget));
+    setIsSaving(false);
+  }
+
+  async function handleQuickAdd(itemId: string) {
+    if (quickAddId) {
+      return;
+    }
+
+    setQuickAddId(itemId);
+    await addToCollection(itemId);
+    setQuickAddId(null);
+  }
+
+  async function handleAddToWishlist(itemId: string) {
+    if (isSavingWishlist) {
+      return;
+    }
+
+    setIsSavingWishlist(true);
+    await addToWishlist(itemId);
+    setIsSavingWishlist(false);
+  }
+
+  async function loadMoreCatalogue() {
+    const offset = catalogueSearchInfo.nextOffset;
+    if (
+      offset === null ||
+      !catalogueSearchInfo.hasMore ||
+      catalogueSearchInfo.windowExhausted ||
+      isLoadingMoreCatalogue ||
+      isSearchingCatalogue
+    ) {
+      return;
+    }
+
+    catalogueLoadMoreAbortRef.current?.abort();
+    const controller = new AbortController();
+    const requestSignature = catalogueQuerySignature;
+    catalogueLoadMoreAbortRef.current = controller;
+    setIsLoadingMoreCatalogue(true);
+    setCatalogueLoadMoreError("");
+
+    try {
+      const params = new URLSearchParams({
+        limit: "80",
+        language: catalogueLanguageFilter,
+        offset: String(offset),
+        q: addSearch.trim(),
+        rarity: catalogueRarityFilter,
+        set: catalogueSetFilter,
+        sort: catalogueSort,
+        type: appState.addType,
+      });
+      const response = await fetch(`/api/catalogue/search?${params.toString()}`, {
+        cache: "no-store",
+        signal: controller.signal,
+      });
+      const body = (await response.json().catch(() => ({}))) as Partial<AppCatalogueSearchData> & { error?: string };
+      if (!response.ok || !Array.isArray(body.catalogue)) {
+        throw new Error(body.error ?? `Catalogue page failed with ${response.status}.`);
+      }
+      if (dataSource === "database" && body.source !== "database") {
+        throw new Error(body.notice ?? "The live catalogue could not be reached. Sample search results were hidden.");
+      }
+      if (catalogueQuerySignatureRef.current !== requestSignature) return;
+
+      const nextItems = body.catalogue;
+      setCatalogueSearchResults((current) => {
+        const existingIds = new Set(current.map((item) => item.id));
+        return [...current, ...nextItems.filter((item) => !existingIds.has(item.id))];
+      });
+      setCatalogueSearchInfo({
+        hasMore: body.hasMore === true,
+        nextOffset: typeof body.nextOffset === "number" ? body.nextOffset : null,
+        returned: typeof body.returned === "number" ? body.returned : nextItems.length,
+        windowExhausted: body.windowExhausted === true,
+      });
+      setCatalogueSearchNotice(body.notice ?? "");
+      cacheCatalogueItems(nextItems);
+    } catch (error) {
+      if (controller.signal.aborted || catalogueQuerySignatureRef.current !== requestSignature) return;
+      console.warn("Unable to load more catalogue results.", error);
+      setCatalogueLoadMoreError(error instanceof Error ? error.message : "More catalogue results could not be loaded.");
+    } finally {
+      if (catalogueLoadMoreAbortRef.current === controller) {
+        catalogueLoadMoreAbortRef.current = null;
+        setIsLoadingMoreCatalogue(false);
+      }
+    }
   }
 
   return (
     <section className="page">
       <PageHeader
-        title="Add item"
+        title={appState.addType === "sealed" ? "Add sealed product" : "Add card"}
         action={
           <button className="button" onClick={() => navigate("collection")}>
             <X size={17} />
@@ -4668,12 +5361,43 @@ function AddScreen({
         }
       />
 
+      <div className="segmented add-type-tabs" aria-label="Item type">
+        <button
+          aria-pressed={appState.addType === "card"}
+          className={appState.addType === "card" ? "active" : ""}
+          onClick={() => {
+            setAppState((current) => ({ ...current, addType: "card", selectedCatalogueId: "" }));
+            setCatalogueRarityFilter("all");
+          }}
+          type="button"
+        >
+          <Layers3 size={16} />
+          Cards
+        </button>
+        <button
+          aria-pressed={appState.addType === "sealed"}
+          className={appState.addType === "sealed" ? "active" : ""}
+          onClick={() => {
+            setAppState((current) => ({ ...current, addType: "sealed", selectedCatalogueId: "" }));
+            setCatalogueRarityFilter("all");
+          }}
+          type="button"
+        >
+          <PackagePlus size={16} />
+          Sealed
+        </button>
+      </div>
+
       <div className="screen-split">
         <section className="section-block">
           <div className="add-search-sticky">
             <label className="search-box">
               <Search size={18} />
-              <input value={addSearch} onChange={(event) => setAddSearch(event.target.value)} placeholder="Search cards, sealed products, sets, or numbers" />
+              <input
+                value={addSearch}
+                onChange={(event) => setAddSearch(event.target.value)}
+                placeholder={appState.addType === "sealed" ? "Search sealed products or sets" : "Search cards, sets, or collector numbers"}
+              />
             </label>
 
             <div className="catalogue-controls">
@@ -4727,20 +5451,25 @@ function AddScreen({
             </div>
           </div>
 
-          <ManualSealedProductPanel sets={sets} onCreate={createManualSealedProduct} />
+          {appState.addType === "sealed" ? (
+            <ManualSealedProductPanel sets={sets} onCreate={createManualSealedProduct} />
+          ) : null}
 
+          {catalogueSearchNotice ? <p className="catalogue-search-notice" role="status">{catalogueSearchNotice}</p> : null}
           <p className="result-meta">
             {isSearchingCatalogue && !visibleResults.length
               ? "Searching catalogue"
-              : `Showing ${visibleResults.length} of ${catalogueSearchInfo.resultCount} catalogue items`}
-            {catalogueSearchInfo.hasMore ? " | Search or filter to narrow results" : ""}
+              : `${visibleResults.length} catalogue item${visibleResults.length === 1 ? "" : "s"} loaded`}
+            {catalogueSearchInfo.hasMore && catalogueSearchInfo.nextOffset !== null ? " · More available" : ""}
           </p>
-          <div className="item-list">
+          <div aria-busy={isSearchingCatalogue} className="item-list">
             {visibleResults.length ? visibleResults.map((item) => (
               <CatalogueResult
                 key={item.id}
                 item={item}
-                onQuickAdd={() => void addToCollection(item.id)}
+                quickAddBusy={quickAddId === item.id}
+                quickAddDisabled={Boolean(quickAddId)}
+                onQuickAdd={() => void handleQuickAdd(item.id)}
                 selected={item.id === selected?.id}
                 onClick={() => setAppState((current) => ({ ...current, addType: item.type, selectedCatalogueId: item.id }))}
               />
@@ -4756,6 +5485,36 @@ function AddScreen({
               />
             )}
           </div>
+          {visibleResults.length ? (
+            <div className="catalogue-pagination" aria-live="polite">
+              {catalogueLoadMoreError ? (
+                <div className="inline-error-state" role="alert">
+                  <span>{catalogueLoadMoreError}</span>
+                  <button className="button small" disabled={isLoadingMoreCatalogue} onClick={() => void loadMoreCatalogue()} type="button">
+                    <RefreshCw size={15} />
+                    Retry
+                  </button>
+                </div>
+              ) : null}
+              {catalogueSearchInfo.windowExhausted ? (
+                <p className="catalogue-window-note">
+                  The safe 1,000-result browsing window has been reached. Narrow the search, set, rarity, or language to continue.
+                </p>
+              ) : !catalogueLoadMoreError && catalogueSearchInfo.hasMore && catalogueSearchInfo.nextOffset !== null ? (
+                <button
+                  className="button catalogue-load-more"
+                  disabled={isLoadingMoreCatalogue || isSearchingCatalogue}
+                  onClick={() => void loadMoreCatalogue()}
+                  type="button"
+                >
+                  <Plus size={17} />
+                  {isLoadingMoreCatalogue ? "Loading more" : "Load more catalogue items"}
+                </button>
+              ) : !catalogueLoadMoreError && visibleResults.length ? (
+                <span className="catalogue-end-note">All matching results in this search window are loaded.</span>
+              ) : null}
+            </div>
+          ) : null}
         </section>
 
         <section className="tool-panel add-details-panel">
@@ -4814,10 +5573,13 @@ function AddScreen({
                     onChange={(event) => setAddQuantity(Math.max(1, Number(event.target.value) || 1))}
                   />
                 </Field>
-                <Field label="Paid">
+                <Field label="Paid (lot total)">
                   <input name="paid" inputMode="decimal" placeholder="£0.00" />
                 </Field>
-                <Field label="Manual value">
+                <Field label="Purchase date">
+                  <input name="purchaseDate" type="date" defaultValue={dateStamp()} />
+                </Field>
+                <Field label="Manual lot value">
                   <input name="overrideValue" inputMode="decimal" placeholder="£0.00" />
                 </Field>
                 <Field label="Location">
@@ -4838,6 +5600,9 @@ function AddScreen({
                   </Field>
                 )}
               </div>
+              <p className="form-note">
+                Paid and manual value are totals for this lot, including all {addQuantity} cop{addQuantity === 1 ? "y" : "ies"}.
+              </p>
               {usesDifferentLotLanguage ? (
                 <p className="form-note">
                   This lot language differs from the selected {selectedCatalogueLanguageLabel} catalogue printing. Use a
@@ -4857,13 +5622,18 @@ function AddScreen({
                 <textarea name="notes" placeholder="Optional" />
               </Field>
               <div className="actions">
-                <button className="button primary" type="submit">
+                <button className="button primary" type="submit" disabled={isSaving || isSavingWishlist}>
                   <Check size={17} />
-                  Save to collection
+                  {isSaving ? "Saving" : "Save to collection"}
                 </button>
-                <button className="button" type="button" onClick={() => void addToWishlist(selected.id)}>
+                <button
+                  className="button"
+                  type="button"
+                  disabled={isSaving || isSavingWishlist}
+                  onClick={() => void handleAddToWishlist(selected.id)}
+                >
                   <Heart size={17} />
-                  Add to wishlist
+                  {isSavingWishlist ? "Saving" : "Add to wishlist"}
                 </button>
               </div>
             </form>
@@ -4889,6 +5659,10 @@ function ManualSealedProductPanel({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (isSaving) {
+      return;
+    }
+
     setIsSaving(true);
     const created = await onCreate(new FormData(event.currentTarget));
     setIsSaving(false);
@@ -4966,6 +5740,7 @@ function ItemDetailScreen({
   const [isEditing, setIsEditing] = useState(false);
   const [isSelling, setIsSelling] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isDuplicating, setIsDuplicating] = useState(false);
   const [isRemoving, setIsRemoving] = useState(false);
   const [isRecordingSale, setIsRecordingSale] = useState(false);
   const owned = collection.find((item) => item.id === appState.selectedItemId) ?? collection[0];
@@ -4990,6 +5765,10 @@ function ItemDetailScreen({
 
   async function handleUpdate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (isSaving) {
+      return;
+    }
+
     setIsSaving(true);
 
     const saved = await updateCollectionItem(owned.id, new FormData(event.currentTarget));
@@ -5001,6 +5780,10 @@ function ItemDetailScreen({
   }
 
   async function handleRemove() {
+    if (isRemoving) {
+      return;
+    }
+
     if (!window.confirm(`Remove ${itemName} from your collection?`)) {
       return;
     }
@@ -5012,6 +5795,10 @@ function ItemDetailScreen({
 
   async function handleSale(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (isRecordingSale) {
+      return;
+    }
+
     setIsRecordingSale(true);
     const recorded = await recordCollectionSale(owned.id, new FormData(event.currentTarget));
     setIsRecordingSale(false);
@@ -5019,6 +5806,16 @@ function ItemDetailScreen({
     if (recorded) {
       setIsSelling(false);
     }
+  }
+
+  async function handleDuplicate() {
+    if (isDuplicating) {
+      return;
+    }
+
+    setIsDuplicating(true);
+    await duplicateItem(owned.id);
+    setIsDuplicating(false);
   }
 
   return (
@@ -5096,9 +5893,9 @@ function ItemDetailScreen({
                 {isSelling ? <X size={17} /> : <History size={17} />}
                 {isSelling ? "Cancel sale" : "Record sale"}
               </button>
-              <button className="button" onClick={() => void duplicateItem(owned.id)}>
+              <button className="button" onClick={() => void handleDuplicate()} disabled={isDuplicating}>
                 <Plus size={17} />
-                Duplicate lot
+                {isDuplicating ? "Duplicating" : "Duplicate lot"}
               </button>
               <button className="button danger" onClick={handleRemove} disabled={isRemoving}>
                 <Trash2 size={17} />
@@ -5139,7 +5936,7 @@ function ItemDetailScreen({
                   <Field label="Quantity">
                     <input name="quantity" type="number" min={1} defaultValue={owned.quantity} />
                   </Field>
-                  <Field label="Paid">
+                  <Field label="Paid (lot total)">
                     <input
                       name="paid"
                       inputMode="decimal"
@@ -5147,7 +5944,14 @@ function ItemDetailScreen({
                       placeholder="£0.00"
                     />
                   </Field>
-                  <Field label="Manual value">
+                  <Field label="Purchase date">
+                    <input
+                      name="purchaseDate"
+                      type="date"
+                      defaultValue={owned.purchaseDate ?? ""}
+                    />
+                  </Field>
+                  <Field label="Manual lot value">
                     <input
                       name="overrideValue"
                       inputMode="decimal"
@@ -5200,6 +6004,9 @@ function ItemDetailScreen({
                     </Field>
                   )}
                 </div>
+                <p className="form-note">
+                  Paid and manual value are totals for the complete lot, not per-copy amounts.
+                </p>
                 <Field label="Valuation note">
                   <textarea
                     name="valuationNote"
@@ -5231,6 +6038,7 @@ function ItemDetailScreen({
                 ["Language", owned.language],
                 ["Variant", owned.variant],
                 ["Grade", owned.grade],
+                ["Purchased", owned.purchaseDate ? formatEventDate(owned.purchaseDate) : "Not recorded"],
                 ["Location", owned.location],
               ]}
             />
@@ -5270,12 +6078,24 @@ function ItemDetailScreen({
             <section className="tool-panel">
               <div className="panel-title-row">
                 <h2>Record sale</h2>
-                <span className="tag amber">Removes lot</span>
+                <span className="tag amber">{owned.quantity > 1 ? "Reduces or removes lot" : "Removes lot"}</span>
               </div>
-              <p className="muted">Record the sale amount and date. The item will move out of the active collection.</p>
+              <p className="muted">
+                Record how many copies sold and the total proceeds. Any remaining copies stay in the active lot.
+              </p>
               <form className="form-stack" onSubmit={handleSale}>
                 <div className="field-grid">
-                  <Field label="Sale amount">
+                  <Field label="Quantity sold">
+                    <input
+                      name="quantity"
+                      type="number"
+                      min={1}
+                      max={owned.quantity}
+                      step={1}
+                      defaultValue={owned.quantity}
+                    />
+                  </Field>
+                  <Field label="Sale amount (total)">
                     <input
                       name="amount"
                       inputMode="decimal"
@@ -5321,7 +6141,11 @@ function ItemDetailScreen({
 }
 
 function SetsScreen({
+  activeSetGoal,
+  activeSetGoalNotice,
   appState,
+  isLoadingSetGoal,
+  reloadActiveSetGoal,
   sets,
   setSearch,
   setSetSearch,
@@ -5337,6 +6161,7 @@ function SetsScreen({
     { codes: ["ko"], label: "Korean", value: "ko" },
   ];
   const activeLanguages = languageOptions.find((option) => option.value === languageFilter)?.codes ?? ["en"];
+  const activeGoalSet = activeSetGoal ? sets.find((set) => set.id === activeSetGoal.cardSetId) : undefined;
   const filteredSets = sets
     .filter((set) => activeLanguages.includes(set.language ?? "en"))
     .filter((set) => matchesSetSearch(set, normalizedSetSearch))
@@ -5345,6 +6170,17 @@ function SetsScreen({
   return (
     <section className="page">
       <PageHeader title="Sets" />
+      <SetGoalOverview
+        goal={activeSetGoal}
+        goalSet={activeGoalSet}
+        isLoading={isLoadingSetGoal}
+        notice={activeSetGoalNotice}
+        onOpenGoal={() => {
+          if (!activeSetGoal) return;
+          setAppState((current) => ({ ...current, screen: "setDetail", selectedSetId: activeSetGoal.cardSetId }));
+        }}
+        onRetry={() => void reloadActiveSetGoal()}
+      />
       <div className="segmented set-language-tabs" aria-label="Set language">
         {languageOptions.map((option) => {
           const count = sets.filter((set) => option.codes.includes(set.language ?? "en")).length;
@@ -5387,6 +6223,7 @@ function SetsScreen({
         <div className="set-list">
           {filteredSets.map((set) => (
             <SetProgressCard
+              isActiveGoal={activeSetGoal?.cardSetId === set.id}
               key={set.id}
               set={set}
               onClick={() => setAppState({ ...appState, selectedSetId: set.id, screen: "setDetail" })}
@@ -5400,12 +6237,85 @@ function SetsScreen({
   );
 }
 
+function SetGoalOverview({
+  goal,
+  goalSet,
+  isLoading,
+  notice,
+  onOpenGoal,
+  onRetry,
+}: {
+  goal: ActiveSetGoal | null;
+  goalSet?: SetProgress;
+  isLoading: boolean;
+  notice: string;
+  onOpenGoal: () => void;
+  onRetry: () => void;
+}) {
+  if (notice) {
+    return (
+      <div className="data-error-state" role="alert">
+        <p>{notice}</p>
+        <button className="button small" type="button" onClick={onRetry}>
+          <RefreshCw size={15} />
+          Retry goal
+        </button>
+      </div>
+    );
+  }
+
+  if (isLoading) {
+    return <section className="tool-panel set-goal-overview" aria-busy="true"><p className="muted">Loading your active set goal…</p></section>;
+  }
+
+  if (!goal) {
+    return (
+      <section className="tool-panel set-goal-overview empty">
+        <div>
+          <p className="eyebrow">Set Builder</p>
+          <h2>Turn a set into a focused collecting goal.</h2>
+          <p className="muted">Open any set to choose a completion target, set wishlist priority, and plan the missing cards.</p>
+        </div>
+        <Target size={24} aria-hidden="true" />
+      </section>
+    );
+  }
+
+  const completion = goalSet ? completionPercent(goalSet.owned, goalSet.total) : 0;
+  const title = goalSet ? setTitle(goalSet) : goal.set.name;
+
+  return (
+    <section className="tool-panel set-goal-overview active">
+      <div className="set-goal-overview-copy">
+        <p className="eyebrow">Active Set Builder goal</p>
+        <h2>{title}</h2>
+        <p className="muted">
+          {goalSet ? `${goalSet.owned} of ${goalSet.total} owned` : "Progress will appear when the catalogue is loaded"}
+          {` · ${goal.wishlistPriority} wishlist priority`}
+        </p>
+      </div>
+      <div className="set-goal-overview-progress">
+        <strong>{completion}%</strong>
+        <span>Target {goal.targetCompletionPercent}%</span>
+        <ProgressBar value={goal.targetCompletionPercent ? (completion / goal.targetCompletionPercent) * 100 : 0} />
+      </div>
+      <button className="button primary" type="button" onClick={onOpenGoal}>
+        Open goal
+        <ArrowRight size={17} />
+      </button>
+    </section>
+  );
+}
+
 function SetDetailScreen({
+  activeSetGoal,
+  activeSetGoalNotice,
   appState,
   catalogueItems,
   catalogueComplete,
   collection,
   isLoadingCatalogue,
+  isLoadingSetGoal,
   loadedCatalogueSetNames,
   loadSetCatalogueData,
   sets,
@@ -5413,6 +6323,11 @@ function SetDetailScreen({
   setAppState,
   addToWishlist,
   navigate,
+  refreshAppData,
+  reloadActiveSetGoal,
+  setActiveSetGoal,
+  setActiveSetGoalNotice,
+  showToast,
 }: ScreenContext) {
   const [cardSearch, setCardSearch] = useState("");
   const [rarityFilter, setRarityFilter] = useState("all");
@@ -5558,6 +6473,29 @@ function SetDetailScreen({
         </div>
       </section>
 
+      <SetBuilderPanel
+        activeGoal={activeSetGoal}
+        cards={setCards}
+        collection={collection}
+        currentSet={set}
+        isLoadingGoal={isLoadingSetGoal}
+        notice={activeSetGoalNotice}
+        onFocus={(filter) => {
+          setAppState((current) => ({ ...current, setFilter: filter }));
+          window.requestAnimationFrame(() => document.getElementById("set-card-results")?.scrollIntoView({
+            behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+            block: "start",
+          }));
+        }}
+        onGoalChange={setActiveSetGoal}
+        onGoalNoticeChange={setActiveSetGoalNotice}
+        onPreview={setPreviewItemId}
+        onRefreshData={refreshAppData}
+        onRetryGoal={reloadActiveSetGoal}
+        showToast={showToast}
+        wishlist={wishlist}
+      />
+
       <section className="catalogue-toolbar">
         <label className="search-box">
           <Search size={18} />
@@ -5588,7 +6526,7 @@ function SetDetailScreen({
         </div>
       </section>
 
-      <div className="set-card-grid">
+      <div className="set-card-grid" id="set-card-results">
         {visibleCards.length ? visibleCards.map((item) => {
           const owned = collection.find((entry) => entry.catalogueId === item.id);
           const wanted = wishlist.some((entry) => entry.catalogueId === item.id);
@@ -5729,6 +6667,426 @@ function SetDetailScreen({
   );
 }
 
+type SetBuilderChase = {
+  item: CatalogueItem;
+  marketValueMinor: number;
+  reason: string;
+  targetPriceMinor?: number;
+  wishlistPriority?: WishlistItem["priority"];
+};
+
+function SetBuilderPanel({
+  activeGoal,
+  cards,
+  collection,
+  currentSet,
+  isLoadingGoal,
+  notice,
+  onFocus,
+  onGoalChange,
+  onGoalNoticeChange,
+  onPreview,
+  onRefreshData,
+  onRetryGoal,
+  showToast,
+  wishlist,
+}: {
+  activeGoal: ActiveSetGoal | null;
+  cards: CatalogueItem[];
+  collection: CollectionItem[];
+  currentSet: SetProgress;
+  isLoadingGoal: boolean;
+  notice: string;
+  onFocus: (filter: AppState["setFilter"]) => void;
+  onGoalChange: (goal: ActiveSetGoal | null) => void;
+  onGoalNoticeChange: (notice: string) => void;
+  onPreview: (itemId: string) => void;
+  onRefreshData: (options?: { quiet?: boolean }) => Promise<boolean>;
+  onRetryGoal: (options?: { quiet?: boolean }) => Promise<boolean>;
+  showToast: (message: string, tone?: ToastTone) => void;
+  wishlist: WishlistItem[];
+}) {
+  const [goalTarget, setGoalTarget] = useState(100);
+  const [goalPriority, setGoalPriority] = useState<WishlistItem["priority"]>("High");
+  const [isSavingGoal, setIsSavingGoal] = useState(false);
+  const [isClearingGoal, setIsClearingGoal] = useState(false);
+  const [isBulkPickerOpen, setIsBulkPickerOpen] = useState(false);
+  const [isBulkAdding, setIsBulkAdding] = useState(false);
+  const [selectedMissingIds, setSelectedMissingIds] = useState<string[]>([]);
+  const [builderError, setBuilderError] = useState("");
+  const [bulkResult, setBulkResult] = useState<SetGoalWishlistBulkResult | null>(null);
+  const ownedCatalogueIds = new Set(collection.map((item) => item.catalogueId));
+  const wishlistByCatalogueId = new Map(wishlist.map((item) => [item.catalogueId, item]));
+  const missingCards = cards.filter((item) => !ownedCatalogueIds.has(item.id));
+  const eligibleMissingCards = missingCards.filter((item) => !wishlistByCatalogueId.has(item.id));
+  const eligibleMissingIds = new Set(eligibleMissingCards.map((item) => item.id));
+  const selectedEligibleIds = selectedMissingIds.filter((itemId) => eligibleMissingIds.has(itemId)).slice(0, 500);
+  const rankedEligibleCards = sortSetBuilderCandidates(eligibleMissingCards, wishlistByCatalogueId);
+  const currentCompletion = completionPercent(currentSet.owned, currentSet.total);
+  const goalForCurrentSet = activeGoal?.cardSetId === currentSet.id ? activeGoal : null;
+  const targetOwnedCount = Math.min(currentSet.total, Math.ceil(currentSet.total * (goalTarget / 100)));
+  const cardsNeededForTarget = Math.max(0, targetOwnedCount - currentSet.owned);
+  const wantedMissingCount = missingCards.filter((item) => wishlistByCatalogueId.has(item.id)).length;
+  const chase = nextBestSetBuilderChase(missingCards, wishlistByCatalogueId);
+
+  useEffect(() => {
+    setGoalTarget(goalForCurrentSet?.targetCompletionPercent ?? 100);
+    setGoalPriority(goalForCurrentSet?.wishlistPriority ?? "High");
+    setSelectedMissingIds([]);
+    setBulkResult(null);
+    setBuilderError("");
+  }, [currentSet.id, goalForCurrentSet?.id, goalForCurrentSet?.targetCompletionPercent, goalForCurrentSet?.wishlistPriority]);
+
+  async function saveGoal(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (isSavingGoal || isClearingGoal) return;
+    setIsSavingGoal(true);
+    setBuilderError("");
+    try {
+      const response = await fetch("/api/set-goal", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          cardSetId: currentSet.id,
+          targetCompletionPercent: goalTarget,
+          wishlistPriority: goalPriority,
+        }),
+      });
+      const body = (await response.json().catch(() => ({}))) as SetGoalResponse & { error?: string };
+      if (!response.ok || !body.goal) throw new Error(body.error ?? `Set goal save failed with ${response.status}.`);
+      onGoalChange(body.goal);
+      onGoalNoticeChange("");
+      showToast(`${setTitle(currentSet)} is now your active Set Builder goal.`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "The set goal could not be saved.";
+      setBuilderError(message);
+      showToast(message, "error");
+    } finally {
+      setIsSavingGoal(false);
+    }
+  }
+
+  async function clearGoal() {
+    if (!goalForCurrentSet || isClearingGoal || isSavingGoal) return;
+    if (!window.confirm("Clear this active set goal? Existing wishlist entries will stay intact.")) return;
+    setIsClearingGoal(true);
+    setBuilderError("");
+    try {
+      const response = await fetch("/api/set-goal", { method: "DELETE" });
+      const body = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) throw new Error(body.error ?? `Set goal clear failed with ${response.status}.`);
+      onGoalChange(null);
+      showToast("Active set goal cleared. Your wishlist was not changed.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "The set goal could not be cleared.";
+      setBuilderError(message);
+      showToast(message, "error");
+    } finally {
+      setIsClearingGoal(false);
+    }
+  }
+
+  function toggleMissingSelection(itemId: string, selected: boolean) {
+    setBulkResult(null);
+    setSelectedMissingIds((current) => selected
+      ? uniqueValues([...current, itemId]).slice(0, 500)
+      : current.filter((id) => id !== itemId));
+  }
+
+  async function addSelectedMissingToWishlist() {
+    if (!goalForCurrentSet || !selectedEligibleIds.length || isBulkAdding) return;
+    setIsBulkAdding(true);
+    setBuilderError("");
+    setBulkResult(null);
+    try {
+      const response = await fetch("/api/set-goal/wishlist", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ cardPrintingIds: selectedEligibleIds }),
+      });
+      const body = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        result?: SetGoalWishlistBulkResult;
+      };
+      if (!response.ok || !body.result) throw new Error(body.error ?? `Bulk wishlist update failed with ${response.status}.`);
+      setBulkResult(body.result);
+      setSelectedMissingIds([]);
+      const refreshed = await onRefreshData({ quiet: true });
+      if (!refreshed) {
+        throw new Error("The wishlist was updated, but the latest app data could not be reloaded. Refresh the page to see every change.");
+      }
+      showToast(
+        body.result.added
+          ? `${body.result.added} missing card${body.result.added === 1 ? "" : "s"} added to the wishlist.`
+          : "Those cards were already owned or wishlisted; no duplicates were created.",
+        body.result.added ? "success" : "warning",
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Missing cards could not be added to the wishlist.";
+      setBuilderError(message);
+      showToast(message, "error");
+    } finally {
+      setIsBulkAdding(false);
+    }
+  }
+
+  return (
+    <section className="tool-panel set-builder-panel" aria-labelledby="set-builder-title">
+      <div className="panel-title-row set-builder-heading">
+        <div>
+          <p className="eyebrow">Set Builder</p>
+          <h2 id="set-builder-title">Plan the next cards, not just the finish line.</h2>
+          <p className="muted">One saved goal follows you across devices. Wishlist actions use the saved priority and skip owned or duplicate cards.</p>
+        </div>
+        <span className={goalForCurrentSet ? "tag green" : "tag blue"}>
+          {isLoadingGoal ? "Loading goal" : goalForCurrentSet ? "Active goal" : activeGoal ? "Another goal active" : "Not active"}
+        </span>
+      </div>
+
+      {notice ? (
+        <div className="data-error-state" role="alert">
+          <p>{notice}</p>
+          <button className="button small" type="button" onClick={() => void onRetryGoal()}>
+            <RefreshCw size={15} />
+            Retry goal
+          </button>
+        </div>
+      ) : null}
+
+      {activeGoal && !goalForCurrentSet ? (
+        <div className="set-builder-active-note">
+          <Info size={18} />
+          <span><strong>{activeGoal.set.name}</strong> is currently active. Saving below will switch the goal to this set.</span>
+        </div>
+      ) : null}
+
+      <div className="set-builder-grid">
+        <form className="set-builder-goal-form" onSubmit={saveGoal}>
+          <div className="panel-title-row">
+            <h3>Goal settings</h3>
+            <Target size={18} />
+          </div>
+          <div className="set-builder-form-fields">
+            <Field label="Completion target (%)">
+              <input
+                inputMode="numeric"
+                max={100}
+                min={1}
+                onChange={(event) => setGoalTarget(Math.max(1, Math.min(100, Number(event.target.value) || 1)))}
+                type="number"
+                value={goalTarget}
+              />
+            </Field>
+            <Field label="Wishlist priority">
+              <select value={goalPriority} onChange={(event) => setGoalPriority(event.target.value as WishlistItem["priority"])}>
+                {(["Low", "Medium", "High", "Grail"] as const).map((priority) => <option key={priority}>{priority}</option>)}
+              </select>
+            </Field>
+          </div>
+          <div className="set-builder-progress-copy">
+            <div>
+              <strong>{currentCompletion}% now</strong>
+              <span>{goalTarget}% target · {cardsNeededForTarget ? `${cardsNeededForTarget} more card${cardsNeededForTarget === 1 ? "" : "s"}` : "target reached"}</span>
+            </div>
+            <ProgressBar value={goalTarget ? (currentCompletion / goalTarget) * 100 : 0} />
+          </div>
+          <div className="actions">
+            <button className="button primary" disabled={isSavingGoal || isClearingGoal || isLoadingGoal} type="submit">
+              <Save size={17} />
+              {isSavingGoal ? "Saving goal" : goalForCurrentSet ? "Save goal" : activeGoal ? "Switch active goal" : "Start this goal"}
+            </button>
+            {goalForCurrentSet ? (
+              <button className="button danger" disabled={isClearingGoal || isSavingGoal} onClick={() => void clearGoal()} type="button">
+                <X size={17} />
+                {isClearingGoal ? "Clearing" : "Clear goal"}
+              </button>
+            ) : null}
+          </div>
+        </form>
+
+        <article className="set-builder-chase-card">
+          <div className="panel-title-row">
+            <h3>Next-best chase</h3>
+            <Sparkles size={18} />
+          </div>
+          {chase ? (
+            <>
+              <div className="set-builder-chase-main">
+                <div className="item-image set-builder-chase-image">{renderItemImage(chase.item)}</div>
+                <div>
+                  <strong>{catalogueItemTitle(chase.item)}</strong>
+                  <span>No. {chase.item.number} · {chase.item.rarity}</span>
+                  <b>{formatMoney(chase.marketValueMinor)}</b>
+                </div>
+              </div>
+              <p>{chase.reason}</p>
+              <div className="tag-row">
+                <span className={valuationTagClass(chase.item)}>{chase.item.confidence} confidence</span>
+                {chase.item.priceSource ? <span className="tag">{priceSourceLabel(chase.item.priceSource)}</span> : null}
+                {chase.item.priceObservedAt ? <span className="tag">Observed {formatEventDate(chase.item.priceObservedAt)}</span> : null}
+                {chase.wishlistPriority ? <span className="tag">{chase.wishlistPriority} priority</span> : null}
+                {chase.targetPriceMinor !== undefined ? <span className="tag blue">Target {formatMoney(chase.targetPriceMinor)}</span> : null}
+              </div>
+              <button className="button" type="button" onClick={() => onPreview(chase.item.id)}>
+                View card
+                <ArrowRight size={16} />
+              </button>
+            </>
+          ) : (
+            <p className="muted">A price-aware recommendation will appear when at least one missing card has a usable market estimate.</p>
+          )}
+        </article>
+      </div>
+
+      <div className="set-builder-focus-row">
+        <button className="button" type="button" onClick={() => onFocus("missing")}>
+          <Search size={16} />
+          Focus {missingCards.length} missing
+        </button>
+        <button className="button" type="button" onClick={() => onFocus("want")}>
+          <Heart size={16} />
+          Focus {wantedMissingCount} wanted
+        </button>
+        <span>{eligibleMissingCards.length} missing card{eligibleMissingCards.length === 1 ? " is" : "s are"} not yet on the wishlist.</span>
+      </div>
+
+      <div className="set-builder-bulk">
+        <div className="panel-title-row">
+          <div>
+            <h3>Bulk wishlist</h3>
+            <p className="muted">Select exact missing printings. The server rechecks ownership, set membership, and duplicates before writing.</p>
+          </div>
+          <button
+            aria-expanded={isBulkPickerOpen}
+            className="button small"
+            disabled={!eligibleMissingCards.length}
+            onClick={() => setIsBulkPickerOpen((open) => !open)}
+            type="button"
+          >
+            {isBulkPickerOpen ? "Hide cards" : "Choose cards"}
+          </button>
+        </div>
+
+        {isBulkPickerOpen && eligibleMissingCards.length ? (
+          <>
+            <div className="set-builder-selection-actions">
+              <button
+                className="button small"
+                disabled={!cardsNeededForTarget}
+                onClick={() => setSelectedMissingIds(rankedEligibleCards.slice(0, Math.min(cardsNeededForTarget, 500)).map((item) => item.id))}
+                type="button"
+              >
+                Select {Math.min(cardsNeededForTarget, eligibleMissingCards.length)} {cardsNeededForTarget > eligibleMissingCards.length ? "available toward target" : "to target"}
+              </button>
+              <button className="button small" onClick={() => setSelectedMissingIds(rankedEligibleCards.slice(0, 500).map((item) => item.id))} type="button">
+                Select all{eligibleMissingCards.length > 500 ? " (first 500)" : ""}
+              </button>
+              <button className="button small" disabled={!selectedEligibleIds.length} onClick={() => setSelectedMissingIds([])} type="button">
+                Clear
+              </button>
+              <strong>{selectedEligibleIds.length} selected</strong>
+            </div>
+            <div className="set-builder-checklist" role="group" aria-label={`Missing cards in ${setTitle(currentSet)}`}>
+              {rankedEligibleCards.map((item) => {
+                const value = catalogueMarketValueMinor(item);
+                return (
+                  <label className="set-builder-check-row" key={item.id}>
+                    <input
+                      checked={selectedEligibleIds.includes(item.id)}
+                      onChange={(event) => toggleMissingSelection(item.id, event.target.checked)}
+                      type="checkbox"
+                    />
+                    <span>
+                      <strong>{catalogueItemTitle(item)}</strong>
+                      <small>No. {item.number} · {item.rarity}</small>
+                    </span>
+                    <b>{formatValuation(value)}</b>
+                  </label>
+                );
+              })}
+            </div>
+          </>
+        ) : null}
+
+        {builderError ? <p className="auth-error" role="alert">{builderError}</p> : null}
+        {bulkResult ? (
+          <p className="set-builder-result" role="status">
+            Added {bulkResult.added}; already wanted {bulkResult.alreadyWishlisted}; owned skipped {bulkResult.ownedSkipped}; concurrent duplicates skipped {bulkResult.concurrentDuplicatesSkipped}.
+          </p>
+        ) : null}
+        <div className="set-builder-bulk-footer">
+          <span>{goalForCurrentSet ? `${goalForCurrentSet.wishlistPriority} saved priority will be applied.` : "Save this set as the active goal before bulk adding."}</span>
+          <button
+            className="button primary"
+            disabled={!goalForCurrentSet || !selectedEligibleIds.length || isBulkAdding}
+            onClick={() => void addSelectedMissingToWishlist()}
+            type="button"
+          >
+            <Heart size={17} />
+            {isBulkAdding ? "Adding safely" : `Add ${selectedEligibleIds.length || "selected"} to wishlist`}
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function sortSetBuilderCandidates(cards: CatalogueItem[], wishlistByCatalogueId: Map<string, WishlistItem>) {
+  return [...cards].sort((left, right) => {
+    const leftMarket = catalogueMarketValueMinor(left);
+    const rightMarket = catalogueMarketValueMinor(right);
+    const leftTarget = wishlistByCatalogueId.get(left.id)?.targetPriceMinor;
+    const rightTarget = wishlistByCatalogueId.get(right.id)?.targetPriceMinor;
+    const leftGroup = leftMarket !== null && leftTarget !== undefined && leftMarket <= leftTarget
+      ? 0
+      : leftMarket !== null && leftTarget !== undefined
+        ? 1
+        : leftMarket !== null
+          ? 2
+          : 3;
+    const rightGroup = rightMarket !== null && rightTarget !== undefined && rightMarket <= rightTarget
+      ? 0
+      : rightMarket !== null && rightTarget !== undefined
+        ? 1
+        : rightMarket !== null
+          ? 2
+          : 3;
+    if (leftGroup !== rightGroup) return leftGroup - rightGroup;
+    if (leftGroup === 0 && leftMarket !== null && rightMarket !== null && leftTarget !== undefined && rightTarget !== undefined) {
+      return (rightTarget - rightMarket) - (leftTarget - leftMarket);
+    }
+    if (leftGroup === 1 && leftMarket !== null && rightMarket !== null && leftTarget !== undefined && rightTarget !== undefined) {
+      return (leftMarket - leftTarget) - (rightMarket - rightTarget);
+    }
+    if (leftMarket !== null || rightMarket !== null) return (leftMarket ?? Number.POSITIVE_INFINITY) - (rightMarket ?? Number.POSITIVE_INFINITY);
+    return compareCatalogueNumbers(left.number, right.number);
+  });
+}
+
+function nextBestSetBuilderChase(
+  missingCards: CatalogueItem[],
+  wishlistByCatalogueId: Map<string, WishlistItem>,
+): SetBuilderChase | null {
+  const item = sortSetBuilderCandidates(missingCards, wishlistByCatalogueId)
+    .find((candidate) => catalogueMarketValueMinor(candidate) !== null);
+  if (!item) return null;
+  const marketValueMinor = catalogueMarketValueMinor(item) as number;
+  const wanted = wishlistByCatalogueId.get(item.id);
+  const targetPriceMinor = wanted?.targetPriceMinor;
+  const reason = targetPriceMinor !== undefined
+    ? marketValueMinor <= targetPriceMinor
+      ? `The current ${formatMoney(marketValueMinor)} estimate is at or below your saved ${formatMoney(targetPriceMinor)} wishlist target.`
+      : `This is the closest priced missing card to its saved target: ${formatMoney(marketValueMinor)} is ${formatMoney(marketValueMinor - targetPriceMinor)} above ${formatMoney(targetPriceMinor)}.`
+    : "This is the lowest current market estimate among missing cards with usable price data.";
+  return {
+    item,
+    marketValueMinor,
+    reason,
+    targetPriceMinor,
+    wishlistPriority: wanted?.priority,
+  };
+}
+
 function CataloguePreviewModal({
   item,
   owned,
@@ -5747,6 +7105,7 @@ function CataloguePreviewModal({
   onWant: () => void;
 }) {
   const [showDetails, setShowDetails] = useState(false);
+  const dialogRef = useDialogFocus<HTMLElement>(true);
   const marketValue = catalogueMarketValueMinor(item);
   const variants = item.variantOptions ?? [];
   const visibleVariants = variants.slice(0, 6);
@@ -5770,7 +7129,9 @@ function CataloguePreviewModal({
         aria-modal="true"
         className="catalogue-preview-modal"
         onClick={(event) => event.stopPropagation()}
+        ref={dialogRef}
         role="dialog"
+        tabIndex={-1}
       >
         <button className="icon-button catalogue-preview-close" type="button" onClick={onClose} aria-label="Close preview">
           <X size={18} />
@@ -5864,7 +7225,6 @@ function WishlistScreen({
   collection,
   wishlist,
   wishlistTotal,
-  addToCollection,
   navigate,
   removeWishlistItem,
   setAppState,
@@ -5960,6 +7320,10 @@ function WishlistScreen({
 
   async function handleUpdate(event: FormEvent<HTMLFormElement>, itemId: string) {
     event.preventDefault();
+    if (savingId) {
+      return;
+    }
+
     setSavingId(itemId);
     const saved = await updateWishlistItem(itemId, new FormData(event.currentTarget));
     setSavingId("");
@@ -6026,12 +7390,19 @@ function WishlistScreen({
         <button
           className={isCard ? "button primary" : "icon-button primary"}
           type="button"
-          onClick={() => void addToCollection(row.item.catalogueId)}
-          aria-label="Move to collection"
-          title="Move to collection"
+          onClick={() =>
+            setAppState((current) => ({
+              ...current,
+              addType: row.catalogueItem.type,
+              screen: "add",
+              selectedCatalogueId: row.item.catalogueId,
+            }))
+          }
+          aria-label="Add owned-copy details"
+          title="Add owned-copy details"
         >
           <Check size={17} />
-          {isCard ? "Move" : <span className="sr-only">Move to collection</span>}
+          {isCard ? "Add owned" : <span className="sr-only">Add owned-copy details</span>}
         </button>
         <button
           className={isCard ? "button wishlist-icon-action" : "icon-button"}
@@ -6746,1419 +8117,8 @@ function OperationsLockedScreen() {
   );
 }
 
-function BetaStatusPanel({
-  error,
-  isLoading,
-  onRefresh,
-  status,
-}: {
-  error: string;
-  isLoading: boolean;
-  onRefresh: () => void;
-  status: BetaStatusApiResult | null;
-}) {
-  const checks = status?.launchChecks ?? [];
-  const actionCount = checks.filter((check) => check.level === "action").length;
-  const watchCount = checks.filter((check) => check.level === "watch").length;
-  const catalogue = status?.catalogue?.status;
-  const jobRuns = status?.jobRuns ?? [];
-  const env = status?.env;
 
-  return (
-    <section className="tool-panel beta-status-panel">
-      <div className="panel-title-row">
-        <div>
-          <h2>Beta status</h2>
-          <p className="muted">
-            {status?.generatedAt ? `Updated ${formatEventDate(status.generatedAt)}` : "Live admin readiness snapshot"}
-          </p>
-        </div>
-        <div className="actions">
-          <span className={actionCount ? "tag red" : watchCount ? "tag amber" : "tag green"}>
-            {actionCount ? `${actionCount} action` : watchCount ? `${watchCount} watch` : "Ready"}
-          </span>
-          <button className="button small" type="button" onClick={onRefresh} disabled={isLoading}>
-            <RefreshCw size={15} />
-            {isLoading ? "Loading" : "Refresh"}
-          </button>
-        </div>
-      </div>
-      {error ? <p className="form-note danger">{error}</p> : null}
-      {status ? (
-        <>
-          <div className="beta-status-grid">
-            <span>
-              <b>{formatCount(catalogue?.cardCount)}</b>
-              Cards
-            </span>
-            <span>
-              <b>{formatPercent(catalogue?.pricingCoveragePercent)}</b>
-              Card pricing
-            </span>
-            <span>
-              <b>{formatPercent(catalogue?.sealedPricingCoveragePercent)}</b>
-              Sealed pricing
-            </span>
-            <span>
-              <b>{env?.squareEnvironment ?? "unknown"}</b>
-              Square
-            </span>
-          </div>
-          <div className="beta-check-list">
-            {checks.map((check) => (
-              <article className="beta-check-row" key={check.label}>
-                <span className={`beta-check-icon ${check.level}`}>
-                  {check.level === "good" ? <Check size={15} /> : <Info size={15} />}
-                </span>
-                <div>
-                  <strong>{check.label}</strong>
-                  <p className="muted">{check.detail}</p>
-                </div>
-                <span className={`tag ${betaCheckTagClass(check.level)}`}>
-                  {check.level}
-                </span>
-              </article>
-            ))}
-          </div>
-          {env ? (
-            <div className="beta-env-row">
-              <span>{env.databaseConfigured ? "Database configured" : "Database missing"}</span>
-              <span>{env.jobSecretConfigured ? "Jobs protected" : "Job secret missing"}</span>
-              <span>{env.priceAlertDryRun ? "Alerts dry run" : "Alerts live"}</span>
-              <span>{env.emailSmokeToConfigured ? "Smoke recipient set" : "No smoke recipient"}</span>
-            </div>
-          ) : null}
-          {jobRuns.length ? (
-            <div className="beta-job-strip">
-              {jobRuns.slice(0, 4).map((run) => (
-                <span key={run.id}>
-                  <b className={`tag ${jobStatusClass(run.status)}`}>{run.status}</b>
-                  {jobTypeLabel(run.jobType)}
-                </span>
-              ))}
-            </div>
-          ) : null}
-        </>
-      ) : (
-        <p className="muted">{isLoading ? "Loading beta readiness." : "Refresh to load beta readiness."}</p>
-      )}
-    </section>
-  );
-}
 
-function OperationsScreen({
-  catalogueItems,
-  loadCatalogueData,
-  refreshAppData,
-  showToast,
-}: ScreenContext) {
-  const [jobSecret, setJobSecret] = useState("");
-  const [query, setQuery] = useState("set.id:sv3pt5");
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(25);
-  const [maxPages, setMaxPages] = useState(1);
-  const [cardPriceOnlyUnpriced, setCardPriceOnlyUnpriced] = useState(true);
-  const [sealedGroupIds, setSealedGroupIds] = useState("");
-  const [sealedGroupLimit, setSealedGroupLimit] = useState(10);
-  const [sealedPriceOnlyUnpriced, setSealedPriceOnlyUnpriced] = useState(true);
-  const [sealedUsdToGbpRate, setSealedUsdToGbpRate] = useState("");
-  const [internationalLanguage, setInternationalLanguage] = useState("zh-cn");
-  const [internationalPage, setInternationalPage] = useState(1);
-  const [internationalPageSize, setInternationalPageSize] = useState(250);
-  const [internationalMaxPages, setInternationalMaxPages] = useState(2);
-  const [mergePrimaryCardId, setMergePrimaryCardId] = useState("");
-  const [mergeDuplicateCardId, setMergeDuplicateCardId] = useState("");
-  const [betaStatus, setBetaStatus] = useState<BetaStatusApiResult | null>(null);
-  const [betaStatusError, setBetaStatusError] = useState("");
-  const [jobRuns, setJobRuns] = useState<JobRunRecord[]>([]);
-  const [catalogueStatus, setCatalogueStatus] = useState<CatalogueStatusRecord | null>(null);
-  const [lastResult, setLastResult] = useState<unknown>(null);
-  const [isBusy, setIsBusy] = useState("");
-  const latestJobResult = parseJobApiResult(lastResult);
-  const duplicateProviderReview = parseDuplicateProviderReview(lastResult);
-  const resumableJob = getResumeJob(latestJobResult);
-  const gapRecommendations = catalogueStatus ? catalogueGapRecommendations(catalogueStatus) : [];
-  const localCardCount = catalogueItems.filter((item) => item.type === "card").length;
-  const presetRows = importPresets.map((preset) => ({
-    ...preset,
-    importedCount: catalogueItems.filter((item) => item.type === "card" && preset.setNames.includes(item.set)).length,
-    pageSize: Math.min(250, preset.expectedTotal),
-  }));
-
-  const loadBetaStatus = useCallback(
-    async (options?: { quiet?: boolean }) => {
-      if (!options?.quiet) {
-        setIsBusy("beta-status");
-      }
-
-      try {
-        const response = await fetch("/api/admin/beta-status", { cache: "no-store" });
-        const body = (await response.json()) as BetaStatusApiResult;
-
-        if (!response.ok) {
-          throw new Error(body.error ?? `Beta status failed with ${response.status}`);
-        }
-
-        setBetaStatus(body);
-        setBetaStatusError("");
-
-        if (body.catalogue?.status) {
-          setCatalogueStatus(body.catalogue.status);
-        }
-
-        if (body.jobRuns?.length) {
-          setJobRuns(body.jobRuns);
-        }
-
-        if (!options?.quiet) {
-          showToast("Beta status loaded.");
-        }
-
-        return true;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "Unable to load beta status.";
-
-        console.warn("Unable to load beta status.", error);
-        setBetaStatusError(message);
-
-        if (!options?.quiet) {
-          showToast(message);
-        }
-
-        return false;
-      } finally {
-        if (!options?.quiet) {
-          setIsBusy("");
-        }
-      }
-    },
-    [showToast],
-  );
-
-  useEffect(() => {
-    void loadBetaStatus({ quiet: true });
-  }, [loadBetaStatus]);
-
-  async function loadJobRuns() {
-    setIsBusy("runs");
-    try {
-      const response = await fetch("/api/jobs/runs?limit=10", {
-        headers: jobHeaders(jobSecret),
-      });
-      const body = (await response.json()) as { error?: string; runs?: JobRunRecord[] };
-
-      if (!response.ok) {
-        throw new Error(body.error ?? `Job runs failed with ${response.status}`);
-      }
-
-      setJobRuns(body.runs ?? []);
-      void loadCatalogueStatus({ quiet: true });
-      showToast("Job runs loaded.");
-      return true;
-    } catch (error) {
-      console.warn("Unable to load job runs.", error);
-      showToast(error instanceof Error ? error.message : "Unable to load job runs.");
-      return false;
-    } finally {
-      setIsBusy("");
-    }
-  }
-
-  async function loadCatalogueStatus(options?: { quiet?: boolean }) {
-    if (!options?.quiet) {
-      setIsBusy("status");
-    }
-
-    try {
-      const response = await fetch("/api/jobs/catalogue-status", {
-        headers: jobHeaders(jobSecret),
-      });
-      const body = (await response.json()) as CatalogueStatusApiResult;
-
-      if (!response.ok || !body.status) {
-        throw new Error(body.error ?? `Catalogue status failed with ${response.status}`);
-      }
-
-      setCatalogueStatus(body.status);
-      setJobRuns((current) =>
-        [
-          body.latestCatalogueRun,
-          body.latestPricingRun,
-          body.latestSealedPricingRun,
-          ...current,
-        ]
-          .filter((run): run is JobRunRecord => Boolean(run))
-          .filter((run, index, runs) => runs.findIndex((entry) => entry.id === run.id) === index)
-          .slice(0, 10),
-      );
-
-      if (!options?.quiet) {
-        showToast("Catalogue status loaded.");
-      }
-
-      return true;
-    } catch (error) {
-      console.warn("Unable to load catalogue status.", error);
-      if (!options?.quiet) {
-        showToast(error instanceof Error ? error.message : "Unable to load catalogue status.");
-      }
-      return false;
-    } finally {
-      if (!options?.quiet) {
-        setIsBusy("");
-      }
-    }
-  }
-
-  function applyPreset(preset: ImportPreset) {
-    setQuery(preset.query);
-    setPage(1);
-    setPageSize(Math.min(250, preset.expectedTotal));
-    setMaxPages(1);
-  }
-
-  function prepareDuplicateMerge(primaryCardId: string, duplicateCardId: string) {
-    setMergePrimaryCardId(primaryCardId);
-    setMergeDuplicateCardId(duplicateCardId);
-    showToast("Duplicate merge prepared.");
-  }
-
-  async function runPresetJob(preset: ImportPreset, kind: "catalogue" | "pricing") {
-    applyPreset(preset);
-    await runJob(kind, {
-      maxPages: 1,
-      page: 1,
-      pageSize: Math.min(250, preset.expectedTotal),
-      q: preset.query,
-    });
-  }
-
-  async function resumeLatestJob() {
-    if (!resumableJob) {
-      return;
-    }
-
-    setQuery(resumableJob.query ?? "");
-    setPage(resumableJob.nextPage);
-    setPageSize(resumableJob.pageSize);
-    await runJob(resumableJob.kind, {
-      maxPages,
-      page: resumableJob.nextPage,
-      pageSize: resumableJob.pageSize,
-      q: resumableJob.query,
-    });
-  }
-
-  async function runGapRecommendation(recommendation: CatalogueGapRecommendation) {
-    if (recommendation.type === "catalogue_resume" && catalogueStatus?.nextCataloguePage) {
-      setQuery("");
-      setPage(catalogueStatus.nextCataloguePage);
-      setPageSize(250);
-      await runJob("catalogue", {
-        maxPages,
-        page: catalogueStatus.nextCataloguePage,
-        pageSize: 250,
-        q: "",
-      });
-      return;
-    }
-
-    if (recommendation.type === "card_pricing") {
-      setQuery("");
-      setPage(1);
-      setPageSize(250);
-      await runJob("pricing", {
-        maxPages,
-        page: 1,
-        pageSize: 250,
-        q: "",
-      });
-      return;
-    }
-
-    if (recommendation.type === "sealed_pricing") {
-      await runJob("sealed");
-      return;
-    }
-
-    if (recommendation.type === "duplicate_review") {
-      await loadDuplicateProviderReview();
-      return;
-    }
-
-    if (recommendation.type === "card_image_refresh") {
-      await runJob("card-image-repair");
-      return;
-    }
-
-    if (recommendation.type === "sealed_image_refresh") {
-      await runJob("sealed-image-repair");
-      return;
-    }
-
-    if (recommendation.type === "variant_metadata_refresh") {
-      await runJob("variant-metadata-repair");
-    }
-  }
-
-  async function runJob(
-    kind: OperationsJobKind,
-    override?: { maxPages?: number; page?: number; pageSize?: number; q?: string },
-  ) {
-    const path =
-      kind === "catalogue"
-        ? "/api/jobs/catalogue-refresh"
-        : kind === "international-catalogue"
-          ? "/api/jobs/international-catalogue-refresh"
-        : kind === "pricing"
-          ? "/api/jobs/pricing-refresh"
-          : kind === "sealed"
-            ? "/api/jobs/sealed-pricing-refresh"
-            : kind === "card-image-repair"
-              ? "/api/jobs/card-image-repair"
-              : kind === "sealed-image-repair"
-                ? "/api/jobs/sealed-image-repair"
-                : kind === "variant-metadata-repair"
-                  ? "/api/jobs/variant-metadata-repair"
-                  : "/api/jobs/price-alerts";
-    const body =
-      kind === "alerts"
-        ? { dryRun: true }
-        : kind === "international-catalogue"
-          ? internationalCatalogueJobBody()
-        : kind === "sealed"
-          ? sealedJobBody()
-          : kind === "card-image-repair"
-            ? { dryRun: false, limit: 500 }
-            : kind === "sealed-image-repair"
-              ? { dryRun: false, limit: 500, waitMs: 120 }
-              : kind === "variant-metadata-repair"
-                ? { dryRun: false, limit: 500, waitMs: 120 }
-                : {
-                  maxPages: override?.maxPages ?? maxPages,
-                  page: override?.page ?? page,
-                  pageSize: override?.pageSize ?? pageSize,
-                  priceOnlyUnpriced: kind === "pricing" ? cardPriceOnlyUnpriced : undefined,
-                  q: override?.q?.trim() || query.trim() || undefined,
-                };
-
-    setIsBusy(kind);
-    try {
-      const response = await fetch(path, {
-        method: "POST",
-        headers: {
-          ...jobHeaders(jobSecret),
-          "content-type": "application/json",
-        },
-        body: JSON.stringify(body),
-      });
-      const result = (await response.json()) as { error?: string; jobRun?: JobRunRecord };
-
-      if (!response.ok) {
-        setLastResult(result);
-        setJobRuns((current) => (result.jobRun ? [result.jobRun, ...current].slice(0, 10) : current));
-        throw new Error(result.error ?? `Job failed with ${response.status}`);
-      }
-
-      setLastResult(result);
-      setJobRuns((current) => (result.jobRun ? [result.jobRun, ...current].slice(0, 10) : current));
-      showToast("Job completed.");
-
-      if (kind !== "alerts") {
-        await refreshAppData({ quiet: true });
-        void loadCatalogueData({ force: true, quiet: true });
-        void loadCatalogueStatus({ quiet: true });
-      }
-      return true;
-    } catch (error) {
-      console.warn("Unable to run job.", error);
-      showToast(error instanceof Error ? error.message : "Unable to run job.");
-      if (error instanceof Error) {
-        setLastResult({ error: error.message });
-      }
-      return false;
-    } finally {
-      setIsBusy("");
-    }
-  }
-
-  function sealedJobBody() {
-    const rate = Number(sealedUsdToGbpRate);
-
-    return {
-      groupIds: sealedGroupIds.trim() || undefined,
-      groupLimit: sealedGroupLimit,
-      priceOnlyUnpriced: sealedPriceOnlyUnpriced,
-      usdToGbpRate: Number.isFinite(rate) && rate > 0 ? rate : undefined,
-      writePrices: true,
-    };
-  }
-
-  function internationalCatalogueJobBody() {
-    return {
-      language: internationalLanguage,
-      maxPages: internationalMaxPages,
-      page: internationalPage,
-      pageSize: internationalPageSize,
-    };
-  }
-
-  async function exportCatalogueGaps() {
-    setIsBusy("gap-export");
-    try {
-      const response = await fetch("/api/jobs/catalogue-gaps", {
-        headers: jobHeaders(jobSecret),
-      });
-
-      if (!response.ok) {
-        const body = (await response.json().catch(() => ({}))) as { error?: string };
-
-        throw new Error(body.error ?? `Catalogue gap export failed with ${response.status}`);
-      }
-
-      downloadBlob(`mintbinder-catalogue-gaps-${dateStamp()}.json`, await response.blob());
-      showToast("Catalogue gap report downloaded.");
-      return true;
-    } catch (error) {
-      console.warn("Unable to export catalogue gaps.", error);
-      showToast(error instanceof Error ? error.message : "Unable to export catalogue gaps.");
-      return false;
-    } finally {
-      setIsBusy("");
-    }
-  }
-
-  async function loadDuplicateProviderReview() {
-    setIsBusy("duplicate-review");
-    try {
-      const response = await fetch("/api/jobs/duplicate-provider-review?limit=50", {
-        headers: jobHeaders(jobSecret),
-      });
-      const result = (await response.json()) as JobApiResult & { error?: string };
-
-      if (!response.ok) {
-        throw new Error(result.error ?? `Duplicate review failed with ${response.status}`);
-      }
-
-      setLastResult(result);
-      showToast("Duplicate provider review loaded.");
-      return true;
-    } catch (error) {
-      console.warn("Unable to review duplicate provider IDs.", error);
-      showToast(error instanceof Error ? error.message : "Unable to review duplicate provider IDs.");
-      if (error instanceof Error) {
-        setLastResult({ error: error.message });
-      }
-      return false;
-    } finally {
-      setIsBusy("");
-    }
-  }
-
-  async function runDuplicateCardMerge(execute: boolean) {
-    if (!mergePrimaryCardId.trim() || !mergeDuplicateCardId.trim()) {
-      showToast("Both card IDs are required.");
-      return false;
-    }
-
-    setIsBusy(execute ? "duplicate-merge" : "duplicate-merge-dry-run");
-    try {
-      const response = await fetch("/api/jobs/duplicate-card-merge", {
-        body: JSON.stringify({
-          duplicateCardId: mergeDuplicateCardId.trim(),
-          execute,
-          primaryCardId: mergePrimaryCardId.trim(),
-        }),
-        headers: {
-          ...jobHeaders(jobSecret),
-          "content-type": "application/json",
-        },
-        method: "POST",
-      });
-      const result = (await response.json()) as JobApiResult & { error?: string };
-
-      if (!response.ok) {
-        throw new Error(result.error ?? `Duplicate merge failed with ${response.status}`);
-      }
-
-      setLastResult(result);
-      showToast(execute ? "Duplicate card merged." : "Duplicate merge dry run ready.");
-
-      if (execute) {
-        void loadCatalogueStatus({ quiet: true });
-        void loadCatalogueData({ force: true, quiet: true });
-        void refreshAppData();
-      }
-
-      return true;
-    } catch (error) {
-      console.warn("Unable to merge duplicate card.", error);
-      showToast(error instanceof Error ? error.message : "Unable to merge duplicate card.");
-      if (error instanceof Error) {
-        setLastResult({ error: error.message });
-      }
-      return false;
-    } finally {
-      setIsBusy("");
-    }
-  }
-
-  return (
-    <section className="page">
-      <PageHeader title="Operations" action={<span className="status-pill"><TerminalSquare size={17} />Jobs</span>} />
-      <BetaStatusPanel
-        error={betaStatusError}
-        isLoading={isBusy === "beta-status" && !betaStatus}
-        status={betaStatus}
-        onRefresh={() => void loadBetaStatus()}
-      />
-      <div className="stats-grid compact">
-        <StatCard
-          label="Catalogue cards"
-          value={formatCount(catalogueStatus?.cardCount ?? localCardCount)}
-          note={
-            catalogueStatus?.providerTotalCount
-              ? `${formatPercent(catalogueStatus.coveragePercent)} of provider`
-              : "Loaded in app"
-          }
-        />
-        <StatCard label="Provider total" value={formatCount(catalogueStatus?.providerTotalCount)} note="Pokemon TCG API" />
-        <StatCard label="Next page" value={catalogueStatus?.nextCataloguePage?.toString() ?? "-"} note="Broad import resume point" />
-        <StatCard label="Pages/job" value={maxPages.toString()} note="Capped at 20 for safety" />
-        <StatCard label="Access" value="Admin session" note={jobSecret ? "Secret fallback active" : "No secret entry needed"} />
-      </div>
-
-      <div className="dashboard-grid">
-        <section className="tool-panel">
-          <div className="panel-title-row">
-            <h2>Import presets</h2>
-            <Layers3 size={18} />
-          </div>
-          <div className="preset-grid">
-            {presetRows.map((preset) => {
-              const done = completionPercent(preset.importedCount, preset.expectedTotal);
-              const complete = preset.importedCount >= preset.expectedTotal;
-
-              return (
-                <article className="preset-card" key={preset.query}>
-                  <div className="preset-card-header">
-                    <div>
-                      <strong>{preset.label}</strong>
-                      <span>{preset.note}</span>
-                    </div>
-                    <span className={complete ? "tag green" : "tag amber"}>{complete ? "Complete" : "Partial"}</span>
-                  </div>
-                  <ProgressBar value={done} />
-                  <div className="set-stat-row">
-                    <span>{preset.importedCount} / {preset.expectedTotal}</span>
-                    <span>{preset.query}</span>
-                  </div>
-                  <div className="actions">
-                    <button className="button small" disabled={Boolean(isBusy)} onClick={() => applyPreset(preset)}>
-                      <Check size={15} />
-                      Use
-                    </button>
-                    <button className="button small primary" disabled={Boolean(isBusy)} onClick={() => void runPresetJob(preset, "catalogue")}>
-                      <Database size={15} />
-                      Catalogue
-                    </button>
-                    <button className="button small" disabled={Boolean(isBusy)} onClick={() => void runPresetJob(preset, "pricing")}>
-                      <RefreshCw size={15} />
-                      Pricing
-                    </button>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        </section>
-
-        <section className="tool-panel">
-          <div className="panel-title-row">
-            <h2>Import controls</h2>
-            <Database size={18} />
-          </div>
-          <div className="field-grid">
-            <Field label="Job secret fallback">
-              <input
-                type="password"
-                value={jobSecret}
-                onChange={(event) => setJobSecret(event.currentTarget.value)}
-                placeholder="Optional for scripts"
-              />
-            </Field>
-            <Field label="Pokemon query">
-              <input
-                value={query}
-                onChange={(event) => setQuery(event.currentTarget.value)}
-                placeholder="set.id:sv3pt5"
-              />
-            </Field>
-            <Field label="Page">
-              <input
-                min={1}
-                type="number"
-                value={page}
-                onChange={(event) => setPage(Math.max(1, Number(event.currentTarget.value) || 1))}
-              />
-            </Field>
-            <Field label="Page size">
-              <input
-                max={250}
-                min={1}
-                type="number"
-                value={pageSize}
-                onChange={(event) => setPageSize(Math.min(250, Math.max(1, Number(event.currentTarget.value) || 1)))}
-              />
-            </Field>
-            <Field label="Max pages">
-              <input
-                max={20}
-                min={1}
-                type="number"
-                value={maxPages}
-                onChange={(event) => setMaxPages(Math.min(20, Math.max(1, Number(event.currentTarget.value) || 1)))}
-              />
-            </Field>
-            <label className="check-row">
-              <input
-                checked={cardPriceOnlyUnpriced}
-                type="checkbox"
-                onChange={(event) => setCardPriceOnlyUnpriced(event.currentTarget.checked)}
-              />
-              <span>Only unpriced cards</span>
-            </label>
-          </div>
-          <div className="ops-subsection">
-            <div className="panel-title-row">
-              <h3>Sealed pricing</h3>
-              <PackagePlus size={17} />
-            </div>
-            <div className="field-grid">
-              <Field label="TCGCSV groups">
-                <input
-                  value={sealedGroupIds}
-                  onChange={(event) => setSealedGroupIds(event.currentTarget.value)}
-                  placeholder="Optional IDs"
-                />
-              </Field>
-              <Field label="Group limit">
-                <input
-                  min={1}
-                  type="number"
-                  value={sealedGroupLimit}
-                  onChange={(event) => setSealedGroupLimit(Math.max(1, Number(event.currentTarget.value) || 1))}
-                />
-              </Field>
-              <Field label="USD to GBP">
-                <input
-                  inputMode="decimal"
-                  value={sealedUsdToGbpRate}
-                  onChange={(event) => setSealedUsdToGbpRate(event.currentTarget.value)}
-                  placeholder="Env fallback"
-                />
-              </Field>
-              <label className="check-row">
-                <input
-                  checked={sealedPriceOnlyUnpriced}
-                  type="checkbox"
-                  onChange={(event) => setSealedPriceOnlyUnpriced(event.currentTarget.checked)}
-                />
-                <span>Only unpriced</span>
-              </label>
-            </div>
-          </div>
-          <div className="ops-subsection">
-            <div className="panel-title-row">
-              <h3>International catalogue</h3>
-              <Languages size={17} />
-            </div>
-            <div className="field-grid">
-              <Field label="Language">
-                <select
-                  value={internationalLanguage}
-                  onChange={(event) => {
-                    setInternationalLanguage(event.currentTarget.value);
-                    setInternationalPage(1);
-                  }}
-                >
-                  {CATALOGUE_LANGUAGE_OPTIONS
-                    .filter((language) => language.code !== "en")
-                    .map((language) => (
-                      <option key={language.code} value={language.code}>
-                        {language.label}
-                      </option>
-                    ))}
-                </select>
-              </Field>
-              <Field label="Page">
-                <input
-                  min={1}
-                  type="number"
-                  value={internationalPage}
-                  onChange={(event) => setInternationalPage(Math.max(1, Number(event.currentTarget.value) || 1))}
-                />
-              </Field>
-              <Field label="Page size">
-                <input
-                  max={250}
-                  min={1}
-                  type="number"
-                  value={internationalPageSize}
-                  onChange={(event) =>
-                    setInternationalPageSize(Math.min(250, Math.max(1, Number(event.currentTarget.value) || 1)))}
-                />
-              </Field>
-              <Field label="Max pages">
-                <input
-                  max={20}
-                  min={1}
-                  type="number"
-                  value={internationalMaxPages}
-                  onChange={(event) =>
-                    setInternationalMaxPages(Math.min(20, Math.max(1, Number(event.currentTarget.value) || 1)))}
-                />
-              </Field>
-            </div>
-          </div>
-          <div className="actions">
-            <button className="button primary" disabled={Boolean(isBusy)} onClick={() => void runJob("catalogue")}>
-              <Database size={17} />
-              {isBusy === "catalogue" ? "Running" : "Catalogue"}
-            </button>
-            <button className="button" disabled={Boolean(isBusy)} onClick={() => void runJob("international-catalogue")}>
-              <Languages size={17} />
-              {isBusy === "international-catalogue" ? "Running" : "International"}
-            </button>
-            <button className="button" disabled={Boolean(isBusy)} onClick={() => void runJob("pricing")}>
-              <RefreshCw size={17} />
-              {isBusy === "pricing" ? "Running" : "Pricing"}
-            </button>
-            <button className="button" disabled={Boolean(isBusy)} onClick={() => void runJob("sealed")}>
-              <PackagePlus size={17} />
-              {isBusy === "sealed" ? "Running" : "Sealed pricing"}
-            </button>
-            <button className="button" disabled={Boolean(isBusy)} onClick={() => void runJob("card-image-repair")}>
-              <GalleryVerticalEnd size={17} />
-              {isBusy === "card-image-repair" ? "Running" : "Repair card images"}
-            </button>
-            <button className="button" disabled={Boolean(isBusy)} onClick={() => void runJob("sealed-image-repair")}>
-              <GalleryVerticalEnd size={17} />
-              {isBusy === "sealed-image-repair" ? "Running" : "Repair sealed images"}
-            </button>
-            <button className="button" disabled={Boolean(isBusy)} onClick={() => void runJob("variant-metadata-repair")}>
-              <Layers3 size={17} />
-              {isBusy === "variant-metadata-repair" ? "Running" : "Repair variants"}
-            </button>
-            <button className="button" disabled={Boolean(isBusy)} onClick={() => void runJob("alerts")}>
-              <Mail size={17} />
-              {isBusy === "alerts" ? "Running" : "Alert dry run"}
-            </button>
-            <button className="button" disabled={Boolean(isBusy)} onClick={() => void loadJobRuns()}>
-              <History size={17} />
-              {isBusy === "runs" ? "Loading" : "Load runs"}
-            </button>
-          </div>
-        </section>
-
-        <section className="tool-panel">
-          <div className="panel-title-row">
-            <h2>Catalogue status</h2>
-            <Database size={18} />
-          </div>
-          <p className="muted">Catalogue-wide import coverage. Your owned collection value gaps are tracked separately on Dashboard and Collection.</p>
-          {catalogueStatus?.coveragePercent !== null && catalogueStatus?.coveragePercent !== undefined ? (
-            <ProgressBar value={catalogueStatus.coveragePercent} />
-          ) : null}
-          <MetricList
-            rows={[
-              ["Cards", catalogueStatus ? `${formatCount(catalogueStatus.cardCount)} / ${formatCount(catalogueStatus.providerTotalCount)}` : formatCount(localCardCount)],
-              ["Coverage", formatPercent(catalogueStatus?.coveragePercent)],
-              ["Sets", formatCount(catalogueStatus?.setCount)],
-              ["Prices", formatCount(catalogueStatus?.priceSnapshotCount)],
-              ["Priced cards", catalogueStatus ? `${formatCount(catalogueStatus.pricedCardCount)} (${formatPercent(catalogueStatus.pricingCoveragePercent)})` : "-"],
-              ["Card images", catalogueStatus ? `${formatCount(catalogueStatus.cardImageCount)} (${formatPercent(catalogueStatus.cardImageCoveragePercent)})` : "-"],
-              ["Variant metadata", catalogueStatus ? `${formatCount(catalogueStatus.cardVariantMetadataCount)} (${formatPercent(catalogueStatus.cardVariantMetadataCoveragePercent)})` : "-"],
-              ["Sealed products", formatCount(catalogueStatus?.sealedProductCount)],
-              ["Priced sealed", catalogueStatus ? `${formatCount(catalogueStatus.pricedSealedProductCount)} (${formatPercent(catalogueStatus.sealedPricingCoveragePercent)})` : "-"],
-              ["Sealed images", catalogueStatus ? `${formatCount(catalogueStatus.sealedImageCount)} (${formatPercent(catalogueStatus.sealedImageCoveragePercent)})` : "-"],
-              ["Duplicate IDs", formatCount(catalogueStatus?.duplicateProviderIdCount)],
-            ]}
-          />
-          <button className="button" disabled={Boolean(isBusy)} onClick={() => void loadCatalogueStatus()}>
-            <RefreshCw size={17} />
-            {isBusy === "status" ? "Loading" : "Load status"}
-          </button>
-          <button className="button" disabled={Boolean(isBusy)} onClick={() => void exportCatalogueGaps()}>
-            <Download size={17} />
-            {isBusy === "gap-export" ? "Exporting" : "Export gaps"}
-          </button>
-          <button className="button" disabled={Boolean(isBusy)} onClick={() => void loadDuplicateProviderReview()}>
-            <Search size={17} />
-            {isBusy === "duplicate-review" ? "Loading" : "Review duplicates"}
-          </button>
-        </section>
-
-        <section className="tool-panel">
-          <div className="panel-title-row">
-            <h2>Merge duplicate</h2>
-            <ArrowDownUp size={18} />
-          </div>
-          <div className="field-grid">
-            <Field label="Primary card ID">
-              <input
-                value={mergePrimaryCardId}
-                onChange={(event) => setMergePrimaryCardId(event.currentTarget.value)}
-                placeholder="Keep this card"
-              />
-            </Field>
-            <Field label="Duplicate card ID">
-              <input
-                value={mergeDuplicateCardId}
-                onChange={(event) => setMergeDuplicateCardId(event.currentTarget.value)}
-                placeholder="Merge and delete this card"
-              />
-            </Field>
-          </div>
-          <div className="actions">
-            <button className="button" disabled={Boolean(isBusy)} onClick={() => void runDuplicateCardMerge(false)}>
-              <Search size={17} />
-              {isBusy === "duplicate-merge-dry-run" ? "Checking" : "Dry run"}
-            </button>
-            <button className="button danger" disabled={Boolean(isBusy)} onClick={() => void runDuplicateCardMerge(true)}>
-              <Check size={17} />
-              {isBusy === "duplicate-merge" ? "Merging" : "Execute merge"}
-            </button>
-          </div>
-        </section>
-
-        <section className="tool-panel">
-          <div className="panel-title-row">
-            <h2>Latest result</h2>
-            <span className="tag blue">JSON</span>
-          </div>
-          {latestJobResult ? (
-            <div className="job-result-summary">
-              <div className="set-stat-row">
-                {latestJobResult.report === "duplicate_provider_review" ? (
-                  <>
-                    <span>{latestJobResult.duplicateGroupCount ?? 0} groups</span>
-                    <span>{latestJobResult.duplicateCardCount ?? 0} cards</span>
-                    <span>{latestJobResult.highRiskGroupCount ?? 0} high risk</span>
-                  </>
-                ) : latestJobResult.report === "duplicate_card_merge" ? (
-                  <>
-                    <span>{latestJobResult.canMerge ? "Mergeable" : "Blocked"}</span>
-                    <span>{latestJobResult.collectionItemsToMove ?? latestJobResult.collectionItemsMoved ?? 0} collection</span>
-                    <span>{latestJobResult.priceSnapshotsToMove ?? latestJobResult.priceSnapshotsMoved ?? 0} prices</span>
-                  </>
-                ) : latestJobResult.job === "card_image_repair" ? (
-                  <>
-                    <span>{latestJobResult.candidatesChecked ?? 0} checked</span>
-                    <span>{latestJobResult.cardsUpdated ?? 0} cards</span>
-                    <span>{latestJobResult.imageFieldsUpdated ?? 0} fields</span>
-                  </>
-                ) : latestJobResult.job === "sealed_image_repair" ? (
-                  <>
-                    <span>{latestJobResult.candidatesChecked ?? 0} checked</span>
-                    <span>{latestJobResult.sealedProductsUpdated ?? 0} sealed</span>
-                    <span>{latestJobResult.groupsFetched ?? 0} groups</span>
-                  </>
-                ) : latestJobResult.job === "variant_metadata_repair" ? (
-                  <>
-                    <span>{latestJobResult.candidatesChecked ?? 0} checked</span>
-                    <span>{latestJobResult.cardsUpdated ?? 0} cards</span>
-                    <span>{latestJobResult.pokemonTcgCardsFetched ?? 0} fetched</span>
-                  </>
-                ) : latestJobResult.groupsProcessed !== undefined ? (
-                  <>
-                    <span>{latestJobResult.groupsProcessed} groups</span>
-                    <span>{latestJobResult.sealedProductsUpserted ?? 0} sealed</span>
-                    <span>{latestJobResult.cardImagesUpdated ?? 0} images</span>
-                    <span>{latestJobResult.productsFetched ?? 0} products</span>
-                  </>
-                ) : (
-                  <>
-                    <span>{latestJobResult.pagesProcessed ?? 1} page{(latestJobResult.pagesProcessed ?? 1) === 1 ? "" : "s"}</span>
-                    <span>{latestJobResult.cardsUpserted ?? 0} cards</span>
-                  </>
-                )}
-                {latestJobResult.report === "duplicate_provider_review" ? (
-                  <span>{latestJobResult.mediumRiskGroupCount ?? 0} medium</span>
-                ) : latestJobResult.report === "duplicate_card_merge" ? (
-                  <>
-                    <span>{latestJobResult.wishlistItemsToMove ?? latestJobResult.wishlistItemsMoved ?? 0} wishlist</span>
-                    <span>{latestJobResult.wishlistConflictsToMerge ?? latestJobResult.wishlistConflictsMerged ?? 0} conflicts</span>
-                    <span>{latestJobResult.mode ?? "dry_run"}</span>
-                  </>
-                ) : latestJobResult.job === "card_image_repair" ? (
-                  <>
-                    <span>{latestJobResult.repairableCards ?? 0} repairable</span>
-                    <span>{latestJobResult.tcgcsvImageProductsFetched ?? 0} TCGCSV images</span>
-                  </>
-                ) : latestJobResult.job === "sealed_image_repair" ? (
-                  <span>{latestJobResult.repairableProducts ?? 0} repairable</span>
-                ) : latestJobResult.job === "variant_metadata_repair" ? (
-                  <span>{latestJobResult.repairableCards ?? 0} repairable</span>
-                ) : (
-                  <span>{latestJobResult.pricingSnapshotsCreated ?? 0} prices</span>
-                )}
-                {latestJobResult.complete !== undefined ? (
-                  <span>{latestJobResult.complete ? "Complete" : `Next page ${latestJobResult.nextPage ?? "-"}`}</span>
-                ) : null}
-              </div>
-              {resumableJob ? (
-                <button className="button primary" disabled={Boolean(isBusy)} onClick={() => void resumeLatestJob()}>
-                  <RefreshCw size={17} />
-                  Resume page {resumableJob.nextPage}
-                </button>
-              ) : null}
-            </div>
-          ) : null}
-          <pre className="json-preview">{formatJsonPreview(lastResult ?? { status: "No job run yet." })}</pre>
-        </section>
-      </div>
-
-      {duplicateProviderReview ? (
-        <DuplicateProviderReviewPanel
-          report={duplicateProviderReview}
-          onPrepareMerge={prepareDuplicateMerge}
-        />
-      ) : null}
-
-      <div className="operations-breakdowns">
-        <CataloguePricingExplainer />
-        <GapRecommendationsPanel
-          disabled={Boolean(isBusy)}
-          recommendations={gapRecommendations}
-          onRun={(recommendation) => void runGapRecommendation(recommendation)}
-        />
-        <InternationalPricingGapPanel rows={catalogueStatus?.pricingByLanguage ?? []} />
-        <PricingSeriesGapPanel rows={catalogueStatus?.pricingBySeries ?? []} />
-        <SealedPricingGapPanel rows={catalogueStatus?.sealedPricingByProductType ?? []} />
-        <CatalogueMediaGapPanel status={catalogueStatus} />
-        <PricingSourcePanel rows={catalogueStatus?.pricingBySource ?? []} />
-      </div>
-
-      <section className="tool-panel">
-        <div className="panel-title-row">
-          <h2>Job runs</h2>
-          <History size={18} />
-        </div>
-        {jobRuns.length ? (
-          <div className="job-run-list">
-            {jobRuns.map((run) => (
-              <article className="job-run-row" key={run.id}>
-                <div>
-                  <div className="tag-row">
-                    <span className={`tag ${jobStatusClass(run.status)}`}>{run.status}</span>
-                    <span className="tag">{jobTypeLabel(run.jobType)}</span>
-                  </div>
-                  <strong>{formatEventDate(run.startedAt)}</strong>
-                  <p className="muted">
-                    {run.durationMs === undefined ? "In progress" : `${run.durationMs}ms`}
-                    {run.errorMessage ? ` | ${run.errorMessage}` : ""}
-                  </p>
-                </div>
-                <code>{run.id.slice(0, 8)}</code>
-              </article>
-            ))}
-          </div>
-        ) : (
-          <p className="muted">No job runs loaded.</p>
-        )}
-      </section>
-    </section>
-  );
-}
-
-function CataloguePricingExplainer() {
-  return (
-    <section className="tool-panel pricing-explainer-panel">
-      <div className="panel-title-row">
-        <h2>Pricing gaps explained</h2>
-        <Info size={18} />
-      </div>
-      <div className="pricing-explainer-grid">
-        <article>
-          <strong>Catalogue, not collection</strong>
-          <span>These gaps are for every card printing Mint Binder knows about. They are separate from your owned cards, manual values, and Dashboard value gaps.</span>
-        </article>
-        <article>
-          <strong>One imported snapshot counts</strong>
-          <span>A card is priced when it has at least one imported market snapshot. Variant metadata, images, and manual owned values do not count as imported pricing.</span>
-        </article>
-        <article>
-          <strong>Distinct printings only</strong>
-          <span>Historical price snapshots do not multiply the totals. The percentage is distinct priced printings divided by distinct catalogue printings in that series.</span>
-        </article>
-      </div>
-    </section>
-  );
-}
-
-function GapRecommendationsPanel({
-  disabled,
-  onRun,
-  recommendations,
-}: {
-  disabled: boolean;
-  onRun: (recommendation: CatalogueGapRecommendation) => void;
-  recommendations: CatalogueGapRecommendation[];
-}) {
-  return (
-    <section className="tool-panel">
-      <div className="panel-title-row">
-        <h2>Recommended next</h2>
-        <Sparkles size={18} />
-      </div>
-      {recommendations.length ? (
-        <div className="gap-list">
-          {recommendations.map((recommendation) => (
-            <article className="gap-row recommendation-row" key={recommendation.id}>
-              <div className="gap-copy">
-                <div className="tag-row">
-                  <span className={`tag ${recommendationPriorityClass(recommendation.priority)}`}>
-                    {recommendation.priority}
-                  </span>
-                  <span className="tag">{recommendationTypeLabel(recommendation.type)}</span>
-                </div>
-                <strong>{recommendation.title}</strong>
-                <span>{recommendation.detail}</span>
-              </div>
-              {recommendationActionLabel(recommendation) ? (
-                <button className="button small" disabled={disabled} onClick={() => onRun(recommendation)}>
-                  <RefreshCw size={15} />
-                  {recommendationActionLabel(recommendation)}
-                </button>
-              ) : null}
-            </article>
-          ))}
-        </div>
-      ) : (
-        <p className="muted">Load catalogue status to see recommended next actions.</p>
-      )}
-    </section>
-  );
-}
-
-function DuplicateProviderReviewPanel({
-  onPrepareMerge,
-  report,
-}: {
-  onPrepareMerge: (primaryCardId: string, duplicateCardId: string) => void;
-  report: DuplicateProviderReview;
-}) {
-  return (
-    <section className="tool-panel duplicate-review-panel">
-      <div className="panel-title-row">
-        <h2>Duplicate groups</h2>
-        <span className="status-pill">{report.duplicateGroupCount} groups</span>
-      </div>
-      {report.groups.length ? (
-        <div className="duplicate-group-list">
-          {report.groups.slice(0, 12).map((group) => (
-            <DuplicateProviderGroupReview
-              group={group}
-              key={group.providerId}
-              onPrepareMerge={onPrepareMerge}
-            />
-          ))}
-        </div>
-      ) : (
-        <p className="muted">No duplicate provider IDs in the latest report.</p>
-      )}
-    </section>
-  );
-}
-
-function DuplicateProviderGroupReview({
-  group,
-  onPrepareMerge,
-}: {
-  group: DuplicateProviderReviewGroup;
-  onPrepareMerge: (primaryCardId: string, duplicateCardId: string) => void;
-}) {
-  const primaryCardId = group.suggestedPrimaryCardId || group.cards[0]?.id || "";
-
-  return (
-    <article className="duplicate-group-row">
-      <div className="duplicate-group-header">
-        <div className="gap-copy">
-          <div className="tag-row">
-            <span className={`tag ${duplicateRiskClass(group.riskLevel)}`}>{group.riskLevel}</span>
-            <span className="tag">{group.providerId}</span>
-          </div>
-          <strong>{group.cardCount} matching card rows</strong>
-          <span>{group.collectionCount} collection | {group.wishlistCount} wishlist | {group.priceSnapshotCount} prices</span>
-        </div>
-      </div>
-      <div className="duplicate-card-list">
-        {group.cards.map((card) => (
-          <DuplicateProviderCardReview
-            card={card}
-            isPrimary={card.id === primaryCardId}
-            key={card.id}
-            onPrepareMerge={onPrepareMerge}
-            primaryCardId={primaryCardId}
-          />
-        ))}
-      </div>
-    </article>
-  );
-}
-
-function DuplicateProviderCardReview({
-  card,
-  isPrimary,
-  onPrepareMerge,
-  primaryCardId,
-}: {
-  card: DuplicateProviderReviewCard;
-  isPrimary: boolean;
-  onPrepareMerge: (primaryCardId: string, duplicateCardId: string) => void;
-  primaryCardId: string;
-}) {
-  const cardName = catalogueDisplayCardForText(card.name, { number: card.number }) ?? card.name;
-  const setName = catalogueDisplaySetForText(card.setName) ?? card.setName;
-
-  return (
-    <article className="duplicate-card-row">
-      <div className="duplicate-card-thumb">
-        {card.imageSmallUrl || card.imageLargeUrl ? (
-          <Image
-            src={card.imageSmallUrl ?? card.imageLargeUrl!}
-            alt={cardName}
-            fill
-            sizes="52px"
-          />
-        ) : (
-          <span>{cardName.slice(0, 1)}</span>
-        )}
-      </div>
-      <div className="duplicate-card-copy">
-        <div className="tag-row">
-          {isPrimary ? <span className="tag green">primary</span> : <span className="tag">duplicate</span>}
-          <span className="tag">{card.number}</span>
-          {card.rarity ? <span className="tag blue">{card.rarity}</span> : null}
-        </div>
-        <strong>{cardName}</strong>
-        <span>{setName}{card.series ? ` | ${card.series}` : ""}</span>
-        <code>{card.id}</code>
-      </div>
-      <div className="duplicate-card-metrics">
-        <span>{card.collectionCount} collection</span>
-        <span>{card.wishlistCount} wishlist</span>
-        <span>{card.priceSnapshotCount} prices</span>
-      </div>
-      {isPrimary ? (
-        <span className="status-pill">Keep</span>
-      ) : (
-        <button
-          className="button small"
-          disabled={!primaryCardId}
-          onClick={() => onPrepareMerge(primaryCardId, card.id)}
-        >
-          <ArrowDownUp size={15} />
-          Prepare
-        </button>
-      )}
-    </article>
-  );
-}
-
-function InternationalPricingGapPanel({ rows }: { rows: PricingByLanguageGap[] }) {
-  const visibleRows = rows
-    .filter((row) => row.language !== "en" && row.cardCount > 0)
-    .slice(0, 8);
-
-  return (
-    <section className="tool-panel">
-      <div className="panel-title-row">
-        <h2>International cards</h2>
-        <Languages size={18} />
-      </div>
-      {visibleRows.length ? (
-        <div className="gap-list">
-          {visibleRows.map((row) => (
-            <CoverageGapRow
-              key={`${row.language}-${row.region}`}
-              coverage={row.pricingCoveragePercent}
-              gapLabel="unpriced printings"
-              label={`${row.languageLabel} (${row.setCount} sets, ${formatPercent(row.cardImageCoveragePercent)} images)`}
-              priced={row.pricedCardCount}
-              total={row.cardCount}
-              unpriced={row.unpricedCardCount}
-            />
-          ))}
-        </div>
-      ) : (
-        <p className="muted">No international card rows loaded.</p>
-      )}
-    </section>
-  );
-}
-
-function PricingSeriesGapPanel({ rows }: { rows: PricingBySeriesGap[] }) {
-  const visibleRows = rows.filter((row) => row.unpricedCardCount > 0).slice(0, 8);
-
-  return (
-    <section className="tool-panel">
-      <div className="panel-title-row">
-        <h2>Card pricing gaps</h2>
-        <BarChart3 size={18} />
-      </div>
-      <p className="muted">Distinct catalogue card printings without an imported price snapshot yet.</p>
-      {visibleRows.length ? (
-        <div className="gap-list">
-          {visibleRows.map((row) => (
-            <CoverageGapRow
-              key={row.series}
-              coverage={row.pricingCoveragePercent}
-              gapLabel="unpriced printings"
-              label={row.series}
-              priced={row.pricedCardCount}
-              total={row.cardCount}
-              unpriced={row.unpricedCardCount}
-            />
-          ))}
-        </div>
-      ) : (
-        <p className="muted">No card pricing gaps loaded.</p>
-      )}
-    </section>
-  );
-}
-
-function SealedPricingGapPanel({ rows }: { rows: SealedPricingByProductTypeGap[] }) {
-  const visibleRows = rows.filter((row) => row.unpricedSealedProductCount > 0).slice(0, 8);
-
-  return (
-    <section className="tool-panel">
-      <div className="panel-title-row">
-        <h2>Sealed gaps</h2>
-        <PackagePlus size={18} />
-      </div>
-      {visibleRows.length ? (
-        <div className="gap-list">
-          {visibleRows.map((row) => (
-            <CoverageGapRow
-              key={row.productType}
-              coverage={row.sealedPricingCoveragePercent}
-              label={productTypeLabel(row.productType)}
-              priced={row.pricedSealedProductCount}
-              total={row.sealedProductCount}
-              unpriced={row.unpricedSealedProductCount}
-            />
-          ))}
-        </div>
-      ) : (
-        <p className="muted">No sealed pricing gaps loaded.</p>
-      )}
-    </section>
-  );
-}
-
-function CatalogueMediaGapPanel({ status }: { status?: CatalogueStatusRecord | null }) {
-  return (
-    <section className="tool-panel">
-      <div className="panel-title-row">
-        <h2>Media & variants</h2>
-        <GalleryVerticalEnd size={18} />
-      </div>
-      {status ? (
-        <div className="gap-list">
-          <CoverageGapRow
-            coverage={status.cardImageCoveragePercent}
-            gapLabel="missing images"
-            label="Card images"
-            priced={status.cardImageCount}
-            total={status.cardCount}
-            unpriced={status.cardMissingImageCount}
-          />
-          <CoverageGapRow
-            coverage={status.sealedImageCoveragePercent}
-            gapLabel="missing images"
-            label="Sealed images"
-            priced={status.sealedImageCount}
-            total={status.sealedProductCount}
-            unpriced={status.sealedMissingImageCount}
-          />
-          <CoverageGapRow
-            coverage={status.cardVariantMetadataCoveragePercent}
-            gapLabel="without metadata"
-            label="Variant metadata"
-            priced={status.cardVariantMetadataCount}
-            total={status.cardCount}
-            unpriced={status.cardMissingVariantMetadataCount}
-          />
-        </div>
-      ) : (
-        <p className="muted">No media coverage rows loaded.</p>
-      )}
-    </section>
-  );
-}
-
-function PricingSourcePanel({ rows }: { rows: PricingBySourceSummary[] }) {
-  return (
-    <section className="tool-panel">
-      <div className="panel-title-row">
-        <h2>Price sources</h2>
-        <Database size={18} />
-      </div>
-      {rows.length ? (
-        <div className="gap-list">
-          {rows.slice(0, 8).map((row) => (
-            <article className="gap-row" key={`${row.source}-${row.itemType}`}>
-              <div className="gap-copy">
-                <strong>{priceSourceLabel(row.source)}</strong>
-                <span>{itemTypeLabel(row.itemType)}</span>
-              </div>
-              <div className="gap-metrics">
-                <span>{formatCount(row.priceSnapshotCount)} snapshots</span>
-                <span>{formatCount(row.pricedItemCount)} items</span>
-              </div>
-            </article>
-          ))}
-        </div>
-      ) : (
-        <p className="muted">No price source rows loaded.</p>
-      )}
-    </section>
-  );
-}
-
-function CoverageGapRow({
-  coverage,
-  gapLabel = "unpriced",
-  label,
-  priced,
-  total,
-  unpriced,
-}: {
-  coverage: number | null;
-  gapLabel?: string;
-  label: string;
-  priced: number;
-  total: number;
-  unpriced: number;
-}) {
-  return (
-    <article className="gap-row">
-      <div className="gap-copy">
-        <strong>{label}</strong>
-        <span>{formatCount(unpriced)} {gapLabel}</span>
-      </div>
-      <div className="gap-meter">
-        <ProgressBar value={coverage ?? 0} />
-        <span>
-          {formatPercent(coverage)} | {formatCount(priced)} / {formatCount(total)}
-        </span>
-      </div>
-    </article>
-  );
-}
 
 function SettingsScreen({
   appState,
@@ -8179,8 +8139,10 @@ function SettingsScreen({
   startPlusCheckout,
   updateNotificationPreferences,
   downloadImportTemplate,
+  previewCollectionCsv,
   importCollectionCsv,
   navigate,
+  showToast,
   setThemeId,
   themeId,
 }: ScreenContext) {
@@ -8198,14 +8160,7 @@ function SettingsScreen({
         }
       />
       <div className="settings-overview-grid">
-        <MetricPanel
-          title="Account"
-          rows={[
-            ["Name", viewer.name],
-            ["Email", viewer.email],
-            ["Role", viewer.role === "ADMIN" ? "Admin" : "User"],
-          ]}
-        />
+        <AccountPanel showToast={showToast} viewer={viewer} />
         <MetricPanel
           title="Plan"
           rows={[
@@ -8248,18 +8203,174 @@ function SettingsScreen({
             onExportCollection={exportCollectionCsv}
             onExportInsuranceReport={exportInsuranceReport}
             onDownloadTemplate={downloadImportTemplate}
+            onPreviewCollectionImport={previewCollectionCsv}
             onImportCollection={importCollectionCsv}
             onResetSampleData={resetSampleData}
+            samplePreviewEnabled={developmentSamplePreviewEnabled}
           />
           <MetricPanel
             title="Data source"
             rows={[
-              ["Mode", isLoadingData ? "Loading" : dataSource === "database" ? "Prisma database" : "Sample fallback"],
+              ["Mode", isLoadingData ? "Loading" : dataSource === "database" ? "Prisma database" : "Local sample preview"],
               ["Status", dataNotice || "Connected"],
             ]}
           />
           {canUseOperationsForUser(viewer.role) ? <OperationsEntryPanel onOpen={() => navigate("ops")} /> : null}
         </div>
+      </div>
+    </section>
+  );
+}
+
+function AccountPanel({
+  showToast,
+  viewer,
+}: {
+  showToast: (message: string, tone?: ToastTone) => void;
+  viewer: Viewer;
+}) {
+  const [isExporting, setIsExporting] = useState(false);
+  const [isSendingVerification, setIsSendingVerification] = useState(false);
+  const [isDeleteOpen, setIsDeleteOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteEmail, setDeleteEmail] = useState("");
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
+  const [deleteError, setDeleteError] = useState("");
+  const [showDeletePassword, setShowDeletePassword] = useState(false);
+  const confirmationPhrase = "DELETE MY ACCOUNT";
+  const canDelete =
+    deleteConfirmation === confirmationPhrase &&
+    deleteEmail.trim().toLowerCase() === viewer.email.trim().toLowerCase() &&
+    deletePassword.length >= 8;
+
+  async function exportAccount() {
+    if (isExporting) return;
+    setIsExporting(true);
+    try {
+      const response = await fetch("/api/account/export", { cache: "no-store" });
+      if (!response.ok) {
+        const body = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? `Account export failed with ${response.status}.`);
+      }
+      downloadBlob(`mintbinder-account-${dateStamp()}.json`, await response.blob());
+      showToast("Account JSON export downloaded.");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Account export could not be downloaded.", "error");
+    } finally {
+      setIsExporting(false);
+    }
+  }
+
+  async function resendVerification() {
+    if (isSendingVerification) return;
+    setIsSendingVerification(true);
+    try {
+      const response = await fetch("/api/auth/verification", { method: "POST" });
+      const body = (await response.json().catch(() => ({}))) as { error?: string; message?: string };
+      if (!response.ok) throw new Error(body.error ?? `Verification request failed with ${response.status}.`);
+      showToast(body.message ?? "Verification email sent.");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Verification email could not be sent.", "error");
+    } finally {
+      setIsSendingVerification(false);
+    }
+  }
+
+  async function deleteAccount(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!canDelete || isDeleting) return;
+    setIsDeleting(true);
+    setDeleteError("");
+    try {
+      const response = await fetch("/api/account", {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          confirmation: deleteConfirmation,
+          email: deleteEmail,
+          password: deletePassword,
+        }),
+      });
+      const body = (await response.json().catch(() => ({}))) as { error?: string; message?: string };
+      if (!response.ok) throw new Error(body.error ?? `Account deletion failed with ${response.status}.`);
+      window.localStorage.removeItem(binderStorageKey(viewer.email));
+      window.localStorage.removeItem(defaultBinderSettingsStorageKey(viewer.email));
+      window.localStorage.removeItem(binderMigrationStorageKey(viewer.email));
+      await signOut({ redirect: false });
+      window.location.assign("/");
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : "Account deletion failed. Nothing was deleted.");
+      setIsDeleting(false);
+    }
+  }
+
+  return (
+    <section className="tool-panel account-panel">
+      <div className="panel-title-row">
+        <h2>Account</h2>
+        <UserRound size={18} />
+      </div>
+      <MetricList
+        rows={[
+          ["Name", viewer.name],
+          ["Email", viewer.email],
+          ["Email status", viewer.emailVerified ? "Verified" : "Verification pending"],
+          ["Role", viewer.role === "ADMIN" ? "Admin" : "User"],
+        ]}
+      />
+      <div className="actions">
+        <button className="button" type="button" disabled={isExporting} onClick={() => void exportAccount()}>
+          <Download size={17} />
+          {isExporting ? "Preparing export" : "Export account JSON"}
+        </button>
+        {viewer.emailVerified ? (
+          <span className="account-verification verified" role="status">
+            <ShieldCheck size={17} />
+            Email verified
+          </span>
+        ) : (
+          <button className="button" type="button" disabled={isSendingVerification} onClick={() => void resendVerification()}>
+            <Mail size={17} />
+            {isSendingVerification ? "Sending" : "Resend verification email"}
+          </button>
+        )}
+        <Link className="button" href="/auth/forgot-password">
+          <Lock size={17} />
+          Reset password
+        </Link>
+      </div>
+      <div className="account-danger-zone">
+        <button className="button danger" type="button" onClick={() => setIsDeleteOpen((open) => !open)}>
+          <Trash2 size={17} />
+          {isDeleteOpen ? "Cancel account deletion" : "Delete account…"}
+        </button>
+        {isDeleteOpen ? (
+          <form className="form-stack account-delete-form" onSubmit={deleteAccount}>
+            <div className="account-delete-warning" role="alert">
+              <strong>This permanently deletes the account.</strong>
+              <span>Collection, wishlist, binder, alert, storage, and billing records cannot be recovered. Download the JSON export first.</span>
+            </div>
+            <Field label="Confirm account email">
+              <input autoComplete="email" inputMode="email" value={deleteEmail} onChange={(event) => setDeleteEmail(event.target.value)} required />
+            </Field>
+            <Field label="Current password">
+              <input autoComplete="current-password" type={showDeletePassword ? "text" : "password"} value={deletePassword} onChange={(event) => setDeletePassword(event.target.value)} minLength={8} required />
+            </Field>
+            <label className="check-row auth-password-visibility">
+              <input type="checkbox" checked={showDeletePassword} onChange={(event) => setShowDeletePassword(event.target.checked)} />
+              <span>Show password</span>
+            </label>
+            <Field label={`Type “${confirmationPhrase}”`}>
+              <input value={deleteConfirmation} onChange={(event) => setDeleteConfirmation(event.target.value)} autoComplete="off" required />
+            </Field>
+            {deleteError ? <p className="auth-error" role="alert">{deleteError}</p> : null}
+            <button className="button danger" type="submit" disabled={!canDelete || isDeleting}>
+              <Trash2 size={17} />
+              {isDeleting ? "Permanently deleting" : "Permanently delete account"}
+            </button>
+          </form>
+        ) : null}
       </div>
     </section>
   );
@@ -8486,6 +8597,10 @@ function NotificationPreferencesPanel({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (isSaving) {
+      return;
+    }
+
     setIsSaving(true);
     await onUpdate(draft);
     setIsSaving(false);
@@ -8665,29 +8780,67 @@ function DataPanel({
   onExportCollection,
   onExportInsuranceReport,
   onDownloadTemplate,
+  onPreviewCollectionImport,
   onImportCollection,
   onResetSampleData,
+  samplePreviewEnabled,
 }: {
   plus: boolean;
   onExportCollection: () => void;
   onExportInsuranceReport: () => Promise<void>;
   onDownloadTemplate: () => void;
-  onImportCollection: (file: File) => Promise<boolean>;
+  onPreviewCollectionImport: (file: File) => Promise<CollectionImportPreview | null>;
+  onImportCollection: (file: File) => Promise<CollectionImportResult>;
   onResetSampleData: () => void;
+  samplePreviewEnabled: boolean;
 }) {
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importPreview, setImportPreview] = useState<CollectionImportPreview | null>(null);
+  const [isPreviewing, setIsPreviewing] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
 
   async function handleImportChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = "";
 
     if (!file) {
       return;
     }
 
+    setImportFile(file);
+    setImportPreview(null);
+    setIsPreviewing(true);
+    const preview = await onPreviewCollectionImport(file);
+    setImportPreview(preview);
+    setIsPreviewing(false);
+
+    if (!preview) {
+      setImportFile(null);
+    }
+  }
+
+  async function confirmImport() {
+    if (!importFile || !importPreview?.importableCount || isImporting) {
+      return;
+    }
+
     setIsImporting(true);
-    await onImportCollection(file);
+    const result = await onImportCollection(importFile);
     setIsImporting(false);
-    event.currentTarget.value = "";
+
+    if (result.imported > 0 || result.failed === 0) {
+      setImportFile(null);
+      setImportPreview(null);
+    }
+  }
+
+  function cancelImport() {
+    if (isImporting) {
+      return;
+    }
+
+    setImportFile(null);
+    setImportPreview(null);
   }
 
   return (
@@ -8704,11 +8857,11 @@ function DataPanel({
         </button>
         <label className="button file-button">
           <Upload size={17} />
-          {isImporting ? "Importing" : "Import CSV"}
+          {isPreviewing ? "Checking CSV" : "Import CSV"}
           <input
             type="file"
             accept=".csv,text/csv"
-            disabled={isImporting}
+            disabled={isImporting || isPreviewing}
             onChange={handleImportChange}
           />
         </label>
@@ -8716,10 +8869,50 @@ function DataPanel({
           <Download size={17} />
           Template CSV
         </button>
-        <button className="button" onClick={onResetSampleData}>
-          Reset sample
-        </button>
+        {samplePreviewEnabled ? (
+          <button className="button" onClick={onResetSampleData}>
+            Load sample preview
+          </button>
+        ) : null}
       </div>
+      {isPreviewing ? <p className="muted" role="status">Validating the selected CSV…</p> : null}
+      {importFile && importPreview ? (
+        <section className="import-preview" aria-labelledby="import-preview-title">
+          <div className="import-preview-heading">
+            <div>
+              <p className="eyebrow">Ready to review</p>
+              <h3 id="import-preview-title">{importFile.name}</h3>
+            </div>
+            <span className={importPreview.skippedCount ? "tag amber" : "tag green"}>
+              {importPreview.importableCount} ready
+            </span>
+          </div>
+          <p className="muted">
+            {importPreview.totalCount} rows checked. {importPreview.skippedCount} will be skipped. No rows are saved until you confirm.
+          </p>
+          <div className="import-preview-rows" role="list" aria-label="CSV validation results">
+            {importPreview.rows.slice(0, 30).map((row) => (
+              <div className={row.errors.length ? "import-preview-row invalid" : "import-preview-row valid"} key={row.rowNumber} role="listitem">
+                <span>Row {row.rowNumber}</span>
+                <strong>{row.itemName || row.catalogueId || "Unknown item"}</strong>
+                <small>{row.errors.length ? row.errors.join(" ") : "Ready to import"}</small>
+              </div>
+            ))}
+          </div>
+          {importPreview.rows.length > 30 ? (
+            <p className="muted">Showing the first 30 of {importPreview.rows.length} rows.</p>
+          ) : null}
+          <div className="actions">
+            <button className="button primary" type="button" disabled={!importPreview.importableCount || isImporting} onClick={() => void confirmImport()}>
+              <Upload size={17} />
+              {isImporting ? "Importing" : `Import ${importPreview.importableCount} validated rows`}
+            </button>
+            <button className="button" type="button" disabled={isImporting} onClick={cancelImport}>
+              Cancel
+            </button>
+          </div>
+        </section>
+      ) : null}
     </section>
   );
 }
@@ -8738,6 +8931,10 @@ function StoragePanel({
 
   async function handleCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (isSaving) {
+      return;
+    }
+
     setIsSaving(true);
     const created = await onCreate(new FormData(event.currentTarget));
     setIsSaving(false);
@@ -8748,6 +8945,10 @@ function StoragePanel({
   }
 
   async function handleDelete(location: StorageLocation) {
+    if (deletingId) {
+      return;
+    }
+
     if (!window.confirm(`Delete ${location.name}? Items in this location will move to Unassigned.`)) {
       return;
     }
@@ -9016,11 +9217,15 @@ function OwnedItemCard({
 function CatalogueResult({
   item,
   onQuickAdd,
+  quickAddBusy = false,
+  quickAddDisabled = false,
   selected,
   onClick,
 }: {
   item: CatalogueItem;
   onQuickAdd: () => void;
+  quickAddBusy?: boolean;
+  quickAddDisabled?: boolean;
   selected: boolean;
   onClick: () => void;
 }) {
@@ -9052,8 +9257,14 @@ function CatalogueResult({
           ) : null}
         </div>
       </button>
-      <button className="icon-button quick-add-button" type="button" onClick={onQuickAdd} aria-label={`Quick add ${title}`}>
-        <Plus size={18} />
+      <button
+        className="icon-button quick-add-button"
+        type="button"
+        disabled={quickAddDisabled}
+        onClick={onQuickAdd}
+        aria-label={quickAddBusy ? `Adding ${title}` : `Quick add ${title}`}
+      >
+        {quickAddBusy ? <RefreshCw className="spin" size={18} /> : <Plus size={18} />}
       </button>
     </article>
   );
@@ -9102,6 +9313,7 @@ function CataloguePreview({ item, onImageOpen }: { item: CatalogueItem; onImageO
 
 function CardImageZoomModal({ item, onClose }: { item: CatalogueItem; onClose: () => void }) {
   const titleId = `card-image-zoom-${item.id}`;
+  const dialogRef = useDialogFocus<HTMLElement>(true);
   const marketValue = catalogueMarketValueMinor(item);
   const title = catalogueItemTitle(item);
   const setLabel = catalogueItemSetLabel(item);
@@ -9124,7 +9336,9 @@ function CardImageZoomModal({ item, onClose }: { item: CatalogueItem; onClose: (
         aria-modal="true"
         className="card-zoom-modal"
         onClick={(event) => event.stopPropagation()}
+        ref={dialogRef}
         role="dialog"
+        tabIndex={-1}
       >
         <button className="icon-button card-zoom-close" type="button" onClick={onClose} aria-label="Close card image">
           <X size={18} />
@@ -9179,12 +9393,20 @@ function VariantSelect({
   );
 }
 
-function SetProgressCard({ set, onClick }: { set: SetProgress; onClick: () => void }) {
+function SetProgressCard({
+  isActiveGoal = false,
+  set,
+  onClick,
+}: {
+  isActiveGoal?: boolean;
+  set: SetProgress;
+  onClick: () => void;
+}) {
   const done = completionPercent(set.owned, set.total);
   const title = setTitle(set);
 
   return (
-    <button className="set-card" onClick={onClick}>
+    <button className={isActiveGoal ? "set-card active-goal" : "set-card"} onClick={onClick}>
       <SetArtwork set={set} />
       <div className="set-card-header">
         <div>
@@ -9196,6 +9418,7 @@ function SetProgressCard({ set, onClick }: { set: SetProgress; onClick: () => vo
       {set.language && set.language !== "en" ? (
         <span className="tag blue">{set.languageLabel ?? set.language}</span>
       ) : null}
+      {isActiveGoal ? <span className="tag green"><Target size={13} /> Active goal</span> : null}
       <ProgressBar value={done} />
       <span>{set.owned} / {set.total} owned</span>
     </button>
@@ -9203,7 +9426,9 @@ function SetProgressCard({ set, onClick }: { set: SetProgress; onClick: () => vo
 }
 
 function SetArtwork({ set }: { set: SetProgress }) {
-  const image = set.logoImage ?? set.symbolImage;
+  const [failedImage, setFailedImage] = useState<string | undefined>();
+  const candidateImage = set.logoImage ?? set.symbolImage;
+  const image = candidateImage && candidateImage !== failedImage ? candidateImage : undefined;
   const title = setTitle(set);
 
   if (image) {
@@ -9215,7 +9440,8 @@ function SetArtwork({ set }: { set: SetProgress }) {
           alt={`${title} logo`}
           fill
           sizes="(min-width: 980px) 220px, 50vw"
-          unoptimized
+          unoptimized={!isOptimizableCatalogueImageUrl(image)}
+          onError={() => setFailedImage(image)}
         />
       </div>
     );
@@ -9557,7 +9783,14 @@ function PriceTrendPanel({
   overrideValueMinor?: number;
 }) {
   const [range, setRange] = useState<PriceHistoryRange>("30d");
-  const allHistory = item.priceHistory ?? [];
+  const [remoteHistoryByRange, setRemoteHistoryByRange] = useState<Record<string, DetailedPricePoint[]>>({});
+  const [historyLoadError, setHistoryLoadError] = useState("");
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const [historyRetryToken, setHistoryRetryToken] = useState(0);
+  const apiRange = priceHistoryApiRange(range);
+  const shouldLoadRemoteHistory = item.type === "sealed" || range === "3m" || range === "6m" || range === "1y" || range === "all";
+  const remoteHistory = remoteHistoryByRange[apiRange];
+  const allHistory: DetailedPricePoint[] = remoteHistory?.length ? remoteHistory : item.priceHistory ?? [];
   const preferredHistory = preferredPriceSeries(allHistory);
   const history = preferredHistory.length ? preferredHistory : allHistory;
   const visibleHistory = filterPriceHistoryByRange(history, range);
@@ -9573,6 +9806,56 @@ function PriceTrendPanel({
   const deltaPercent = delta !== null && first?.valueMinor
     ? (delta / first.valueMinor) * 100
     : null;
+  const sealedSources = item.type === "sealed" ? latestDetailedPointsBySource(allHistory) : [];
+
+  useEffect(() => {
+    setRange("30d");
+    setRemoteHistoryByRange({});
+    setHistoryLoadError("");
+  }, [item.id]);
+
+  useEffect(() => {
+    if (!shouldLoadRemoteHistory || remoteHistoryByRange[apiRange] || !isUuid(item.id)) {
+      return;
+    }
+
+    const controller = new AbortController();
+    setIsLoadingHistory(true);
+    setHistoryLoadError("");
+
+    void fetch(`/api/price-history?catalogueId=${encodeURIComponent(item.id)}&range=${apiRange}`, {
+      cache: "no-store",
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        const body = (await response.json().catch(() => ({}))) as {
+          error?: string;
+          points?: Array<{
+            bucket?: string;
+            confidenceScore?: number;
+            currency?: string;
+            observedAt?: string;
+            pointCount?: number;
+            priceMinor?: number;
+            sampleSize?: number | null;
+            source?: string;
+            variantLabel?: string | null;
+          }>;
+        };
+        if (!response.ok) throw new Error(body.error ?? `Price history failed with ${response.status}.`);
+        const points = (body.points ?? []).map(normalizeDetailedPricePoint).filter((point): point is DetailedPricePoint => Boolean(point));
+        setRemoteHistoryByRange((current) => ({ ...current, [apiRange]: points }));
+      })
+      .catch((error) => {
+        if (controller.signal.aborted) return;
+        setHistoryLoadError(error instanceof Error ? error.message : "Long-range history is unavailable.");
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setIsLoadingHistory(false);
+      });
+
+    return () => controller.abort();
+  }, [apiRange, historyRetryToken, item.id, remoteHistoryByRange, shouldLoadRemoteHistory]);
 
   return (
     <section className="tool-panel price-history-panel">
@@ -9609,6 +9892,43 @@ function PriceTrendPanel({
       ) : (
         <p className="muted">No price history yet.</p>
       )}
+      {isLoadingHistory ? <p className="muted" role="status">Loading {priceHistoryRangeLabel(range)} history…</p> : null}
+      {historyLoadError ? (
+        <div className="inline-error-state" role="alert">
+          <span>{historyLoadError}</span>
+          <button className="button small" type="button" onClick={() => setHistoryRetryToken((current) => current + 1)}>
+            <RefreshCw size={15} />
+            Retry
+          </button>
+        </div>
+      ) : null}
+      {item.type === "sealed" && sealedSources.length ? (
+        <section className="sealed-source-comparison" aria-label="Sealed price sources">
+          <div className="panel-title-row">
+            <h3>Source comparison</h3>
+            <span className="tag blue">{sealedSources.length} market{sealedSources.length === 1 ? "" : "s"}</span>
+          </div>
+          <div className="sealed-source-grid">
+            {sealedSources.map((point) => (
+              <article className="sealed-source-card" key={`${point.source}-${point.variantLabel ?? "all"}`}>
+                <div>
+                  <strong>{formatMoney(point.valueMinor)}</strong>
+                  <span className={marketConfidenceBadgeClass(point.confidence)}>{point.confidence}</span>
+                </div>
+                <h4>{priceSourceLabel(point.source)}</h4>
+                <dl>
+                  <div><dt>Market</dt><dd>{priceMarketForSource(point.source)}</dd></div>
+                  <div><dt>Observed</dt><dd>{formatEventDate(point.observedAt)}</dd></div>
+                  <div><dt>Variant</dt><dd>{point.variantLabel || "Sealed"}</dd></div>
+                  <div><dt>Sample</dt><dd>{point.sampleSize ?? "Not supplied"}</dd></div>
+                  <div><dt>Snapshots</dt><dd>{point.pointCount ?? 1}</dd></div>
+                  <div><dt>Currency</dt><dd>{point.currency ?? "GBP"}</dd></div>
+                </dl>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
       <MetricList
         rows={[
           ["Range", valueRange ? `${formatMoney(valueRange.low)} - ${formatMoney(valueRange.high)}` : "Unknown"],
@@ -9631,6 +9951,54 @@ const priceHistoryRanges: Array<{ days?: number; label: string; value: PriceHist
   { days: 365, label: "1y", value: "1y" },
   { label: "All", value: "all" },
 ];
+
+function priceHistoryApiRange(range: PriceHistoryRange) {
+  if (range === "3m") return "90d";
+  if (range === "6m") return "1y";
+  return range;
+}
+
+function normalizeDetailedPricePoint(value: {
+  bucket?: string;
+  confidenceScore?: number;
+  currency?: string;
+  observedAt?: string;
+  pointCount?: number;
+  priceMinor?: number;
+  sampleSize?: number | null;
+  source?: string;
+  variantLabel?: string | null;
+}): DetailedPricePoint | null {
+  const observedAt = value.observedAt ?? value.bucket;
+  const valueMinor = Number(value.priceMinor);
+  if (!observedAt || Number.isNaN(Date.parse(observedAt)) || !Number.isFinite(valueMinor) || valueMinor < 0) return null;
+
+  return {
+    bucket: value.bucket,
+    confidence: priceConfidenceFromScore(value.confidenceScore),
+    currency: value.currency,
+    observedAt,
+    pointCount: Number.isSafeInteger(value.pointCount) ? value.pointCount : undefined,
+    sampleSize: value.sampleSize ?? null,
+    source: value.source?.trim() || "unknown",
+    valueMinor: Math.round(valueMinor),
+    variantLabel: value.variantLabel?.trim() || undefined,
+  };
+}
+
+function latestDetailedPointsBySource(history: DetailedPricePoint[]) {
+  const latest = new Map<string, DetailedPricePoint>();
+  for (const point of history) {
+    const key = `${point.source}\u0000${point.variantLabel ?? ""}`;
+    const current = latest.get(key);
+    if (!current || Date.parse(point.observedAt) >= Date.parse(current.observedAt)) latest.set(key, point);
+  }
+  return [...latest.values()].sort((left, right) => right.valueMinor - left.valueMinor);
+}
+
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
 
 function PriceHistoryLineChart({
   history,
@@ -9708,10 +10076,103 @@ function priceHistoryRangeLabel(range: PriceHistoryRange) {
   return priceHistoryRanges.find((option) => option.value === range)?.label ?? "All";
 }
 
+function useDialogFocus<T extends HTMLElement>(active: boolean) {
+  const containerRef = useRef<T>(null);
+
+  useEffect(() => {
+    if (!active) {
+      return;
+    }
+
+    const container = containerRef.current;
+
+    if (!container) {
+      return;
+    }
+
+    const dialog = container;
+
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const focusableSelector = [
+      "a[href]",
+      "button:not([disabled])",
+      "input:not([disabled])",
+      "select:not([disabled])",
+      "textarea:not([disabled])",
+      "[tabindex]:not([tabindex='-1'])",
+    ].join(",");
+    const focusFirst = () => {
+      const first = dialog.querySelector<HTMLElement>(focusableSelector);
+      (first ?? dialog).focus();
+    };
+    const frame = window.requestAnimationFrame(focusFirst);
+
+    function keepFocusInside(event: KeyboardEvent) {
+      if (event.key !== "Tab") {
+        return;
+      }
+
+      const focusable = Array.from(dialog.querySelectorAll<HTMLElement>(focusableSelector))
+        .filter((element) => element.offsetParent !== null);
+
+      if (!focusable.length) {
+        event.preventDefault();
+        dialog.focus();
+        return;
+      }
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+
+    document.addEventListener("keydown", keepFocusInside);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      document.removeEventListener("keydown", keepFocusInside);
+
+      if (previousFocus?.isConnected) {
+        previousFocus.focus();
+      }
+    };
+  }, [active]);
+
+  return containerRef;
+}
+
+function useMediaQuery(query: string) {
+  const [matches, setMatches] = useState(false);
+
+  useEffect(() => {
+    const media = window.matchMedia(query);
+    const update = () => setMatches(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, [query]);
+
+  return matches;
+}
+
 function ProgressBar({ value }: { value: number }) {
+  const boundedValue = Math.max(0, Math.min(100, value));
+
   return (
-    <div className="progress">
-      <span style={{ width: `${value}%` }} />
+    <div
+      aria-valuemax={100}
+      aria-valuemin={0}
+      aria-valuenow={Math.round(boundedValue)}
+      className="progress"
+      role="progressbar"
+    >
+      <span style={{ width: `${boundedValue}%` }} />
     </div>
   );
 }
@@ -9733,7 +10194,7 @@ function CatalogueItemImage({ item }: { item: CatalogueItem }) {
         alt={catalogueItemTitle(item)}
         fill
         sizes="(min-width: 760px) 340px, 96px"
-        unoptimized
+        unoptimized={!isOptimizableCatalogueImageUrl(image)}
         onError={() => setFailedImage(image)}
       />
     );
@@ -10161,233 +10622,6 @@ function priceAlertTagClass(status: CollectionIntelligence["priceAlerts"][number
   return "amber";
 }
 
-function jobHeaders(secret: string): Record<string, string> {
-  const token = secret.trim();
-
-  return token ? { authorization: `Bearer ${token}` } : {};
-}
-
-function jobStatusClass(status: JobStatus) {
-  if (status === "succeeded") {
-    return "green";
-  }
-
-  if (status === "failed") {
-    return "red";
-  }
-
-  return "blue";
-}
-
-function jobTypeLabel(type: JobType) {
-  if (type === "catalogue_refresh") {
-    return "Catalogue";
-  }
-
-  if (type === "card_image_repair") {
-    return "Card images";
-  }
-
-  if (type === "pricing_refresh") {
-    return "Pricing";
-  }
-
-  if (type === "sealed_image_repair") {
-    return "Sealed images";
-  }
-
-  if (type === "sealed_pricing_refresh") {
-    return "Sealed pricing";
-  }
-
-  if (type === "variant_metadata_repair") {
-    return "Variants";
-  }
-
-  return "Price alerts";
-}
-
-function betaCheckTagClass(level: BetaLaunchCheck["level"]) {
-  if (level === "good") {
-    return "green";
-  }
-
-  if (level === "action") {
-    return "red";
-  }
-
-  return "amber";
-}
-
-function recommendationActionLabel(recommendation: CatalogueGapRecommendation) {
-  if (recommendation.type === "duplicate_review") {
-    return "Review";
-  }
-
-  if (recommendation.type === "catalogue_resume") {
-    return "Resume";
-  }
-
-  if (recommendation.type === "card_pricing") {
-    return "Run pricing";
-  }
-
-  if (recommendation.type === "sealed_pricing") {
-    return "Run sealed";
-  }
-
-  if (recommendation.type === "card_image_refresh") {
-    return "Repair cards";
-  }
-
-  if (recommendation.type === "sealed_image_refresh") {
-    return "Repair sealed";
-  }
-
-  if (recommendation.type === "variant_metadata_refresh") {
-    return "Repair variants";
-  }
-
-  return "";
-}
-
-function recommendationPriorityClass(priority: CatalogueGapRecommendation["priority"]) {
-  if (priority === "high") {
-    return "red";
-  }
-
-  if (priority === "medium") {
-    return "amber";
-  }
-
-  return "green";
-}
-
-function duplicateRiskClass(risk: DuplicateProviderReviewGroup["riskLevel"]) {
-  if (risk === "high") {
-    return "red";
-  }
-
-  if (risk === "medium") {
-    return "amber";
-  }
-
-  return "green";
-}
-
-function recommendationTypeLabel(type: CatalogueGapRecommendation["type"]) {
-  if (type === "card_image_refresh" || type === "sealed_image_refresh") {
-    return "Images";
-  }
-
-  if (type === "card_pricing") {
-    return "Cards";
-  }
-
-  if (type === "catalogue_resume") {
-    return "Catalogue";
-  }
-
-  if (type === "sealed_pricing") {
-    return "Sealed";
-  }
-
-  if (type === "variant_metadata_refresh") {
-    return "Variants";
-  }
-
-  if (type === "duplicate_review") {
-    return "Review";
-  }
-
-  return "Health";
-}
-
-function itemTypeLabel(type: string) {
-  if (type === "sealed_product") {
-    return "Sealed";
-  }
-
-  if (type === "card") {
-    return "Cards";
-  }
-
-  return startCase(type);
-}
-
-function productTypeLabel(type: string) {
-  return startCase(type);
-}
-
-function startCase(value: string) {
-  return value
-    .replace(/[-_]+/g, " ")
-    .replace(/\w\S*/g, (word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase());
-}
-
-function formatJsonPreview(value: unknown) {
-  return JSON.stringify(value, null, 2);
-}
-
-function formatCount(value?: number | null) {
-  return typeof value === "number" ? new Intl.NumberFormat("en-GB").format(value) : "-";
-}
-
-function formatPercent(value?: number | null) {
-  if (typeof value !== "number") {
-    return "Unknown";
-  }
-
-  return `${Number.isInteger(value) ? value.toFixed(0) : value.toFixed(1)}%`;
-}
-
-function parseJobApiResult(value: unknown): JobApiResult | null {
-  if (!value || typeof value !== "object") {
-    return null;
-  }
-
-  return value as JobApiResult;
-}
-
-function parseDuplicateProviderReview(value: unknown): DuplicateProviderReview | null {
-  if (!value || typeof value !== "object") {
-    return null;
-  }
-
-  const result = value as Partial<DuplicateProviderReview>;
-
-  if (result.report !== "duplicate_provider_review" || !Array.isArray(result.groups)) {
-    return null;
-  }
-
-  return result as DuplicateProviderReview;
-}
-
-function getResumeJob(result: JobApiResult | null): ResumeJob | null {
-  if (!result?.jobRun || result.complete || !result.nextPage || !result.pageSize) {
-    return null;
-  }
-
-  if (result.jobRun.jobType === "catalogue_refresh") {
-    return {
-      kind: "catalogue",
-      nextPage: result.nextPage,
-      pageSize: result.pageSize,
-      query: result.query,
-    };
-  }
-
-  if (result.jobRun.jobType === "pricing_refresh") {
-    return {
-      kind: "pricing",
-      nextPage: result.nextPage,
-      pageSize: result.pageSize,
-      query: result.query,
-    };
-  }
-
-  return null;
-}
 
 function compareNullableNumbers(
   left: number | null,
@@ -10721,7 +10955,10 @@ function importPayload(row: CollectionImportRow) {
     condition: row.condition,
     language: row.language,
     variant: row.variant,
+    gradeCompany: gradeCompanyFromLabel(row.grade),
+    gradeScore: gradeScoreFromLabel(row.grade),
     paid: row.paid,
+    purchaseDate: row.purchaseDate ?? "",
     overrideValue: row.overrideValue ?? "",
     valuationNote: row.valuationNote ?? "",
     location: row.location,
@@ -10741,7 +10978,7 @@ function defaultBinderSettingsStorageKey(email: string) {
   return `${defaultBinderSettingsStoragePrefix}:${owner}`;
 }
 
-function readStoredBinders(storageKey: string): CustomBinder[] {
+function readStoredBinders(storageKey: string): LegacyStoredBinder[] {
   try {
     const parsed = JSON.parse(window.localStorage.getItem(storageKey) ?? "[]");
 
@@ -10751,7 +10988,7 @@ function readStoredBinders(storageKey: string): CustomBinder[] {
 
     return parsed
       .map((value) => sanitizeStoredBinder(value))
-      .filter((binder): binder is CustomBinder => Boolean(binder));
+      .filter((binder): binder is LegacyStoredBinder => Boolean(binder));
   } catch {
     return [];
   }
@@ -10783,7 +11020,7 @@ function sanitizeStoredDefaultBinderSettings(value: unknown): DefaultBinderSetti
   };
 }
 
-function sanitizeStoredBinder(value: unknown): CustomBinder | null {
+function sanitizeStoredBinder(value: unknown): LegacyStoredBinder | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
   }
@@ -10803,6 +11040,346 @@ function sanitizeStoredBinder(value: unknown): CustomBinder | null {
   return id && name ? { artworkId, createdAt, id, interiorId, itemIds, name } : null;
 }
 
+function binderMigrationStorageKey(email: string) {
+  const owner = email.trim().toLowerCase() || "local";
+  return `${binderMigrationStoragePrefix}:${owner}`;
+}
+
+async function fetchServerBinders() {
+  const response = await fetch("/api/binders", { cache: "no-store" });
+  const body = (await response.json().catch(() => ({}))) as { binders?: unknown[]; error?: string };
+
+  if (!response.ok) {
+    throw new Error(body.error ?? `Binder load failed with ${response.status}.`);
+  }
+
+  return (body.binders ?? []).map(normalizeServerBinder).filter((binder): binder is CustomBinder => Boolean(binder));
+}
+
+async function createServerBinder(input: {
+  artworkId: BinderArtworkId;
+  description?: string;
+  isDefault?: boolean;
+  name: string;
+}) {
+  const response = await fetch("/api/binders", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      coverStyle: serverCoverStyleFromArtwork(input.artworkId),
+      description: input.description ?? "",
+      isDefault: input.isDefault,
+      name: input.name,
+    }),
+  });
+  const body = (await response.json().catch(() => ({}))) as { binder?: unknown; error?: string };
+
+  if (!response.ok || !body.binder) {
+    throw new Error(body.error ?? `Binder creation failed with ${response.status}.`);
+  }
+
+  const binder = normalizeServerBinder(body.binder);
+  if (!binder) throw new Error("Binder creation returned an invalid response.");
+  return binder;
+}
+
+async function replaceServerBinderLayout(binderId: string, pages: BinderPageRecord[]) {
+  const response = await fetch(`/api/binders/${encodeURIComponent(binderId)}/layout`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ pages: binderLayoutPayload(pages) }),
+  });
+  const body = (await response.json().catch(() => ({}))) as { binder?: unknown; error?: string };
+
+  if (!response.ok || !body.binder) {
+    throw new Error(body.error ?? `Binder layout save failed with ${response.status}.`);
+  }
+
+  const binder = normalizeServerBinder(body.binder);
+  if (!binder) throw new Error("Binder layout save returned an invalid response.");
+  return binder;
+}
+
+async function patchServerBinder(
+  binderId: string,
+  input: Partial<{
+    coverStyle: string;
+    description: string;
+    isDefault: boolean;
+    name: string;
+    visibility: BinderVisibility;
+  }>,
+) {
+  const response = await fetch(`/api/binders/${encodeURIComponent(binderId)}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = (await response.json().catch(() => ({}))) as { binder?: unknown; error?: string };
+
+  if (!response.ok || !body.binder) {
+    throw new Error(body.error ?? `Binder update failed with ${response.status}.`);
+  }
+
+  const binder = normalizeServerBinder(body.binder);
+  if (!binder) throw new Error("Binder update returned an invalid response.");
+  return binder;
+}
+
+async function deleteServerBinder(binderId: string) {
+  const response = await fetch(`/api/binders/${encodeURIComponent(binderId)}`, { method: "DELETE" });
+  const body = (await response.json().catch(() => ({}))) as { error?: string };
+  if (!response.ok) throw new Error(body.error ?? `Binder deletion failed with ${response.status}.`);
+}
+
+function cloneBinderPages(pages: BinderPageRecord[]) {
+  return pages.map((page) => ({ ...page, slots: page.slots.map((slot) => ({ ...slot })) }));
+}
+
+function placeBinderCopyInFirstBlank(
+  sourcePages: BinderPageRecord[],
+  collectionItemId: string,
+  copyIndex: number,
+) {
+  const pages = cloneBinderPages(sourcePages);
+
+  for (const page of pages) {
+    const slot = page.slots.find((candidate) => !candidate.collectionItemId);
+    if (slot) {
+      page.slots = page.slots.map((candidate) =>
+        candidate.position === slot.position
+          ? { collectionItemId, copyIndex, note: null, position: candidate.position }
+          : candidate,
+      );
+      return pages;
+    }
+  }
+
+  if (pages.length < 100) {
+    pages.push({
+      position: pages.length,
+      slots: Array.from({ length: 9 }, (_, position) =>
+        position === 0
+          ? { collectionItemId, copyIndex, note: null, position }
+          : emptyBinderSlot(position),
+      ),
+    });
+  }
+
+  return pages;
+}
+
+function swapBinderSlots(sourcePages: BinderPageRecord[], sourceIndex: number, targetIndex: number) {
+  const pages = cloneBinderPages(sourcePages);
+  const flat = pages.flatMap((page) => page.slots);
+  const source = flat[sourceIndex];
+  const target = flat[targetIndex];
+  if (!source || !target) return pages;
+  const sourceContent = { collectionItemId: source.collectionItemId, copyIndex: source.copyIndex, note: source.note };
+  const targetContent = { collectionItemId: target.collectionItemId, copyIndex: target.copyIndex, note: target.note };
+  Object.assign(source, targetContent);
+  Object.assign(target, sourceContent);
+  return pages;
+}
+
+async function migrateLegacyBinders({
+  binders,
+  collection,
+  legacyBinders,
+  legacyDefault,
+}: {
+  binders: CustomBinder[];
+  collection: CollectionItem[];
+  legacyBinders: LegacyStoredBinder[];
+  legacyDefault: DefaultBinderSettings;
+}) {
+  let nextBinders = [...binders];
+  let migratedCount = 0;
+  const collectionById = new Map(collection.map((item) => [item.id, item]));
+  const cardItems = collection;
+  const existingDefault = nextBinders.find((binder) => binder.isDefault);
+  const defaultMigrationMarker = "[Legacy source: default]";
+
+  if (!existingDefault && cardItems.length) {
+    const orderedItems = orderedCollectionItems(cardItems, legacyDefault.itemIds);
+    const created = await createServerBinder({
+      artworkId: legacyDefault.artworkId,
+      description: `Every active card lot, migrated from this device. ${defaultMigrationMarker}`,
+      isDefault: true,
+      name: uniqueBinderName("Full Card Collection", nextBinders),
+    });
+    const pages = buildBinderPages(orderedItems.map((item) => ({ collectionItemId: item.id, copyIndex: 1 })));
+    const saved = await replaceServerBinderLayout(created.id, pages);
+    nextBinders = [saved, ...nextBinders.map((binder) => ({ ...binder, isDefault: false }))];
+    migratedCount += 1;
+  } else if (existingDefault?.legacySource === "default") {
+    const orderedItems = orderedCollectionItems(cardItems, legacyDefault.itemIds);
+    const saved = await replaceServerBinderLayout(
+      existingDefault.id,
+      buildBinderPages(orderedItems.map((item) => ({ collectionItemId: item.id, copyIndex: 1 }))),
+    );
+    nextBinders = nextBinders.map((binder) => (binder.id === saved.id ? saved : binder));
+  }
+
+  for (const legacy of legacyBinders) {
+    const legacySource = legacy.id.slice(0, 120);
+    const migrationMarker = `[Legacy source: ${legacySource}]`;
+    const existingMigration = nextBinders.find((binder) => binder.legacySource === legacySource);
+    const created = existingMigration ?? await createServerBinder({
+      artworkId: legacy.artworkId,
+      description: `Migrated from this device. The original local copy remains available as a safety backup. ${migrationMarker}`,
+      name: uniqueBinderName(legacy.name.slice(0, 70), nextBinders),
+    });
+    const entries = legacy.itemIds
+      .filter((itemId) => collectionById.has(itemId))
+      .map((collectionItemId) => ({ collectionItemId, copyIndex: 1 }));
+    const saved = await replaceServerBinderLayout(created.id, buildBinderPages(entries));
+    nextBinders = existingMigration
+      ? nextBinders.map((binder) => (binder.id === saved.id ? saved : binder))
+      : [...nextBinders, saved];
+    if (!existingMigration) migratedCount += 1;
+  }
+
+  return { binders: nextBinders, complete: true, migratedCount };
+}
+
+function normalizeServerBinder(value: unknown): CustomBinder | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const source = value as Record<string, unknown>;
+  const id = typeof source.id === "string" ? source.id : "";
+  const name = typeof source.name === "string" ? source.name : "";
+  if (!id || !name) return null;
+  const coverStyle = typeof source.coverStyle === "string" ? source.coverStyle : "forest";
+  const rawDescription = typeof source.description === "string" ? source.description : "";
+  const legacySourceMatch = rawDescription.match(/\s*\[Legacy source: ([^\]]+)]\s*$/);
+  const pages = Array.isArray(source.pages)
+    ? source.pages.map(normalizeServerBinderPage).filter((page): page is BinderPageRecord => Boolean(page))
+    : [];
+
+  return {
+    artworkId: artworkFromServerCoverStyle(coverStyle),
+    coverStyle,
+    createdAt: typeof source.createdAt === "string" ? source.createdAt : new Date().toISOString(),
+    description: rawDescription.replace(/\s*\[Legacy source: [^\]]+]\s*$/, "").trim(),
+    id,
+    interiorId: "classic",
+    isDefault: source.isDefault === true,
+    legacySource: legacySourceMatch?.[1],
+    name,
+    pages: pages.length ? pages : buildBinderPages([]),
+    shareSlug: typeof source.shareSlug === "string" && source.shareSlug ? source.shareSlug : undefined,
+    updatedAt: typeof source.updatedAt === "string" ? source.updatedAt : new Date().toISOString(),
+    visibility: String(source.visibility).toLowerCase() === "unlisted" ? "unlisted" : "private",
+  };
+}
+
+function normalizeServerBinderPage(value: unknown): BinderPageRecord | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const source = value as Record<string, unknown>;
+  const position = Number(source.position);
+  if (!Number.isSafeInteger(position) || position < 0) return null;
+  const slots = Array.isArray(source.slots)
+    ? source.slots.map(normalizeServerBinderSlot).filter((slot): slot is BinderSlotRecord => Boolean(slot))
+    : [];
+
+  return {
+    id: typeof source.id === "string" ? source.id : undefined,
+    position,
+    slots: Array.from({ length: 9 }, (_, slotPosition) =>
+      slots.find((slot) => slot.position === slotPosition) ?? emptyBinderSlot(slotPosition),
+    ),
+  };
+}
+
+function normalizeServerBinderSlot(value: unknown): BinderSlotRecord | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const source = value as Record<string, unknown>;
+  const position = Number(source.position);
+  if (!Number.isSafeInteger(position) || position < 0 || position > 8) return null;
+  const collectionItemId = typeof source.collectionItemId === "string" ? source.collectionItemId : null;
+  const copyIndex = collectionItemId && Number.isSafeInteger(Number(source.copyIndex)) ? Number(source.copyIndex) : null;
+
+  return {
+    collectionItemId,
+    copyIndex,
+    id: typeof source.id === "string" ? source.id : undefined,
+    note: typeof source.note === "string" ? source.note : null,
+    position,
+  };
+}
+
+function emptyBinderSlot(position: number): BinderSlotRecord {
+  return { collectionItemId: null, copyIndex: null, note: null, position };
+}
+
+function binderCopyCounts(pages: BinderPageRecord[]) {
+  return pages.flatMap((page) => page.slots).reduce<Record<string, number>>((counts, slot) => {
+    if (slot.collectionItemId) {
+      counts[slot.collectionItemId] = (counts[slot.collectionItemId] ?? 0) + 1;
+    }
+    return counts;
+  }, {});
+}
+
+function buildBinderPages(entries: Array<{ collectionItemId: string; copyIndex: number }>, minimumPages = 2) {
+  const pageCount = Math.min(100, Math.max(minimumPages, Math.ceil(entries.length / 9), 1));
+  return Array.from({ length: pageCount }, (_, pagePosition): BinderPageRecord => ({
+    position: pagePosition,
+    slots: Array.from({ length: 9 }, (_entry, slotPosition) => {
+      const entry = entries[pagePosition * 9 + slotPosition];
+      return entry
+        ? { ...entry, note: null, position: slotPosition }
+        : emptyBinderSlot(slotPosition);
+    }),
+  }));
+}
+
+function binderLayoutPayload(pages: BinderPageRecord[]) {
+  return [...pages]
+    .sort((left, right) => left.position - right.position)
+    .map((page, pagePosition) => ({
+      position: pagePosition,
+      slots: Array.from({ length: 9 }, (_, slotPosition) => {
+        const slot = page.slots.find((candidate) => candidate.position === slotPosition) ?? emptyBinderSlot(slotPosition);
+        return {
+          collectionItemId: slot.collectionItemId,
+          copyIndex: slot.collectionItemId ? slot.copyIndex ?? 1 : null,
+          note: slot.note ?? null,
+          position: slotPosition,
+        };
+      }),
+    }));
+}
+
+function uniqueBinderName(preferred: string, binders: CustomBinder[]) {
+  const names = new Set(binders.map((binder) => binder.name.trim().toLowerCase()));
+  if (!names.has(preferred.trim().toLowerCase())) return preferred;
+  let suffix = 2;
+  while (names.has(`${preferred} ${suffix}`.toLowerCase())) suffix += 1;
+  return `${preferred} ${suffix}`;
+}
+
+function serverCoverStyleFromArtwork(artworkId: BinderArtworkId) {
+  return ({
+    mint: "forest",
+    vault: "midnight",
+    sunburst: "sunset",
+    ocean: "sapphire",
+    rose: "oxblood",
+    midnight: "midnight",
+  } satisfies Record<BinderArtworkId, string>)[artworkId];
+}
+
+function artworkFromServerCoverStyle(coverStyle: string): BinderArtworkId {
+  const normalized = coverStyle.trim().toLowerCase();
+  if (normalized === "sapphire") return "ocean";
+  if (normalized === "sunset") return "sunburst";
+  if (normalized === "oxblood") return "rose";
+  if (normalized === "midnight") return "midnight";
+  if (normalized === "ivory") return "vault";
+  return "mint";
+}
+
 function isBinderArtworkId(value: unknown): value is BinderArtworkId {
   return typeof value === "string" && binderArtworkOptions.some((artwork) => artwork.id === value);
 }
@@ -10814,22 +11391,31 @@ function isBinderInteriorId(value: unknown): value is BinderInteriorId {
 function binderSummaries(
   collection: CollectionItem[],
   customBinders: CustomBinder[],
-  defaultBinderSettings: DefaultBinderSettings,
 ): BinderSummary[] {
   const collectionById = new Map(collection.map((item) => [item.id, item]));
-  const orderedDefaultItems = orderedCollectionItems(collection, defaultBinderSettings.itemIds);
+  return customBinders.map((binder) => {
+    const pages = [...binder.pages].sort((left, right) => left.position - right.position);
+    const slots = pages.flatMap((page) =>
+      page.slots
+        .slice()
+        .sort((left, right) => left.position - right.position)
+        .map((slot) => ({ ...slot, item: slot.collectionItemId ? collectionById.get(slot.collectionItemId) : undefined })),
+    );
 
-  return [
-    defaultBinderSummary(orderedDefaultItems, defaultBinderSettings),
-    ...customBinders.map((binder) => ({
+    return {
       artworkId: binder.artworkId,
-      description: `${binder.itemIds.length} saved card lot${binder.itemIds.length === 1 ? "" : "s"}.`,
+      description: binder.description || `${slots.filter((slot) => slot.item).length} filled pocket${slots.filter((slot) => slot.item).length === 1 ? "" : "s"}.`,
       id: binder.id,
       interiorId: isBinderInteriorId(binder.interiorId) ? binder.interiorId : "classic",
-      items: binder.itemIds.map((itemId) => collectionById.get(itemId)).filter((item): item is CollectionItem => Boolean(item)),
+      isDefault: binder.isDefault,
+      items: slots.map((slot) => slot.item).filter((item): item is CollectionItem => Boolean(item)),
       name: binder.name,
-    })),
-  ];
+      pages,
+      shareSlug: binder.shareSlug,
+      slots,
+      visibility: binder.visibility,
+    };
+  });
 }
 
 function orderedCollectionItems(collection: CollectionItem[], preferredItemIds: string[]) {
@@ -10855,37 +11441,11 @@ function defaultBinderSummary(
     isDefault: true,
     items: collection,
     name: "Full Card Collection",
+    pages: buildBinderPages(collection.map((item) => ({ collectionItemId: item.id, copyIndex: 1 }))),
+    slots: buildBinderPages(collection.map((item) => ({ collectionItemId: item.id, copyIndex: 1 })))
+      .flatMap((page) => page.slots.map((slot) => ({ ...slot, item: slot.collectionItemId ? collection.find((item) => item.id === slot.collectionItemId) : undefined }))),
+    visibility: "private",
   };
-}
-
-function moveBinderItemToSlot(
-  itemIds: string[],
-  sourceItemId: string,
-  targetSlotIndex: number,
-  visibleItemIds: Set<string>,
-) {
-  const visibleIds = itemIds.filter((itemId) => visibleItemIds.has(itemId));
-  const sourceIndex = visibleIds.indexOf(sourceItemId);
-
-  if (sourceIndex === -1) {
-    return itemIds;
-  }
-
-  const targetItemId = visibleIds[targetSlotIndex];
-
-  if (targetItemId && targetItemId !== sourceItemId) {
-    const targetIndex = visibleIds.indexOf(targetItemId);
-    const swappedIds = [...visibleIds];
-    swappedIds[sourceIndex] = targetItemId;
-    swappedIds[targetIndex] = sourceItemId;
-    return swappedIds;
-  }
-
-  const movedIds = visibleIds.filter((itemId) => itemId !== sourceItemId);
-  const boundedTargetIndex = Math.min(Math.max(targetSlotIndex, 0), movedIds.length);
-  movedIds.splice(boundedTargetIndex, 0, sourceItemId);
-
-  return movedIds;
 }
 
 function binderStageStyle(artworkId: BinderArtworkId, interiorId: BinderInteriorId): CSSProperties {
@@ -11045,7 +11605,10 @@ function payloadFromCollectionItem(item: CollectionItem) {
     condition: item.condition,
     language: item.language,
     variant: item.variant,
+    gradeCompany: gradeCompanyFromLabel(item.grade),
+    gradeScore: gradeScoreFromLabel(item.grade),
     paid: moneyInputValue(item.purchasePriceMinor),
+    purchaseDate: item.purchaseDate ?? "",
     overrideValue: moneyInputValue(item.overrideValueMinor),
     valuationNote: item.valuationNote ?? "",
     location: item.location,

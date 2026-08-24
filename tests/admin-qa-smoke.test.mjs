@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   adminFailures,
@@ -9,6 +10,15 @@ import {
   exchangeRateStatus,
   jobRunWarnings,
 } from "../scripts/admin-qa-smoke.mjs";
+
+test("admin QA sealed catalogue metrics exclude tenant-private products", async () => {
+  const source = await readFile(new URL("../scripts/admin-qa-smoke.mjs", import.meta.url), "utf8");
+  assert.match(source, /sealedProduct\.count\(\{ where: \{ visibility: "GLOBAL" \} \}\)/);
+  assert.equal(
+    (source.match(/visibility = 'global'::catalogue_visibility/g) ?? []).length >= 3,
+    true,
+  );
+});
 
 test("flags missing admin setup as launch-blocking", () => {
   assert.deepEqual(adminFailures("missing@example.com", null), [

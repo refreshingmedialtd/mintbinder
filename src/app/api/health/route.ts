@@ -1,6 +1,4 @@
 import { NextResponse } from "next/server";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { prisma } from "@/lib/db/prisma";
 
 export const dynamic = "force-dynamic";
@@ -33,7 +31,7 @@ export async function GET() {
         },
       },
     );
-  } catch (error) {
+  } catch {
     return NextResponse.json(
       {
         checks: {
@@ -42,7 +40,7 @@ export async function GET() {
         },
         build: buildInfo(),
         durationMs: Date.now() - startedAt,
-        error: error instanceof Error ? error.message : "Health check failed.",
+        error: "Database health check failed.",
         ok: false,
         service: "mintbinder",
         status: "degraded",
@@ -60,7 +58,7 @@ export async function GET() {
 
 function environmentChecks() {
   return {
-    authSecretConfigured: Boolean(process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET || process.env.JOB_SECRET),
+    authSecretConfigured: Boolean(process.env.AUTH_SECRET),
     authTrustHost: process.env.AUTH_TRUST_HOST === "true",
     authUrlConfigured: Boolean(process.env.AUTH_URL || process.env.NEXTAUTH_URL),
     nextPublicAppUrlConfigured: Boolean(process.env.NEXT_PUBLIC_APP_URL),
@@ -68,22 +66,14 @@ function environmentChecks() {
 }
 
 function buildInfo() {
-  const fallback = {
-    branch: process.env.MINTBINDER_BRANCH || "unknown",
-    commit: process.env.MINTBINDER_COMMIT || "unknown",
-    deployScriptVersion: process.env.MINTBINDER_DEPLOY_SCRIPT_VERSION || "unknown",
+  return {
+    branch: process.env.MINTBINDER_RUNTIME_BRANCH || "unknown",
+    commit: process.env.MINTBINDER_RUNTIME_COMMIT || "unknown",
+    deployScriptVersion: process.env.MINTBINDER_RUNTIME_DEPLOY_SCRIPT_VERSION || "unknown",
+    // app.js derives this from the directory actually passed to Next, after
+    // matching root and release-local build metadata.
+    distDir: process.env.MINTBINDER_RUNTIME_DIST_DIR || "unknown",
+    generatedAt: process.env.MINTBINDER_RUNTIME_GENERATED_AT || undefined,
+    nodeVersion: process.env.MINTBINDER_RUNTIME_NODE_VERSION || undefined,
   };
-
-  try {
-    const file = JSON.parse(readFileSync(join(process.cwd(), ".mintbinder-build.json"), "utf8")) as Partial<
-      typeof fallback & { generatedAt: string; nodeVersion: string }
-    >;
-
-    return {
-      ...fallback,
-      ...file,
-    };
-  } catch {
-    return fallback;
-  }
 }

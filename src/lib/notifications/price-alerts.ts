@@ -1,4 +1,3 @@
-import { SubscriptionPlan, SubscriptionStatus } from "@prisma/client";
 import { getAppData } from "@/lib/db/app-data";
 import { prisma } from "@/lib/db/prisma";
 import { formatMoney } from "@/lib/format";
@@ -8,16 +7,47 @@ import {
   filterPriceAlertsForPreferences,
   shouldSendDigestForFrequency,
 } from "@/lib/notifications/preference-filter";
+import { effectivePlusAccessWhere } from "@/lib/billing/effective-access";
+import { loadRecipientDataFailClosed } from "@/lib/notifications/fail-closed-recipient";
+import { deliverNotificationOnce } from "@/lib/notifications/delivery-guard";
+import {
+  claimPriceAlertDelivery,
+  markNotificationDeliveryAmbiguous,
+  markNotificationDeliverySent,
+  notificationRecipientToken,
+} from "@/lib/notifications/delivery-store";
 
 type PriceAlertDigestResult = {
   alerts: number;
-  deliveryEmail?: string;
-  emailId?: string;
-  email: string;
-  status: "sent" | "dry_run" | "skipped" | "failed" | "filtered" | "not_scheduled" | "preferences_off";
-  userId: string;
+  recipientToken: string;
+  status: "sent" | "duplicate" | "dry_run" | "skipped" | "failed" | "filtered" | "not_scheduled" | "preferences_off";
   error?: string;
 };
+
+type PriceAlertDigestRunResult = {
+  dryRun: boolean;
+  emailConfigured: boolean;
+  results: PriceAlertDigestResult[];
+  users: number;
+};
+
+export class PriceAlertDigestIncompleteError extends Error {
+  resultPayload: PriceAlertDigestRunResult;
+
+  constructor(result: PriceAlertDigestRunResult) {
+    const failures = result.results.filter((entry) => entry.status === "failed").length;
+    super(`Price-alert digest needs attention: ${failures} recipient delivery or data failure(s).`);
+    this.name = "PriceAlertDigestIncompleteError";
+    this.resultPayload = result;
+  }
+}
+
+export function assertPriceAlertDigestHealthy(result: PriceAlertDigestRunResult) {
+  if (result.results.some((entry) => entry.status === "failed")) {
+    throw new PriceAlertDigestIncompleteError(result);
+  }
+  return result;
+}
 
 export async function sendPriceAlertDigests({
   dryRun = false,
@@ -32,10 +62,10 @@ export async function sendPriceAlertDigests({
   const users = await prisma.user.findMany({
     where: {
       email: { not: "" },
+      emailVerifiedAt: { not: null },
       subscriptions: {
         some: {
-          plan: { in: [SubscriptionPlan.PLUS_MONTHLY, SubscriptionPlan.PLUS_YEARLY] },
-          status: { in: [SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING] },
+          ...effectivePlusAccessWhere(now),
         },
       },
     },
@@ -51,92 +81,124 @@ export async function sendPriceAlertDigests({
 
   for (const user of users) {
     const deliveryEmail = testRecipientEmail ?? user.email;
-    const data = await getAppData(user.id);
-    const intelligence = buildCollectionIntelligence({
-      catalogueById: new Map(data.catalogue.map((item) => [item.id, item])),
-      collection: data.collection,
-      events: data.events,
-      sets: data.sets,
-      storageLocations: data.storageLocations,
-      wishlist: data.wishlist,
+    const periodKey = dateStamp(now);
+    const recipientToken = notificationRecipientToken({
+      periodKey,
+      recipient: deliveryEmail,
+      userId: user.id,
     });
-    const alerts = filterPriceAlertsForPreferences(
-      intelligence.priceAlerts,
-      data.notificationPreferences,
-    );
+    const processed = await loadRecipientDataFailClosed({
+      load: () =>
+        getAppData(user.id, {
+          catalogueScope: "referenced",
+          fallback: "throw",
+        }),
+      process: async (data) => {
+        const intelligence = buildCollectionIntelligence({
+          catalogueById: new Map(data.catalogue.map((item) => [item.id, item])),
+          collection: data.collection,
+          events: data.events,
+          sets: data.sets,
+          storageLocations: data.storageLocations,
+          wishlist: data.wishlist,
+        });
+        const alerts = filterPriceAlertsForPreferences(
+          intelligence.priceAlerts,
+          data.notificationPreferences,
+        );
 
-    if (data.notificationPreferences.digestFrequency === "Off") {
+        if (data.notificationPreferences.digestFrequency === "Off") {
+          results.push({
+            alerts: 0,
+            recipientToken,
+            status: "preferences_off",
+          });
+          return;
+        }
+
+        if (!shouldSendDigestForFrequency(data.notificationPreferences.digestFrequency, now)) {
+          results.push({
+            alerts: alerts.length,
+            recipientToken,
+            status: "not_scheduled",
+          });
+          return;
+        }
+
+        if (!alerts.length) {
+          results.push({
+            alerts: intelligence.priceAlerts.length,
+            recipientToken,
+            status: intelligence.priceAlerts.length ? "filtered" : "skipped",
+          });
+          return;
+        }
+
+        if (dryRun || !emailReady) {
+          results.push({
+            alerts: alerts.length,
+            recipientToken,
+            status: "dry_run",
+          });
+          return;
+        }
+
+        const email = buildPriceAlertDigestEmail({
+          alerts,
+          ownerName: user.displayName ?? "Collector",
+        });
+        let deliveryId: string | undefined;
+        const delivery = await deliverNotificationOnce({
+          claim: async () => {
+            const claimed = await claimPriceAlertDelivery({
+              periodKey,
+              recipient: deliveryEmail,
+              userId: user.id,
+            });
+            deliveryId = claimed?.id;
+            return Boolean(claimed);
+          },
+          markAmbiguous: async (error) => {
+            if (deliveryId) await markNotificationDeliveryAmbiguous(deliveryId, error);
+          },
+          markSent: async (sent) => {
+            if (!deliveryId) throw new Error("Notification delivery claim was lost.");
+            await markNotificationDeliverySent(deliveryId, sent.id);
+          },
+          send: () => sendEmail({
+            ...email,
+            idempotencyKey: `price-alerts-${recipientToken}-${periodKey}`,
+            to: deliveryEmail,
+          }),
+        });
+
+        if (delivery.status === "duplicate") {
+          results.push({ alerts: alerts.length, recipientToken, status: "duplicate" });
+          return;
+        }
+        if (delivery.status === "ambiguous") {
+          console.error(`Price-alert delivery ${recipientToken} has an ambiguous outcome.`, delivery.error);
+          results.push({
+            alerts: alerts.length,
+            recipientToken,
+            error: "The email provider outcome was ambiguous; automatic retry is suppressed.",
+            status: "failed",
+          });
+          return;
+        }
+
+        results.push({ alerts: alerts.length, recipientToken, status: "sent" });
+      },
+    });
+
+    if (!processed.ok) {
       results.push({
         alerts: 0,
-        deliveryEmail: testRecipientEmail,
-        email: user.email,
-        status: "preferences_off",
-        userId: user.id,
-      });
-      continue;
-    }
-
-    if (!shouldSendDigestForFrequency(data.notificationPreferences.digestFrequency, now)) {
-      results.push({
-        alerts: alerts.length,
-        deliveryEmail: testRecipientEmail,
-        email: user.email,
-        status: "not_scheduled",
-        userId: user.id,
-      });
-      continue;
-    }
-
-    if (!alerts.length) {
-      results.push({
-        alerts: intelligence.priceAlerts.length,
-        deliveryEmail: testRecipientEmail,
-        email: user.email,
-        status: intelligence.priceAlerts.length ? "filtered" : "skipped",
-        userId: user.id,
-      });
-      continue;
-    }
-
-    if (dryRun || !emailReady) {
-      results.push({
-        alerts: alerts.length,
-        deliveryEmail: testRecipientEmail,
-        email: user.email,
-        status: "dry_run",
-        userId: user.id,
-      });
-      continue;
-    }
-
-    try {
-      const email = buildPriceAlertDigestEmail({
-        alerts,
-        ownerName: user.displayName ?? "Collector",
-      });
-      const sent = await sendEmail({
-        ...email,
-        idempotencyKey: `price-alerts-${user.id}-${dateStamp()}`,
-        to: deliveryEmail,
-      });
-
-      results.push({
-        alerts: alerts.length,
-        deliveryEmail: testRecipientEmail,
-        email: user.email,
-        emailId: sent.id,
-        status: "sent",
-        userId: user.id,
-      });
-    } catch (error) {
-      results.push({
-        alerts: alerts.length,
-        deliveryEmail: testRecipientEmail,
-        email: user.email,
-        error: error instanceof Error ? error.message : "Unknown email error.",
+        recipientToken,
+        error: "Recipient data could not be loaded or processed safely.",
         status: "failed",
-        userId: user.id,
       });
+      console.error(`Price-alert recipient ${recipientToken} failed before delivery.`, processed.error);
     }
   }
 

@@ -147,7 +147,8 @@ async function catalogueCounts() {
         (
           SELECT COUNT(*)::int
           FROM sealed_products
-          WHERE NULLIF(BTRIM(COALESCE(image_url, '')), '') IS NOT NULL
+          WHERE visibility = 'global'::catalogue_visibility
+            AND NULLIF(BTRIM(COALESCE(image_url, '')), '') IS NOT NULL
         ) AS "sealedImageCount"
     `,
     prisma.$queryRaw<PricingCoverageRow[]>`
@@ -237,6 +238,7 @@ async function catalogueCounts() {
       LEFT JOIN price_snapshots ps
         ON ps.sealed_product_id = sp.id
         AND ps.item_type = 'sealed_product'
+      WHERE sp.visibility = 'global'::catalogue_visibility
       GROUP BY sp.product_type
       ORDER BY (COUNT(DISTINCT sp.id) - COUNT(DISTINCT ps.sealed_product_id)) DESC, sp.product_type
     `,
@@ -244,11 +246,13 @@ async function catalogueCounts() {
       SELECT
         COUNT(DISTINCT sealed_product_id)::int AS "pricedSealedProductCount",
         COUNT(id)::int AS "sealedPriceSnapshotCount"
-      FROM price_snapshots
-      WHERE sealed_product_id IS NOT NULL
+      FROM price_snapshots ps
+      JOIN sealed_products sp ON sp.id = ps.sealed_product_id
+      WHERE ps.sealed_product_id IS NOT NULL
+        AND sp.visibility = 'global'::catalogue_visibility
     `,
     prisma.priceSnapshot.count(),
-    prisma.sealedProduct.count(),
+    prisma.sealedProduct.count({ where: { visibility: "GLOBAL" } }),
     prisma.cardSet.count(),
   ]);
 

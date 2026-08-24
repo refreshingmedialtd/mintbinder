@@ -1,4 +1,7 @@
 export type TcgcsvCardPricingOptions = {
+  apiRetryAttempts?: number;
+  apiRetryWaitMs?: number;
+  apiTimeoutMs?: number;
   categoryId?: number;
   fetchImpl?: typeof fetch;
   groupIds?: string[] | string;

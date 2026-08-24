@@ -4,6 +4,7 @@ import {
   PrismaClient,
 } from "@prisma/client";
 import { booleanSetting, positiveInteger } from "./catalogue-batch-options.mjs";
+import { fetchJsonWithRetry } from "./provider-fetch.mjs";
 import {
   extendedDataValue,
   isSealedProduct,
@@ -43,6 +44,9 @@ export function cardPricingOptionsFromEnv(env = process.env) {
   const categoryId = positiveInteger(env.TCGCSV_CARD_CATEGORY_ID, categoryIdForLanguage(language));
 
   return {
+    apiRetryAttempts: positiveInteger(env.TCGCSV_API_RETRY_ATTEMPTS, 3),
+    apiRetryWaitMs: nonNegativeInteger(env.TCGCSV_API_RETRY_WAIT_MS, 500),
+    apiTimeoutMs: positiveInteger(env.TCGCSV_API_TIMEOUT_MS, 10_000),
     categoryId,
     groupIds: idList(env.TCGCSV_CARD_GROUP_IDS),
     groupLimit: positiveInteger(env.TCGCSV_CARD_GROUP_LIMIT, Number.POSITIVE_INFINITY),
@@ -58,6 +62,9 @@ export function cardPricingOptionsFromEnv(env = process.env) {
 
 export function japanCardPricingOptionsFromEnv(env = process.env) {
   return {
+    apiRetryAttempts: positiveInteger(env.TCGCSV_API_RETRY_ATTEMPTS, 3),
+    apiRetryWaitMs: nonNegativeInteger(env.TCGCSV_API_RETRY_WAIT_MS, 500),
+    apiTimeoutMs: positiveInteger(env.TCGCSV_API_TIMEOUT_MS, 10_000),
     categoryId: positiveInteger(env.TCGCSV_JAPAN_CARD_CATEGORY_ID, tcgcsvPokemonJapanCategoryId),
     groupIds: idList(env.TCGCSV_JAPAN_CARD_GROUP_IDS),
     groupLimit: positiveInteger(env.TCGCSV_JAPAN_CARD_GROUP_LIMIT, 1),
@@ -79,6 +86,11 @@ export async function syncTcgcsvCardPrices(options = {}) {
   const prisma = options.prisma ?? new PrismaClient();
   const shouldDisconnect = !options.prisma;
   const fetchImpl = options.fetchImpl ?? fetch;
+  const providerFetchOptions = {
+    retryAttempts: positiveInteger(options.apiRetryAttempts, 3),
+    retryWaitMs: nonNegativeInteger(options.apiRetryWaitMs, 500),
+    timeoutMs: positiveInteger(options.apiTimeoutMs, 10_000),
+  };
   const categoryId = positiveInteger(options.categoryId, tcgcsvPokemonCategoryId);
   const groupIds = idSet(options.groupIds);
   const groupLimit = positiveInteger(options.groupLimit, Number.POSITIVE_INFINITY);
@@ -98,7 +110,7 @@ export async function syncTcgcsvCardPrices(options = {}) {
 
   try {
     const [groups, sets] = await Promise.all([
-      fetchTcgcsv(`https://tcgcsv.com/tcgplayer/${categoryId}/groups`, fetchImpl),
+      fetchTcgcsv(`https://tcgcsv.com/tcgplayer/${categoryId}/groups`, fetchImpl, providerFetchOptions),
       prisma.cardSet.findMany({
         select: {
           id: true,
@@ -165,6 +177,7 @@ export async function syncTcgcsvCardPrices(options = {}) {
         match,
         priceOnlyUnpriced,
         prisma,
+        providerFetchOptions,
         categoryId,
         language,
         source,
@@ -350,6 +363,7 @@ async function importCardGroup({
   match,
   priceOnlyUnpriced,
   prisma,
+  providerFetchOptions,
   categoryId,
   language,
   source,
@@ -359,8 +373,8 @@ async function importCardGroup({
 }) {
   const { group, set } = match;
   const [productsResponse, pricesResponse, cards] = await Promise.all([
-    fetchTcgcsv(`https://tcgcsv.com/tcgplayer/${categoryId}/${group.groupId}/products`, fetchImpl),
-    fetchTcgcsv(`https://tcgcsv.com/tcgplayer/${categoryId}/${group.groupId}/prices`, fetchImpl),
+    fetchTcgcsv(`https://tcgcsv.com/tcgplayer/${categoryId}/${group.groupId}/products`, fetchImpl, providerFetchOptions),
+    fetchTcgcsv(`https://tcgcsv.com/tcgplayer/${categoryId}/${group.groupId}/prices`, fetchImpl, providerFetchOptions),
     prisma.cardPrinting.findMany({
       select: {
         id: true,
@@ -617,20 +631,26 @@ async function updateTcgcsvCardImage(prisma, card, product) {
   return true;
 }
 
-async function fetchTcgcsv(url, fetchImpl) {
-  const response = await fetchImpl(url, {
-    headers: {
-      accept: "application/json",
-      "user-agent": "MintBinderLocalImporter/0.1",
+async function fetchTcgcsv(url, fetchImpl, providerFetchOptions) {
+  const result = await fetchJsonWithRetry({
+    fetchImpl,
+    init: {
+      headers: {
+        accept: "application/json",
+        "user-agent": "MintBinderLocalImporter/0.1",
+      },
     },
+    maxResponseBytes: 32 * 1024 * 1024,
+    provider: "TCGCSV",
+    retryAttempts: providerFetchOptions.retryAttempts,
+    retryInvalidResponse: true,
+    retryWaitMs: providerFetchOptions.retryWaitMs,
+    timeoutMs: providerFetchOptions.timeoutMs,
+    url,
+    validate: (body) => body?.success === true,
   });
-  const body = await response.json().catch(() => ({}));
 
-  if (!response.ok || !body.success) {
-    throw new Error(`TCGCSV request failed for ${url}.`);
-  }
-
-  return body;
+  return result.body;
 }
 
 async function hasCardVariantPriceSnapshot(prisma, cardPrintingId, variantLabel) {

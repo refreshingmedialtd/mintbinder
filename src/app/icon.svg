@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Mint Binder">
+  <defs>
+    <linearGradient id="cover" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1f7a72"/>
+      <stop offset="1" stop-color="#123d4a"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="#101923"/>
+  <path d="M118 92h250c25 0 46 21 46 46v270c0 17-13 30-30 30H142c-25 0-44-20-44-44V112c0-11 9-20 20-20Z" fill="url(#cover)"/>
+  <path d="M142 92v346" stroke="#d9b86c" stroke-width="18" opacity=".85"/>
+  <rect x="190" y="148" width="168" height="220" rx="28" fill="#f6f2e8"/>
+  <circle cx="274" cy="258" r="62" fill="#d9b86c"/>
+  <path d="M219 258h110M274 203v110" stroke="#123d4a" stroke-width="18" stroke-linecap="round"/>
+</svg>

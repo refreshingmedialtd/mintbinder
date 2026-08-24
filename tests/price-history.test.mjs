@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   buildPriceHistory,
   latestPricePoint,
+  priceInputsForGrade,
   priceConfidenceFromScore,
   priceRangeMinor,
   suppressTransientPriceOutliers,
@@ -46,6 +47,42 @@ test("builds sorted price history with normalized confidence and sources", () =>
   ]);
   assert.deepEqual(latestPricePoint(history), history[1]);
   assert.deepEqual(priceRangeMinor(history), { high: 1250, low: 990 });
+});
+
+test("isolates raw and exact company-specific graded price streams", () => {
+  const prices = [
+    { priceMinor: 1_000, source: "raw", gradedCompany: null, gradedScore: null },
+    { priceMinor: 20_000, source: "graded", gradedCompany: "PSA", gradedScore: "10.0" },
+    { priceMinor: 15_000, source: "graded", gradedCompany: "BGS", gradedScore: 10 },
+    { priceMinor: 8_000, source: "graded", gradedCompany: "PSA", gradedScore: 9 },
+  ];
+
+  assert.deepEqual(priceInputsForGrade(prices), [prices[0]]);
+  assert.deepEqual(priceInputsForGrade(prices, "psa", 10), [prices[1]]);
+  assert.deepEqual(priceInputsForGrade(prices, "BGS", "10.0"), [prices[2]]);
+  assert.deepEqual(priceInputsForGrade(prices, "PSA", null), []);
+});
+
+test("keeps company-specific graded series separate during daily deduplication", () => {
+  const history = buildPriceHistory([
+    {
+      priceMinor: 20_000,
+      source: "pricecharting-graded-card",
+      observedAt: "2026-08-24T09:00:00.000Z",
+      gradedCompany: "PSA",
+      gradedScore: 10,
+    },
+    {
+      priceMinor: 15_000,
+      source: "pricecharting-graded-card",
+      observedAt: "2026-08-24T09:00:00.000Z",
+      gradedCompany: "BGS",
+      gradedScore: 10,
+    },
+  ]);
+
+  assert.equal(history.length, 2);
+  assert.deepEqual(history.map((point) => point.gradedCompany).sort(), ["BGS", "PSA"]);
 });
 
 test("maps confidence score thresholds", () => {

@@ -1,4 +1,7 @@
 export type TcgcsvSealedImportOptions = {
+  apiRetryAttempts?: number;
+  apiRetryWaitMs?: number;
+  apiTimeoutMs?: number;
   fetchImpl?: typeof fetch;
   groupIds?: string[] | string;
   groupLimit?: number;

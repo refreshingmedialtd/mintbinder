@@ -31,6 +31,7 @@ export function statusFromSquare(status?: string | null) {
       return SubscriptionStatus.PAST_DUE;
     case "CANCELED":
     case "DEACTIVATED":
+    case "COMPLETED":
       return SubscriptionStatus.CANCELED;
     default:
       return SubscriptionStatus.INCOMPLETE;
@@ -64,10 +65,12 @@ export function statusFromSquareForLocalAccess({
 }
 
 export function planFromHint(plan?: string | null) {
-  return plan === "yearly" ? SubscriptionPlan.PLUS_YEARLY : SubscriptionPlan.PLUS_MONTHLY;
+  if (plan === "yearly") return SubscriptionPlan.PLUS_YEARLY;
+  if (plan === "monthly") return SubscriptionPlan.PLUS_MONTHLY;
+  return null;
 }
 
-export function planFromPriceId(priceId?: string | null, fallback?: SubscriptionPlan) {
+export function planFromPriceId(priceId?: string | null) {
   if (priceId && priceId === process.env.STRIPE_PLUS_YEARLY_PRICE_ID) {
     return SubscriptionPlan.PLUS_YEARLY;
   }
@@ -76,7 +79,7 @@ export function planFromPriceId(priceId?: string | null, fallback?: Subscription
     return SubscriptionPlan.PLUS_MONTHLY;
   }
 
-  return fallback === SubscriptionPlan.PLUS_YEARLY ? fallback : SubscriptionPlan.PLUS_MONTHLY;
+  return null;
 }
 
 export function squareSubscriptionPeriodEnd({
@@ -131,7 +134,7 @@ function squareDateToPeriodEnd(value?: string | null) {
   return Number.isNaN(date.getTime()) ? undefined : date;
 }
 
-export function planFromSquarePlanVariationId(planVariationId?: string | null, fallback?: SubscriptionPlan) {
+export function planFromSquarePlanVariationId(planVariationId?: string | null) {
   if (planVariationId && planVariationId === process.env.SQUARE_PLUS_YEARLY_PLAN_VARIATION_ID) {
     return SubscriptionPlan.PLUS_YEARLY;
   }
@@ -140,5 +143,5 @@ export function planFromSquarePlanVariationId(planVariationId?: string | null, f
     return SubscriptionPlan.PLUS_MONTHLY;
   }
 
-  return fallback === SubscriptionPlan.PLUS_YEARLY ? fallback : SubscriptionPlan.PLUS_MONTHLY;
+  return null;
 }

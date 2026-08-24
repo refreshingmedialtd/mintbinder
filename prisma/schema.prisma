@@ -126,7 +126,27 @@ enum NotificationDigestFrequency {
   @@map("notification_digest_frequency")
 }
 
+enum NotificationDeliveryStatus {
+  CLAIMED   @map("claimed")
+  SENT      @map("sent")
+  AMBIGUOUS @map("ambiguous")
+
+  @@map("notification_delivery_status")
+}
+
+enum PasswordResetOutboxStatus {
+  QUEUED     @map("queued")
+  CLAIMED    @map("claimed")
+  SENT       @map("sent")
+  DISCARDED  @map("discarded")
+  UNRESOLVED @map("unresolved")
+
+  @@map("password_reset_outbox_status")
+}
+
 enum JobRunType {
+  BILLING_CHECKOUT_RETIREMENT @map("billing_checkout_retirement")
+  PASSWORD_RESET_DELIVERY     @map("password_reset_delivery")
   PRICE_ALERTS           @map("price_alerts")
   CATALOGUE_REFRESH      @map("catalogue_refresh")
   PRICING_REFRESH        @map("pricing_refresh")
@@ -143,11 +163,44 @@ enum JobRunStatus {
   @@map("job_run_status")
 }
 
+enum BinderVisibility {
+  PRIVATE  @map("private")
+  UNLISTED @map("unlisted")
+
+  @@map("binder_visibility")
+}
+
+enum BillingWebhookStatus {
+  PROCESSING @map("processing")
+  SUCCEEDED  @map("succeeded")
+  FAILED     @map("failed")
+
+  @@map("billing_webhook_status")
+}
+
+enum BillingCustomerProvenance {
+  APP_CREATED         @map("app_created")
+  PROVIDER_MATCHED    @map("provider_matched")
+  LEGACY_SUBSCRIPTION @map("legacy_subscription")
+
+  @@map("billing_customer_provenance")
+}
+
+enum AccountTokenType {
+  EMAIL_VERIFICATION @map("email_verification")
+  PASSWORD_RESET     @map("password_reset")
+
+  @@map("account_token_type")
+}
+
 model User {
   id                     String                  @id @default(uuid()) @db.Uuid
   email                  String                  @unique
   displayName            String?                 @map("display_name")
   passwordHash           String?                 @map("password_hash")
+  sessionVersion         Int                     @default(0) @map("session_version")
+  emailVerifiedAt        DateTime?               @map("email_verified_at")
+  deletionRequestedAt    DateTime?               @map("deletion_requested_at")
   preferredCurrency      String                  @default("GBP") @map("preferred_currency")
   preferredRegion        String?                 @map("preferred_region")
   role                   UserRole                @default(USER)
@@ -160,6 +213,13 @@ model User {
   wishlistItems          WishlistItem[]
   collectionEvents       CollectionEvent[]
   notificationPreference NotificationPreference?
+  notificationDeliveries NotificationDelivery[]
+  passwordResetOutbox     PasswordResetOutbox[]
+  binders                 Binder[]
+  accountTokens           AccountToken[]
+  billingCheckoutIntents  BillingCheckoutIntent[]
+  billingCustomers        BillingCustomer[]
+  activeSetGoal           SetGoal?
 
   @@map("users")
 }
@@ -178,6 +238,49 @@ model NotificationPreference {
   @@map("notification_preferences")
 }
 
+model NotificationDelivery {
+  id                String                     @id @default(uuid()) @db.Uuid
+  userId            String                     @map("user_id") @db.Uuid
+  kind              String
+  periodKey         String                     @map("period_key")
+  recipientKey      String                     @map("recipient_key")
+  status            NotificationDeliveryStatus @default(CLAIMED)
+  providerMessageId String?                    @map("provider_message_id")
+  errorCode         String?                    @map("error_code")
+  sentAt            DateTime?                  @map("sent_at")
+  ambiguousAt       DateTime?                  @map("ambiguous_at")
+  createdAt         DateTime                   @default(now()) @map("created_at")
+  updatedAt         DateTime                   @updatedAt @map("updated_at")
+  user              User                       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([kind, periodKey, recipientKey])
+  @@index([userId, createdAt])
+  @@index([status, updatedAt])
+  @@map("notification_deliveries")
+}
+
+model PasswordResetOutbox {
+  id                  String                    @id @default(uuid()) @db.Uuid
+  userId              String?                   @map("user_id") @db.Uuid
+  recipientKey        String                    @map("recipient_key")
+  coalesceKey         String?                   @unique @map("coalesce_key")
+  status              PasswordResetOutboxStatus @default(QUEUED)
+  claimedAt           DateTime?                 @map("claimed_at")
+  deliveryAttemptedAt DateTime?                 @map("delivery_attempted_at")
+  sentAt              DateTime?                 @map("sent_at")
+  discardedAt         DateTime?                 @map("discarded_at")
+  unresolvedAt        DateTime?                 @map("unresolved_at")
+  providerMessageId   String?                   @map("provider_message_id")
+  errorCode           String?                   @map("error_code")
+  createdAt           DateTime                  @default(now()) @map("created_at")
+  updatedAt           DateTime                  @updatedAt @map("updated_at")
+  user                User?                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt])
+  @@index([userId, createdAt])
+  @@map("password_reset_outbox")
+}
+
 model JobRun {
   id             String       @id @default(uuid()) @db.Uuid
   jobType        JobRunType   @map("job_type")
@@ -192,6 +295,7 @@ model JobRun {
 
   @@index([jobType, startedAt])
   @@index([status, startedAt])
+  @@index([status, finishedAt])
   @@map("job_runs")
 }
 
@@ -205,11 +309,13 @@ model Subscription {
   status                 SubscriptionStatus @default(ACTIVE)
   currentPeriodEnd       DateTime?          @map("current_period_end")
   cancelAtPeriodEnd      Boolean            @default(false) @map("cancel_at_period_end")
+  providerUpdatedAt      DateTime?          @map("provider_updated_at")
   createdAt              DateTime           @default(now()) @map("created_at")
   updatedAt              DateTime           @updatedAt @map("updated_at")
   user                   User               @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+  @@index([provider, providerCustomerId])
   @@map("subscriptions")
 }
 
@@ -230,6 +336,7 @@ model CardSet {
   updatedAt      DateTime        @updatedAt @map("updated_at")
   cardPrintings  CardPrinting[]
   sealedProducts SealedProduct[]
+  setGoals       SetGoal[]
 
   @@index([name])
   @@index([language])
@@ -344,6 +451,7 @@ model CollectionItem {
   sealedProduct                SealedProduct?    @relation(fields: [sealedProductId], references: [id], onDelete: SetNull)
   storageLocation              StorageLocation?  @relation(fields: [storageLocationId], references: [id], onDelete: SetNull)
   events                       CollectionEvent[]
+  binderSlots                  BinderSlot[]
 
   @@index([userId])
   @@index([userId, itemType])
@@ -352,6 +460,57 @@ model CollectionItem {
   @@index([userId, storageLocationId])
   @@index([userId, archivedAt])
   @@map("collection_items")
+}
+
+model Binder {
+  id          String           @id @default(uuid()) @db.Uuid
+  userId      String           @map("user_id") @db.Uuid
+  name        String
+  description String?
+  coverStyle  String           @default("forest") @map("cover_style")
+  isDefault   Boolean          @default(false) @map("is_default")
+  visibility  BinderVisibility @default(PRIVATE)
+  shareSlug   String?          @unique @map("share_slug")
+  createdAt   DateTime         @default(now()) @map("created_at")
+  updatedAt   DateTime         @updatedAt @map("updated_at")
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  pages       BinderPage[]
+
+  @@unique([userId, name])
+  @@index([userId, updatedAt])
+  @@map("binders")
+}
+
+model BinderPage {
+  id        String       @id @default(uuid()) @db.Uuid
+  binderId  String       @map("binder_id") @db.Uuid
+  position  Int
+  createdAt DateTime     @default(now()) @map("created_at")
+  updatedAt DateTime     @updatedAt @map("updated_at")
+  binder    Binder       @relation(fields: [binderId], references: [id], onDelete: Cascade)
+  slots     BinderSlot[]
+
+  @@unique([binderId, position])
+  @@index([binderId])
+  @@map("binder_pages")
+}
+
+model BinderSlot {
+  id               String          @id @default(uuid()) @db.Uuid
+  binderPageId     String          @map("binder_page_id") @db.Uuid
+  collectionItemId String?         @map("collection_item_id") @db.Uuid
+  position         Int
+  copyIndex        Int?            @map("copy_index")
+  note             String?
+  createdAt        DateTime        @default(now()) @map("created_at")
+  updatedAt        DateTime        @updatedAt @map("updated_at")
+  binderPage       BinderPage      @relation(fields: [binderPageId], references: [id], onDelete: Cascade)
+  collectionItem   CollectionItem? @relation(fields: [collectionItemId], references: [id], onDelete: SetNull)
+
+  @@unique([binderPageId, position])
+  @@unique([collectionItemId, copyIndex])
+  @@index([collectionItemId])
+  @@map("binder_slots")
 }
 
 model WishlistItem {
@@ -375,6 +534,21 @@ model WishlistItem {
   @@index([userId])
   @@index([userId, priority])
   @@map("wishlist_items")
+}
+
+model SetGoal {
+  id                      String           @id @default(uuid()) @db.Uuid
+  userId                  String           @unique @map("user_id") @db.Uuid
+  cardSetId               String           @map("card_set_id") @db.Uuid
+  targetCompletionPercent Int              @default(100) @map("target_completion_percent")
+  wishlistPriority        WishlistPriority @default(MEDIUM) @map("wishlist_priority")
+  createdAt               DateTime         @default(now()) @map("created_at")
+  updatedAt               DateTime         @updatedAt @map("updated_at")
+  user                    User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cardSet                 CardSet          @relation(fields: [cardSetId], references: [id], onDelete: Cascade)
+
+  @@index([cardSetId])
+  @@map("set_goals")
 }
 
 model PriceSnapshot {
@@ -426,4 +600,93 @@ model CollectionEvent {
   @@index([userId, occurredAt])
   @@index([userId, eventType])
   @@map("collection_events")
+}
+
+model BillingWebhookEvent {
+  id              String               @id @default(uuid()) @db.Uuid
+  provider        String
+  providerEventId String               @map("provider_event_id")
+  eventType       String               @map("event_type")
+  status          BillingWebhookStatus @default(PROCESSING)
+  occurredAt      DateTime?            @map("occurred_at")
+  processedAt     DateTime?            @map("processed_at")
+  errorMessage    String?              @map("error_message")
+  createdAt       DateTime             @default(now()) @map("created_at")
+  updatedAt       DateTime             @updatedAt @map("updated_at")
+
+  @@unique([provider, providerEventId])
+  @@index([status, createdAt])
+  @@index([status, processedAt])
+  @@map("billing_webhook_events")
+}
+
+model BillingCheckoutIntent {
+  id                 String           @id @default(uuid()) @db.Uuid
+  userId             String           @map("user_id") @db.Uuid
+  provider           String
+  plan               SubscriptionPlan
+  status             String
+  idempotencyKey     String           @unique @map("idempotency_key")
+  leaseToken         String           @map("lease_token")
+  leaseExpiresAt     DateTime          @map("lease_expires_at")
+  providerCheckoutId String?          @map("provider_checkout_id")
+  providerOrderId    String?          @map("provider_order_id")
+  providerPaymentId  String?          @unique @map("provider_payment_id")
+  providerCustomerId String?          @map("provider_customer_id")
+  expectedAmountMinor Int?            @map("expected_amount_minor")
+  expectedCurrency    String?         @map("expected_currency")
+  providerPlanVariationId String?     @map("provider_plan_variation_id")
+  checkoutOrigin     String           @map("checkout_origin")
+  checkoutUrl        String?          @map("checkout_url")
+  expiresAt          DateTime         @map("expires_at")
+  createdAt          DateTime         @default(now()) @map("created_at")
+  updatedAt          DateTime         @updatedAt @map("updated_at")
+  user               User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, provider, status, updatedAt])
+  @@index([expiresAt])
+  @@map("billing_checkout_intents")
+}
+
+model BillingCustomer {
+  id                 String                    @id @default(uuid()) @db.Uuid
+  userId             String                    @map("user_id") @db.Uuid
+  provider           String
+  providerCustomerId String                    @map("provider_customer_id")
+  provenance         BillingCustomerProvenance @default(PROVIDER_MATCHED)
+  createdAt          DateTime                  @default(now()) @map("created_at")
+  updatedAt          DateTime                  @updatedAt @map("updated_at")
+  user               User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerCustomerId])
+  @@index([userId, provider])
+  @@map("billing_customers")
+}
+
+model AccountToken {
+  id        String           @id @default(uuid()) @db.Uuid
+  userId    String           @map("user_id") @db.Uuid
+  type      AccountTokenType
+  tokenHash String           @unique @map("token_hash")
+  expiresAt DateTime         @map("expires_at")
+  usedAt    DateTime?        @map("used_at")
+  createdAt DateTime         @default(now()) @map("created_at")
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, type, expiresAt])
+  @@index([expiresAt])
+  @@map("account_tokens")
+}
+
+model AuthThrottle {
+  keyHash         String    @id @map("key_hash")
+  action          String
+  attempts        Int       @default(0)
+  windowStartedAt DateTime  @map("window_started_at")
+  blockedUntil    DateTime? @map("blocked_until")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@index([blockedUntil])
+  @@index([updatedAt])
+  @@map("auth_throttles")
 }

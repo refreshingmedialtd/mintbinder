@@ -1,9 +1,26 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  appBaseUrl,
   protectedJobRequest,
   runLiveScheduledJob,
+  scheduledResponseDegradation,
 } from "../scripts/run-live-scheduled-job.mjs";
+
+test("scheduled job bearer transport requires HTTPS outside loopback", () => {
+  assert.throws(
+    () => appBaseUrl({ SCHEDULED_JOB_APP_URL: "http://mintbinder.co.uk" }),
+    /must use HTTPS outside local loopback/,
+  );
+  assert.equal(
+    appBaseUrl({ SCHEDULED_JOB_APP_URL: "http://127.0.0.1:3000" }).href,
+    "http://127.0.0.1:3000/",
+  );
+  assert.equal(
+    appBaseUrl({ SCHEDULED_JOB_APP_URL: "https://mintbinder.co.uk" }).href,
+    "https://mintbinder.co.uk/",
+  );
+});
 
 test("live pricing requests are split into timeout-safe batches", async () => {
   const calls = [];
@@ -136,6 +153,42 @@ test("live pricing defaults to set rotation and splits set batches", async () =>
   assert.equal(result.response.strategy, "set-rotation");
 });
 
+test("marks HTTP-successful provider partial failures as degraded", async () => {
+  const result = await runLiveScheduledJob({
+    env: {
+      JOB_SECRET: "secret",
+      POKEMON_TCG_SET_PRICING_LIMIT: "1",
+      SCHEDULED_JOB_APP_URL: "https://mintbinder.co.uk",
+    },
+    fetchImpl: async () => jsonResponse({
+      failedSets: 1,
+      pricingSnapshotsCreated: 0,
+      setResults: [{ error: "Provider 500", providerId: "set1", status: "failed" }],
+      setsProcessed: 1,
+      warning: "Set pricing completed with 1 failed set.",
+    }),
+    job: "pricing",
+  });
+
+  assert.equal(result.status, 200);
+  assert.equal(result.ok, false);
+  assert.match(result.degradation, /1 failed set/);
+});
+
+test("marks a zero-output configured second source as degraded", async () => {
+  const reason = scheduledResponseDegradation({
+    secondSource: {
+      candidatesChecked: 5,
+      pricingSnapshotsCreated: 0,
+      pricingSnapshotsUpdated: 0,
+      provider: "cardtrader-sealed",
+      status: "succeeded",
+    },
+  });
+
+  assert.match(reason, /produced no price snapshots/);
+});
+
 test("explicit live pricing page requests remain single requests", async () => {
   const request = protectedJobRequest("pricing", {
     POKEMON_TCG_PRICING_MAX_PAGES: "5",
@@ -158,6 +211,24 @@ test("live catalogue discovery refreshes newly announced sets", () => {
       setsOnly: true,
     },
     path: "/api/jobs/catalogue-refresh",
+  });
+});
+
+test("expired billing checkout retirement uses a bounded protected job", () => {
+  assert.deepEqual(protectedJobRequest("billing-checkout-retirement", {
+    BILLING_CHECKOUT_RETIREMENT_BATCH_SIZE: "75",
+  }), {
+    body: { batchSize: 75 },
+    path: "/api/jobs/billing-checkout-retirement",
+  });
+});
+
+test("password-reset delivery uses a bounded protected job", () => {
+  assert.deepEqual(protectedJobRequest("password-reset-delivery", {
+    PASSWORD_RESET_DELIVERY_BATCH_SIZE: "75",
+  }), {
+    body: { batchSize: 75 },
+    path: "/api/jobs/password-reset-delivery",
   });
 });
 
@@ -197,6 +268,29 @@ test("live English TCGCSV pricing defaults to one history-building group", () =>
   });
 });
 
+test("live PriceCharting graded-card pricing defaults to a bounded history refresh", () => {
+  const request = protectedJobRequest("graded-card-pricing", {});
+
+  assert.deepEqual(request, {
+    body: {
+      limit: 5,
+      priceOnlyUnpriced: false,
+      waitMs: 1100,
+      writePrices: false,
+    },
+    path: "/api/jobs/graded-card-pricing",
+  });
+});
+
+test("marks a top-level graded provider partial result as degraded", () => {
+  const reason = scheduledResponseDegradation({
+    provider: "pricecharting-graded-card",
+    status: "partial",
+  });
+
+  assert.match(reason, /pricecharting-graded-card reported partial/);
+});
+
 test("live sealed pricing defaults to a timeout-safe history-building group rotation", () => {
   const request = protectedJobRequest("sealed-pricing", {});
 
@@ -210,6 +304,25 @@ test("live sealed pricing defaults to a timeout-safe history-building group rota
     },
     path: "/api/jobs/sealed-pricing-refresh",
   });
+});
+
+test("live price alerts default to dry-run and require explicit live authorization", () => {
+  assert.deepEqual(protectedJobRequest("price-alerts", {}), {
+    body: { dryRun: true },
+    path: "/api/jobs/price-alerts",
+  });
+
+  assert.throws(
+    () => protectedJobRequest("price-alerts", {
+      EMAIL_FROM: "Mint Binder <alerts@example.com>",
+      PRICE_ALERT_DIGEST_ALLOW_LIVE_RECIPIENTS: "false",
+      PRICE_ALERT_DIGEST_DRY_RUN: "false",
+      SMTP_HOST: "smtp.example.com",
+      SMTP_PASSWORD: "secret",
+      SMTP_USER: "alerts@example.com",
+    }),
+    /test recipient/,
+  );
 });
 
 function jsonResponse(body, status = 200) {

@@ -9,36 +9,64 @@ import {
   StorageLocationType,
   WishlistPriority,
 } from "@prisma/client";
-import { sampleAppData } from "@/lib/sample-data";
+import { sampleAppData } from "../sample-data.ts";
 import {
   buildCatalogueVariantOptions,
   catalogueValueMinorForVariant,
   latestPricePointForVariant,
   pokemonTcgImageUrlFromProviderIds,
-} from "@/lib/catalogue/variants";
-import { tcgdexJapaneseImageUrlFromProviderIds } from "@/lib/catalogue/tcgdex-images";
+} from "../catalogue/variants.ts";
+import { tcgdexJapaneseImageUrlFromProviderIds } from "../catalogue/tcgdex-images.ts";
 import {
   catalogueDisplayCardForText,
   catalogueNameAliasesForText,
   catalogueDisplaySetForText,
   catalogueSearchTermsForQuery,
-} from "@/lib/catalogue/name-aliases";
+} from "../catalogue/name-aliases.ts";
 import {
   catalogueLanguageCodesForSearch,
   catalogueLanguageLabel,
   catalogueRegionLabel,
   languageLabelToCode,
   normalizeCatalogueLanguageFilter,
-} from "@/lib/catalogue/languages";
-import { getEntitlements } from "@/lib/entitlements";
-import { getNotificationPreferences } from "@/lib/notifications/preferences";
-import { buildPriceHistory } from "@/lib/pricing/price-history";
+} from "../catalogue/languages.ts";
+import {
+  catalogueSearchLookahead,
+  normalizeCatalogueSearchLimit,
+  normalizeCatalogueSearchOffset,
+  paginateCatalogueResults,
+} from "../catalogue/pagination.ts";
+import {
+  CATALOGUE_SET_MAX_ITEMS,
+  normalizeCatalogueLookupIds,
+} from "../catalogue/lookup.ts";
+import { sortCatalogueSearchResults } from "../catalogue/search-order.ts";
+import { compactCatalogueSearchHistory } from "../catalogue/search-payload.ts";
+import { getEntitlements } from "../entitlements.ts";
+import {
+  normalizeCollectionQuantity,
+  normalizeSaleQuantity,
+  proportionalMinor,
+  remainingMinor,
+} from "../collection/mutations.ts";
+import {
+  lockCollectionItemsForBinderConsistency,
+  reconcileBinderSlotsForQuantity,
+} from "../binders/slot-reconciliation.ts";
+import { getNotificationPreferences } from "../notifications/preferences.ts";
+import {
+  assertUserResourceQuota,
+  lockUserResourceQuota,
+  USER_RESOURCE_LIMITS,
+  UserQuotaExceededError,
+} from "./user-quotas.ts";
+import { buildPriceHistory, priceInputsForGrade } from "../pricing/price-history.ts";
 import {
   effectivePriceConfidence,
   preferredLatestPricePoint,
   priceFreshnessStatus,
   priceMarketForSource,
-} from "@/lib/pricing/market-context";
+} from "../pricing/market-context.ts";
 import type {
   AppCatalogueData,
   AppCatalogueSearchData,
@@ -51,8 +79,21 @@ import type {
   SetProgress,
   StorageLocation,
   WishlistItem,
-} from "@/lib/types";
-import { prisma } from "./prisma";
+} from "../types.ts";
+import { prisma } from "./prisma.ts";
+import {
+  assertAppDataDatabaseConfigured,
+  resolveAppDataFallbackMode,
+  shouldThrowAppDataReadError,
+  type AppDataFallbackMode,
+} from "./app-data-fallback.ts";
+import { visibleSealedProductWhere, visibleSealedProductsWhere } from "./visibility.ts";
+import {
+  boundedOptionalText,
+  boundedRequiredText,
+  moneyInputToMinor,
+  PERSISTED_INPUT_LIMITS,
+} from "./input-validation.ts";
 
 type PriceLike = {
   priceMinor: number;
@@ -61,13 +102,16 @@ type PriceLike = {
   sourceRef?: string | null;
   observedAt: Date;
   variantLabel: string | null;
+  gradedCompany: string | null;
+  gradedScore: number | string | { toString(): string } | null;
 };
 
-type CatalogueScope = "full" | "referenced";
+type CatalogueScope = "referenced";
 
 type CatalogueSearchInput = {
   language?: string;
   limit?: number;
+  offset?: number;
   q?: string;
   rarity?: string;
   set?: string;
@@ -80,6 +124,7 @@ type CatalogueSearchType = ItemType | "all";
 type NormalizedCatalogueSearchInput = {
   language: string;
   limit: number;
+  offset: number;
   q: string;
   rarity: string;
   set: string;
@@ -93,6 +138,9 @@ type OrderedCatalogueId = {
 
 type AppDataOptions = {
   catalogueScope?: CatalogueScope;
+  eventLimit?: number;
+  eventTypes?: CollectionEventType[];
+  fallback?: AppDataFallbackMode;
 };
 
 type CardPrintingWithPrices = {
@@ -125,8 +173,58 @@ type CatalogueReferenceRecord = {
 };
 
 const PRICE_HISTORY_LIMIT = 8;
-const CATALOGUE_SEARCH_MAX_LIMIT = 100;
-const CATALOGUE_SEARCH_FETCH_MULTIPLIER = 6;
+
+const catalogueSearchPriceSelect = {
+  priceMinor: true,
+  confidenceScore: true,
+  source: true,
+  sourceRef: true,
+  observedAt: true,
+  variantLabel: true,
+  gradedCompany: true,
+  gradedScore: true,
+} satisfies Prisma.PriceSnapshotSelect;
+
+const catalogueSearchCardSelect = {
+  id: true,
+  name: true,
+  language: true,
+  region: true,
+  number: true,
+  rarity: true,
+  supertype: true,
+  imageLargeUrl: true,
+  imageSmallUrl: true,
+  providerIds: true,
+  variantMetadata: true,
+  cardSet: {
+    select: {
+      id: true,
+      name: true,
+      language: true,
+      region: true,
+      providerIds: true,
+    },
+  },
+  priceSnapshots: {
+    orderBy: [{ observedAt: "desc" as const }, { createdAt: "desc" as const }],
+    take: PRICE_HISTORY_LIMIT,
+    select: catalogueSearchPriceSelect,
+  },
+} satisfies Prisma.CardPrintingSelect;
+
+const catalogueSearchSealedSelect = {
+  id: true,
+  name: true,
+  productType: true,
+  imageUrl: true,
+  relatedCardSet: { select: { name: true } },
+  priceSnapshots: {
+    orderBy: [{ observedAt: "desc" as const }, { createdAt: "desc" as const }],
+    take: PRICE_HISTORY_LIMIT,
+    select: catalogueSearchPriceSelect,
+  },
+} satisfies Prisma.SealedProductSelect;
 
 export type CreateCollectionItemInput = {
   catalogueId: string;
@@ -135,6 +233,7 @@ export type CreateCollectionItemInput = {
   language?: string;
   variant?: string;
   paid?: string;
+  purchaseDate?: string;
   overrideValue?: string;
   valuationNote?: string;
   location?: string;
@@ -149,6 +248,7 @@ export type UpdateCollectionItemInput = Omit<CreateCollectionItemInput, "catalog
 export type SellCollectionItemInput = {
   amount?: string;
   occurredAt?: string;
+  quantity?: number;
   notes?: string;
 };
 
@@ -174,7 +274,17 @@ export type UpdateWishlistItemInput = {
   notes?: string;
 };
 
-export function sampleDataFallback(notice: string): AppData {
+export class AppMutationError extends Error {
+  status: number;
+
+  constructor(message: string, status: 400 | 404 | 409 = 400) {
+    super(message);
+    this.name = "AppMutationError";
+    this.status = status;
+  }
+}
+
+function sampleDataFallback(notice: string): AppData {
   return {
     ...sampleAppData,
     catalogueComplete: true,
@@ -183,7 +293,8 @@ export function sampleDataFallback(notice: string): AppData {
 }
 
 export async function getAppData(userId: string, options: AppDataOptions = {}): Promise<AppData> {
-  const catalogueScope = options.catalogueScope ?? "full";
+  const fallback = resolveAppDataFallbackMode(options.fallback);
+  assertAppDataDatabaseConfigured(process.env.DATABASE_URL, fallback);
 
   if (!process.env.DATABASE_URL) {
     return sampleDataFallback("Using sample data because DATABASE_URL is not configured.");
@@ -193,7 +304,6 @@ export async function getAppData(userId: string, options: AppDataOptions = {}): 
     const [
       subscription,
       notificationPreferences,
-      fullCatalogue,
       collectionItems,
       wishlistItems,
       cardSets,
@@ -204,8 +314,9 @@ export async function getAppData(userId: string, options: AppDataOptions = {}): 
     ] =
       await Promise.all([
         getEntitlements(userId),
-        getNotificationPreferences(userId),
-        catalogueScope === "full" ? getCatalogueItems(userId) : Promise.resolve([]),
+        getNotificationPreferences(userId, {
+          fallback: fallback === "throw" ? "throw" : "default",
+        }),
         prisma.collectionItem.findMany({
           where: {
             userId,
@@ -263,23 +374,23 @@ export async function getAppData(userId: string, options: AppDataOptions = {}): 
           orderBy: { name: "asc" },
         }),
         prisma.collectionEvent.findMany({
-          where: { userId },
+          where: {
+            userId,
+            ...(options.eventTypes?.length ? { eventType: { in: options.eventTypes } } : {}),
+          },
           include: collectionEventInclude,
           orderBy: { occurredAt: "desc" },
-          take: 12,
+          take: options.eventLimit ?? 12,
         }),
       ]);
 
     const cardSetTotals = new Map(cardSetCounts.map((row) => [row.cardSetId, row._count._all]));
     const ownedCardsBySet = ownedCardCountsBySet(ownedCardRows);
-    const catalogue =
-      catalogueScope === "full"
-        ? fullCatalogue
-        : referencedCatalogueItems(collectionItems, wishlistItems);
+    const catalogue = referencedCatalogueItems(collectionItems, wishlistItems);
 
     return {
       catalogue,
-      catalogueComplete: catalogueScope === "full",
+      catalogueComplete: false,
       collection: collectionItems.map(mapCollectionItem),
       wishlist: wishlistItems.map(mapWishlistItem),
       sets: cardSets.map((set) =>
@@ -295,30 +406,58 @@ export async function getAppData(userId: string, options: AppDataOptions = {}): 
       notificationPreferences,
     };
   } catch (error) {
+    if (shouldThrowAppDataReadError(fallback)) {
+      throw error;
+    }
+
     console.warn("Falling back to sample data after Prisma read failed.", error);
     return sampleDataFallback("Using sample data because the database could not be reached.");
   }
 }
 
-export async function getCatalogueData(userId: string): Promise<AppCatalogueData> {
+export async function lookupCatalogueData(userId: string, input: unknown): Promise<AppCatalogueData> {
+  const ids = normalizeCatalogueLookupIds(input);
+  const fallback = resolveAppDataFallbackMode();
+  assertAppDataDatabaseConfigured(process.env.DATABASE_URL, fallback);
+
   if (!process.env.DATABASE_URL) {
+    const catalogueById = new Map(sampleAppData.catalogue.map((item) => [item.id, item]));
+
     return {
-      catalogue: sampleAppData.catalogue,
+      catalogue: ids.flatMap((id) => {
+        const item = catalogueById.get(id);
+        return item ? [item] : [];
+      }),
       notice: "Using sample data because DATABASE_URL is not configured.",
       source: sampleAppData.source,
     };
   }
 
   try {
+    const [cards, sealed] = await Promise.all([
+      hydrateCardPrintingsByOrderedIds(ids),
+      hydrateSealedProductsByOrderedIds(userId, ids),
+    ]);
+    const catalogueById = new Map([...cards, ...sealed].map((item) => [item.id, item]));
+
     return {
-      catalogue: await getCatalogueItems(userId),
+      catalogue: ids.flatMap((id) => {
+        const item = catalogueById.get(id);
+        return item ? [item] : [];
+      }),
       source: "database",
     };
   } catch (error) {
-    console.warn("Falling back to sample catalogue after Prisma read failed.", error);
+    if (shouldThrowAppDataReadError(fallback)) throw error;
+    console.warn("Falling back to sample catalogue lookup after Prisma read failed.", error);
+    const catalogueById = new Map(sampleAppData.catalogue.map((item) => [item.id, item]));
+
     return {
-      catalogue: sampleAppData.catalogue,
-      notice: "Using sample data because the database catalogue could not be reached.",
+      catalogue: ids.flatMap((id) => {
+        const item = catalogueById.get(id);
+        return item ? [item] : [];
+      }),
+      notice: "Using sample data because the database catalogue lookup could not be reached.",
       source: sampleAppData.source,
     };
   }
@@ -327,9 +466,13 @@ export async function getCatalogueData(userId: string): Promise<AppCatalogueData
 export async function getCatalogueSetData(setName: string, setId?: string | null): Promise<AppCatalogueData> {
   const normalizedSetName = normalizeOptionalText(setName);
   const normalizedSetId = normalizeOptionalText(setId ?? undefined);
+  const fallback = resolveAppDataFallbackMode();
+  assertAppDataDatabaseConfigured(process.env.DATABASE_URL, fallback);
 
   if (!process.env.DATABASE_URL) {
-    const catalogue = sampleAppData.catalogue.filter((item) => item.type === "card" && item.set === normalizedSetName);
+    const catalogue = sampleAppData.catalogue
+      .filter((item) => item.type === "card" && item.set === normalizedSetName)
+      .slice(0, CATALOGUE_SET_MAX_ITEMS);
 
     return {
       catalogue,
@@ -356,6 +499,7 @@ export async function getCatalogueSetData(setName: string, setId?: string | null
         },
       },
       orderBy: [{ number: "asc" }, { name: "asc" }],
+      take: CATALOGUE_SET_MAX_ITEMS,
     });
 
     return {
@@ -366,9 +510,12 @@ export async function getCatalogueSetData(setName: string, setId?: string | null
       source: "database",
     };
   } catch (error) {
+    if (shouldThrowAppDataReadError(fallback)) throw error;
     console.warn("Falling back to sample set catalogue after Prisma read failed.", error);
     return {
-      catalogue: sampleAppData.catalogue.filter((item) => item.type === "card" && item.set === normalizedSetName),
+      catalogue: sampleAppData.catalogue
+        .filter((item) => item.type === "card" && item.set === normalizedSetName)
+        .slice(0, CATALOGUE_SET_MAX_ITEMS),
       notice: "Using sample data because the database set catalogue could not be reached.",
       source: sampleAppData.source,
     };
@@ -392,15 +539,17 @@ export async function searchCatalogueData(
   input: CatalogueSearchInput,
 ): Promise<AppCatalogueSearchData> {
   const query = normalizeCatalogueSearchInput(input);
+  const fallback = resolveAppDataFallbackMode();
+  assertAppDataDatabaseConfigured(process.env.DATABASE_URL, fallback);
 
   if (!process.env.DATABASE_URL) {
     const catalogue = filterAndSortCatalogue(sampleAppData.catalogue, query);
+    const page = paginateCatalogueResults(catalogue, query);
 
     return {
-      catalogue: catalogue.slice(0, query.limit),
-      hasMore: catalogue.length > query.limit,
+      ...page,
       query,
-      resultCount: catalogue.length,
+      resultCount: page.returned,
       source: sampleAppData.source,
       notice: "Using sample data because DATABASE_URL is not configured.",
     };
@@ -408,67 +557,28 @@ export async function searchCatalogueData(
 
   try {
     const catalogue = await searchCatalogueItems(userId, query);
+    const page = paginateCatalogueResults(catalogue, query);
 
     return {
-      catalogue: catalogue.slice(0, query.limit),
-      hasMore: catalogue.length > query.limit,
+      ...page,
       query,
-      resultCount: catalogue.length,
+      resultCount: page.returned,
       source: "database",
     };
   } catch (error) {
+    if (shouldThrowAppDataReadError(fallback)) throw error;
     console.warn("Falling back to sample catalogue search after Prisma read failed.", error);
     const catalogue = filterAndSortCatalogue(sampleAppData.catalogue, query);
+    const page = paginateCatalogueResults(catalogue, query);
 
     return {
-      catalogue: catalogue.slice(0, query.limit),
-      hasMore: catalogue.length > query.limit,
+      ...page,
       query,
-      resultCount: catalogue.length,
+      resultCount: page.returned,
       source: sampleAppData.source,
       notice: "Using sample data because the database catalogue search could not be reached.",
     };
   }
-}
-
-async function getCatalogueItems(userId: string): Promise<CatalogueItem[]> {
-  const [cardPrintings, sealedProducts] = await Promise.all([
-    prisma.cardPrinting.findMany({
-      include: {
-        cardSet: true,
-        priceSnapshots: {
-          orderBy: { observedAt: "desc" },
-          take: PRICE_HISTORY_LIMIT,
-        },
-      },
-      orderBy: [{ cardSet: { releaseDate: "desc" } }, { number: "asc" }],
-    }),
-    prisma.sealedProduct.findMany({
-      where: {
-        OR: [
-          { visibility: CatalogueVisibility.GLOBAL },
-          { createdByUserId: userId },
-        ],
-      },
-      include: {
-        relatedCardSet: true,
-        priceSnapshots: {
-          orderBy: { observedAt: "desc" },
-          take: PRICE_HISTORY_LIMIT,
-        },
-      },
-      orderBy: { name: "asc" },
-    }),
-  ]);
-
-  return [
-    ...cardPrintings.map((card) =>
-      mapCardPrintingToCatalogueItem(card, card.priceSnapshots),
-    ),
-    ...sealedProducts.map((product) =>
-      mapSealedProductToCatalogueItem(product, product.priceSnapshots),
-    ),
-  ];
 }
 
 async function searchCatalogueItems(
@@ -531,17 +641,11 @@ async function searchCardPrintings(query: NormalizedCatalogueSearchInput): Promi
 
   const cards = await prisma.cardPrinting.findMany({
     where: filters.length ? { AND: filters } : undefined,
-    include: {
-      cardSet: true,
-      priceSnapshots: {
-        orderBy: { observedAt: "desc" },
-        take: PRICE_HISTORY_LIMIT,
-      },
-    },
-    orderBy: [{ cardSet: { releaseDate: "desc" } }, { number: "asc" }],
+    select: catalogueSearchCardSelect,
+    orderBy: cardCatalogueSearchOrderBy(query.sort),
     take: catalogueSearchFetchLimit(query),
   });
-  const catalogue = cards.map((card) => mapCardPrintingToCatalogueItem(card, card.priceSnapshots));
+  const catalogue = cards.map(mapCatalogueSearchCard);
 
   return sortCatalogueSearchResults(catalogue, query.sort);
 }
@@ -554,14 +658,7 @@ async function searchSealedProducts(
     return searchSealedProductsByValue(userId, query);
   }
 
-  const filters: Prisma.SealedProductWhereInput[] = [
-    {
-      OR: [
-        { visibility: CatalogueVisibility.GLOBAL },
-        { createdByUserId: userId },
-      ],
-    },
-  ];
+  const filters: Prisma.SealedProductWhereInput[] = [visibleSealedProductsWhere(userId)];
 
   if (query.q) {
     const productType = sealedProductTypeFromSearchTerm(query.q);
@@ -584,44 +681,69 @@ async function searchSealedProducts(
 
   const products = await prisma.sealedProduct.findMany({
     where: { AND: filters },
-    include: {
-      relatedCardSet: true,
-      priceSnapshots: {
-        orderBy: { observedAt: "desc" },
-        take: PRICE_HISTORY_LIMIT,
-      },
-    },
-    orderBy: { name: "asc" },
+    select: catalogueSearchSealedSelect,
+    orderBy: sealedCatalogueSearchOrderBy(query.sort),
     take: catalogueSearchFetchLimit(query),
   });
-  const catalogue = products.map((product) =>
-    mapSealedProductToCatalogueItem(product, product.priceSnapshots),
-  );
+  const catalogue = products.map(mapCatalogueSearchSealed);
 
   return sortCatalogueSearchResults(catalogue, query.sort);
 }
 
 async function searchCardPrintingsByValue(query: NormalizedCatalogueSearchInput): Promise<CatalogueItem[]> {
   const rows = await prisma.$queryRaw<OrderedCatalogueId[]>(Prisma.sql`
-    WITH latest_prices AS (
-      SELECT DISTINCT ON (card_printing_id)
-        card_printing_id,
-        price_minor
-      FROM price_snapshots
-      WHERE card_printing_id IS NOT NULL
-        AND item_type = 'card'::item_type
-      ORDER BY card_printing_id, observed_at DESC, created_at DESC
-    )
     SELECT cp.id
     FROM card_printings cp
     JOIN card_sets cs ON cs.id = cp.card_set_id
-    LEFT JOIN latest_prices lp ON lp.card_printing_id = cp.id
+    LEFT JOIN LATERAL (
+      SELECT recent.price_minor
+      FROM (
+        SELECT
+          ps.price_minor,
+          ps.source,
+          ps.observed_at,
+          ps.confidence_score,
+          ps.created_at,
+          ps.graded_company
+        FROM price_snapshots ps
+        WHERE ps.card_printing_id = cp.id
+          AND ps.item_type = 'card'::item_type
+        ORDER BY ps.observed_at DESC, ps.created_at DESC
+        LIMIT ${PRICE_HISTORY_LIMIT}
+      ) recent
+      WHERE recent.graded_company IS NULL
+      ORDER BY
+        CASE
+          WHEN recent.observed_at >= CURRENT_TIMESTAMP -
+            CASE WHEN recent.price_minor >= 10000 THEN INTERVAL '7 days' ELSE INTERVAL '14 days' END
+          THEN 1 ELSE 0
+        END DESC,
+        CASE
+          WHEN recent.observed_at < CURRENT_TIMESTAMP -
+            CASE WHEN recent.price_minor >= 10000 THEN INTERVAL '7 days' ELSE INTERVAL '14 days' END
+          THEN 0
+          WHEN LOWER(BTRIM(recent.source)) LIKE 'pulse-uk%'
+            OR LOWER(BTRIM(recent.source)) LIKE 'uk-market%'
+            OR LOWER(BTRIM(recent.source)) LIKE 'ebay-uk%' THEN 4
+          WHEN LOWER(BTRIM(recent.source)) LIKE '%cardmarket%'
+            OR LOWER(BTRIM(recent.source)) LIKE '%cardtrader%' THEN 3
+          WHEN LOWER(BTRIM(recent.source)) = 'pokemon-tcg-api'
+            OR LOWER(BTRIM(recent.source)) LIKE 'tcgcsv%'
+            OR LOWER(BTRIM(recent.source)) LIKE 'pricecharting%' THEN 2
+          ELSE 1
+        END DESC,
+        recent.observed_at DESC,
+        recent.confidence_score DESC,
+        recent.created_at DESC
+      LIMIT 1
+    ) lp ON TRUE
     ${cardCatalogueSearchWhere(query)}
     ORDER BY
       CASE WHEN lp.price_minor IS NULL THEN 1 ELSE 0 END ASC,
       lp.price_minor ${catalogueValueSortDirection(query.sort)},
       cp.name ASC,
-      cp.number ASC
+      cp.number ASC,
+      cp.id ASC
     LIMIT ${catalogueSearchFetchLimit(query)}
   `);
 
@@ -633,28 +755,59 @@ async function searchSealedProductsByValue(
   query: NormalizedCatalogueSearchInput,
 ): Promise<CatalogueItem[]> {
   const rows = await prisma.$queryRaw<OrderedCatalogueId[]>(Prisma.sql`
-    WITH latest_prices AS (
-      SELECT DISTINCT ON (sealed_product_id)
-        sealed_product_id,
-        price_minor
-      FROM price_snapshots
-      WHERE sealed_product_id IS NOT NULL
-        AND item_type = 'sealed_product'::item_type
-      ORDER BY sealed_product_id, observed_at DESC, created_at DESC
-    )
     SELECT sp.id
     FROM sealed_products sp
     LEFT JOIN card_sets cs ON cs.id = sp.related_card_set_id
-    LEFT JOIN latest_prices lp ON lp.sealed_product_id = sp.id
+    LEFT JOIN LATERAL (
+      SELECT recent.price_minor
+      FROM (
+        SELECT
+          ps.price_minor,
+          ps.source,
+          ps.observed_at,
+          ps.confidence_score,
+          ps.created_at
+        FROM price_snapshots ps
+        WHERE ps.sealed_product_id = sp.id
+          AND ps.item_type = 'sealed_product'::item_type
+        ORDER BY ps.observed_at DESC, ps.created_at DESC
+        LIMIT ${PRICE_HISTORY_LIMIT}
+      ) recent
+      ORDER BY
+        CASE
+          WHEN recent.observed_at >= CURRENT_TIMESTAMP -
+            CASE WHEN recent.price_minor >= 10000 THEN INTERVAL '7 days' ELSE INTERVAL '14 days' END
+          THEN 1 ELSE 0
+        END DESC,
+        CASE
+          WHEN recent.observed_at < CURRENT_TIMESTAMP -
+            CASE WHEN recent.price_minor >= 10000 THEN INTERVAL '7 days' ELSE INTERVAL '14 days' END
+          THEN 0
+          WHEN LOWER(BTRIM(recent.source)) LIKE 'pulse-uk%'
+            OR LOWER(BTRIM(recent.source)) LIKE 'uk-market%'
+            OR LOWER(BTRIM(recent.source)) LIKE 'ebay-uk%' THEN 4
+          WHEN LOWER(BTRIM(recent.source)) LIKE '%cardmarket%'
+            OR LOWER(BTRIM(recent.source)) LIKE '%cardtrader%' THEN 3
+          WHEN LOWER(BTRIM(recent.source)) = 'pokemon-tcg-api'
+            OR LOWER(BTRIM(recent.source)) LIKE 'tcgcsv%'
+            OR LOWER(BTRIM(recent.source)) LIKE 'pricecharting%' THEN 2
+          ELSE 1
+        END DESC,
+        recent.observed_at DESC,
+        recent.confidence_score DESC,
+        recent.created_at DESC
+      LIMIT 1
+    ) lp ON TRUE
     ${sealedCatalogueSearchWhere(userId, query)}
     ORDER BY
       CASE WHEN lp.price_minor IS NULL THEN 1 ELSE 0 END ASC,
       lp.price_minor ${catalogueValueSortDirection(query.sort)},
-      sp.name ASC
+      sp.name ASC,
+      sp.id ASC
     LIMIT ${catalogueSearchFetchLimit(query)}
   `);
 
-  return hydrateSealedProductsByOrderedIds(rows.map((row) => row.id));
+  return hydrateSealedProductsByOrderedIds(userId, rows.map((row) => row.id));
 }
 
 async function hydrateCardPrintingsByOrderedIds(ids: string[]): Promise<CatalogueItem[]> {
@@ -665,39 +818,30 @@ async function hydrateCardPrintingsByOrderedIds(ids: string[]): Promise<Catalogu
   const order = new Map(ids.map((id, index) => [id, index]));
   const cards = await prisma.cardPrinting.findMany({
     where: { id: { in: ids } },
-    include: {
-      cardSet: true,
-      priceSnapshots: {
-        orderBy: [{ observedAt: "desc" }, { createdAt: "desc" }],
-        take: PRICE_HISTORY_LIMIT,
-      },
-    },
+    select: catalogueSearchCardSelect,
   });
 
   return cards
-    .map((card) => mapCardPrintingToCatalogueItem(card, card.priceSnapshots))
+    .map(mapCatalogueSearchCard)
     .sort((left, right) => (order.get(left.id) ?? 0) - (order.get(right.id) ?? 0));
 }
 
-async function hydrateSealedProductsByOrderedIds(ids: string[]): Promise<CatalogueItem[]> {
+async function hydrateSealedProductsByOrderedIds(
+  userId: string,
+  ids: string[],
+): Promise<CatalogueItem[]> {
   if (!ids.length) {
     return [];
   }
 
   const order = new Map(ids.map((id, index) => [id, index]));
   const products = await prisma.sealedProduct.findMany({
-    where: { id: { in: ids } },
-    include: {
-      relatedCardSet: true,
-      priceSnapshots: {
-        orderBy: [{ observedAt: "desc" }, { createdAt: "desc" }],
-        take: PRICE_HISTORY_LIMIT,
-      },
-    },
+    where: visibleSealedProductsWhere(userId, ids),
+    select: catalogueSearchSealedSelect,
   });
 
   return products
-    .map((product) => mapSealedProductToCatalogueItem(product, product.priceSnapshots))
+    .map(mapCatalogueSearchSealed)
     .sort((left, right) => (order.get(left.id) ?? 0) - (order.get(right.id) ?? 0));
 }
 
@@ -744,14 +888,10 @@ function ownedCardCountsBySet(
 }
 
 function normalizeCatalogueSearchInput(input: CatalogueSearchInput): NormalizedCatalogueSearchInput {
-  const limit = Number(input.limit);
-
   return {
     language: normalizeCatalogueLanguageFilter(input.language),
-    limit:
-      Number.isFinite(limit) && limit > 0
-        ? Math.min(Math.floor(limit), CATALOGUE_SEARCH_MAX_LIMIT)
-        : 40,
+    limit: normalizeCatalogueSearchLimit(input.limit),
+    offset: normalizeCatalogueSearchOffset(input.offset),
     q: normalizeOptionalText(input.q) ?? "",
     rarity: normalizeCatalogueFacet(input.rarity),
     set: normalizeCatalogueFacet(input.set),
@@ -792,11 +932,47 @@ function normalizeCatalogueSort(value?: string) {
 }
 
 function catalogueSearchFetchLimit(query: NormalizedCatalogueSearchInput) {
-  const multiplier = query.q || query.set !== "all" || query.rarity !== "all" || query.language !== "all"
-    ? CATALOGUE_SEARCH_FETCH_MULTIPLIER
-    : 3;
+  return catalogueSearchLookahead(query);
+}
 
-  return Math.min(CATALOGUE_SEARCH_MAX_LIMIT * CATALOGUE_SEARCH_FETCH_MULTIPLIER, query.limit * multiplier);
+function cardCatalogueSearchOrderBy(sort: string): Prisma.CardPrintingOrderByWithRelationInput[] {
+  if (sort === "name-desc") {
+    return [{ name: "desc" }, { id: "desc" }];
+  }
+
+  if (sort === "rarity") {
+    return [{ rarity: { sort: "asc", nulls: "last" } }, { name: "asc" }, { id: "asc" }];
+  }
+
+  if (sort === "set-number-asc") {
+    return [{ cardSet: { name: "asc" } }, { number: "asc" }, { id: "asc" }];
+  }
+
+  if (sort === "set-number-desc") {
+    return [{ cardSet: { name: "desc" } }, { number: "desc" }, { id: "desc" }];
+  }
+
+  return [{ name: "asc" }, { id: "asc" }];
+}
+
+function sealedCatalogueSearchOrderBy(sort: string): Prisma.SealedProductOrderByWithRelationInput[] {
+  if (sort === "name-desc") {
+    return [{ name: "desc" }, { id: "desc" }];
+  }
+
+  if (sort === "rarity") {
+    return [{ productType: "asc" }, { name: "asc" }, { id: "asc" }];
+  }
+
+  if (sort === "set-number-asc") {
+    return [{ relatedCardSet: { name: "asc" } }, { name: "asc" }, { id: "asc" }];
+  }
+
+  if (sort === "set-number-desc") {
+    return [{ relatedCardSet: { name: "desc" } }, { name: "desc" }, { id: "desc" }];
+  }
+
+  return [{ name: "asc" }, { id: "asc" }];
 }
 
 function isCatalogueValueSort(sort: string) {
@@ -918,65 +1094,6 @@ function filterAndSortCatalogue(
   );
 }
 
-function sortCatalogueSearchResults(items: CatalogueItem[], sort: string) {
-  return [...items].sort((left, right) => {
-    if (sort === "value-asc") {
-      return compareCatalogueValues(left, right, "asc") || compareCatalogueNames(left, right);
-    }
-
-    if (sort === "name-asc") {
-      return compareCatalogueNames(left, right);
-    }
-
-    if (sort === "name-desc") {
-      return compareCatalogueNames(right, left);
-    }
-
-    if (sort === "set-number-asc") {
-      return compareCatalogueSetNumbers(left, right);
-    }
-
-    if (sort === "set-number-desc") {
-      return compareCatalogueSetNumbers(right, left);
-    }
-
-    if (sort === "rarity") {
-      return left.rarity.localeCompare(right.rarity) || compareCatalogueNames(left, right);
-    }
-
-    return compareCatalogueValues(right, left, "desc") || compareCatalogueNames(left, right);
-  });
-}
-
-function compareCatalogueValues(left: CatalogueItem, right: CatalogueItem, direction: "asc" | "desc") {
-  const leftValue = left.hasPrice ? left.valueMinor : null;
-  const rightValue = right.hasPrice ? right.valueMinor : null;
-
-  if (leftValue === null && rightValue === null) {
-    return 0;
-  }
-
-  if (leftValue === null) {
-    return direction === "asc" ? 1 : -1;
-  }
-
-  if (rightValue === null) {
-    return direction === "asc" ? -1 : 1;
-  }
-
-  return leftValue - rightValue;
-}
-
-function compareCatalogueNames(left: CatalogueItem, right: CatalogueItem) {
-  return left.name.localeCompare(right.name, undefined, { numeric: true });
-}
-
-function compareCatalogueSetNumbers(left: CatalogueItem, right: CatalogueItem) {
-  return `${left.set} ${left.number}`.localeCompare(`${right.set} ${right.number}`, undefined, {
-    numeric: true,
-  });
-}
-
 function dashboardSummary(data: AppData) {
   const catalogueById = new Map(data.catalogue.map((item) => [item.id, item]));
   const collectionSummary = data.collection.reduce(
@@ -1033,17 +1150,22 @@ export async function createCollectionItem(
   input: CreateCollectionItemInput,
 ): Promise<CollectionItem> {
   assertDatabaseConfigured();
+  const catalogueId = boundedRequiredText(
+    input.catalogueId,
+    "Catalogue item id",
+    PERSISTED_INPUT_LIMITS.catalogueId,
+  );
 
   const [cardPrinting, sealedProduct] = await Promise.all([
     prisma.cardPrinting.findUnique({
-      where: { id: input.catalogueId },
+      where: { id: catalogueId },
       include: {
         cardSet: true,
         priceSnapshots: { orderBy: { observedAt: "desc" }, take: 1 },
       },
     }),
-    prisma.sealedProduct.findUnique({
-      where: { id: input.catalogueId },
+    prisma.sealedProduct.findFirst({
+      where: visibleSealedProductWhere(userId, catalogueId),
       include: {
         relatedCardSet: true,
         priceSnapshots: { orderBy: { observedAt: "desc" }, take: 1 },
@@ -1052,37 +1174,63 @@ export async function createCollectionItem(
   ]);
 
   if (!cardPrinting && !sealedProduct) {
-    throw new Error("Catalogue item not found.");
+    throw new AppMutationError("Catalogue item not found.", 404);
   }
 
   const itemType = cardPrinting ? PrismaItemType.CARD : PrismaItemType.SEALED_PRODUCT;
-  const storageLocationId = await resolveStorageLocationId(userId, input.location);
-  const paidMinor = parseMoneyToMinor(input.paid);
-  const overrideMinor = parseMoneyToMinor(input.overrideValue);
+  const paidMinor = moneyInputToMinor(input.paid, "Purchase price");
+  const overrideMinor = moneyInputToMinor(input.overrideValue, "Value override");
+  const variant = boundedOptionalText(input.variant, "Variant", PERSISTED_INPUT_LIMITS.variant);
+  const notes = boundedOptionalText(input.notes, "Notes", PERSISTED_INPUT_LIMITS.notes);
+  const valuationNote = boundedOptionalText(
+    input.valuationNote,
+    "Valuation note",
+    PERSISTED_INPUT_LIMITS.valuationNote,
+  );
+  const quantity = normalizeCollectionQuantity(input.quantity);
+  const purchaseDate = input.purchaseDate === undefined
+    ? paidMinor === undefined ? undefined : new Date()
+    : parseDateInput(input.purchaseDate);
 
-  const created = await prisma.collectionItem.create({
+  const created = await prisma.$transaction(async (transaction) => {
+    await lockUserResourceQuota(transaction, userId, "collectionLots");
+    await lockUserResourceQuota(transaction, userId, "collectionRows");
+    await lockUserResourceQuota(transaction, userId, "collectionEvents");
+    const activeLots = await transaction.collectionItem.count({
+      where: { userId, archivedAt: null },
+    });
+    const [retainedRows, retainedEvents] = await Promise.all([
+      transaction.collectionItem.count({ where: { userId } }),
+      transaction.collectionEvent.count({ where: { userId } }),
+    ]);
+    assertUserResourceQuota(activeLots, "collectionLots");
+    assertUserResourceQuota(retainedRows, "collectionRows");
+    assertUserResourceQuota(retainedEvents, "collectionEvents");
+    const storageLocationId = await resolveStorageLocationId(transaction, userId, input.location);
+
+    return transaction.collectionItem.create({
     data: {
       userId,
       itemType,
       cardPrintingId: cardPrinting?.id,
       sealedProductId: sealedProduct?.id,
-      quantity: Math.max(1, Number(input.quantity ?? 1)),
+      quantity,
       condition: conditionToEnum(input.condition, itemType),
       language: languageToCode(input.language),
-      variantLabel: input.variant || defaultVariant(itemType),
+      variantLabel: variant || defaultVariant(itemType),
       purchasePriceMinor: paidMinor,
       purchaseCurrency: paidMinor === undefined ? undefined : "GBP",
-      purchaseDate: paidMinor === undefined ? undefined : new Date(),
+      purchaseDate,
       currentValueOverrideMinor: overrideMinor,
       currentValueOverrideCurrency: overrideMinor === undefined ? undefined : "GBP",
-      valuationNote: normalizeOptionalText(input.valuationNote),
+      valuationNote,
       storageLocationId,
-      notes: input.notes || undefined,
+      notes,
       events: {
         create: {
           userId,
           eventType: CollectionEventType.ADDED,
-          quantity: Math.max(1, Number(input.quantity ?? 1)),
+          quantity,
           amountMinor: overrideMinor,
           currency: overrideMinor === undefined ? undefined : "GBP",
           occurredAt: new Date(),
@@ -1106,6 +1254,7 @@ export async function createCollectionItem(
       },
       storageLocation: true,
     },
+    });
   });
 
   return mapCollectionItem(created);
@@ -1130,17 +1279,27 @@ export async function updateCollectionItem(
       gradedCompany: true,
       gradedScore: true,
       currentValueOverrideMinor: true,
+      purchaseDate: true,
+      quantity: true,
     },
   });
 
   if (!existing) {
-    throw new Error("Collection item not found.");
+    throw new AppMutationError("Collection item not found.", 404);
   }
 
-  const storageLocationId = await resolveStorageLocationId(userId, input.location);
-  const paidMinor = parseMoneyToMinor(input.paid);
-  const overrideMinor = parseMoneyToMinor(input.overrideValue);
-  const quantity = Math.max(1, Number(input.quantity ?? 1));
+  const paidMinor = moneyInputToMinor(input.paid, "Purchase price");
+  const overrideMinor = moneyInputToMinor(input.overrideValue, "Value override");
+  const variant = input.variant === undefined
+    ? undefined
+    : boundedOptionalText(input.variant, "Variant", PERSISTED_INPUT_LIMITS.variant);
+  const notes = input.notes === undefined
+    ? undefined
+    : boundedOptionalText(input.notes, "Notes", PERSISTED_INPUT_LIMITS.notes);
+  const valuationNote = input.valuationNote === undefined
+    ? undefined
+    : boundedOptionalText(input.valuationNote, "Valuation note", PERSISTED_INPUT_LIMITS.valuationNote);
+  const quantity = normalizeCollectionQuantity(input.quantity);
   const gradedCompany =
     input.gradeCompany === undefined
       ? undefined
@@ -1166,24 +1325,43 @@ export async function updateCollectionItem(
     input.overrideValue !== undefined &&
     (existing.currentValueOverrideMinor ?? null) !== (overrideMinor ?? null);
 
-  const updated = await prisma.collectionItem.update({
-    where: { id: existing.id },
-    data: {
+  const updated = await prisma.$transaction(async (transaction) => {
+    await lockUserResourceQuota(transaction, userId, "collectionEvents");
+    assertUserResourceQuota(
+      await transaction.collectionEvent.count({ where: { userId } }),
+      "collectionEvents",
+    );
+    await lockCollectionItemsForBinderConsistency(transaction, userId, [existing.id]);
+    const storageLocationId = await resolveStorageLocationId(transaction, userId, input.location);
+    const current = await transaction.collectionItem.findFirst({
+      where: { id: existing.id, userId, archivedAt: null },
+      select: { quantity: true },
+    });
+    if (!current || current.quantity !== existing.quantity) {
+      throw new AppMutationError("This collection item changed while it was being edited. Refresh and try again.", 409);
+    }
+
+    const result = await transaction.collectionItem.update({
+      where: { id: existing.id },
+      data: {
       quantity,
       condition: conditionToEnum(input.condition, existing.itemType),
       language: languageToCode(input.language),
-      variantLabel: input.variant || defaultVariant(existing.itemType),
+      variantLabel: input.variant === undefined ? undefined : variant || defaultVariant(existing.itemType),
       purchasePriceMinor: paidMinor ?? null,
       purchaseCurrency: paidMinor === undefined ? null : "GBP",
-      purchaseDate: paidMinor === undefined ? null : new Date(),
+      purchaseDate:
+        input.purchaseDate === undefined
+          ? undefined
+          : parseDateInput(input.purchaseDate) ?? null,
       gradedCompany,
       gradedScore,
       currentValueOverrideMinor: input.overrideValue === undefined ? undefined : overrideMinor ?? null,
       currentValueOverrideCurrency:
         input.overrideValue === undefined ? undefined : overrideMinor === undefined ? null : "GBP",
-      valuationNote: input.valuationNote === undefined ? undefined : normalizeOptionalText(input.valuationNote) ?? null,
+      valuationNote: input.valuationNote === undefined ? undefined : valuationNote ?? null,
       storageLocationId: storageLocationId ?? null,
-      notes: input.notes || null,
+      notes: input.notes === undefined ? undefined : notes ?? null,
       events: {
         create: {
           userId,
@@ -1203,7 +1381,14 @@ export async function updateCollectionItem(
         },
       },
     },
-    include: collectionItemInclude,
+      include: collectionItemInclude,
+    });
+
+    if (quantity < existing.quantity) {
+      await reconcileBinderSlotsForQuantity(transaction, existing.id, quantity);
+    }
+
+    return result;
   });
 
   return mapCollectionItem(updated);
@@ -1225,12 +1410,24 @@ export async function archiveCollectionItem(userId: string, id: string) {
   });
 
   if (!existing) {
-    throw new Error("Collection item not found.");
+    throw new AppMutationError("Collection item not found.", 404);
   }
 
-  await prisma.collectionItem.update({
-    where: { id: existing.id },
-    data: {
+  await prisma.$transaction(async (transaction) => {
+    await lockUserResourceQuota(transaction, userId, "collectionEvents");
+    await reserveCollectionEventForDestructiveMutation(transaction, userId);
+    await lockCollectionItemsForBinderConsistency(transaction, userId, [existing.id]);
+    const current = await transaction.collectionItem.findFirst({
+      where: { id: existing.id, userId, archivedAt: null },
+      select: { quantity: true },
+    });
+    if (!current || current.quantity !== existing.quantity) {
+      throw new AppMutationError("This collection item changed while it was being removed. Refresh and try again.", 409);
+    }
+
+    await transaction.collectionItem.update({
+      where: { id: existing.id },
+      data: {
       archivedAt: new Date(),
       events: {
         create: {
@@ -1242,7 +1439,9 @@ export async function archiveCollectionItem(userId: string, id: string) {
           metadata: { source: "app_api" },
         },
       },
-    },
+      },
+    });
+    await reconcileBinderSlotsForQuantity(transaction, existing.id, 0);
   });
 }
 
@@ -1262,35 +1461,108 @@ export async function sellCollectionItem(
     select: {
       id: true,
       quantity: true,
+      purchasePriceMinor: true,
+      currentValueOverrideMinor: true,
     },
   });
 
   if (!existing) {
-    throw new Error("Collection item not found.");
+    throw new AppMutationError("Collection item not found.", 404);
   }
 
-  const amountMinor = parseMoneyToMinor(input.amount);
+  const amountMinor = moneyInputToMinor(input.amount, "Sale amount");
+  const saleNotes = boundedOptionalText(input.notes, "Sale notes", PERSISTED_INPUT_LIMITS.saleNotes);
   const occurredAt = parseDateInput(input.occurredAt) ?? new Date();
+  const soldQuantity = normalizeSaleQuantity(input.quantity, existing.quantity);
+  const remainingQuantity = existing.quantity - soldQuantity;
+  const soldPurchaseBasisMinor = proportionalMinor(
+    existing.purchasePriceMinor,
+    soldQuantity,
+    existing.quantity,
+  );
+  const remainingPurchaseBasisMinor = remainingMinor(
+    existing.purchasePriceMinor,
+    soldPurchaseBasisMinor,
+  );
+  const soldOverrideMinor = proportionalMinor(
+    existing.currentValueOverrideMinor,
+    soldQuantity,
+    existing.quantity,
+  );
+  const remainingOverrideMinor = remainingMinor(
+    existing.currentValueOverrideMinor,
+    soldOverrideMinor,
+  );
 
-  await prisma.collectionItem.update({
-    where: { id: existing.id },
-    data: {
-      soldAt: occurredAt,
-      archivedAt: new Date(),
+  await prisma.$transaction(async (transaction) => {
+    await lockUserResourceQuota(transaction, userId, "collectionEvents");
+    await reserveCollectionEventForDestructiveMutation(transaction, userId);
+    await lockCollectionItemsForBinderConsistency(transaction, userId, [existing.id]);
+    const current = await transaction.collectionItem.findFirst({
+      where: { id: existing.id, userId, archivedAt: null },
+      select: { quantity: true },
+    });
+    if (!current || current.quantity !== existing.quantity) {
+      throw new AppMutationError("This collection item changed while the sale was being recorded. Refresh and try again.", 409);
+    }
+
+    await transaction.collectionItem.update({
+      where: { id: existing.id },
+      data: {
+      quantity: remainingQuantity || existing.quantity,
+      purchasePriceMinor: remainingQuantity ? remainingPurchaseBasisMinor : undefined,
+      currentValueOverrideMinor: remainingQuantity ? remainingOverrideMinor : undefined,
+      soldAt: remainingQuantity ? null : occurredAt,
+      archivedAt: remainingQuantity ? null : new Date(),
       events: {
         create: {
           userId,
           eventType: CollectionEventType.SOLD,
-          quantity: existing.quantity,
+          quantity: soldQuantity,
           amountMinor,
           currency: amountMinor === undefined ? undefined : "GBP",
           occurredAt,
-          notes: normalizeOptionalText(input.notes) ?? "Sold from app API.",
-          metadata: { source: "app_api" },
+          notes: saleNotes ?? "Sold from app API.",
+          metadata: {
+            source: "app_api",
+            original_quantity: existing.quantity,
+            remaining_quantity: remainingQuantity,
+            sold_purchase_basis_minor: soldPurchaseBasisMinor,
+          },
         },
       },
-    },
+      },
+    });
+    await reconcileBinderSlotsForQuantity(transaction, existing.id, remainingQuantity);
   });
+}
+
+export async function reserveCollectionEventForDestructiveMutation(
+  transaction: Pick<Prisma.TransactionClient, "collectionEvent">,
+  userId: string,
+) {
+  const limit = USER_RESOURCE_LIMITS.collectionEvents;
+  const count = await transaction.collectionEvent.count({ where: { userId } });
+  if (count < limit) return { compacted: false };
+
+  // Preserve acquisition, sale, removal, and grading evidence. At the hard
+  // ceiling only an oldest low-value edit audit row may be replaced by the new
+  // destructive event, so users can still sell or remove a lot without ever
+  // exceeding the bounded event total.
+  const replaceable = await transaction.collectionEvent.findFirst({
+    where: { userId, eventType: CollectionEventType.EDITED },
+    orderBy: [{ occurredAt: "asc" }, { createdAt: "asc" }],
+    select: { id: true },
+  });
+  if (!replaceable) throw new UserQuotaExceededError("collection events", limit);
+
+  const removed = await transaction.collectionEvent.deleteMany({
+    where: { id: replaceable.id, userId, eventType: CollectionEventType.EDITED },
+  });
+  if (removed.count !== 1) {
+    throw new AppMutationError("Collection history changed concurrently. Refresh and try again.", 409);
+  }
+  return { compacted: true };
 }
 
 export async function createStorageLocation(
@@ -1300,26 +1572,27 @@ export async function createStorageLocation(
   assertDatabaseConfigured();
 
   const name = normalizeStorageName(input.name);
-  const notes = normalizeOptionalText(input.notes);
+  const notes = boundedOptionalText(input.notes, "Storage notes", PERSISTED_INPUT_LIMITS.storageNotes);
   const type = storageLocationTypeToEnum(input.type);
 
-  const location = await prisma.storageLocation.upsert({
-    where: {
-      userId_name: {
-        userId,
-        name,
-      },
-    },
-    update: {
-      type,
-      notes: notes ?? null,
-    },
-    create: {
-      userId,
-      name,
-      type,
-      notes,
-    },
+  const location = await prisma.$transaction(async (transaction) => {
+    await lockUserResourceQuota(transaction, userId, "storageLocations");
+    const existing = await transaction.storageLocation.findUnique({
+      where: { userId_name: { userId, name } },
+    });
+    if (existing) {
+      return transaction.storageLocation.update({
+        where: { id: existing.id },
+        data: { type, notes: notes ?? null },
+      });
+    }
+    assertUserResourceQuota(
+      await transaction.storageLocation.count({ where: { userId } }),
+      "storageLocations",
+    );
+    return transaction.storageLocation.create({
+      data: { userId, name, type, notes },
+    });
   });
 
   return mapStorageLocation(location, []);
@@ -1340,7 +1613,7 @@ export async function updateStorageLocation(
   });
 
   if (!existing) {
-    throw new Error("Storage location not found.");
+    throw new AppMutationError("Storage location not found.", 404);
   }
 
   const location = await prisma.storageLocation.update({
@@ -1348,7 +1621,9 @@ export async function updateStorageLocation(
     data: {
       name: input.name === undefined ? undefined : normalizeStorageName(input.name),
       type: input.type === undefined ? undefined : storageLocationTypeToEnum(input.type),
-      notes: input.notes === undefined ? undefined : normalizeOptionalText(input.notes) ?? null,
+      notes: input.notes === undefined
+        ? undefined
+        : boundedOptionalText(input.notes, "Storage notes", PERSISTED_INPUT_LIMITS.storageNotes) ?? null,
     },
   });
 
@@ -1375,15 +1650,23 @@ export async function createSealedProduct(
   const name = normalizeSealedProductName(input.name);
   const productType = sealedProductTypeToEnum(input.productType);
   const relatedCardSet = await resolveCardSet(input.relatedSetId);
-  const estimatedValueMinor = parseMoneyToMinor(input.estimatedValue);
+  const estimatedValueMinor = moneyInputToMinor(input.estimatedValue, "Estimated value");
+  const notes = boundedOptionalText(input.notes, "Notes", PERSISTED_INPUT_LIMITS.notes);
 
-  const product = await prisma.sealedProduct.create({
+  const product = await prisma.$transaction(async (transaction) => {
+    await lockUserResourceQuota(transaction, userId, "manualSealedProducts");
+    const productCount = await transaction.sealedProduct.count({
+      where: { createdByUserId: userId, visibility: CatalogueVisibility.PRIVATE },
+    });
+    assertUserResourceQuota(productCount, "manualSealedProducts");
+
+    return transaction.sealedProduct.create({
     data: {
       createdByUserId: userId,
       relatedCardSetId: relatedCardSet?.id,
       name,
       productType,
-      notes: normalizeOptionalText(input.notes),
+      notes,
       visibility: CatalogueVisibility.PRIVATE,
       metadata: {
         source: "manual",
@@ -1413,38 +1696,104 @@ export async function createSealedProduct(
         take: PRICE_HISTORY_LIMIT,
       },
     },
+    });
   });
 
   return mapSealedProductToCatalogueItem(product, product.priceSnapshots);
 }
 
+export async function deleteManualSealedProduct(userId: string, id: string) {
+  assertDatabaseConfigured();
+  const normalizedId = boundedRequiredText(id, "Sealed product id", PERSISTED_INPUT_LIMITS.catalogueId);
+
+  return prisma.$transaction(async (transaction) => {
+    await lockUserResourceQuota(transaction, userId, "manualSealedProducts");
+    const product = await transaction.sealedProduct.findFirst({
+      where: {
+        id: normalizedId,
+        createdByUserId: userId,
+        visibility: CatalogueVisibility.PRIVATE,
+      },
+      select: {
+        id: true,
+        _count: { select: { collectionItems: true, wishlistItems: true } },
+      },
+    });
+    if (!product) throw new AppMutationError("Private sealed product not found.", 404);
+    if (product._count.collectionItems || product._count.wishlistItems) {
+      throw new AppMutationError(
+        "Remove this product from collections and wishlists before deleting it permanently.",
+        409,
+      );
+    }
+
+    const deleted = await transaction.sealedProduct.deleteMany({
+      where: {
+        id: product.id,
+        createdByUserId: userId,
+        visibility: CatalogueVisibility.PRIVATE,
+      },
+    });
+    if (deleted.count !== 1) {
+      throw new AppMutationError("Private sealed product changed concurrently. Refresh and try again.", 409);
+    }
+    return { deleted: true };
+  });
+}
+
 export async function createWishlistItem(userId: string, catalogueId: string): Promise<WishlistItem> {
   assertDatabaseConfigured();
+  const normalizedCatalogueId = boundedRequiredText(
+    catalogueId,
+    "Catalogue item id",
+    PERSISTED_INPUT_LIMITS.catalogueId,
+  );
 
   const [cardPrinting, sealedProduct] = await Promise.all([
     prisma.cardPrinting.findUnique({
-      where: { id: catalogueId },
+      where: { id: normalizedCatalogueId },
       include: { priceSnapshots: { orderBy: { observedAt: "desc" }, take: 1 } },
     }),
-    prisma.sealedProduct.findUnique({
-      where: { id: catalogueId },
+    prisma.sealedProduct.findFirst({
+      where: visibleSealedProductWhere(userId, normalizedCatalogueId),
       include: { priceSnapshots: { orderBy: { observedAt: "desc" }, take: 1 } },
     }),
   ]);
 
   if (!cardPrinting && !sealedProduct) {
-    throw new Error("Catalogue item not found.");
+    throw new AppMutationError("Catalogue item not found.", 404);
   }
 
   const priceSnapshot = cardPrinting?.priceSnapshots[0] ?? sealedProduct?.priceSnapshots[0];
   const targetPriceMinor = defaultWishlistTargetPriceMinor(priceSnapshot?.priceMinor);
 
-  const created = await prisma.wishlistItem.upsert({
-    where: cardPrinting
+  const uniqueWhere = cardPrinting
       ? { userId_cardPrintingId: { userId, cardPrintingId: cardPrinting.id } }
-      : { userId_sealedProductId: { userId, sealedProductId: sealedProduct!.id } },
-    update: {},
-    create: {
+      : { userId_sealedProductId: { userId, sealedProductId: sealedProduct!.id } };
+  const include = {
+    cardPrinting: {
+      include: {
+        cardSet: true,
+        priceSnapshots: { orderBy: { observedAt: "desc" as const }, take: 1 },
+      },
+    },
+    sealedProduct: {
+      include: {
+        relatedCardSet: true,
+        priceSnapshots: { orderBy: { observedAt: "desc" as const }, take: 1 },
+      },
+    },
+  };
+  const created = await prisma.$transaction(async (transaction) => {
+    await lockUserResourceQuota(transaction, userId, "wishlistItems");
+    const existing = await transaction.wishlistItem.findUnique({ where: uniqueWhere, include });
+    if (existing) return existing;
+    assertUserResourceQuota(
+      await transaction.wishlistItem.count({ where: { userId } }),
+      "wishlistItems",
+    );
+    return transaction.wishlistItem.create({
+      data: {
       userId,
       itemType: cardPrinting ? PrismaItemType.CARD : PrismaItemType.SEALED_PRODUCT,
       cardPrintingId: cardPrinting?.id,
@@ -1456,21 +1805,9 @@ export async function createWishlistItem(userId: string, catalogueId: string): P
           ? WishlistPriority.GRAIL
           : WishlistPriority.HIGH,
       notes: "Added from app API.",
-    },
-    include: {
-      cardPrinting: {
-        include: {
-          cardSet: true,
-          priceSnapshots: { orderBy: { observedAt: "desc" }, take: 1 },
-        },
       },
-      sealedProduct: {
-        include: {
-          relatedCardSet: true,
-          priceSnapshots: { orderBy: { observedAt: "desc" }, take: 1 },
-        },
-      },
-    },
+      include,
+    });
   });
 
   return mapWishlistItem(created);
@@ -1503,41 +1840,46 @@ export async function updateWishlistItem(
   });
 
   if (!existing) {
-    throw new Error("Wishlist item not found.");
+    throw new AppMutationError("Wishlist item not found.", 404);
   }
 
-  const targetPriceMinor = parseMoneyToMinor(input.targetPrice);
+  const targetPriceMinor = moneyInputToMinor(input.targetPrice, "Wishlist target price");
   const updated = await prisma.wishlistItem.update({
     where: { id: existing.id },
     data: {
       priority: input.priority === undefined ? undefined : priorityToEnum(input.priority),
       targetPriceMinor: input.targetPrice === undefined ? undefined : targetPriceMinor ?? null,
       targetCurrency: input.targetPrice === undefined ? undefined : targetPriceMinor === undefined ? null : "GBP",
-      notes: input.notes === undefined ? undefined : normalizeOptionalText(input.notes) ?? null,
+      notes: input.notes === undefined
+        ? undefined
+        : boundedOptionalText(input.notes, "Wishlist notes", PERSISTED_INPUT_LIMITS.wishlistNotes) ?? null,
     },
   });
 
   return mapWishlistItem(updated);
 }
 
-async function resolveStorageLocationId(userId: string, location?: string) {
+async function resolveStorageLocationId(
+  transaction: Prisma.TransactionClient,
+  userId: string,
+  location?: string,
+) {
   if (!location || location === "Unassigned") {
     return undefined;
   }
 
-  const storage = await prisma.storageLocation.upsert({
-    where: {
-      userId_name: {
-        userId,
-        name: location,
-      },
-    },
-    update: {},
-    create: {
-      userId,
-      name: location,
-      type: StorageLocationType.OTHER,
-    },
+  const name = normalizeStorageName(location);
+  await lockUserResourceQuota(transaction, userId, "storageLocations");
+  const existing = await transaction.storageLocation.findUnique({
+    where: { userId_name: { userId, name } },
+  });
+  if (existing) return existing.id;
+  assertUserResourceQuota(
+    await transaction.storageLocation.count({ where: { userId } }),
+    "storageLocations",
+  );
+  const storage = await transaction.storageLocation.create({
+    data: { userId, name, type: StorageLocationType.OTHER },
   });
 
   return storage.id;
@@ -1560,7 +1902,7 @@ function mapCardPrintingToCatalogueItem(
   },
   prices: PriceLike[] = [],
 ): CatalogueItem {
-  const priceHistory = buildPriceHistory(prices);
+  const priceHistory = buildPriceHistory(priceInputsForGrade(prices));
   const latestPrice = preferredLatestPricePoint(priceHistory);
   const image =
     usableCardImageUrl(card.imageLargeUrl) ??
@@ -1681,6 +2023,22 @@ function mapSealedProductToCatalogueItem(
   };
 }
 
+function mapCatalogueSearchCard(
+  card: Prisma.CardPrintingGetPayload<{ select: typeof catalogueSearchCardSelect }>,
+) {
+  return compactCatalogueSearchHistory(
+    mapCardPrintingToCatalogueItem(card, card.priceSnapshots),
+  );
+}
+
+function mapCatalogueSearchSealed(
+  product: Prisma.SealedProductGetPayload<{ select: typeof catalogueSearchSealedSelect }>,
+) {
+  return compactCatalogueSearchHistory(
+    mapSealedProductToCatalogueItem(product, product.priceSnapshots),
+  );
+}
+
 function mapCollectionItem(item: {
   id: string;
   itemType: string;
@@ -1792,9 +2150,12 @@ function mapStorageLocations(
   locations: Array<{ id: string; name: string; type: string; notes: string | null }>,
   collectionItems: Array<{
     condition: string;
+    itemType: string;
     storageLocationId: string | null;
     quantity: number;
     variantLabel: string | null;
+    gradedCompany: string | null;
+    gradedScore: unknown;
     currentValueOverrideMinor: number | null;
     cardPrinting: { priceSnapshots: PriceLike[] } | null;
     sealedProduct: { priceSnapshots: PriceLike[] } | null;
@@ -1810,8 +2171,11 @@ function mapStorageLocation(
   location: { id: string; name: string; type: string; notes: string | null },
   items: Array<{
     condition: string;
+    itemType: string;
     quantity: number;
     variantLabel: string | null;
+    gradedCompany: string | null;
+    gradedScore: unknown;
     currentValueOverrideMinor: number | null;
     cardPrinting: { priceSnapshots: PriceLike[] } | null;
     sealedProduct: { priceSnapshots: PriceLike[] } | null;
@@ -1836,6 +2200,7 @@ function mapCollectionEvent(event: {
   currency: string | null;
   occurredAt: Date;
   notes: string | null;
+  metadata: unknown;
   collectionItem: {
     id: string;
     cardPrintingId: string | null;
@@ -1858,7 +2223,7 @@ function mapCollectionEvent(event: {
     amountMinor: event.amountMinor ?? undefined,
     basisMinor:
       event.eventType === CollectionEventType.SOLD
-        ? event.collectionItem.purchasePriceMinor ?? undefined
+        ? saleBasisMinor(event.metadata) ?? event.collectionItem.purchasePriceMinor ?? undefined
         : undefined,
     currency: event.currency ?? undefined,
     occurredAt: event.occurredAt.toISOString(),
@@ -1866,10 +2231,23 @@ function mapCollectionEvent(event: {
   };
 }
 
+function saleBasisMinor(metadata: unknown) {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return undefined;
+  }
+
+  const value = (metadata as Record<string, unknown>).sold_purchase_basis_minor;
+
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
 function collectionItemValueMinor(item: {
   condition: string;
+  itemType: string;
   quantity: number;
   variantLabel: string | null;
+  gradedCompany: string | null;
+  gradedScore: unknown;
   currentValueOverrideMinor: number | null;
   cardPrinting: { priceSnapshots: PriceLike[] } | null;
   sealedProduct: { priceSnapshots: PriceLike[] } | null;
@@ -1878,15 +2256,22 @@ function collectionItemValueMinor(item: {
     return item.currentValueOverrideMinor;
   }
 
+  const prices = item.cardPrinting?.priceSnapshots ?? item.sealedProduct?.priceSnapshots ?? [];
   const priceHistory = buildPriceHistory(
-    item.cardPrinting?.priceSnapshots ?? item.sealedProduct?.priceSnapshots ?? [],
+    item.itemType === PrismaItemType.CARD
+      ? priceInputsForGrade(prices, item.gradedCompany, item.gradedScore as string | number | null)
+      : prices,
   );
   const latestValue = preferredLatestPricePoint(priceHistory)?.valueMinor ?? 0;
   const unitValue = item.variantLabel
     ? latestPricePointForVariant(priceHistory, item.variantLabel)?.valueMinor ?? latestValue
     : latestValue;
 
-  return Math.round(unitValue * conditionValueMultiplier(enumLabel(item.condition))) * item.quantity;
+  const conditionMultiplier = item.gradedCompany
+    ? 1
+    : conditionValueMultiplier(enumLabel(item.condition));
+
+  return Math.round(unitValue * conditionMultiplier) * item.quantity;
 }
 
 function conditionValueMultiplier(condition: string) {
@@ -2136,17 +2521,6 @@ function defaultWishlistTargetPriceMinor(priceMinor?: number | null) {
   return Math.max(1, Math.round(priceMinor * 0.9));
 }
 
-function parseMoneyToMinor(value?: string) {
-  const normalized = String(value ?? "").replace(/[^0-9.]/g, "");
-  const amount = Number(normalized);
-
-  if (!normalized || !Number.isFinite(amount)) {
-    return undefined;
-  }
-
-  return Math.round(amount * 100);
-}
-
 function parseDateInput(value?: string) {
   const normalized = value?.trim();
 
@@ -2160,23 +2534,11 @@ function parseDateInput(value?: string) {
 }
 
 function normalizeStorageName(value?: string) {
-  const name = value?.trim();
-
-  if (!name) {
-    throw new Error("Storage location name is required.");
-  }
-
-  return name;
+  return boundedRequiredText(value, "Storage location name", PERSISTED_INPUT_LIMITS.storageName);
 }
 
 function normalizeSealedProductName(value?: string) {
-  const name = value?.trim();
-
-  if (!name) {
-    throw new Error("Sealed product name is required.");
-  }
-
-  return name;
+  return boundedRequiredText(value, "Sealed product name", PERSISTED_INPUT_LIMITS.name);
 }
 
 function normalizeOptionalText(value?: string) {

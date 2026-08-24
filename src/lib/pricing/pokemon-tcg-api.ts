@@ -12,6 +12,8 @@ import {
   summarizePokemonTcgPageResults,
 } from "@/lib/pricing/pokemon-tcg-pagination";
 import { bestPokemonTcgCardPrice, type PokemonPricingRates } from "@/lib/pricing/pokemon-tcg-card-prices";
+import { retryAfterMilliseconds, retryDelayMilliseconds } from "../../../scripts/provider-fetch.mjs";
+import { fetchWithPolicy, ProviderRequestError } from "@/lib/http/fetch-with-policy";
 
 type PokemonTcgSearchResponse = {
   count: number;
@@ -106,11 +108,13 @@ export class PricingProviderConfigError extends Error {
 }
 
 export class PokemonTcgApiRequestError extends Error {
+  retryAfterMs?: number;
   status: number;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, retryAfterMs?: number) {
     super(message);
     this.name = "PokemonTcgApiRequestError";
+    this.retryAfterMs = retryAfterMs;
     this.status = status;
   }
 }
@@ -503,7 +507,11 @@ async function fetchPokemonCards({
         throw error;
       }
 
-      await wait(retryWaitMs * attempt);
+      await wait(retryDelayMilliseconds({
+        attempt,
+        retryAfterMs: error instanceof PokemonTcgApiRequestError ? error.retryAfterMs : undefined,
+        retryWaitMs,
+      }));
     }
   }
 
@@ -529,7 +537,16 @@ async function fetchPokemonSets({ page, pageSize }: { page: number; pageSize: nu
         headers["x-api-key"] = apiKey;
       }
 
-      const response = await fetch(url, { headers, signal: pokemonTcgFetchSignal() });
+      const response = await fetchWithPolicy(
+        url,
+        { headers, signal: pokemonTcgFetchSignal() },
+        {
+          maxResponseBytes: 16 * 1024 * 1024,
+          provider: "Pokemon TCG sets",
+          retryAttempts: 0,
+          timeoutMs: pokemonTcgApiTimeoutMs(),
+        },
+      );
       const data = (await response.json().catch(() => ({}))) as Partial<PokemonTcgSetSearchResponse> & {
         error?: { message?: string };
       };
@@ -538,6 +555,7 @@ async function fetchPokemonSets({ page, pageSize }: { page: number; pageSize: nu
         throw new PokemonTcgApiRequestError(
           data.error?.message ?? `Pokemon TCG sets request failed with ${response.status}.`,
           response.status,
+          retryAfterMilliseconds(response.headers.get("retry-after")),
         );
       }
 
@@ -549,7 +567,11 @@ async function fetchPokemonSets({ page, pageSize }: { page: number; pageSize: nu
         throw error;
       }
 
-      await wait(retryWaitMs * attempt);
+      await wait(retryDelayMilliseconds({
+        attempt,
+        retryAfterMs: error instanceof PokemonTcgApiRequestError ? error.retryAfterMs : undefined,
+        retryWaitMs,
+      }));
     }
   }
 
@@ -584,7 +606,16 @@ async function fetchPokemonCardsOnce({
     headers["x-api-key"] = apiKey;
   }
 
-  const response = await fetch(url, { headers, signal: pokemonTcgFetchSignal() });
+  const response = await fetchWithPolicy(
+    url,
+    { headers, signal: pokemonTcgFetchSignal() },
+    {
+      maxResponseBytes: 32 * 1024 * 1024,
+      provider: "Pokemon TCG cards",
+      retryAttempts: 0,
+      timeoutMs: pokemonTcgApiTimeoutMs(),
+    },
+  );
   const data = (await response.json().catch(() => ({}))) as Partial<PokemonTcgSearchResponse> & {
     error?: { message?: string };
   };
@@ -593,6 +624,7 @@ async function fetchPokemonCardsOnce({
     throw new PokemonTcgApiRequestError(
       data.error?.message ?? `Pokemon TCG API request failed with ${response.status}.`,
       response.status,
+      retryAfterMilliseconds(response.headers.get("retry-after")),
     );
   }
 
@@ -608,6 +640,7 @@ function isRetryablePokemonTcgError(error: unknown) {
 }
 
 function isFetchNetworkError(error: unknown) {
+  if (error instanceof ProviderRequestError) return true;
   if (error instanceof DOMException && ["AbortError", "TimeoutError"].includes(error.name)) {
     return true;
   }
@@ -616,9 +649,11 @@ function isFetchNetworkError(error: unknown) {
 }
 
 function pokemonTcgFetchSignal() {
-  const timeoutMs = optionalPositiveInteger(process.env.POKEMON_TCG_API_TIMEOUT_MS) ?? 8000;
+  return AbortSignal.timeout(pokemonTcgApiTimeoutMs());
+}
 
-  return AbortSignal.timeout(timeoutMs);
+function pokemonTcgApiTimeoutMs() {
+  return optionalPositiveInteger(process.env.POKEMON_TCG_API_TIMEOUT_MS) ?? 8000;
 }
 
 function optionalPositiveInteger(value: unknown) {

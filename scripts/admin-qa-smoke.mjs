@@ -295,7 +295,7 @@ async function databaseCounts(prisma) {
     prisma.jobRun.count(),
     prisma.notificationPreference.count(),
     prisma.priceSnapshot.count(),
-    prisma.sealedProduct.count(),
+    prisma.sealedProduct.count({ where: { visibility: "GLOBAL" } }),
     prisma.storageLocation.count(),
     prisma.subscription.count(),
     prisma.user.count(),
@@ -372,13 +372,16 @@ async function catalogueHealthReport(prisma) {
         COUNT(*)::int AS "total",
         COUNT(*) FILTER (WHERE image_url IS NOT NULL)::int AS "covered"
       FROM sealed_products
+      WHERE visibility = 'global'::catalogue_visibility
     `,
     prisma.$queryRaw`
       SELECT
-        (SELECT COUNT(*)::int FROM sealed_products) AS "total",
-        COUNT(DISTINCT sealed_product_id)::int AS "covered"
-      FROM price_snapshots
-      WHERE sealed_product_id IS NOT NULL
+        (SELECT COUNT(*)::int FROM sealed_products WHERE visibility = 'global'::catalogue_visibility) AS "total",
+        COUNT(DISTINCT snapshot.sealed_product_id)::int AS "covered"
+      FROM price_snapshots AS snapshot
+      INNER JOIN sealed_products AS product
+        ON product.id = snapshot.sealed_product_id
+       AND product.visibility = 'global'::catalogue_visibility
     `,
     prisma.$queryRaw`
       SELECT source, COUNT(*)::int AS snapshots

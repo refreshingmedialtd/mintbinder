@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { prisma } from "@/lib/db/prisma";
-import type { NotificationPreferences } from "@/lib/types";
+import { prisma } from "../db/prisma.ts";
+import type { NotificationPreferences } from "../types.ts";
 
 type DbNotificationPreference = {
   price_alerts_enabled: boolean;
@@ -18,12 +18,31 @@ export const defaultNotificationPreferences: NotificationPreferences = {
 
 export type NotificationPreferenceUpdate = Partial<NotificationPreferences>;
 
+type NotificationPreferenceQueryClient = Pick<typeof prisma, "$queryRaw">;
+
+type NotificationPreferenceOptions = {
+  client?: NotificationPreferenceQueryClient;
+};
+
+export class NotificationPreferenceValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "NotificationPreferenceValidationError";
+  }
+}
+
 export async function ensureNotificationPreferences(userId: string): Promise<NotificationPreferences> {
   return updateNotificationPreferences(userId, {});
 }
 
-export async function getNotificationPreferences(userId: string): Promise<NotificationPreferences> {
-  const rows = await prisma.$queryRaw<DbNotificationPreference[]>`
+export async function getNotificationPreferences(
+  userId: string,
+  {
+    client = prisma,
+    fallback = "throw",
+  }: NotificationPreferenceOptions & { fallback?: "default" | "throw" } = {},
+): Promise<NotificationPreferences> {
+  const query = client.$queryRaw<DbNotificationPreference[]>`
       SELECT
         price_alerts_enabled,
         wishlist_target_alerts_enabled,
@@ -32,7 +51,10 @@ export async function getNotificationPreferences(userId: string): Promise<Notifi
       FROM notification_preferences
       WHERE user_id = ${userId}::uuid
       LIMIT 1
-    `.catch((error) => {
+    `;
+  const rows = fallback === "throw"
+    ? await query
+    : await query.catch((error) => {
       console.warn("Notification preferences unavailable; using defaults.", error);
       return [] as DbNotificationPreference[];
     });
@@ -42,12 +64,11 @@ export async function getNotificationPreferences(userId: string): Promise<Notifi
 
 export async function updateNotificationPreferences(
   userId: string,
-  input: NotificationPreferenceUpdate,
+  input: unknown,
+  { client = prisma }: NotificationPreferenceOptions = {},
 ): Promise<NotificationPreferences> {
-  const current = await getNotificationPreferences(userId);
-  const next = { ...current, ...input };
-  const digestFrequency = digestFrequencyToDb(next.digestFrequency);
-  const rows = await prisma.$queryRaw<DbNotificationPreference[]>`
+  const update = normalizeNotificationPreferenceUpdate(input);
+  const rows = await client.$queryRaw<DbNotificationPreference[]>`
     INSERT INTO notification_preferences (
       id,
       user_id,
@@ -60,17 +81,33 @@ export async function updateNotificationPreferences(
     VALUES (
       ${randomUUID()}::uuid,
       ${userId}::uuid,
-      ${next.priceAlertsEnabled},
-      ${next.wishlistTargetAlertsEnabled},
-      ${next.weakPriceAlertsEnabled},
-      ${digestFrequency}::notification_digest_frequency,
+      ${update.priceAlertsEnabled.value},
+      ${update.wishlistTargetAlertsEnabled.value},
+      ${update.weakPriceAlertsEnabled.value},
+      ${update.digestFrequency.value}::notification_digest_frequency,
       NOW()
     )
     ON CONFLICT (user_id) DO UPDATE SET
-      price_alerts_enabled = EXCLUDED.price_alerts_enabled,
-      wishlist_target_alerts_enabled = EXCLUDED.wishlist_target_alerts_enabled,
-      weak_price_alerts_enabled = EXCLUDED.weak_price_alerts_enabled,
-      digest_frequency = EXCLUDED.digest_frequency,
+      price_alerts_enabled = CASE
+        WHEN ${update.priceAlertsEnabled.provided}
+        THEN EXCLUDED.price_alerts_enabled
+        ELSE notification_preferences.price_alerts_enabled
+      END,
+      wishlist_target_alerts_enabled = CASE
+        WHEN ${update.wishlistTargetAlertsEnabled.provided}
+        THEN EXCLUDED.wishlist_target_alerts_enabled
+        ELSE notification_preferences.wishlist_target_alerts_enabled
+      END,
+      weak_price_alerts_enabled = CASE
+        WHEN ${update.weakPriceAlertsEnabled.provided}
+        THEN EXCLUDED.weak_price_alerts_enabled
+        ELSE notification_preferences.weak_price_alerts_enabled
+      END,
+      digest_frequency = CASE
+        WHEN ${update.digestFrequency.provided}
+        THEN EXCLUDED.digest_frequency
+        ELSE notification_preferences.digest_frequency
+      END,
       updated_at = NOW()
     RETURNING
       price_alerts_enabled,
@@ -79,7 +116,63 @@ export async function updateNotificationPreferences(
       digest_frequency
   `;
 
-  return rows[0] ? mapNotificationPreferences(rows[0]) : next;
+  if (!rows[0]) {
+    throw new Error("Notification preference update did not return a row.");
+  }
+
+  return mapNotificationPreferences(rows[0]);
+}
+
+function normalizeNotificationPreferenceUpdate(input: unknown) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new NotificationPreferenceValidationError("Notification preferences must be an object.");
+  }
+
+  const value = input as Record<string, unknown>;
+
+  return {
+    digestFrequency: normalizeDigestUpdate(value),
+    priceAlertsEnabled: normalizeBooleanUpdate(value, "priceAlertsEnabled", defaultNotificationPreferences.priceAlertsEnabled),
+    weakPriceAlertsEnabled: normalizeBooleanUpdate(
+      value,
+      "weakPriceAlertsEnabled",
+      defaultNotificationPreferences.weakPriceAlertsEnabled,
+    ),
+    wishlistTargetAlertsEnabled: normalizeBooleanUpdate(
+      value,
+      "wishlistTargetAlertsEnabled",
+      defaultNotificationPreferences.wishlistTargetAlertsEnabled,
+    ),
+  };
+}
+
+function normalizeBooleanUpdate(
+  input: Record<string, unknown>,
+  field: keyof Pick<
+    NotificationPreferences,
+    "priceAlertsEnabled" | "weakPriceAlertsEnabled" | "wishlistTargetAlertsEnabled"
+  >,
+  defaultValue: boolean,
+) {
+  const provided = Object.prototype.hasOwnProperty.call(input, field);
+  const value = provided ? input[field] : defaultValue;
+
+  if (typeof value !== "boolean") {
+    throw new NotificationPreferenceValidationError(`${field} must be a boolean.`);
+  }
+
+  return { provided, value };
+}
+
+function normalizeDigestUpdate(input: Record<string, unknown>) {
+  const provided = Object.prototype.hasOwnProperty.call(input, "digestFrequency");
+  const value = provided ? input.digestFrequency : defaultNotificationPreferences.digestFrequency;
+
+  if (value !== "Off" && value !== "Daily" && value !== "Weekly") {
+    throw new NotificationPreferenceValidationError("digestFrequency must be Off, Daily, or Weekly.");
+  }
+
+  return { provided, value: digestFrequencyToDb(value) };
 }
 
 function mapNotificationPreferences(preferences: DbNotificationPreference): NotificationPreferences {

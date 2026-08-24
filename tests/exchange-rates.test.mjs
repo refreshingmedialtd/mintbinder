@@ -61,6 +61,26 @@ test("falls back to env rates when the live provider is unavailable", async () =
   assert.equal(rates.USD?.metadata.provider, "env");
 });
 
+test("falls back when exchange-rate response headers arrive but the body stalls", async () => {
+  const started = Date.now();
+  const rates = await resolvePokemonPricingRates({
+    env: {
+      EXCHANGE_RATES_TIMEOUT_MS: "100",
+      POKEMON_TCG_USD_TO_GBP_RATE: "0.74",
+    },
+    fetchImpl: async (_url, init) => new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"rates":'));
+        init?.signal?.addEventListener("abort", () => controller.error(new Error("aborted")), { once: true });
+      },
+    }), { status: 200 }),
+  });
+
+  assert.equal(rates.usdToGbp, 0.74);
+  assert.equal(rates.metadata.USD?.provider, "env");
+  assert.ok(Date.now() - started < 2_000);
+});
+
 test("fails clearly when neither live nor fallback rates are available", async () => {
   await assert.rejects(
     () =>

@@ -2,8 +2,9 @@ import type { Metadata } from "next";
 import { LegalPage, legalBusinessName, legalProductName } from "../LegalPage";
 
 export const metadata: Metadata = {
-  title: `Non-Affiliation Notice | ${legalProductName}`,
+  title: "Non-Affiliation Notice",
   description: `${legalProductName} Pokemon brand and intellectual-property notice.`,
+  alternates: { canonical: "/legal/non-affiliation" },
 };
 
 export default function NonAffiliationPage() {

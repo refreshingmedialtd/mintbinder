@@ -6,7 +6,7 @@ type LegalSection = {
   body: ReactNode;
 };
 
-export const legalLastUpdated = "10 June 2026";
+export const legalLastUpdated = "24 August 2026";
 export const legalProductName = "Mint Binder";
 export const legalBusinessName = "Refreshing Media";
 export const legalContact = "support@mintbinder.co.uk";

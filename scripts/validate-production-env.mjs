@@ -1,6 +1,12 @@
 import "dotenv/config";
+import {
+  authAndJobSecretsAreIndependent,
+  billingProviderLifecycleSettings,
+} from "./billing-provider-lifecycle.mjs";
+import { smtpSecurityOptions } from "./smtp-policy.mjs";
 
 const jsonOutput = process.argv.includes("--json");
+const deploymentCheck = process.argv.includes("--deployment");
 
 const checks = [];
 
@@ -23,23 +29,75 @@ required("NEXT_PUBLIC_APP_URL", "Set NEXT_PUBLIC_APP_URL to the production app o
 httpsUrl("NEXT_PUBLIC_APP_URL", "NEXT_PUBLIC_APP_URL must be a public HTTPS URL.");
 sameOrigin("AUTH_URL", "NEXT_PUBLIC_APP_URL", "AUTH_URL and NEXT_PUBLIC_APP_URL should use the same origin.");
 
+required("SCHEDULED_JOB_APP_URL", "Set the HTTPS production origin used by protected scheduled-job helpers.");
+httpsUrl("SCHEDULED_JOB_APP_URL", "SCHEDULED_JOB_APP_URL must be a public HTTPS URL.");
+sameOrigin(
+  "SCHEDULED_JOB_APP_URL",
+  "NEXT_PUBLIC_APP_URL",
+  "SCHEDULED_JOB_APP_URL and NEXT_PUBLIC_APP_URL should use the same origin.",
+);
+
 required("JOB_SECRET", "Set a high-entropy secret for protected job routes.");
 minLength("JOB_SECRET", 32, "JOB_SECRET should be at least 32 characters.");
 notPlaceholder("JOB_SECRET", ["replace", "secret", "password"], "JOB_SECRET still looks like a placeholder.");
+if (!authAndJobSecretsAreIndependent(process.env)) {
+  blocker(
+    "JOB_SECRET",
+    "AUTH_SECRET and JOB_SECRET must be independently generated values. Rotate both if either has been reused or exposed.",
+  );
+}
 
 oneOf("BILLING_PROVIDER", ["square", "stripe", ""], "BILLING_PROVIDER should be square or stripe. Empty defaults to square.");
+oneOf("SQUARE_WEBHOOK_ENABLED", ["true", "false", ""], "SQUARE_WEBHOOK_ENABLED should be true or false.");
+oneOf("STRIPE_WEBHOOK_ENABLED", ["true", "false", ""], "STRIPE_WEBHOOK_ENABLED should be true or false.");
 
-const billingProvider = normalized("BILLING_PROVIDER") || "square";
-if (billingProvider === "square") {
-  required("SQUARE_ACCESS_TOKEN", "Set the production Square access token.");
-  required("SQUARE_LOCATION_ID", "Set the production Square location ID.");
-  exact("SQUARE_ENVIRONMENT", "production", "SQUARE_ENVIRONMENT must be production for public launch.");
+const lifecycle = billingProviderLifecycleSettings(process.env);
+const billingProvider = lifecycle.checkoutProvider;
+
+if (lifecycle.squareWebhookEnabled) {
+  required("SQUARE_ACCESS_TOKEN", "Set the Square access token while Square webhooks remain enabled.");
+  required("SQUARE_ENVIRONMENT", "Set SQUARE_ENVIRONMENT while Square webhooks remain enabled.");
   required("SQUARE_WEBHOOK_NOTIFICATION_URL", "Set the Square webhook URL.");
   httpsUrl("SQUARE_WEBHOOK_NOTIFICATION_URL", "SQUARE_WEBHOOK_NOTIFICATION_URL must be HTTPS.");
-  webhookPath("SQUARE_WEBHOOK_NOTIFICATION_URL", "/api/billing/webhook", "Square webhook URL should end with /api/billing/webhook.");
+  webhookPath("SQUARE_WEBHOOK_NOTIFICATION_URL", "/api/billing/webhook/square", "Square webhook URL should end with /api/billing/webhook/square.");
   sameOrigin("SQUARE_WEBHOOK_NOTIFICATION_URL", "NEXT_PUBLIC_APP_URL", "Square webhook URL should share the app origin.");
   required("SQUARE_WEBHOOK_SIGNATURE_KEY", "Copy the Square webhook signature key.");
   required("SQUARE_WEBHOOK_SUBSCRIPTION_ID", "Record the Square webhook subscription ID.");
+}
+
+if (lifecycle.stripeWebhookEnabled) {
+  required("STRIPE_SECRET_KEY", "Set STRIPE_SECRET_KEY while Stripe webhooks remain enabled.");
+  required("STRIPE_WEBHOOK_SECRET", "Set STRIPE_WEBHOOK_SECRET while Stripe webhooks remain enabled.");
+  required("STRIPE_WEBHOOK_NOTIFICATION_URL", "Record the Stripe webhook URL while Stripe webhooks remain enabled.");
+  httpsUrl("STRIPE_WEBHOOK_NOTIFICATION_URL", "STRIPE_WEBHOOK_NOTIFICATION_URL must be HTTPS.");
+  webhookPath("STRIPE_WEBHOOK_NOTIFICATION_URL", "/api/billing/webhook/stripe", "Stripe webhook URL should end with /api/billing/webhook/stripe.");
+  sameOrigin("STRIPE_WEBHOOK_NOTIFICATION_URL", "NEXT_PUBLIC_APP_URL", "Stripe webhook URL should share the app origin.");
+}
+
+if (billingProvider === "square") {
+  required("SQUARE_LOCATION_ID", "Set the production Square location ID.");
+  if (deploymentCheck) {
+    warnIf(
+      normalized("SQUARE_ENVIRONMENT") !== "production",
+      "SQUARE_ENVIRONMENT",
+      "Square is not in production mode; paid public checkout must remain a beta/sandbox test.",
+    );
+  } else {
+    exact("SQUARE_ENVIRONMENT", "production", "SQUARE_ENVIRONMENT must be production for public launch.");
+  }
+  if (deploymentCheck) {
+    warnIf(
+      normalized("SQUARE_PAYMENT_CORRELATION_VERIFIED") !== "true",
+      "SQUARE_PAYMENT_CORRELATION_VERIFIED",
+      "Paid Square checkout remains disabled until the hosted-checkout payment correlation smoke has passed.",
+    );
+  } else {
+    exact(
+      "SQUARE_PAYMENT_CORRELATION_VERIFIED",
+      "true",
+      "Set SQUARE_PAYMENT_CORRELATION_VERIFIED=true only after payment.created/payment.updated hosted-checkout correlation passes end to end.",
+    );
+  }
   required("SQUARE_PLUS_MONTHLY_PLAN_VARIATION_ID", "Set the Square Plus monthly plan variation ID.");
   required("SQUARE_PLUS_YEARLY_PLAN_VARIATION_ID", "Set the Square Plus yearly plan variation ID.");
   exact("SQUARE_CURRENCY", "GBP", "SQUARE_CURRENCY should be GBP.");
@@ -58,10 +116,8 @@ if (billingProvider === "square") {
 }
 
 if (billingProvider === "stripe") {
-  required("STRIPE_SECRET_KEY", "Set STRIPE_SECRET_KEY when Stripe is active.");
   required("STRIPE_PLUS_MONTHLY_PRICE_ID", "Set the Stripe monthly price ID when Stripe is active.");
   required("STRIPE_PLUS_YEARLY_PRICE_ID", "Set the Stripe yearly price ID when Stripe is active.");
-  required("STRIPE_WEBHOOK_SECRET", "Set STRIPE_WEBHOOK_SECRET when Stripe is active.");
 }
 
 required("EMAIL_FROM", "Set EMAIL_FROM to a verified sender on the production domain.");
@@ -73,8 +129,15 @@ if (!emailProvider) {
 }
 if (emailProvider === "smtp") {
   required("SMTP_HOST", "Set the 20i outgoing SMTP host, for example smtp.stackmail.com.");
-  positiveInteger("SMTP_PORT", "Set SMTP_PORT to the secure SMTP port, usually 465 or 587.");
-  required("SMTP_SECURE", "Set SMTP_SECURE=true for port 465 or false for STARTTLS on port 587.");
+  oneOf("SMTP_PORT", ["465", "587"], "SMTP_PORT must be 465 for implicit TLS or 587 for STARTTLS.");
+  oneOf("SMTP_SECURE", ["true", "false"], "SMTP_SECURE must be exactly true or false.");
+  if (normalized("SMTP_PORT") && normalized("SMTP_SECURE")) {
+    try {
+      smtpSecurityOptions(normalized("SMTP_PORT"), normalized("SMTP_SECURE"));
+    } catch (error) {
+      blocker("SMTP_SECURE", error instanceof Error ? error.message : "SMTP TLS settings are invalid.");
+    }
+  }
   required("SMTP_USER", "Set SMTP_USER to the 20i mailbox username.");
   required("SMTP_PASSWORD", "Set SMTP_PASSWORD to the 20i mailbox password.");
 }
@@ -315,7 +378,9 @@ function publicCheck(check) {
 }
 
 function printHumanReport(result) {
-  console.log("Mint Binder production environment validation");
+  console.log(deploymentCheck
+    ? "Mint Binder deployment environment validation"
+    : "Mint Binder production environment validation");
   console.log(`Generated: ${result.generatedAt}`);
   console.log(`Summary: ${result.summary.blockers} blocker(s), ${result.summary.warnings} warning(s), ${result.summary.reported} reported signal(s).`);
   console.log("");

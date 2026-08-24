@@ -3,6 +3,7 @@ import type { AppData, CatalogueItem, CollectionEvent, CollectionItem, StorageLo
 export type InsuranceReportInput = {
   data: AppData;
   generatedAt?: Date;
+  historyNotice?: string;
   ownerEmail?: string;
   ownerName?: string;
 };
@@ -10,6 +11,7 @@ export type InsuranceReportInput = {
 export function buildInsuranceReportHtml({
   data,
   generatedAt = new Date(),
+  historyNotice,
   ownerEmail,
   ownerName,
 }: InsuranceReportInput) {
@@ -49,7 +51,7 @@ export function buildInsuranceReportHtml({
   </section>
   ${storageSection(data.storageLocations)}
   ${collectionSection(data.collection, catalogueById)}
-  ${historySection(data.events)}
+  ${historySection(data.events, historyNotice)}
 </body>
 </html>`;
 }
@@ -110,7 +112,7 @@ function collectionSection(collection: CollectionItem[], catalogueById: Map<stri
   </table>`;
 }
 
-function historySection(events: CollectionEvent[]) {
+function historySection(events: CollectionEvent[], notice?: string) {
   const importantEvents = events.filter((event) => event.type === "Sold" || event.type === "Removed" || event.type === "Graded");
 
   if (!importantEvents.length) {
@@ -118,6 +120,7 @@ function historySection(events: CollectionEvent[]) {
   }
 
   return `<h2>Important History</h2>
+  ${notice ? `<p class="muted">${escapeHtml(notice)}</p>` : ""}
   <table>
     <thead><tr><th>Date</th><th>Event</th><th>Item</th><th>Qty</th><th>Amount</th><th>Notes</th></tr></thead>
     <tbody>

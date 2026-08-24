@@ -2,8 +2,9 @@ import type { Metadata } from "next";
 import { LegalPage, legalBusinessName, legalContact, legalProductName } from "../LegalPage";
 
 export const metadata: Metadata = {
-  title: `Terms of Use | ${legalProductName}`,
+  title: "Terms of Use",
   description: `${legalProductName} beta terms of use.`,
+  alternates: { canonical: "/legal/terms" },
 };
 
 export default function TermsPage() {
@@ -67,6 +68,7 @@ export default function TermsPage() {
             <>
               <p>Exports, insurance reports, price alerts, and wishlist notifications are convenience tools. They may fail, be delayed, or include missing provider data.</p>
               <p>You remain responsible for checking exported information before sharing it with insurers, buyers, accountants, or other third parties.</p>
+              <p>Signed-in users can download a structured account-data export and request permanent account deletion through the account tools. Deletion requires password reauthentication and explicit confirmation, and an active paid subscription must be cancelled as part of, or before, the request.</p>
             </>
           ),
         },

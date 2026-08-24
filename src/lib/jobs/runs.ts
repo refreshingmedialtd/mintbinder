@@ -39,6 +39,21 @@ export class JobRunExecutionError extends Error {
   }
 }
 
+export class JobRunOverlapError extends Error {
+  activeRun: JobRunRecord;
+  leaseMinutes: number;
+
+  constructor(activeRun: JobRunRecord, leaseMinutes: number) {
+    super(
+      `${activeRun.jobType} already has a running job started at ${activeRun.startedAt}; ` +
+      `the ${leaseMinutes}-minute overlap lease has not expired.`,
+    );
+    this.name = "JobRunOverlapError";
+    this.activeRun = activeRun;
+    this.leaseMinutes = leaseMinutes;
+  }
+}
+
 export async function runTrackedJob<T>({
   input,
   task,
@@ -109,30 +124,63 @@ export async function recentJobRuns({
 async function startJobRun(type: JobRunType, input: unknown) {
   const id = randomUUID();
   const inputJson = toJsonString(input);
-  const rows = await prisma.$queryRaw<DbJobRun[]>`
-    INSERT INTO job_runs (
-      id,
-      job_type,
-      status,
-      request_payload
-    )
-    VALUES (
-      ${id}::uuid,
-      ${type}::job_run_type,
-      'running'::job_run_status,
-      ${inputJson}::jsonb
-    )
-    RETURNING
-      id,
-      job_type,
-      status,
-      request_payload,
-      result_payload,
-      error_message,
-      started_at,
-      finished_at,
-      duration_ms
-  `;
+  const leaseMinutes = positiveInteger(process.env.JOB_RUN_OVERLAP_LEASE_MINUTES, 45);
+  const leaseStartedAt = new Date(Date.now() - leaseMinutes * 60 * 1_000);
+  const rows = await prisma.$transaction(async (tx) => {
+    // Serialize starters for this job type, then use the existing RUNNING row as
+    // the bounded lease. The advisory lock only guards lease acquisition; the
+    // durable job row remains visible while the task runs.
+    await tx.$queryRaw`
+      SELECT pg_advisory_xact_lock(hashtextextended(${`mintbinder-job:${type}`}, 0))
+    `;
+    const activeRows = await tx.$queryRaw<DbJobRun[]>`
+      SELECT
+        id,
+        job_type,
+        status,
+        request_payload,
+        result_payload,
+        error_message,
+        started_at,
+        finished_at,
+        duration_ms
+      FROM job_runs
+      WHERE job_type = ${type}::job_run_type
+        AND status = 'running'::job_run_status
+        AND started_at >= ${leaseStartedAt}
+      ORDER BY started_at DESC
+      LIMIT 1
+    `;
+
+    if (activeRows[0]) {
+      throw new JobRunOverlapError(mapJobRun(activeRows[0]), leaseMinutes);
+    }
+
+    return tx.$queryRaw<DbJobRun[]>`
+      INSERT INTO job_runs (
+        id,
+        job_type,
+        status,
+        request_payload
+      )
+      VALUES (
+        ${id}::uuid,
+        ${type}::job_run_type,
+        'running'::job_run_status,
+        ${inputJson}::jsonb
+      )
+      RETURNING
+        id,
+        job_type,
+        status,
+        request_payload,
+        result_payload,
+        error_message,
+        started_at,
+        finished_at,
+        duration_ms
+    `;
+  });
 
   return mapJobRun(rows[0]);
 }
@@ -205,4 +253,10 @@ function mapJobRun(row: DbJobRun): JobRunRecord {
 
 function toJsonString(value: unknown) {
   return JSON.stringify(value ?? {});
+}
+
+function positiveInteger(value: unknown, fallback: number) {
+  const number = Number(value);
+
+  return Number.isFinite(number) && number > 0 ? Math.floor(number) : fallback;
 }

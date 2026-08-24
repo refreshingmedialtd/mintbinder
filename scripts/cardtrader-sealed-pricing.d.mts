@@ -1,8 +1,15 @@
 export type CardTraderSealedPricingOptions = {
+  apiRetryAttempts?: number;
+  apiRetryWaitMs?: number;
+  apiTimeoutMs?: number;
   enabled?: boolean;
   eurToGbpRate?: number;
   fetchImpl?: typeof fetch;
   limit?: number;
+  manualAliases?: string | Record<string, string> | Map<string, string> | Array<{
+    blueprintId: string;
+    localKey: string;
+  }>;
   priceOnlyUnpriced?: boolean;
   prisma?: unknown;
   setLimit?: number;
@@ -13,12 +20,21 @@ export type CardTraderSealedPricingOptions = {
 };
 
 export type CardTraderSealedPricingSummary = {
+  ambiguousMatches: number;
+  apiAttempts: number;
   apiRequests: number;
+  blueprintsAvailable: number;
   blueprintsMatched: number;
+  blueprintsWithIdentifiers: number;
+  blueprintsWithTcgplayerId: number;
   candidatesAvailable: number;
   candidatesChecked: number;
   candidatesUnmatched: number;
   listingOffersUsed: number;
+  mappingCoveragePercent: number;
+  mappingMethods: Record<"identifier" | "manualAlias" | "normalizedNameType" | "tcgplayerId", number>;
+  mappingReview: Array<Record<string, unknown>>;
+  marketplaceMatches: number;
   priceOnlyUnpriced: boolean;
   pricingSnapshotsCreated: number;
   pricingSnapshotsUpdated: number;
@@ -26,7 +42,7 @@ export type CardTraderSealedPricingSummary = {
   sampleUnmatchedProducts: Array<Record<string, unknown>>;
   setsChecked: number;
   setsUnmatched: number;
-  status: "succeeded";
+  status: "degraded" | "succeeded";
   writePrices: boolean;
 };
 
@@ -37,3 +53,11 @@ export function cardTraderSealedOptionsFromEnv(
 export function syncCardTraderSealedPrices(
   options?: CardTraderSealedPricingOptions,
 ): Promise<CardTraderSealedPricingSummary>;
+
+export function buildCardTraderBlueprintIndex(blueprints: Array<Record<string, unknown>>): unknown;
+export function normalizeManualAliases(value: unknown): Map<string, string>;
+export function resolveCardTraderBlueprint(
+  product: Record<string, unknown>,
+  blueprintIndex: unknown,
+  aliases?: Map<string, string>,
+): Record<string, unknown>;

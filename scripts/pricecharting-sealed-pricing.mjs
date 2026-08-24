@@ -45,7 +45,7 @@ export function priceChartingSealedOptionsFromEnv(env = process.env) {
       conversionRate(env.POKEMON_TCG_USD_TO_GBP_RATE),
     useNameSearch: booleanSetting(env.PRICECHARTING_SEALED_USE_NAME_SEARCH, true),
     waitMs: nonNegativeInteger(env.PRICECHARTING_SEALED_WAIT_MS, 1100),
-    writePrices: booleanSetting(env.PRICECHARTING_SEALED_WRITE_PRICES, true),
+    writePrices: booleanSetting(env.PRICECHARTING_SEALED_WRITE_PRICES, false),
   };
 }
 
@@ -59,7 +59,7 @@ export async function syncPriceChartingSealedPrices(options = {}) {
   const usdToGbp = conversionRate(options.usdToGbpRate);
   const useNameSearch = options.useNameSearch ?? true;
   const waitMs = nonNegativeInteger(options.waitMs, 1100);
-  const writePrices = options.writePrices ?? true;
+  const writePrices = options.writePrices ?? false;
   const summary = {
     apiRequests: 0,
     candidatesChecked: 0,
@@ -97,13 +97,17 @@ export async function syncPriceChartingSealedPrices(options = {}) {
         },
       },
       take: limit,
-      where: priceOnlyUnpriced ? {
-        priceSnapshots: {
-          none: {
-            itemType: ItemType.SEALED_PRODUCT,
+      where: {
+        createdByUserId: null,
+        visibility: "GLOBAL",
+        ...(priceOnlyUnpriced ? {
+          priceSnapshots: {
+            none: {
+              itemType: ItemType.SEALED_PRODUCT,
+            },
           },
-        },
-      } : undefined,
+        } : {}),
+      },
     });
     const request = async (params) => {
       if (summary.apiRequests > 0 && waitMs > 0) {

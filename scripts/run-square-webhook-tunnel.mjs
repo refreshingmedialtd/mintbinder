@@ -5,7 +5,13 @@ import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const WEBHOOK_EVENTS = ["subscription.created", "subscription.updated", "invoice.payment_made"];
+const WEBHOOK_EVENTS = [
+  "subscription.created",
+  "subscription.updated",
+  "invoice.payment_made",
+  "payment.created",
+  "payment.updated",
+];
 const DEFAULT_WEBHOOK_NAME = "Mint Binder Local Billing Webhook";
 const DEFAULT_PORT = 3000;
 const DEFAULT_HOST = "127.0.0.1";
@@ -41,7 +47,7 @@ async function main() {
 
   status("Starting Cloudflare quick tunnel...");
   const tunnel = await startCloudflareTunnel(localBaseUrl);
-  const notificationUrl = `${tunnel.url}/api/billing/webhook`;
+  const notificationUrl = `${tunnel.url}/api/billing/webhook/square`;
   status(`Cloudflare tunnel ready: ${tunnel.url}`);
 
   status("Starting local app for Square URL validation...");
@@ -276,7 +282,7 @@ async function sendLocalWebhookSelfCheck({ notificationUrl, signatureKey }) {
     merchant_id: "local_self_check",
     type: "mintbinder.local_webhook_self_check",
   });
-  const response = await fetch(`${localBaseUrl}/api/billing/webhook`, {
+  const response = await fetch(`${localBaseUrl}/api/billing/webhook/square`, {
     body: payload,
     headers: {
       "content-type": "application/json",

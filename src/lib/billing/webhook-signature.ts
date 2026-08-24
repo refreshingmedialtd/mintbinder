@@ -10,6 +10,7 @@ export type StripeWebhookEvent<T = unknown> = {
 };
 
 export type SquareWebhookEvent<T = unknown> = {
+  created_at?: string;
   data?: {
     id?: string;
     object?: T;
@@ -19,6 +20,19 @@ export type SquareWebhookEvent<T = unknown> = {
   merchant_id?: string;
   type: string;
 };
+
+export function stripeWebhookOccurredAt(event: StripeWebhookEvent) {
+  return Number.isFinite(event.created) ? new Date(Number(event.created) * 1000) : undefined;
+}
+
+export function squareWebhookOccurredAt(event: SquareWebhookEvent) {
+  if (!event.created_at) {
+    return undefined;
+  }
+
+  const occurredAt = new Date(event.created_at);
+  return Number.isNaN(occurredAt.getTime()) ? undefined : occurredAt;
+}
 
 export class StripeWebhookSignatureError extends Error {
   constructor(message: string) {

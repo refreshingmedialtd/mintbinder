@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  buildCardTraderBlueprintIndex,
   cardTraderMarketplacePrice,
   cardTraderSealedOptionsFromEnv,
   matchCardTraderExpansion,
+  normalizeManualAliases,
+  resolveCardTraderBlueprint,
   syncCardTraderSealedPrices,
 } from "../scripts/cardtrader-sealed-pricing.mjs";
 
@@ -20,9 +23,13 @@ test("reads CardTrader sealed pricing options and enables them when a token exis
       CARDTRADER_USD_TO_GBP_RATE: "0.75",
     }),
     {
+      apiRetryAttempts: 3,
+      apiRetryWaitMs: 500,
+      apiTimeoutMs: 10_000,
       enabled: true,
       eurToGbpRate: 0.84,
       limit: 7,
+      manualAliases: undefined,
       priceOnlyUnpriced: true,
       setLimit: 2,
       token: "token",
@@ -31,6 +38,75 @@ test("reads CardTrader sealed pricing options and enables them when a token exis
       writePrices: false,
     },
   );
+});
+
+test("matches expansion-scoped blueprints by UPC before normalized name and type", () => {
+  const blueprints = [
+    {
+      fixed_properties: [{ name: "UPC", value: "820650123456" }],
+      id: 20,
+      name: "Different regional display name",
+    },
+    {
+      fixed_properties: [{ name: "UPC", value: "820650999999" }],
+      id: 21,
+      name: "Silver Tempest Booster Box",
+    },
+  ];
+  const result = resolveCardTraderBlueprint(
+    sealedProduct({ metadata: { upc: "8 20650 123456" } }),
+    buildCardTraderBlueprintIndex(blueprints),
+  );
+
+  assert.equal(result.blueprint.id, 20);
+  assert.equal(result.method, "identifier");
+});
+
+test("uses exact normalized name and compatible sealed type as a conservative fallback", () => {
+  const result = resolveCardTraderBlueprint(
+    sealedProduct({ name: "Pokémon TCG: Alakazam V Box", productType: "COLLECTION_BOX" }),
+    buildCardTraderBlueprintIndex([
+      { id: 20, name: "Pokemon Alakazam V Box" },
+      { id: 21, name: "Alakazam V Box Case" },
+    ]),
+  );
+
+  assert.equal(result.blueprint.id, 20);
+  assert.equal(result.method, "normalizedNameType");
+});
+
+test("rejects ambiguous normalized fallback matches and emits review candidates", () => {
+  const result = resolveCardTraderBlueprint(
+    sealedProduct({ name: "Alakazam V Box", productType: "COLLECTION_BOX" }),
+    buildCardTraderBlueprintIndex([
+      { id: 20, name: "Alakazam V Box" },
+      { id: 21, name: "Pokemon Alakazam V Box" },
+    ]),
+  );
+
+  assert.equal(result.blueprint, null);
+  assert.equal(result.ambiguous, true);
+  assert.deepEqual(result.candidates.map((candidate) => candidate.id), [20, 21]);
+});
+
+test("manual aliases only resolve to a blueprint inside the matched expansion", () => {
+  const index = buildCardTraderBlueprintIndex([{ id: 20, name: "Regional product name" }]);
+  const product = sealedProduct();
+  const matched = resolveCardTraderBlueprint(
+    product,
+    index,
+    normalizeManualAliases({ "tcgplayer:100": "20" }),
+  );
+  const missing = resolveCardTraderBlueprint(
+    product,
+    index,
+    normalizeManualAliases({ "tcgplayer:100": "999" }),
+  );
+
+  assert.equal(matched.blueprint.id, 20);
+  assert.equal(matched.method, "manualAlias");
+  assert.equal(missing.blueprint, null);
+  assert.match(missing.reason, /not present in the matched expansion/);
 });
 
 test("uses a conservative median of the five lowest eligible CardTrader listings", () => {
@@ -156,6 +232,60 @@ test("imports a CardTrader sealed marketplace snapshot by direct TCGplayer ident
   assert.equal(requestedUrls.length, 4);
 });
 
+test("includes products without a TCGplayer ID so conservative fallback mapping can produce output", async () => {
+  const updates = [];
+  const prisma = {
+    sealedProduct: {
+      findMany: async () => [
+        {
+          id: "sealed-without-tcgplayer",
+          metadata: { groupName: "SWSH12: Silver Tempest" },
+          name: "Pokémon TCG: Alakazam V Box",
+          priceSnapshots: [],
+          productType: "COLLECTION_BOX",
+          providerIds: {},
+          relatedCardSet: { id: "set-1", name: "Silver Tempest" },
+        },
+      ],
+      update: async ({ data, where }) => {
+        updates.push({ data, where });
+        return { id: where.id, ...data };
+      },
+    },
+  };
+  const fetchImpl = async (url) => {
+    if (url.pathname.endsWith("/games")) {
+      return jsonResponse({ data: [{ id: 15, display_name: "Pokémon" }] });
+    }
+
+    if (url.pathname.endsWith("/expansions")) {
+      return jsonResponse({ expansions: [{ game_id: 15, id: 10, name: "Silver Tempest" }] });
+    }
+
+    if (url.pathname.endsWith("/blueprints/export")) {
+      return jsonResponse({ results: [{ id: 20, name: "Pokemon Alakazam V Box" }] });
+    }
+
+    return jsonResponse({ 20: [listing(10_000, "GBP")] });
+  };
+
+  const summary = await syncCardTraderSealedPrices({
+    fetchImpl,
+    limit: 1,
+    prisma,
+    token: "token",
+    waitMs: 0,
+    writePrices: false,
+  });
+
+  assert.equal(summary.candidatesAvailable, 1);
+  assert.equal(summary.blueprintsMatched, 1);
+  assert.equal(summary.marketplaceMatches, 1);
+  assert.equal(summary.mappingMethods.normalizedNameType, 1);
+  assert.equal(summary.status, "succeeded");
+  assert.equal(updates[0].data.providerIds.cardtrader, "20");
+});
+
 function listing(cents, currency, extra = {}) {
   return {
     graded: false,
@@ -163,6 +293,17 @@ function listing(cents, currency, extra = {}) {
     price: { cents, currency },
     quantity: 1,
     ...extra,
+  };
+}
+
+function sealedProduct(overrides = {}) {
+  return {
+    id: "sealed-1",
+    metadata: {},
+    name: "Silver Tempest Booster Box",
+    productType: "BOOSTER_BOX",
+    providerIds: { tcgplayer: "100" },
+    ...overrides,
   };
 }
 

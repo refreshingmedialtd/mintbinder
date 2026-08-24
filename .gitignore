@@ -3,11 +3,16 @@ node_modules/
 
 # Build output
 .next/
+.next-releases/
 .mintbinder-build.json
+.mintbinder-build.previous.json
+.mintbinder-build.json.tmp
 out/
 dist/
 build/
 coverage/
+output/
+tmp/
 tsconfig.tsbuildinfo
 
 # Environment and secrets

@@ -6,7 +6,32 @@ export type PriceHistoryInput = {
   source?: string | null;
   observedAt?: Date | string | null;
   variantLabel?: string | null;
+  gradedCompany?: string | null;
+  gradedScore?: number | string | { toString(): string } | null;
 };
+
+export function priceInputsForGrade(
+  prices: PriceHistoryInput[],
+  gradedCompany?: string | null,
+  gradedScore?: number | string | { toString(): string } | null,
+) {
+  const company = normalizeGradeCompany(gradedCompany);
+
+  if (!company) {
+    return prices.filter((price) => !normalizeGradeCompany(price.gradedCompany));
+  }
+
+  const score = normalizeGradeScore(gradedScore);
+
+  if (score === undefined) {
+    return [];
+  }
+
+  return prices.filter((price) =>
+    normalizeGradeCompany(price.gradedCompany) === company &&
+    normalizeGradeScore(price.gradedScore) === score,
+  );
+}
 
 export function buildPriceHistory(prices: PriceHistoryInput[]): PricePoint[] {
   const sorted = prices
@@ -22,7 +47,7 @@ export function buildPriceHistory(prices: PriceHistoryInput[]): PricePoint[] {
 
   for (const point of sorted) {
     const day = point.observedAt.slice(0, 10);
-    const key = `${point.source}\u0000${point.variantLabel ?? ""}\u0000${day}`;
+    const key = `${point.source}\u0000${point.variantLabel ?? ""}\u0000${point.gradedCompany ?? ""}\u0000${point.gradedScore ?? ""}\u0000${day}`;
     latestBySeriesDay.set(key, point);
   }
 
@@ -35,7 +60,7 @@ export function suppressTransientPriceOutliers(history: PricePoint[]): PricePoin
   const bySeries = new Map<string, PricePoint[]>();
 
   for (const point of history) {
-    const key = `${point.source}\u0000${point.variantLabel ?? ""}`;
+    const key = `${point.source}\u0000${point.variantLabel ?? ""}\u0000${point.gradedCompany ?? ""}\u0000${point.gradedScore ?? ""}`;
     const series = bySeries.get(key) ?? [];
 
     series.push(point);
@@ -119,7 +144,31 @@ function normalizePricePoint(price: PriceHistoryInput): PricePoint | null {
     point.variantLabel = variantLabel;
   }
 
+  const gradedCompany = normalizeGradeCompany(price.gradedCompany);
+  const gradedScore = normalizeGradeScore(price.gradedScore);
+
+  if (gradedCompany && gradedScore !== undefined) {
+    point.gradedCompany = gradedCompany;
+    point.gradedScore = gradedScore;
+  }
+
   return point;
+}
+
+function normalizeGradeCompany(value?: string | null) {
+  const normalized = String(value ?? "").trim().toUpperCase();
+
+  return normalized || undefined;
+}
+
+function normalizeGradeScore(value?: number | string | { toString(): string } | null) {
+  if (value === null || value === undefined || value === "") {
+    return undefined;
+  }
+
+  const score = Number(value);
+
+  return Number.isFinite(score) ? score : undefined;
 }
 
 function normalizeObservedAt(value?: Date | string | null) {

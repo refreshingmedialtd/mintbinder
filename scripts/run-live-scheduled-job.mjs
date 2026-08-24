@@ -1,11 +1,15 @@
 import "dotenv/config";
 import { pathToFileURL } from "node:url";
+import { priceAlertScheduleSettings } from "./price-alert-schedule.mjs";
 
 const knownJobs = new Set([
   "health",
+  "billing-checkout-retirement",
+  "password-reset-delivery",
   "pricing",
   "catalogue-discovery",
   "english-card-pricing",
+  "graded-card-pricing",
   "sealed-pricing",
   "japan-card-pricing",
   "price-alerts",
@@ -53,6 +57,24 @@ export async function runLiveScheduledJob({
 }
 
 export function protectedJobRequest(kind, env = process.env) {
+  if (kind === "billing-checkout-retirement") {
+    return {
+      body: {
+        batchSize: optionalPositiveInteger(env.BILLING_CHECKOUT_RETIREMENT_BATCH_SIZE) ?? 100,
+      },
+      path: "/api/jobs/billing-checkout-retirement",
+    };
+  }
+
+  if (kind === "password-reset-delivery") {
+    return {
+      body: {
+        batchSize: optionalPositiveInteger(env.PASSWORD_RESET_DELIVERY_BATCH_SIZE) ?? 50,
+      },
+      path: "/api/jobs/password-reset-delivery",
+    };
+  }
+
   if (kind === "catalogue-discovery") {
     return {
       body: {
@@ -91,6 +113,13 @@ export function protectedJobRequest(kind, env = process.env) {
     return {
       body: englishCardPricingBody(env),
       path: "/api/jobs/international-card-pricing",
+    };
+  }
+
+  if (kind === "graded-card-pricing") {
+    return {
+      body: gradedCardPricingBody(env),
+      path: "/api/jobs/graded-card-pricing",
     };
   }
 
@@ -341,7 +370,10 @@ export function appBaseUrl(env = process.env) {
   const url = new URL(raw);
 
   if (!["http:", "https:"].includes(url.protocol)) {
-    throw new Error("Scheduled job app URL must use http or https.");
+    throw new Error("Scheduled job app URL must use HTTPS, or HTTP on loopback for local development.");
+  }
+  if (url.protocol === "http:" && !isLoopbackHostname(url.hostname)) {
+    throw new Error("Scheduled job app URL must use HTTPS outside local loopback development.");
   }
 
   url.pathname = "/";
@@ -349,6 +381,10 @@ export function appBaseUrl(env = process.env) {
   url.hash = "";
 
   return url;
+}
+
+function isLoopbackHostname(hostname) {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
 }
 
 function scheduledPricingBody(env) {
@@ -550,20 +586,43 @@ function englishCardPricingBody(env) {
   return body;
 }
 
+function gradedCardPricingBody(env) {
+  const body = {
+    limit: optionalPositiveInteger(env.PRICECHARTING_GRADED_LIMIT) ?? 5,
+    priceOnlyUnpriced: optionalBoolean(env.PRICECHARTING_GRADED_PRICE_ONLY_UNPRICED) ?? false,
+    waitMs: optionalNonNegativeInteger(env.PRICECHARTING_GRADED_WAIT_MS) ?? 1_100,
+    writePrices: optionalBoolean(env.PRICECHARTING_GRADED_WRITE_PRICES) ?? false,
+  };
+  const retryAttempts = optionalPositiveInteger(env.PRICECHARTING_API_RETRY_ATTEMPTS);
+  const retryWaitMs = optionalNonNegativeInteger(env.PRICECHARTING_API_RETRY_WAIT_MS);
+  const timeoutMs = optionalPositiveInteger(env.PRICECHARTING_API_TIMEOUT_MS);
+  const usdToGbpRate = optionalRate(env.PRICECHARTING_USD_TO_GBP_RATE);
+
+  if (retryAttempts) body.retryAttempts = retryAttempts;
+  if (retryWaitMs !== undefined) body.retryWaitMs = retryWaitMs;
+  if (timeoutMs) body.timeoutMs = timeoutMs;
+  if (usdToGbpRate) body.usdToGbpRate = usdToGbpRate;
+
+  return body;
+}
+
 function priceAlertsBody(env) {
   const body = {};
-  const dryRun = optionalBoolean(env.PRICE_ALERT_DIGEST_DRY_RUN);
+  const settings = priceAlertScheduleSettings(env);
   const now = optionalString(env.PRICE_ALERT_DIGEST_NOW);
-  const testRecipient = optionalString(env.PRICE_ALERT_DIGEST_TEST_RECIPIENT);
 
-  body.dryRun = dryRun ?? true;
+  if (!settings.ok) {
+    throw new Error(settings.problems.join(" "));
+  }
+
+  body.dryRun = settings.dryRun;
 
   if (now) {
     body.now = now;
   }
 
-  if (testRecipient) {
-    body.testRecipient = testRecipient;
+  if (settings.testRecipient) {
+    body.testRecipient = settings.testRecipient;
   }
 
   return body;
@@ -578,9 +637,11 @@ async function requestJson({ body, fetchImpl, headers, method, url }) {
   const payload = await response.json().catch(async () => ({
     text: await response.text().catch(() => ""),
   }));
+  const degradation = scheduledResponseDegradation(payload);
   const result = {
     body: body ?? null,
-    ok: response.ok,
+    degradation,
+    ok: response.ok && !degradation,
     response: payload,
     status: response.status,
     url: url.toString(),
@@ -591,6 +652,52 @@ async function requestJson({ body, fetchImpl, headers, method, url }) {
   }
 
   return result;
+}
+
+export function scheduledResponseDegradation(payload) {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+
+  const reasons = [];
+  const warning = optionalString(payload.warning);
+
+  if (warning) reasons.push(warning);
+
+  const topLevelStatus = optionalString(payload.status);
+  const provider = optionalString(payload.provider) ?? "scheduled provider";
+
+  if (topLevelStatus && !["succeeded", "healthy", "not_configured"].includes(topLevelStatus)) {
+    reasons.push(`${provider} reported ${topLevelStatus}.`);
+  }
+
+  for (const [key, label] of [
+    ["failedSets", "provider set refresh(es) failed"],
+    ["partialSets", "provider set refresh(es) were partial"],
+    ["failedGroups", "provider group refresh(es) failed"],
+  ]) {
+    const count = optionalPositiveInteger(payload[key]);
+
+    if (count) reasons.push(`${count} ${label}.`);
+  }
+
+  const secondSource = payload.secondSource;
+
+  if (secondSource && typeof secondSource === "object") {
+    const status = optionalString(secondSource.status);
+    const provider = optionalString(secondSource.provider) ?? "second source";
+    const candidatesChecked = optionalPositiveInteger(secondSource.candidatesChecked) ?? 0;
+    const output = (optionalPositiveInteger(secondSource.pricingSnapshotsCreated) ?? 0) +
+      (optionalPositiveInteger(secondSource.pricingSnapshotsUpdated) ?? 0);
+
+    if (status && !["succeeded", "not_configured"].includes(status)) {
+      reasons.push(`${provider} reported ${status}.`);
+    } else if (status === "succeeded" && candidatesChecked > 0 && output === 0) {
+      reasons.push(`${provider} checked ${candidatesChecked} candidate(s) but produced no price snapshots.`);
+    }
+  }
+
+  return [...new Set(reasons)].join(" ") || null;
 }
 
 function normalizeJob(value) {
@@ -697,6 +804,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     const result = await runLiveScheduledJob();
 
     console.log(JSON.stringify(result, null, 2));
+    if (!result.ok) {
+      process.exitCode = 1;
+    }
   } catch (error) {
     console.error(JSON.stringify({
       error: error instanceof Error ? error.message : "Scheduled job failed.",

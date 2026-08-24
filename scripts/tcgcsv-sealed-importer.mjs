@@ -5,6 +5,7 @@ import {
   SealedProductType,
 } from "@prisma/client";
 import { booleanSetting, positiveInteger } from "./catalogue-batch-options.mjs";
+import { fetchJsonWithRetry } from "./provider-fetch.mjs";
 import {
   bestTcgcsvPrice,
   deterministicUuid,
@@ -18,6 +19,9 @@ import {
 
 export function sealedImportOptionsFromEnv(env = process.env) {
   return {
+    apiRetryAttempts: positiveInteger(env.TCGCSV_API_RETRY_ATTEMPTS, 3),
+    apiRetryWaitMs: nonNegativeInteger(env.TCGCSV_API_RETRY_WAIT_MS, 500),
+    apiTimeoutMs: positiveInteger(env.TCGCSV_API_TIMEOUT_MS, 10_000),
     groupIds: idList(env.TCGCSV_SEALED_GROUP_IDS),
     groupLimit: positiveInteger(env.TCGCSV_SEALED_GROUP_LIMIT, Number.POSITIVE_INFINITY),
     priceOnlyUnpriced: booleanSetting(env.TCGCSV_SEALED_PRICE_ONLY_UNPRICED, true),
@@ -31,6 +35,11 @@ export async function syncTcgcsvSealedProducts(options = {}) {
   const prisma = options.prisma ?? new PrismaClient();
   const shouldDisconnect = !options.prisma;
   const fetchImpl = options.fetchImpl ?? fetch;
+  const providerFetchOptions = {
+    retryAttempts: positiveInteger(options.apiRetryAttempts, 3),
+    retryWaitMs: nonNegativeInteger(options.apiRetryWaitMs, 500),
+    timeoutMs: positiveInteger(options.apiTimeoutMs, 10_000),
+  };
   const groupIds = idSet(options.groupIds);
   const groupLimit = positiveInteger(options.groupLimit, Number.POSITIVE_INFINITY);
   const priceOnlyUnpriced = options.priceOnlyUnpriced ?? true;
@@ -45,7 +54,7 @@ export async function syncTcgcsvSealedProducts(options = {}) {
 
   try {
     const [groups, sets] = await Promise.all([
-      fetchTcgcsv(`https://tcgcsv.com/tcgplayer/${tcgcsvPokemonCategoryId}/groups`, fetchImpl),
+      fetchTcgcsv(`https://tcgcsv.com/tcgplayer/${tcgcsvPokemonCategoryId}/groups`, fetchImpl, providerFetchOptions),
       prisma.cardSet.findMany({
         select: {
           id: true,
@@ -106,6 +115,7 @@ export async function syncTcgcsvSealedProducts(options = {}) {
           match,
           priceOnlyUnpriced,
           prisma,
+          providerFetchOptions,
           productLimit,
           usdToGbp,
           writePrices,
@@ -186,14 +196,15 @@ async function importGroup({
   match,
   priceOnlyUnpriced,
   prisma,
+  providerFetchOptions,
   productLimit,
   usdToGbp,
   writePrices,
 }) {
   const { group, set } = match;
   const [productsResponse, pricesResponse] = await Promise.all([
-    fetchTcgcsv(`https://tcgcsv.com/tcgplayer/${tcgcsvPokemonCategoryId}/${group.groupId}/products`, fetchImpl),
-    fetchTcgcsv(`https://tcgcsv.com/tcgplayer/${tcgcsvPokemonCategoryId}/${group.groupId}/prices`, fetchImpl),
+    fetchTcgcsv(`https://tcgcsv.com/tcgplayer/${tcgcsvPokemonCategoryId}/${group.groupId}/products`, fetchImpl, providerFetchOptions),
+    fetchTcgcsv(`https://tcgcsv.com/tcgplayer/${tcgcsvPokemonCategoryId}/${group.groupId}/prices`, fetchImpl, providerFetchOptions),
   ]);
   const pricesByProductId = new Map();
   const products = productsResponse.results ?? [];
@@ -334,6 +345,8 @@ async function upsertSealedProduct({ group, product, prisma, set }) {
       providerIds: true,
     },
     where: {
+      createdByUserId: null,
+      visibility: "GLOBAL",
       OR: [
         { id },
         {
@@ -350,6 +363,7 @@ async function upsertSealedProduct({ group, product, prisma, set }) {
     tcgplayer: String(product.productId),
   };
   const data = {
+    createdByUserId: null,
     imageUrl: upgradedImageUrl(product.imageUrl),
     metadata: {
       ...(isObject(existing?.metadata) ? existing.metadata : {}),
@@ -366,6 +380,7 @@ async function upsertSealedProduct({ group, product, prisma, set }) {
     providerIds,
     relatedCardSetId: set.id,
     releaseDate: parseDate(product.presaleInfo?.releasedOn ?? group.publishedOn),
+    visibility: "GLOBAL",
   };
 
   return prisma.sealedProduct.upsert({
@@ -378,20 +393,26 @@ async function upsertSealedProduct({ group, product, prisma, set }) {
   });
 }
 
-async function fetchTcgcsv(url, fetchImpl) {
-  const response = await fetchImpl(url, {
-    headers: {
-      accept: "application/json",
-      "user-agent": "MintBinderLocalImporter/0.1",
+async function fetchTcgcsv(url, fetchImpl, providerFetchOptions) {
+  const result = await fetchJsonWithRetry({
+    fetchImpl,
+    init: {
+      headers: {
+        accept: "application/json",
+        "user-agent": "MintBinderLocalImporter/0.1",
+      },
     },
+    maxResponseBytes: 32 * 1024 * 1024,
+    provider: "TCGCSV",
+    retryAttempts: providerFetchOptions.retryAttempts,
+    retryInvalidResponse: true,
+    retryWaitMs: providerFetchOptions.retryWaitMs,
+    timeoutMs: providerFetchOptions.timeoutMs,
+    url,
+    validate: (body) => body?.success === true,
   });
-  const body = await response.json().catch(() => ({}));
 
-  if (!response.ok || !body.success) {
-    throw new Error(`TCGCSV request failed with HTTP ${response.status} for ${url}.`);
-  }
-
-  return body;
+  return result.body;
 }
 
 export function orderSealedPricingMatches(matches) {

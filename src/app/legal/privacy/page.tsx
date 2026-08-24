@@ -2,8 +2,9 @@ import type { Metadata } from "next";
 import { LegalPage, legalBusinessName, legalContact, legalProductName } from "../LegalPage";
 
 export const metadata: Metadata = {
-  title: `Privacy Notice | ${legalProductName}`,
+  title: "Privacy Notice",
   description: `${legalProductName} beta privacy notice.`,
+  alternates: { canonical: "/legal/privacy" },
 };
 
 export default function PrivacyNoticePage() {
@@ -34,7 +35,7 @@ export default function PrivacyNoticePage() {
                 <li>Collection, wishlist, storage, sale, grading, valuation-note, and import/export data you add.</li>
                 <li>Notification preferences and price-alert delivery status.</li>
                 <li>Payment and subscription identifiers from Square. Full card details are handled by Square, not by this app.</li>
-                <li>Operational records such as job runs, error logs, timestamps, and basic security/audit events.</li>
+                <li>Operational records such as job runs, error logs, timestamps, basic security/audit events, and password-reset outbox status. Unknown reset addresses are represented by a keyed pseudonymous value; their raw address is not retained in the outbox.</li>
               </ul>
             </>
           ),
@@ -70,8 +71,10 @@ export default function PrivacyNoticePage() {
           title: "Retention and deletion",
           body: (
             <>
-              <p>Account and collection data should be kept while your account remains active. You should be able to request export or deletion of your account data, subject to records we need to retain for legal, payment, tax, or fraud-prevention reasons.</p>
-              <p>The final retention schedule must be confirmed before public launch.</p>
+              <p>Signed-in users can download a structured copy of their account, collection, wishlist, storage, subscription, preference, and binder data from the account tools.</p>
+              <p>Account deletion is also available from the account tools and requires the account email, password, and an explicit confirmation phrase. Mint Binder cancels the exact Square subscription identifiers recorded for the account. A Square customer profile is deleted only when Mint Binder created that profile; a pre-existing profile matched by Square hosted checkout is retained so unrelated customer history is not removed. Square may retain transaction, invoice, dispute, or compliance records under its own legal obligations and privacy terms. Deleting the local account removes the user record together with linked collection, wishlist, storage, preference, subscription, binder, event, and account-token records. Private and pending-review user-created sealed products are deleted. Global catalogue contributions are retained for other users without the creator link or free-form notes; non-personal product and provider metadata is preserved.</p>
+              <p>Separate operational records use configurable retention windows. Current cleanup defaults make account-link tokens eligible 30 days after expiry, inactive authentication throttles 30 days after their last update, terminal checkout-attempt records 730 days after their last update, completed job records 365 days after finishing, completed billing-webhook records 730 days after processing, successfully sent notification-delivery claims 365 days after their last update, and sent or discarded password-reset outbox rows 365 days after their last update. Checkout-attempt retention has a configurable 90-day floor and is never shorter than billing-webhook retention. Live or ambiguous checkout attempts, claimed or ambiguous notification deliveries, queued, claimed, or unresolved password-reset rows, active blocks, processing webhooks, and running jobs are excluded from routine cleanup so they can be reconciled safely. These settings may be extended where payment, accounting, dispute, fraud-prevention, or legal requirements call for longer retention.</p>
+              <p>The retention schedule and this draft notice still need review before public launch.</p>
             </>
           ),
         },

@@ -25,7 +25,7 @@ try {
     prisma.cardPrinting.count(),
     prisma.cardSet.count(),
     prisma.priceSnapshot.count(),
-    prisma.sealedProduct.count(),
+    prisma.sealedProduct.count({ where: { visibility: "GLOBAL" } }),
     prisma.$queryRaw`
       SELECT
         COUNT(DISTINCT ps.sealed_product_id)::int AS "pricedSealedProductCount",
@@ -35,6 +35,7 @@ try {
       LEFT JOIN price_snapshots ps
         ON ps.sealed_product_id = sp.id
         AND ps.item_type = 'sealed_product'
+      WHERE sp.visibility = 'global'::catalogue_visibility
     `,
     prisma.$queryRaw`
       SELECT cp.provider_ids->>'pokemon_tcg_api' AS provider_id, COUNT(*)::int AS count
@@ -76,6 +77,7 @@ try {
       LEFT JOIN price_snapshots ps
         ON ps.sealed_product_id = sp.id
         AND ps.item_type = 'sealed_product'
+      WHERE sp.visibility = 'global'::catalogue_visibility
       GROUP BY sp.product_type
       ORDER BY "sealedProductCount" DESC, sp.product_type
     `,
@@ -120,6 +122,7 @@ try {
           WHERE image_url IS NOT NULL AND image_url <> ''
         )::int AS "sealedImageCount"
       FROM sealed_products
+      WHERE visibility = 'global'::catalogue_visibility
     `,
     prisma.$queryRaw`
       SELECT
@@ -142,7 +145,8 @@ try {
         metadata->>'groupId' AS "tcgcsvGroupId",
         COALESCE(provider_ids->>'tcgcsv', provider_ids->>'tcgplayer') AS "tcgcsvProductId"
       FROM sealed_products
-      WHERE image_url IS NULL OR image_url = ''
+      WHERE visibility = 'global'::catalogue_visibility
+        AND (image_url IS NULL OR image_url = '')
       ORDER BY updated_at ASC
       LIMIT 10
     `,

@@ -1,17 +1,28 @@
 import "dotenv/config";
 import nodemailer from "nodemailer";
+import { smtpSecurityOptions } from "./smtp-policy.mjs";
 import { PrismaClient } from "@prisma/client";
 import { pathToFileURL } from "node:url";
-import { buildPricingHealthReport, loadPricingHealthMetrics } from "./report-pricing-health.mjs";
+import { priceAlertScheduleSettings } from "./price-alert-schedule.mjs";
+import {
+  buildPricingHealthReport,
+  loadPricingHealthMetrics,
+  pricingHealthThresholdsFromEnv,
+} from "./report-pricing-health.mjs";
 
 const defaultLookbackMinutes = 90;
 const defaultStaleMinutes = 45;
 const defaultDetailLimit = 10;
+const billingWebhookLeaseMinutes = 10;
+const notificationDeliveryLeaseMinutes = 15;
+const passwordResetOutboxLeaseMinutes = 15;
+const passwordResetOutboxQueueMinutes = 10;
 
 export async function runJobMonitor({
   alertTo = optionalEnv("JOB_MONITOR_ALERT_TO") || optionalEnv("EMAIL_SMOKE_TO"),
   detailLimit = positiveInteger(process.env.JOB_MONITOR_DETAIL_LIMIT, defaultDetailLimit),
   dryRun = booleanSetting(process.env.JOB_MONITOR_DRY_RUN, true),
+  env = process.env,
   lookbackMinutes = positiveInteger(process.env.JOB_MONITOR_LOOKBACK_MINUTES, defaultLookbackMinutes),
   now = optionalDate(process.env.JOB_MONITOR_NOW) ?? new Date(),
   prisma = new PrismaClient(),
@@ -19,19 +30,31 @@ export async function runJobMonitor({
   sendEmail = sendMonitorEmail,
 } = {}) {
   try {
+    const pricingThresholds = pricingHealthThresholdsFromEnv(env);
     const [runs, pricingMetrics] = await Promise.all([
       loadProblemJobRuns({ detailLimit, lookbackMinutes, now, prisma, staleMinutes }),
-      loadPricingHealthMetrics({ now, prisma }),
+      loadPricingHealthMetrics({ now, prisma, thresholds: pricingThresholds }),
     ]);
-    const pricingHealth = buildPricingHealthReport(pricingMetrics);
+    const pricingHealth = buildPricingHealthReport(pricingMetrics, pricingThresholds);
+    const priceAlertSettings = priceAlertScheduleSettings(env);
     const report = buildJobMonitorReport({
       alertTo,
       detailLimit,
       dryRun,
+      degradedRuns: runs.degradedRuns,
+      failedBillingWebhookCount: runs.failedBillingWebhookCount,
+      failedBillingWebhooks: runs.failedBillingWebhooks,
       failedRuns: runs.failedRuns,
+      latestPriceAlertRun: runs.latestPriceAlertRun,
       lookbackMinutes,
       now,
+      priceAlertMaxAgeHours: positiveInteger(env.JOB_MONITOR_PRICE_ALERT_MAX_AGE_HOURS, 36),
+      priceAlertSettings,
       pricingHealth,
+      passwordResetOutboxProblemCount: runs.passwordResetOutboxProblemCount,
+      passwordResetOutboxOldestAt: runs.passwordResetOutboxOldestAt,
+      unresolvedNotificationDeliveryCount: runs.unresolvedNotificationDeliveryCount,
+      unresolvedNotificationDeliveryOldestAt: runs.unresolvedNotificationDeliveryOldestAt,
       staleMinutes,
       staleRuns: runs.staleRuns,
     });
@@ -64,15 +87,53 @@ export function buildJobMonitorReport({
   alertTo,
   detailLimit,
   dryRun,
+  degradedRuns = [],
+  failedBillingWebhookCount,
+  failedBillingWebhooks = [],
   failedRuns,
+  latestPriceAlertRun,
   lookbackMinutes,
   now,
+  priceAlertMaxAgeHours = 36,
+  priceAlertSettings,
   pricingHealth,
+  passwordResetOutboxProblemCount = 0,
+  passwordResetOutboxOldestAt = null,
+  unresolvedNotificationDeliveryCount = 0,
+  unresolvedNotificationDeliveryOldestAt = null,
   staleMinutes,
   staleRuns,
 }) {
   const normalizedFailedRuns = failedRuns.map(normalizeJobRun);
+  const normalizedDegradedRuns = degradedRuns.map(normalizeJobRun);
   const normalizedStaleRuns = staleRuns.map(normalizeJobRun);
+  const normalizedFailedBillingWebhooks = failedBillingWebhooks.map(normalizeBillingWebhookEvent);
+  const normalizedFailedBillingWebhookCount = Number.isFinite(Number(failedBillingWebhookCount))
+    ? Math.max(0, Math.floor(Number(failedBillingWebhookCount)))
+    : normalizedFailedBillingWebhooks.length;
+  const normalizedUnresolvedDeliveryCount = Number.isFinite(Number(unresolvedNotificationDeliveryCount))
+    ? Math.max(0, Math.floor(Number(unresolvedNotificationDeliveryCount)))
+    : 0;
+  const unresolvedDeliveryOldestAt = dateStringOrNull(unresolvedNotificationDeliveryOldestAt);
+  const unresolvedDeliveryAgeHours = unresolvedDeliveryOldestAt
+    ? Math.max(0, Math.round(((now.getTime() - new Date(unresolvedDeliveryOldestAt).getTime()) / 3_600_000) * 10) / 10)
+    : null;
+  const normalizedPasswordResetOutboxProblemCount = Number.isFinite(Number(passwordResetOutboxProblemCount))
+    ? Math.max(0, Math.floor(Number(passwordResetOutboxProblemCount)))
+    : 0;
+  const normalizedPasswordResetOutboxOldestAt = dateStringOrNull(passwordResetOutboxOldestAt);
+  const passwordResetOutboxOldestAgeMinutes = normalizedPasswordResetOutboxOldestAt
+    ? Math.max(
+        0,
+        Math.round((now.getTime() - new Date(normalizedPasswordResetOutboxOldestAt).getTime()) / 6_000) / 10,
+      )
+    : null;
+  const priceAlerts = priceAlertScheduleHealth({
+    latestRun: latestPriceAlertRun,
+    maxAgeHours: priceAlertMaxAgeHours,
+    now,
+    settings: priceAlertSettings,
+  });
   const problems = [
     ...(normalizedFailedRuns.length
       ? [`${normalizedFailedRuns.length} failed job run${normalizedFailedRuns.length === 1 ? "" : "s"} in the last ${lookbackMinutes} minutes.`]
@@ -80,6 +141,25 @@ export function buildJobMonitorReport({
     ...(normalizedStaleRuns.length
       ? [`${normalizedStaleRuns.length} running job run${normalizedStaleRuns.length === 1 ? "" : "s"} older than ${staleMinutes} minutes.`]
       : []),
+    ...(normalizedDegradedRuns.length
+      ? [`${normalizedDegradedRuns.length} successful job run${normalizedDegradedRuns.length === 1 ? "" : "s"} reported partial provider degradation in the last ${lookbackMinutes} minutes.`]
+      : []),
+    ...(normalizedFailedBillingWebhookCount
+      ? [`${normalizedFailedBillingWebhookCount} failed billing webhook event${normalizedFailedBillingWebhookCount === 1 ? "" : "s"} or stuck processing event${normalizedFailedBillingWebhookCount === 1 ? "" : "s"} need attention.`]
+      : []),
+    ...(normalizedUnresolvedDeliveryCount
+      ? [
+          `${normalizedUnresolvedDeliveryCount} notification delivery claim${normalizedUnresolvedDeliveryCount === 1 ? "" : "s"} ` +
+          `remain unresolved${unresolvedDeliveryAgeHours === null ? "" : `; the oldest is ${unresolvedDeliveryAgeHours} hours old`}.`,
+        ]
+      : []),
+    ...(normalizedPasswordResetOutboxProblemCount
+      ? [
+          `${normalizedPasswordResetOutboxProblemCount} password-reset outbox row${normalizedPasswordResetOutboxProblemCount === 1 ? "" : "s"} ` +
+          `are stale or unresolved${passwordResetOutboxOldestAgeMinutes === null ? "" : `; the oldest is ${passwordResetOutboxOldestAgeMinutes} minutes old`}.`,
+        ]
+      : []),
+    ...priceAlerts.problems,
     ...(pricingHealth?.problems ?? []),
   ];
 
@@ -100,6 +180,25 @@ export function buildJobMonitorReport({
       runs: normalizedFailedRuns,
     },
     pricingHealth: pricingHealth ?? null,
+    priceAlerts,
+    passwordResetOutbox: {
+      count: normalizedPasswordResetOutboxProblemCount,
+      oldestCreatedAt: normalizedPasswordResetOutboxOldestAt,
+      oldestAgeMinutes: passwordResetOutboxOldestAgeMinutes,
+    },
+    recentFailedBillingWebhooks: {
+      count: normalizedFailedBillingWebhookCount,
+      events: normalizedFailedBillingWebhooks,
+    },
+    unresolvedNotificationDeliveries: {
+      count: normalizedUnresolvedDeliveryCount,
+      oldestUpdatedAt: unresolvedDeliveryOldestAt,
+      oldestAgeHours: unresolvedDeliveryAgeHours,
+    },
+    recentDegraded: {
+      count: normalizedDegradedRuns.length,
+      runs: normalizedDegradedRuns,
+    },
     staleMinutes,
     staleRunning: {
       count: normalizedStaleRuns.length,
@@ -115,6 +214,10 @@ export function shouldSendJobMonitorAlert(report) {
 export function buildJobMonitorEmail(report) {
   const subject = `[Mint Binder] Job monitor alert: ${report.problems.length} issue${report.problems.length === 1 ? "" : "s"}`;
   const failedRows = report.recentFailed.runs.map(jobRunTableRow).join("");
+  const degradedRows = report.recentDegraded.runs.map(jobRunTableRow).join("");
+  const failedBillingWebhookRows = report.recentFailedBillingWebhooks.events
+    .map(billingWebhookTableRow)
+    .join("");
   const staleRows = report.staleRunning.runs.map(jobRunTableRow).join("");
   const html = `<!doctype html>
 <html lang="en">
@@ -123,6 +226,8 @@ export function buildJobMonitorEmail(report) {
   <p>The job monitor found ${report.problems.length} operational issue${report.problems.length === 1 ? "" : "s"} at ${escapeHtml(report.generatedAt)}.</p>
   <ul>${report.problems.map((problem) => `<li>${escapeHtml(problem)}</li>`).join("")}</ul>
   ${failedRows ? `<h2 style="font-size:16px;margin:20px 0 8px;">Recent failed jobs</h2>${jobRunTable(failedRows)}` : ""}
+  ${degradedRows ? `<h2 style="font-size:16px;margin:20px 0 8px;">Partial provider degradation</h2>${jobRunTable(degradedRows)}` : ""}
+  ${failedBillingWebhookRows ? `<h2 style="font-size:16px;margin:20px 0 8px;">Billing webhooks needing attention</h2>${billingWebhookTable(failedBillingWebhookRows)}` : ""}
   ${staleRows ? `<h2 style="font-size:16px;margin:20px 0 8px;">Stale running jobs</h2>${jobRunTable(staleRows)}` : ""}
   <p style="color:#4b5563;margin-top:20px;">Check the Operations job history before running further imports or enabling beta recipient emails.</p>
 </body>
@@ -135,6 +240,8 @@ export function buildJobMonitorEmail(report) {
     ...report.problems.map((problem) => `- ${problem}`),
     "",
     ...jobRunTextSection("Recent failed jobs", report.recentFailed.runs),
+    ...jobRunTextSection("Partial provider degradation", report.recentDegraded.runs),
+    ...billingWebhookTextSection(report.recentFailedBillingWebhooks.events),
     ...jobRunTextSection("Stale running jobs", report.staleRunning.runs),
     "Check the Operations job history before running further imports or enabling beta recipient emails.",
   ].join("\n");
@@ -149,7 +256,28 @@ export function buildJobMonitorEmail(report) {
 async function loadProblemJobRuns({ detailLimit, lookbackMinutes, now, prisma, staleMinutes }) {
   const failedSince = new Date(now.getTime() - lookbackMinutes * 60 * 1000);
   const staleBefore = new Date(now.getTime() - staleMinutes * 60 * 1000);
-  const [failedRuns, staleRuns] = await Promise.all([
+  const billingWebhookStaleBefore = new Date(now.getTime() - billingWebhookLeaseMinutes * 60 * 1000);
+  const notificationDeliveryStaleBefore = new Date(
+    now.getTime() - notificationDeliveryLeaseMinutes * 60 * 1000,
+  );
+  const passwordResetOutboxClaimStaleBefore = new Date(
+    now.getTime() - passwordResetOutboxLeaseMinutes * 60 * 1_000,
+  );
+  const passwordResetOutboxQueueStaleBefore = new Date(
+    now.getTime() - passwordResetOutboxQueueMinutes * 60 * 1_000,
+  );
+  const [
+    failedRuns,
+    staleRuns,
+    successfulRuns,
+    latestPriceAlertRun,
+    failedBillingWebhooks,
+    failedBillingWebhookCount,
+    unresolvedNotificationDeliveryCount,
+    unresolvedNotificationDeliveryOldest,
+    passwordResetOutboxProblemCount,
+    passwordResetOutboxOldest,
+  ] = await Promise.all([
     prisma.jobRun.findMany({
       orderBy: { startedAt: "desc" },
       select: jobRunSelect(),
@@ -169,11 +297,97 @@ async function loadProblemJobRuns({ detailLimit, lookbackMinutes, now, prisma, s
         status: "RUNNING",
       },
     }),
+    prisma.jobRun.findMany({
+      orderBy: { startedAt: "desc" },
+      select: jobRunSelect(),
+      take: 250,
+      where: {
+        startedAt: { gte: failedSince },
+        status: "SUCCEEDED",
+      },
+    }),
+    prisma.jobRun.findFirst({
+      orderBy: { startedAt: "desc" },
+      select: jobRunSelect(),
+      where: { jobType: "PRICE_ALERTS" },
+    }),
+    prisma.billingWebhookEvent.findMany({
+      orderBy: { updatedAt: "desc" },
+      select: billingWebhookEventSelect(),
+      take: detailLimit,
+      where: {
+        OR: [
+          { status: "FAILED", updatedAt: { gte: failedSince } },
+          { status: "PROCESSING", updatedAt: { lte: billingWebhookStaleBefore } },
+        ],
+      },
+    }),
+    prisma.billingWebhookEvent.count({
+      where: {
+        OR: [
+          { status: "FAILED", updatedAt: { gte: failedSince } },
+          { status: "PROCESSING", updatedAt: { lte: billingWebhookStaleBefore } },
+        ],
+      },
+    }),
+    prisma.notificationDelivery.count({
+      where: {
+        OR: [
+          { status: "AMBIGUOUS" },
+          { status: "CLAIMED", updatedAt: { lte: notificationDeliveryStaleBefore } },
+        ],
+      },
+    }),
+    prisma.notificationDelivery.findFirst({
+      orderBy: { updatedAt: "asc" },
+      select: { updatedAt: true },
+      where: {
+        OR: [
+          { status: "AMBIGUOUS" },
+          { status: "CLAIMED", updatedAt: { lte: notificationDeliveryStaleBefore } },
+        ],
+      },
+    }),
+    prisma.passwordResetOutbox.count({
+      where: passwordResetOutboxProblemWhere({
+        claimStaleBefore: passwordResetOutboxClaimStaleBefore,
+        queueStaleBefore: passwordResetOutboxQueueStaleBefore,
+      }),
+    }),
+    prisma.passwordResetOutbox.findFirst({
+      orderBy: { createdAt: "asc" },
+      select: { createdAt: true },
+      where: passwordResetOutboxProblemWhere({
+        claimStaleBefore: passwordResetOutboxClaimStaleBefore,
+        queueStaleBefore: passwordResetOutboxQueueStaleBefore,
+      }),
+    }),
   ]);
 
   return {
+    degradedRuns: successfulRuns
+      .map((run) => ({ ...run, degradation: successfulJobDegradation(run) }))
+      .filter((run) => run.degradation)
+      .slice(0, detailLimit),
+    failedBillingWebhookCount,
+    failedBillingWebhooks,
     failedRuns,
+    latestPriceAlertRun,
+    passwordResetOutboxProblemCount,
+    passwordResetOutboxOldestAt: passwordResetOutboxOldest?.createdAt ?? null,
     staleRuns,
+    unresolvedNotificationDeliveryCount,
+    unresolvedNotificationDeliveryOldestAt: unresolvedNotificationDeliveryOldest?.updatedAt ?? null,
+  };
+}
+
+function passwordResetOutboxProblemWhere({ claimStaleBefore, queueStaleBefore }) {
+  return {
+    OR: [
+      { status: "UNRESOLVED" },
+      { claimedAt: { lte: claimStaleBefore }, status: "CLAIMED" },
+      { createdAt: { lte: queueStaleBefore }, status: "QUEUED" },
+    ],
   };
 }
 
@@ -186,6 +400,7 @@ async function sendMonitorEmail({ html, subject, text, to }) {
     const user = requiredEnv("SMTP_USER", "SMTP_USER must be set before live SMTP job monitor alerts can send.");
     const pass = requiredEnv("SMTP_PASSWORD", "SMTP_PASSWORD must be set before live SMTP job monitor alerts can send.");
     const port = smtpPort();
+    const security = smtpSecurityOptions(port, process.env.SMTP_SECURE);
     const transporter = nodemailer.createTransport({
       auth: {
         pass,
@@ -193,7 +408,7 @@ async function sendMonitorEmail({ html, subject, text, to }) {
       },
       host,
       port,
-      secure: booleanSetting(process.env.SMTP_SECURE, port === 465),
+      ...security,
     });
     const info = await transporter.sendMail({
       from,
@@ -236,6 +451,7 @@ function normalizeJobRun(run) {
   return {
     durationMs: numberOrNull(run.durationMs),
     errorMessage: run.errorMessage ?? null,
+    degradation: run.degradation ?? null,
     finishedAt: dateStringOrNull(run.finishedAt),
     jobType: jobTypeLabel(run.jobType),
     startedAt: dateStringOrNull(run.startedAt),
@@ -249,8 +465,23 @@ function jobRunSelect() {
     errorMessage: true,
     finishedAt: true,
     jobType: true,
+    resultPayload: true,
     startedAt: true,
     status: true,
+  };
+}
+
+function billingWebhookEventSelect() {
+  return {
+    createdAt: true,
+    errorMessage: true,
+    eventType: true,
+    occurredAt: true,
+    processedAt: true,
+    provider: true,
+    providerEventId: true,
+    status: true,
+    updatedAt: true,
   };
 }
 
@@ -273,7 +504,30 @@ function jobRunTableRow(run) {
     <td style="border-bottom:1px solid #e5e7eb;padding:8px;">${escapeHtml(run.jobType)}</td>
     <td style="border-bottom:1px solid #e5e7eb;padding:8px;">${escapeHtml(run.status)}</td>
     <td style="border-bottom:1px solid #e5e7eb;padding:8px;">${escapeHtml(run.startedAt ?? "-")}</td>
-    <td style="border-bottom:1px solid #e5e7eb;padding:8px;">${escapeHtml(run.errorMessage ?? "-")}</td>
+    <td style="border-bottom:1px solid #e5e7eb;padding:8px;">${escapeHtml(run.errorMessage ?? run.degradation ?? "-")}</td>
+  </tr>`;
+}
+
+function billingWebhookTable(rows) {
+  return `<table style="border-collapse:collapse;width:100%;">
+    <thead>
+      <tr>
+        <th align="left" style="border-bottom:1px solid #d1d5db;padding:8px;">Provider</th>
+        <th align="left" style="border-bottom:1px solid #d1d5db;padding:8px;">Event</th>
+        <th align="left" style="border-bottom:1px solid #d1d5db;padding:8px;">Failed</th>
+        <th align="left" style="border-bottom:1px solid #d1d5db;padding:8px;">Error</th>
+      </tr>
+    </thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
+function billingWebhookTableRow(event) {
+  return `<tr>
+    <td style="border-bottom:1px solid #e5e7eb;padding:8px;">${escapeHtml(event.provider)}</td>
+    <td style="border-bottom:1px solid #e5e7eb;padding:8px;">${escapeHtml(`${event.eventType} (${event.providerEventId})`)}</td>
+    <td style="border-bottom:1px solid #e5e7eb;padding:8px;">${escapeHtml(event.updatedAt ?? "-")}</td>
+    <td style="border-bottom:1px solid #e5e7eb;padding:8px;">${escapeHtml(event.errorMessage ?? "-")}</td>
   </tr>`;
 }
 
@@ -286,10 +540,38 @@ function jobRunTextSection(title, runs) {
     title,
     ...runs.map(
       (run) =>
-        `- ${run.jobType} ${run.status} started ${run.startedAt ?? "unknown"}${run.errorMessage ? `: ${run.errorMessage}` : ""}`,
+        `- ${run.jobType} ${run.status} started ${run.startedAt ?? "unknown"}${run.errorMessage || run.degradation ? `: ${run.errorMessage ?? run.degradation}` : ""}`,
     ),
     "",
   ];
+}
+
+function billingWebhookTextSection(events) {
+  if (!events.length) {
+    return [];
+  }
+
+  return [
+    "Billing webhooks needing attention",
+    ...events.map((event) =>
+      `- ${event.provider} ${event.eventType} (${event.providerEventId}) failed ${event.updatedAt ?? "at an unknown time"}${event.errorMessage ? `: ${event.errorMessage}` : ""}`
+    ),
+    "",
+  ];
+}
+
+function normalizeBillingWebhookEvent(event) {
+  return {
+    createdAt: dateStringOrNull(event.createdAt),
+    errorMessage: event.errorMessage ?? null,
+    eventType: String(event.eventType ?? "unknown"),
+    occurredAt: dateStringOrNull(event.occurredAt),
+    processedAt: dateStringOrNull(event.processedAt),
+    provider: String(event.provider ?? "unknown"),
+    providerEventId: String(event.providerEventId ?? "unknown"),
+    status: jobStatusLabel(event.status),
+    updatedAt: dateStringOrNull(event.updatedAt),
+  };
 }
 
 function jobTypeLabel(value) {
@@ -310,6 +592,109 @@ function dateStringOrNull(value) {
 
 function numberOrNull(value) {
   return Number.isFinite(value) ? value : null;
+}
+
+export function successfulJobDegradation(run) {
+  const result = isObject(run?.resultPayload) ? run.resultPayload : {};
+  const reasons = [];
+  const warning = optionalEnvValue(result.warning);
+  const topLevelStatus = optionalEnvValue(result.status);
+  const topLevelProvider = optionalEnvValue(result.provider) ?? "scheduled provider";
+
+  if (topLevelStatus && !["succeeded", "healthy", "not_configured"].includes(topLevelStatus)) {
+    reasons.push(`${topLevelProvider} reported ${topLevelStatus}.`);
+  }
+
+  if (warning) {
+    reasons.push(warning);
+  }
+
+  const failedSets = positiveCount(result.failedSets);
+  const failedGroups = positiveCount(result.failedGroups);
+  const partialSets = positiveCount(result.partialSets);
+  const ambiguousCheckouts = positiveCount(result.ambiguous);
+  const checkoutErrors = positiveCount(result.errors);
+
+  if (failedSets) reasons.push(`${failedSets} provider set refresh(es) failed.`);
+  if (partialSets) reasons.push(`${partialSets} provider set refresh(es) were partial.`);
+  if (failedGroups) reasons.push(`${failedGroups} provider group refresh(es) failed.`);
+  if (ambiguousCheckouts) reasons.push(`${ambiguousCheckouts} billing checkout retirement(s) need reconciliation.`);
+  if (checkoutErrors) reasons.push(`${checkoutErrors} billing checkout retirement provider operation(s) failed.`);
+
+  const secondSource = isObject(result.secondSource) ? result.secondSource : null;
+
+  if (secondSource) {
+    const status = optionalEnvValue(secondSource.status);
+    const provider = optionalEnvValue(secondSource.provider) ?? "second source";
+    const output = positiveCount(secondSource.pricingSnapshotsCreated) +
+      positiveCount(secondSource.pricingSnapshotsUpdated);
+    const candidatesChecked = positiveCount(secondSource.candidatesChecked);
+
+    if (status && !["succeeded", "not_configured"].includes(status)) {
+      reasons.push(`${provider} reported ${status}.`);
+    } else if (status === "succeeded" && candidatesChecked > 0 && output === 0) {
+      reasons.push(`${provider} checked ${candidatesChecked} candidate(s) but produced no price snapshots.`);
+    }
+  }
+
+  return [...new Set(reasons)].join(" ") || null;
+}
+
+export function priceAlertScheduleHealth({ latestRun, maxAgeHours = 36, now, settings }) {
+  if (!settings) {
+    return {
+      latestRunAt: null,
+      maxAgeHours,
+      mode: "unknown",
+      ok: true,
+      problems: [],
+    };
+  }
+
+  const latestRunAt = latestRun?.startedAt
+    ? (latestRun.startedAt instanceof Date ? latestRun.startedAt : new Date(latestRun.startedAt))
+    : null;
+  const ageHours = latestRunAt && !Number.isNaN(latestRunAt.getTime())
+    ? Math.round(Math.max(0, now.getTime() - latestRunAt.getTime()) / 3_600) / 1_000
+    : null;
+  const problems = [...settings.problems];
+
+  if (ageHours === null) {
+    problems.push("No price-alert digest job run has been recorded; configure the daily dry-run schedule.");
+  } else if (ageHours > maxAgeHours) {
+    problems.push(
+      `Latest price-alert digest job is ${ageHours} hours old; expected a run within ${maxAgeHours} hours.`,
+    );
+  }
+
+  return {
+    ageHours,
+    allowLiveRecipients: settings.allowLiveRecipients,
+    dryRun: settings.dryRun,
+    emailConfigured: settings.emailConfigured,
+    latestRunAt: latestRunAt?.toISOString() ?? null,
+    maxAgeHours,
+    mode: settings.mode,
+    ok: problems.length === 0,
+    problems,
+    testRecipientConfigured: settings.testRecipientConfigured,
+  };
+}
+
+function positiveCount(value) {
+  const number = Number(value);
+
+  return Number.isFinite(number) && number > 0 ? Math.floor(number) : 0;
+}
+
+function optionalEnvValue(value) {
+  const text = String(value ?? "").trim();
+
+  return text || undefined;
+}
+
+function isObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function emailProvider() {

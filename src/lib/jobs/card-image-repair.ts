@@ -4,6 +4,7 @@ import {
   knownBadPokemonTcgImageProviderCodes,
   type TcgcsvCardImageProduct,
 } from "../catalogue/image-repair";
+import { fetchWithPolicy } from "../http/fetch-with-policy";
 
 export type CardImageRepairOptions = {
   dryRun?: boolean;
@@ -135,11 +136,16 @@ async function fetchKnownBadTcgcsvCardImageProducts(providerCodes: string[]) {
       }
 
       try {
-        const response = await fetch(`https://tcgcsv.com/tcgplayer/${target.categoryId}/${target.groupId}/products`, {
+        const response = await fetchWithPolicy(`https://tcgcsv.com/tcgplayer/${target.categoryId}/${target.groupId}/products`, {
           headers: {
             accept: "application/json",
             "user-agent": "MintBinderLocalImporter/0.1",
           },
+        }, {
+          maxResponseBytes: 16 * 1024 * 1024,
+          provider: "TCGCSV card images",
+          retryAttempts: 2,
+          timeoutMs: 12_000,
         });
 
         if (!response.ok) {

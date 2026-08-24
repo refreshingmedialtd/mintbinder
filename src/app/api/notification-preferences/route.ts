@@ -1,21 +1,29 @@
-import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import {
   getNotificationPreferences,
+  NotificationPreferenceValidationError,
   updateNotificationPreferences,
-  type NotificationPreferenceUpdate,
 } from "@/lib/notifications/preferences";
+import {
+  databaseReadUnavailableResponse,
+  privateReadJson,
+} from "@/lib/http/private-read-response";
+import { accountMutationGuard } from "@/lib/auth/mutation-guard";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const session = await auth();
+  try {
+    const session = await auth();
 
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+    if (!session?.user?.id) {
+      return privateReadJson({ error: "Authentication required." }, 401);
+    }
+    return privateReadJson(await getNotificationPreferences(session.user.id, { fallback: "throw" }));
+  } catch (error) {
+    console.error("Unable to read notification preferences.", error);
+    return databaseReadUnavailableResponse("Notification preferences are temporarily unavailable.");
   }
-
-  return NextResponse.json(await getNotificationPreferences(session.user.id));
 }
 
 export async function PATCH(request: Request) {
@@ -23,16 +31,30 @@ export async function PATCH(request: Request) {
     const session = await auth();
 
     if (!session?.user?.id) {
-      return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+      return privateReadJson({ error: "Authentication required." }, 401);
+    }
+    const mutationError = await accountMutationGuard({
+      isEmailVerified: session.user.isEmailVerified, request, userId: session.user.id,
+    });
+    if (mutationError) return mutationError;
+
+    let body: unknown;
+
+    try {
+      body = await request.json();
+    } catch {
+      return privateReadJson({ error: "A JSON body is required." }, 400);
     }
 
-    const body = (await request.json().catch(() => ({}))) as NotificationPreferenceUpdate;
     const preferences = await updateNotificationPreferences(session.user.id, body);
 
-    return NextResponse.json(preferences);
+    return privateReadJson(preferences);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unable to update notification preferences.";
+    if (error instanceof NotificationPreferenceValidationError) {
+      return privateReadJson({ error: error.message }, 400);
+    }
 
-    return NextResponse.json({ error: message }, { status: 400 });
+    console.error("Unable to update notification preferences.", error);
+    return databaseReadUnavailableResponse("Notification preferences are temporarily unavailable.");
   }
 }

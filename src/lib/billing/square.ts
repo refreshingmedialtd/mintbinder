@@ -1,7 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { BillingConfigError } from "@/lib/billing/errors";
+import { fetchWithPolicy } from "@/lib/http/fetch-with-policy";
+import { createSquareCheckoutCorrelation } from "@/lib/billing/square-checkout-correlation";
 
 type SquarePlan = "monthly" | "yearly";
+
+export type SquareCheckoutExpectation = {
+  amountMinor: number;
+  currency: string;
+  planVariationId: string;
+};
 
 type SquareCustomerResponse = {
   customer?: {
@@ -17,18 +25,38 @@ type SquarePaymentLinkResponse = {
   payment_link?: {
     id?: string;
     long_url?: string;
+    order_id?: string;
     url?: string;
   };
 };
 
+type SquareOrderResponse = {
+  errors?: SquareApiError[];
+  order?: {
+    id?: string | null;
+    state?: string | null;
+  };
+};
+
+type SquarePaymentResponse = {
+  errors?: SquareApiError[];
+  payment?: SquarePaymentRecord;
+};
+
 type SquareRequestOptions = {
   body?: unknown;
-  method?: "GET" | "POST" | "PUT";
+  method?: "DELETE" | "GET" | "POST" | "PUT";
 };
 
 type SquareSubscriptionResponse = {
   errors?: SquareApiError[];
   subscription?: SquareSubscriptionRecord;
+};
+
+type SquareSubscriptionSearchResponse = {
+  cursor?: string;
+  errors?: SquareApiError[];
+  subscriptions?: SquareSubscriptionRecord[];
 };
 
 type SquareApiError = {
@@ -53,17 +81,28 @@ export type SquareSubscriptionRecord = {
   status?: string | null;
 };
 
+export type SquarePaymentRecord = {
+  amount_money?: { amount?: number | null; currency?: string | null } | null;
+  customer_id?: string | null;
+  id?: string | null;
+  note?: string | null;
+  order_id?: string | null;
+  status?: string | null;
+};
+
 export async function createSquareCustomer({
   email,
+  idempotencyKey,
   name,
   userId,
 }: {
   email?: string | null;
+  idempotencyKey?: string;
   name?: string | null;
   userId: string;
 }) {
   const body: Record<string, unknown> = {
-    idempotency_key: randomUUID(),
+    idempotency_key: idempotencyKey ?? randomUUID(),
     note: "Mint Binder subscription customer",
     reference_id: userId,
   };
@@ -116,10 +155,31 @@ export async function retrieveSquareCustomer(customerId: string) {
   } satisfies SquareCustomer;
 }
 
+export async function deleteSquareCustomer(customerId: string) {
+  try {
+    await squareRequest(`/v2/customers/${encodeURIComponent(customerId)}`, { method: "DELETE" });
+  } catch (error) {
+    if (!isSquareNotFoundError(error)) {
+      throw error;
+    }
+  }
+}
+
 export async function retrieveSquareSubscription(subscriptionId: string) {
-  const response = await squareRequest<SquareSubscriptionResponse>(`/v2/subscriptions/${subscriptionId}`);
+  let response: SquareSubscriptionResponse;
+  try {
+    response = await squareRequest<SquareSubscriptionResponse>(`/v2/subscriptions/${subscriptionId}`);
+  } catch (error) {
+    if (isSquareNotFoundError(error)) return null;
+    throw error;
+  }
 
   return response.subscription ?? null;
+}
+
+export async function retrieveSquarePayment(paymentId: string) {
+  const response = await squareRequest<SquarePaymentResponse>(`/v2/payments/${encodeURIComponent(paymentId)}`);
+  return response.payment ?? null;
 }
 
 export async function cancelSquareSubscription(subscriptionId: string) {
@@ -134,27 +194,59 @@ export async function cancelSquareSubscription(subscriptionId: string) {
   return response.subscription;
 }
 
+export async function searchSquareSubscriptions(customerId: string) {
+  const subscriptions: SquareSubscriptionRecord[] = [];
+  let cursor: string | undefined;
+
+  for (let page = 0; page < 20; page += 1) {
+    const response = await squareRequest<SquareSubscriptionSearchResponse>("/v2/subscriptions/search", {
+      method: "POST",
+      body: {
+        cursor,
+        limit: 100,
+        query: {
+          filter: {
+            customer_ids: [customerId],
+          },
+        },
+      },
+    });
+
+    subscriptions.push(...(response.subscriptions ?? []));
+    cursor = response.cursor?.trim() || undefined;
+
+    if (!cursor) {
+      return subscriptions;
+    }
+  }
+
+  throw new Error("Square subscription search exceeded its safe pagination limit.");
+}
+
 export async function createSquareSubscriptionCheckout({
-  customerId,
   email,
+  expectation,
+  idempotencyKey,
   origin,
   plan,
-  userId,
 }: {
-  customerId: string;
   email?: string | null;
+  expectation: SquareCheckoutExpectation;
+  idempotencyKey?: string;
   origin: string;
   plan: SquarePlan;
-  userId: string;
 }) {
-  const config = squarePlanConfig(plan);
+  const requestKey = idempotencyKey ?? randomUUID();
   const body = {
     checkout_options: {
+      allow_tipping: false,
+      enable_coupon: false,
+      enable_loyalty: false,
       redirect_url: `${origin}/?billing=success&provider=square&plan=${plan}`,
-      subscription_plan_id: config.planVariationId,
+      subscription_plan_id: expectation.planVariationId,
     },
-    idempotency_key: randomUUID(),
-    payment_note: `mintbinder_user=${userId};square_customer=${customerId};plan=${plan}`,
+    idempotency_key: requestKey,
+    payment_note: createSquareCheckoutCorrelation(requestKey),
     pre_populated_data: {
       buyer_email: email ?? undefined,
     },
@@ -162,8 +254,8 @@ export async function createSquareSubscriptionCheckout({
       location_id: squareLocationId(),
       name: `Mint Binder Plus ${plan === "yearly" ? "Yearly" : "Monthly"}`,
       price_money: {
-        amount: config.amountMinor,
-        currency: process.env.SQUARE_CURRENCY?.trim() || "GBP",
+        amount: expectation.amountMinor,
+        currency: expectation.currency,
       },
     },
   };
@@ -171,14 +263,51 @@ export async function createSquareSubscriptionCheckout({
   const paymentLink = response.payment_link;
   const url = paymentLink?.url ?? paymentLink?.long_url;
 
-  if (!url) {
-    throw new Error("Square did not return a checkout URL.");
+  if (!paymentLink?.id || !paymentLink.order_id || !url) {
+    throw new Error("Square did not return a checkout ID, order ID, and URL.");
   }
 
   return {
-    id: paymentLink?.id,
+    id: paymentLink.id,
+    orderId: paymentLink.order_id,
     url,
   };
+}
+
+export function squareCheckoutExpectation(plan: SquarePlan): SquareCheckoutExpectation {
+  const config = squarePlanConfig(plan);
+  return {
+    amountMinor: config.amountMinor,
+    currency: process.env.SQUARE_CURRENCY?.trim().toUpperCase() || "GBP",
+    planVariationId: config.planVariationId,
+  };
+}
+
+export async function deleteSquarePaymentLink(paymentLinkId: string) {
+  try {
+    await squareRequest(`/v2/online-checkout/payment-links/${encodeURIComponent(paymentLinkId)}`, {
+      method: "DELETE",
+    });
+  } catch (error) {
+    if (!isSquareNotFoundError(error)) throw error;
+  }
+}
+
+export async function retrieveSquarePaymentLink(paymentLinkId: string) {
+  try {
+    const response = await squareRequest<SquarePaymentLinkResponse>(
+      `/v2/online-checkout/payment-links/${encodeURIComponent(paymentLinkId)}`,
+    );
+    return response.payment_link ?? null;
+  } catch (error) {
+    if (isSquareNotFoundError(error)) return null;
+    throw error;
+  }
+}
+
+export async function retrieveSquareOrder(orderId: string) {
+  const response = await squareRequest<SquareOrderResponse>(`/v2/orders/${encodeURIComponent(orderId)}`);
+  return response.order ?? null;
 }
 
 function squarePlanConfig(plan: SquarePlan) {
@@ -219,7 +348,7 @@ async function squareRequest<T>(path: string, bodyOrOptions?: unknown | SquareRe
     throw new BillingConfigError("Square is not configured.");
   }
 
-  const response = await fetch(`${squareApiBaseUrl()}${path}`, {
+  const response = await fetchWithPolicy(`${squareApiBaseUrl()}${path}`, {
     method: options.method,
     headers: {
       authorization: `Bearer ${accessToken}`,
@@ -227,6 +356,11 @@ async function squareRequest<T>(path: string, bodyOrOptions?: unknown | SquareRe
       "square-version": process.env.SQUARE_VERSION?.trim() || "2026-05-20",
     },
     body: options.body ? JSON.stringify(options.body) : undefined,
+  }, {
+    provider: "Square",
+    retryAttempts: positiveInteger(process.env.SQUARE_RETRY_ATTEMPTS, 2),
+    retryWaitMs: positiveInteger(process.env.SQUARE_RETRY_WAIT_MS, 400),
+    timeoutMs: positiveInteger(process.env.SQUARE_REQUEST_TIMEOUT_MS, 10_000),
   });
   const data = (await response.json().catch(() => ({}))) as T & { errors?: SquareApiError[] };
 

@@ -1,17 +1,25 @@
-import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { getDashboardData } from "@/lib/db/app-data";
+import {
+  databaseReadUnavailableResponse,
+  privateReadJson,
+} from "@/lib/http/private-read-response";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const session = await auth();
+  try {
+    const session = await auth();
 
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+    if (!session?.user?.id) {
+      return privateReadJson({ error: "Authentication required." }, 401);
+    }
+
+    const data = await getDashboardData(session.user.id);
+
+    return privateReadJson(data);
+  } catch (error) {
+    console.error("Unable to read dashboard data.", error);
+    return databaseReadUnavailableResponse("Dashboard data is temporarily unavailable.");
   }
-
-  const data = await getDashboardData(session.user.id);
-
-  return NextResponse.json(data);
 }

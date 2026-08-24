@@ -1,187 +1,193 @@
-# Mint Binder Launch Readiness
+# Mint Binder launch readiness
 
-Last updated: 2026-06-24
+Last updated: 2026-08-24
 
-## Overall Progress
+## Current status
 
-Mint Binder is approximately 90% of the way to a credible MVP/beta release and around 74% of the way to a polished public launch.
+Mint Binder is ready for a controlled beta once this release candidate has been
+deployed, its database migration has completed, and the registered 20i Node
+application has been restarted successfully. The core product, collection and
+wishlist workflows, pricing operations, Plus foundations, legal drafts, account
+controls, and responsive binder experience are implemented.
 
-The product is now feature-complete enough to validate the core idea with a small beta group: users can track cards and sealed products, manage wishlist targets, review value history, see set progress, use Plus-gated analytics/reporting, and admins can operate catalogue/pricing imports. The remaining work is less about inventing the product and more about finishing integration QA, production setup, legal/brand readiness, and a focused mobile polish pass.
+This file distinguishes four different states deliberately:
 
-## Latest QA Snapshot
+- **Implemented** means the code is in this release candidate.
+- **Verified locally** means automated checks or browser QA have passed against
+  the local production build.
+- **Verified in production** means a read-only or controlled live check has
+  completed against `mintbinder.co.uk` or the production database.
+- **External action** means hosting, provider approval, credentials, policy, or
+  business information is still required outside the repository.
 
-Completed on 2026-06-04:
+## August 2026 release candidate
 
-- Applied all Prisma migrations to the local PostgreSQL `mintbinder` database.
-- Seeded the local database with the admin demo user, sample collection, wishlist, storage, catalogue, sealed products, events, and price snapshots.
-- Ran `npm run qa:admin` successfully with zero failures.
-- Ran `npm run build` successfully.
-- Ran `npm run qa:beta` successfully with 18/18 checks passing.
-- Ran `npm run qa:square-activation` successfully. The final pass created Square sandbox monthly/yearly subscriptions through a live Cloudflare webhook tunnel, verified Square's test webhook, confirmed monthly Plus activation, confirmed cancellation keeps Plus active through the estimated paid period, and left the admin account on active yearly Plus. The final pass used real Square webhook delivery with no signed local replay fallback.
-- Reran `npm run qa:admin` after Square activation; the admin QA user now reports `PLUS_YEARLY` / `ACTIVE`.
-- Added `npm run job:price-alerts` and ran a successful dry-run against the local production build. The job selected 1 active Plus user, found 3 alert items, recorded a succeeded `price_alerts` job run, and did not send email because no live email provider is configured locally.
-- Added and ran `npm run qa:operations` successfully. The pass validated protected Operations endpoints for catalogue status, catalogue gap export, duplicate provider review, job history, and local dry-run maintenance job recording.
-- Completed a browser click-through of the admin Operations screen. This caught and fixed a mobile access gap by adding an admin-only `Ops` shortcut to the bottom nav; status loading, gap export API verification, duplicate review, alert dry-run, and job history were validated.
-- Ran controlled Pokemon TCG API-backed variant metadata repair dry-runs for 10 and 50 candidates. Both fetched provider data successfully once network access was allowed, but found 0 repairable cards in those batches, so no catalogue rows were changed.
-- Added a safer price-alert live-smoke path with `PRICE_ALERT_DIGEST_TEST_RECIPIENT`, allowing real digest content to be sent to one controlled mailbox before clearing the override for beta users.
-- Ran controlled pricing backfills for Guardians Rising, Sun & Moon, and Burning Shadows. These added 20 card price snapshots, improved card pricing coverage from 99.5% to 99.6%, and reduced Sun & Moon unpriced cards from 64 to 44.
-- Ran targeted TCGCSV sealed pricing groups for current unpriced products. The batch added 1 sealed price snapshot and moved sealed pricing coverage from 81.4% to 81.5%; many remaining sealed products appear to lack usable provider prices rather than missing import coverage.
-- Added `npm run job:pricing-targets` for multi-set Pokemon TCG price catch-ups, then processed 29 remaining sparse set queries. The sweep added 59 more card price snapshots and moved card pricing coverage to 99.9%, leaving 17 edge-case unpriced printings.
-- Ran targeted TCGCSV card pricing against the final six matched sparse groups. It matched 825 card products but created 0 additional snapshots, confirming the remaining card gaps are provider/no-price edge cases rather than missed group coverage.
-- Ran a full targeted TCGCSV sealed sweep across all 87 groups with unpriced sealed products. It processed 13,594 products and created 0 additional snapshots, confirming the remaining sealed gaps need PriceCharting or another sealed-price source rather than more TCGCSV coverage.
-- Started the beta UX polish pass by removing the prototype-only Plus simulation path, adding a clear Free vs Plus comparison in Settings, clarifying Plus email notification behavior, and locking automated price-watch content behind real checkout actions for free users.
-- Added local theme selection with free Light/Dark options and a Plus-gated extended palette, plus first-run dashboard/collection empty states, a shorter mobile dashboard set-progress preview, and a less overwhelming Add Item catalogue result cap.
-- Added the first international-catalogue foundation: language/region fields on card sets and printings, Add Item catalogue language filtering, expanded lot language options for Japanese/Traditional Chinese/Simplified Chinese/Korean, exact set-ID loading, and a TCGdex-backed batch importer scaffold.
-- Continued beta UX polish with a cleaner item-detail mobile layout, moving owned-lot actions out of the page header, adding a compact owned-lot summary, and clarifying edit/sale form states.
-- Continued mobile UX polish across set detail and wishlist flows, adding clearer set progress summaries, target-watch summaries, full-width mobile actions, and better no-results/empty states.
-- Added beta-draft legal pages for privacy, terms, and Pokemon non-affiliation, linked them from the app/auth surfaces, and added first-run onboarding copy to the sign-in/create-account screen.
-- Added a production deployment runbook, `npm run qa:production-env` validator, and `npm run db:deploy` command for staging/production migration flow.
+### Product and UX
 
-Completed on 2026-06-13:
+- Persistent, database-backed binders with nine-pocket pages, manual card/copy
+  placement, blank pockets, cover styles, private-by-default sharing, unlisted
+  read-only links, mobile swipe navigation, and reduced-motion support.
+- Honest mutation feedback: save failures no longer look successful, destructive
+  or slow actions are locked while pending, and recovery actions are available.
+- Collection acquisition dates, quantity-aware purchase lots, partial sales, and
+  remaining cost-basis handling.
+- Collection and sealed-product filters, wishlist-to-collection conversion, and
+  CSV preview with row-level validation before import.
+- CSV import/export round-trips purchase date and grading information.
+- Persistent onboarding progress rather than a checklist that resets per device.
+- Set Builder with one active set goal, completion target, priority, missing-card
+  focus, safe bulk wishlist actions, and a next-card-to-chase recommendation.
+- Source-aware, lazily loaded long-range price history with raw and exact graded
+  streams kept separate.
+- Accessible dialogs, focus management, keyboard states, touch targets, and a
+  reduced-motion path for animation-heavy interfaces.
+- Branded loading, error, and not-found states; installable PWA metadata; search
+  metadata; social cards; sitemap; and robots policy.
 
-- Deployed Mint Binder to the live `mintbinder.co.uk` 20i NodeJS Optimised Managed Cloud Server and confirmed the public app returns `200`.
-- Connected the live app to Neon PostgreSQL after 20i enabled outbound TCP 5432; live account registration, session creation, database-backed app data, storage-location creation, and Square sandbox checkout link creation all passed.
-- Configured 20i SMTP for `alerts@mintbinder.co.uk`, with public SPF, DKIM selector `s1`, and DMARC records visible.
-- Ran local and production email smoke tests successfully through 20i SMTP. Production `/api/jobs/email-smoke` returned `200` and sent via provider `smtp`.
-- Added a temporary `app.js` protected email-smoke fallback while the 20i deployment script behaviour was being diagnosed.
-- Added a disposable `npm run job:price-alert-fixture` helper so the controlled live price-alert digest smoke can be tested even before real Plus beta users exist.
-- Ran a live-database price-alert digest dry run with one disposable Plus fixture user and one alert; the `price_alerts` job recorded a successful dry run with 1 eligible user and 1 alert.
-- Ran the controlled live price-alert digest smoke through 20i SMTP to the configured smoke mailbox; the `price_alerts` job recorded a successful send, then the disposable fixture user, subscription, wishlist item, card, price snapshot, and set were removed.
-- Added a public `/api/health` endpoint and `npm run monitor:jobs` for first-pass uptime and job-run failure/stale-run monitoring.
+### Accounts, privacy, and billing
 
-Completed on 2026-06-14:
+- Strong password policy, scrypt password hashing, persistent authentication
+  throttling, required production auth secret, and invalidation of sessions for
+  deleted users.
+- Email verification and password-reset flows use expiring, single-use hashed
+  tokens. Verification requires an explicit confirmation action so mail-link
+  scanners cannot consume a token merely by visiting it.
+- Price-alert email selection excludes unverified accounts.
+- Authenticated JSON account export and password-confirmed account deletion.
+- Account deletion removes private and pending user-created catalogue data,
+  anonymises retained global catalogue contributions, and cascades personal
+  collection, wishlist, binder, storage, preference, subscription, token, and
+  goal data.
+- Billing webhook events are idempotent and guard against out-of-order provider
+  updates. Outbound billing and email calls are bounded by timeouts.
+- Square hosted checkout uses a signed opaque payment-note correlation because
+  Square may create or select a buyer customer by phone rather than use the
+  profile Mint Binder prepared. Paid checkout remains fail-closed until the
+  payment.created/payment.updated sandbox path is explicitly verified.
+- Security headers include a restrictive content policy, frame protection,
+  transport security in production, a permissions policy, and MIME sniffing
+  protection.
 
-- Confirmed 20i Git Version Control expects the deployment script field to contain the script path, and that `scripts/deploy-20i.sh` now performs dependency install, Prisma generation/migration deployment, and `next build`.
-- Added a post-build PM2 reload step to `scripts/deploy-20i.sh` so fresh deploys try to restart the registered 20i Node app after rebuilding.
-- Removed the temporary custom-server API fallbacks from `app.js`; the 20i Node server now forwards requests to the real Next route handlers for `/api/health`, `/api/jobs/email-smoke`, and future API routes.
-- Added repeatable production catalogue bootstrap scripts for broad Pokemon TCG imports and targeted set-by-set imports/pricing.
-- Bootstrapped the live Neon catalogue to 20,359 cards across 173 sets, with 100% card image coverage, 0 set deficits, and 0 duplicate Pokemon TCG provider ID groups.
-- Enriched production card pricing through Pokemon TCG API and TCGCSV. The live database now has 19,302 priced cards out of 20,359, or 94.8% card pricing coverage, with 20,759 total price snapshots across card and sealed products.
-- Imported the live sealed-product catalogue from TCGCSV. Production now has 1,936 sealed products, 100% sealed image coverage, 1,457 priced sealed products, and 75.3% sealed pricing coverage.
-- Added protected `/api/jobs/scheduled-set-pricing` and `/api/jobs/scheduled-pricing` routes, live scheduler helpers, and `SCHEDULED_JOBS.md` so production pricing snapshots can run automatically by least-recently refreshed set without manual page tracking or deep provider paging.
+### Pricing, catalogue, and operations
 
-Completed on 2026-06-23:
+- CardTrader sealed matching now uses guarded identifiers and conservative exact
+  fallbacks rather than requiring one provider ID on every product.
+- Provider calls use bounded timeout, retry, jitter, and `Retry-After` handling.
+- Scheduled jobs use database-backed overlap protection; partial or zero-output
+  provider work is marked degraded rather than reported as fully healthy.
+- Health reporting covers provider freshness/output, stale alert work, price
+  snapshot growth, storage forecasts, webhook failures, and retention candidates.
+- Price alerts have a forced-safe daily dry-run lane, separate from live delivery.
+- Snapshot and operational-data retention support dry-run, double opt-in for
+  destructive execution, batching, and monitoring.
+- A conservative PriceCharting graded-price lane supports only explicit PSA 10,
+  BGS 10, and CGC 10 fields. It is disabled and non-writing by default because
+  third-party display requires written provider permission.
+- Raw valuations exclude graded snapshots. Graded collection items require an
+  exact company-and-score stream rather than silently falling back to an
+  unrelated graded value.
+- Catalogue search uses bounded deterministic pagination, tenant-aware sealed
+  visibility, compact payloads, and a client-side “load more” path.
+- The Plus insurance report now generates a styled PDF; HTML remains an explicit
+  fallback format.
 
-- Split the first-load app payload so the dashboard loads only catalogue rows referenced by the user's collection or wishlist, while Add, set detail, and Operations lazy-load or search catalogue data only when needed.
-- Added `/api/dashboard` for the lightweight authenticated dashboard payload and `/api/catalogue/search` for server-side catalogue search, filtering, sorting, and result limits.
-- Added a beta setup checklist to the dashboard so new testers are guided through first item, wishlist target, storage, set focus, and unvalued-lot review.
-- Upgraded the Wishlist with buying signals that identify targets at or below buy price, near-target watch items, and targets needing estimates.
-- Added a logged-in admin/owner beta status panel in Operations for `liam@refreshing.media`, covering launch checks, environment safety, catalogue/pricing coverage, and recent job runs without requiring the job secret.
-- Improved price-source transparency copy so market values explain source, observation date, confidence level, and whether a value should be treated as a guide only.
+## Production pricing health
 
-Known QA warnings:
+Read-only snapshot taken 2026-08-24 at approximately 15:25 UTC:
 
-- Hosted Square checkout link creation has been smoke-tested in sandbox on the production URL, and webhook activation is validated. Do one final browser-based hosted checkout smoke before public beta, then switch to production Square credentials before paid launch.
-- 20i SMTP email delivery and controlled price-alert digest sending are production-verified. A first-pass job monitor now exists; remaining notification work is deciding the real daily/weekly digest schedule and enabling scheduled monitor alerts.
-- 20i support confirmed Git Version Control expects a path to a bash script rather than inline commands. The 20i deployment script field should remain set to `/home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/deploy-20i.sh`; fresh deploys should show dependency install, Prisma generation/migrations, `next build`, and a PM2 app reload.
-- The production Operations gap report currently shows 814 card variant-metadata gaps, with 96% coverage overall. A controlled 50-card provider dry-run found 0 repairable rows, so the remaining gaps appear concentrated in cards where Pokemon TCG API does not expose TCGPlayer variant prices or newer provider metadata is sparse.
-- Production card pricing is strong enough for beta at 94.8% coverage. Remaining gaps are concentrated in older/legacy sets such as Expedition Base Set, XY base, HeartGold & SoulSilver, Base, and a small number of promo/special products where the current providers lack usable prices or matching needs more aliases.
-- Production sealed pricing is useful but still a data-depth gap at 75.3% coverage. The next substantial improvement requires PriceCharting or another sealed-price source, especially for booster boxes/decks/blisters where TCGCSV has products but no usable market price.
-- Recent `fetch failed` job records are from sandbox-blocked provider calls before rerunning with network permission. The latest pricing, sealed-pricing, catalogue, and price-alert jobs have since succeeded.
-- `npm run db:generate` hit a Windows `EPERM` while replacing Prisma's existing query engine DLL. The migration, seed, build, admin QA, and beta QA all completed successfully, so this is currently a local Windows file-lock warning rather than a launch blocker.
+| Catalogue | Priced | Coverage | Freshness |
+| --- | ---: | ---: | ---: |
+| English cards | 20,462 / 20,479 | 99.9% | 100% of priced cards fresh |
+| Japanese cards | 4,194 / 6,246 | 67.1% | 4,177 fresh; 17 stale |
+| Sealed products | 1,612 / 1,979 | 81.5% | 94.9% of priced products fresh |
 
-## What Is Already In Place
+- The seven-day sealed rotation visited 152/152 sets.
+- CardTrader produced its first sealed snapshot: five products checked, one
+  matched, and one snapshot created. The four latest misses are blueprint-mapping
+  misses; the new identifier/name/type fallbacks need a post-deploy run before
+  manual aliases are justified.
+- The snapshot table held 1,458,393 rows at about 1.13 GB. Current growth projects
+  roughly 10.47 million rows / 8.14 GB after one year, below configured limits.
+- Known zero-output promotion groups are intentionally excluded from coverage
+  alarms only after repeated provider runs establish that those groups contain no
+  usable price observations. They remain visible as excluded diagnostics; they
+  are not counted as successful price updates and their products are not deleted.
 
-- Next.js app shell with mobile-first navigation and responsive core screens.
-- Authentication, user roles, admin-only Operations access, and sample-data fallback.
-- PostgreSQL/Prisma data model for users, subscriptions, catalogue, collection items, wishlist, storage, events, prices, and job runs.
-- Collection flows for adding, editing, duplicating, removing, selling, grading, and storing cards/sealed products.
-- Wishlist flows with target prices, priorities, update/delete actions, and collection conversion.
-- Set progress, detail views, variant-aware card values, price history, analytics, action queues, and insurance report export.
-- Preliminary Binders screen with a default full-collection binder, custom binder creation, artwork choices, and animated page/card preview.
-- CSV import/export and collection import templates.
-- Square checkout, webhook verification, subscription entitlement foundations, and retained Stripe fallback support.
-- Square local tunnel testing and beta subscription management, including in-app renewal cancellation while preserving paid access until the period ends.
-- Notification preferences and price-alert dry-run/email job support.
-- Operations dashboard for catalogue imports, pricing refreshes, sealed imports, job runs, status, gap reports, image repairs, variant metadata repairs, duplicate provider reviews, and guarded duplicate card merges.
-- Catalogue health reporting for coverage, pricing, sealed products, images, variants, duplicate provider IDs, and recommended next actions.
-- Tests for auth roles, beta route smoke checks, admin/database readiness, billing webhooks, catalogue status/gaps, job runs, notifications, pricing, price history, variants, image repairs, sealed imports, duplicate reviews, and duplicate merge planning.
+## Verification required before deployment
 
-## Main Remaining Work
+- `npm run db:generate`
+- `npm run db:validate`
+- `npm run lint`
+- `npm run typecheck`
+- `npm test`
+- `npm run build`
+- `npm audit`
+- Production-build browser smoke at desktop and mobile widths.
+- Review the final Prisma SQL before `npm run db:deploy`; do not use `migrate dev`
+  against production.
 
-1. Email and notification readiness
+The migration creates binders, billing event receipts, account tokens,
+authentication throttles, and active set goals; adds supporting indexes and
+non-validating integrity constraints; and marks existing password accounts as
+verified for a safe rollout. It does not enable any destructive retention job.
 
-   20i SMTP, SPF, DKIM, DMARC, local email smoke, production email smoke, price-alert dry run, and controlled live price-alert sending are complete. The first-pass job monitor is in place; next, decide the real digest schedule and enable scheduled monitor alerts before enabling real beta recipient emails.
+## Deployment and immediate post-deploy checks
 
-2. Catalogue data completion
+1. Confirm a current Neon backup or restore point.
+2. Keep the 20i Git deployment script set to the repository deployment script.
+3. Deploy `main`; require dependency installation, Prisma generation, migration
+   deployment, `next build`, and runtime build verification to pass.
+4. Restart the registered 20i Node application using the hosting-supported
+   command or control-panel action. The deploy script now fails clearly if it
+   cannot perform or verify a restart; a successful build alone is not a healthy
+   deployment.
+5. Confirm `/api/health`, the signed-in dashboard, catalogue search pagination,
+   binder creation/save/reload, a private binder, and an unlisted share link.
+6. Confirm registration, verification email, password reset, account export, and
+   password-confirmed deletion using disposable accounts.
+7. Run sealed pricing and inspect CardTrader `mappingReview` before adding aliases.
+8. Run pricing-health and job-monitor reports; confirm the daily alert lane remains
+   dry-run until recipients are intentionally enabled.
+9. Complete one Square hosted-checkout browser smoke with a buyer phone that maps
+   to a different Square customer. Confirm payment.created/payment.updated maps
+   the intended disposable account exactly once, then confirm subscription
+   webhook delivery and in-app entitlement state before enabling the correlation
+   flag or accepting paid users.
 
-   Production card catalogue coverage is now beta-ready: 20,359 cards, 173 sets, 100% card images, 0 set deficits, and 0 duplicate provider groups. Remaining work is ongoing maintenance imports for new sets and measured variant metadata repair/alias improvements.
+## External launch actions
 
-3. Pricing data depth
+These cannot be completed safely in code alone:
 
-   Production card pricing is beta-ready at 94.8% coverage from Pokemon TCG API and TCGCSV. Sealed pricing is 75.3% covered from TCGCSV; add PriceCharting or another sealed-price source for the next meaningful improvement. Coverage can also improve through UPC/EAN metadata, a sealed product alias table, conservative product-name matching, and an admin review queue for high-value manual prices.
+- Confirm the first deployment's project-local PM2 preflight can see the 20i
+  registered application and that runtime reload/commit verification complete.
+  The deploy fails before migration if registration is not visible.
+- Configure independent uptime/error monitoring and verify production database
+  backups with an actual restore exercise.
+- Add the final registered business/operator identity, service address, and legal
+  contact details, then obtain legal review of privacy and terms drafts.
+- Switch Square from sandbox to production credentials only when paid beta is
+  approved, then run the hosted checkout and refund/cancellation smoke path.
+- Obtain PriceCharting’s express written permission and a paid API token before
+  enabling either graded-price flag or displaying its data to third parties.
+- Keep Korean and Simplified Chinese catalogue/pricing coverage labelled partial
+  until a licensed, dependable source is secured.
+- Choose and approve the initial beta cohort and live email-digest schedule.
 
-4. Hosted checkout and billing browser QA
+## Beta gate
 
-   On staging or the eventual production URL, complete one Square-hosted checkout in a browser, confirm the app Settings billing state, and confirm Square webhook delivery without the local tunnel.
+A controlled beta can open when all of the following are true:
 
-5. Production environment
+- The release candidate passes the complete local release gate.
+- Production migration, build verification, registered-app restart, and health
+  checks pass without manual recovery.
+- Core authenticated workflows pass on a real mobile device.
+- Backups and external uptime/error alerts are active.
+- Square remains disabled for paid users or its production checkout/webhook path
+  has passed end-to-end.
+- Legal pages contain the real operator details and have been reviewed.
+- PriceCharting remains disabled unless written permission has been recorded.
 
-   20i hosting, Neon PostgreSQL, Square sandbox, and 20i SMTP are configured on `mintbinder.co.uk`. The path-based 20i deployment script is in place; before real beta users, upgrade Neon, run `npm run qa:production-env`, set up backup policy, and connect scheduled monitoring.
-
-6. UX polish and beta fit-and-finish
-
-   Review mobile layouts, loading states, empty states, error messages, accessibility, button text, and first-run flows. The first passes have clarified Free vs Plus messaging, Analytics upgrade actions, free-user alert states, theme selection, collection/add-flow mobile scanning, first-run empty states, item-detail edit/sale flows, set detail, wishlist targets, dashboard setup, and buying signals; continue with real-device QA.
-
-7. Legal, privacy, and brand safety
-
-   Beta-draft privacy, terms, and non-affiliation pages now exist. Finalize the product name, domain, company/contact details, legal review, Pokemon/Nintendo/The Pokemon Company non-affiliation wording, and data export/deletion expectations.
-
-8. Domain setup batch
-
-   For `mintbinder.co.uk`, the 20i sender mailbox, SPF/DKIM/DMARC records, `EMAIL_FROM`, local email smoke, production email smoke, and controlled live price-alert smoke are complete. Remaining domain tasks: configure production Square credentials/webhook when ready, update final legal URLs, and add the final URLs to monitoring/runbooks.
-
-9. Monitoring and operations
-
-   `/api/health`, `/api/jobs/scheduled-set-pricing`, `/api/jobs/scheduled-pricing`, live scheduled job helpers, and `npm run monitor:jobs` are in place for first-pass uptime, pricing-history refreshes, and job-run failure/stale-run monitoring. Remaining operations work: configure the 20i/external schedules, choose the uptime/error-monitoring provider, add webhook failure alerts, database backup checks, and a small runbook for catalogue/pricing job recovery.
-
-10. Beta launch
-
-   Invite a small group, import enough catalogue/pricing data for their likely collections, gather feedback, and fix the highest-friction issues before a wider release.
-
-## Pre-Beta / Pre-Launch Product Backlog
-
-- CSV import preview: add a review step before committing imported rows. It should show matched catalogue item, quantity, condition, storage, target value, rows that will be skipped, and clear row-level reasons.
-- Manual value review queue: add an admin/user review surface for items that should have a manual value because the market price is missing, weak, stale, variant-mismatched, high-value, or user-overridden without a valuation note.
-- Set-builder mode: this is not a duplicate of the Sets menu. The idea is a focused set-detail workflow that lets a collector choose one set as an active goal, filter missing/wanted cards, add targets in bulk, and track "next best card to chase".
-- Plus Binders: preliminary client-side version exists with artwork, custom contents, and animated previews. Next pass should persist binders in the database, add manual ordering/page slots, sharing/export options, and Plus/free gating.
-- Graded card pricing: collection lots can store grades, but PSA/BGS/CGC/ACE/SGC values currently fall back to raw/variant market pricing unless the user sets a manual value. Add a graded-price source/importer before promising true slab valuations.
-- International catalogue USP: run staged TCGdex imports for Japanese and Traditional Chinese first, treat Korean and Simplified Chinese as partial until a better source or partnership is confirmed, and track the source/rights plan in `INTERNATIONAL_CATALOGUE.md`.
-- Mobile QA pass: test the live app on real phones, using screenshots from account creation, dashboard, Add, item detail, set detail, wishlist, Settings, and checkout/Plus surfaces.
-- Sealed/value coverage: pursue PriceCharting sealed enrichment first, then add UPC/EAN metadata capture, alias management, and manual/admin price review for important products that no provider prices reliably.
-- Operations schema follow-up: the repair jobs currently record under existing tracked job types. If we want first-class run history for card image repair, sealed image repair, and variant metadata repair, add a database enum migration and update the job-run type list.
-
-## Recommended Order From Here
-
-1. Decide the price-alert digest schedule and keep real beta recipient emails disabled until the first beta group is approved.
-2. Do a focused production QA pass against `https://mintbinder.co.uk`, including account creation, dashboard setup, add-card/add-sealed flows, wishlist buying signals, storage, reports, Settings, and mobile layouts.
-3. Complete a hosted Square checkout browser smoke on production.
-4. Build the CSV import preview, manual value review queue, and Plus Binders if they are kept in the beta scope.
-5. Schedule card/sealed pricing jobs, schedule the job monitor, configure public uptime/error monitoring, backups, webhook alerts, and database backup checks.
-6. Review/finalize legal, privacy, brand/non-affiliation, and onboarding copy for `mintbinder.co.uk`.
-7. Run one final `npm run build`, `npm run qa:beta`, and `npm run qa:admin`.
-8. Invite a small beta group.
-
-## Launch Gates
-
-Beta can start when:
-
-- A real database-backed admin session has been tested.
-- `npm run qa:beta` passes against the production build or staging deployment. Completed locally on 2026-06-04.
-- `npm run qa:admin` passes without launch-blocking failures and any warnings are understood. Completed locally on 2026-06-04.
-- Users can sign up, add cards/sealed products, edit collection items, use wishlist, and view value/set progress without relying on sample data.
-- Catalogue coverage is broad enough for modern Pokemon TCG collections, or gaps are clearly handled. Production card catalogue coverage is beta-ready as of 2026-06-14.
-- Pricing refreshes produce useful values for common card variants and sealed products. Production card pricing is beta-ready at 94.8%; sealed pricing is useful at 75.3% but should be deepened before a wider public launch.
-- Plus gates, Square checkout link creation, billing management, and webhook entitlement updates work in sandbox mode. Backend activation completed locally on 2026-06-04; hosted-checkout browser smoke remains for staging/production.
-- Email notifications can be dry-run and sent safely. Production SMTP smoke and controlled price-alert digest smoke completed on 2026-06-13.
-- Operations status, exports, job history, and safe dry-run job controls pass protected API QA and browser UI click-through. Completed locally on 2026-06-04.
-- Basic privacy/terms/non-affiliation pages exist in beta-draft form. Completed locally on 2026-06-04; final legal/name/domain review remains.
-- There is a rollback or recovery plan for migrations and job failures.
-
-Public launch should wait until:
-
-- Beta feedback has been addressed.
-- Production backups, monitoring, and error alerts are active.
-- The catalogue import/pricing process is repeatable and documented.
-- Legal/brand language has been reviewed.
-- The app has had at least one full mobile QA pass on real devices.
+Public launch should additionally wait for beta feedback, real restore testing,
+at least one month of healthy scheduled-job history, confirmed provider/licensing
+positions for every advertised market, and a support/recovery runbook owned by a
+named operator.

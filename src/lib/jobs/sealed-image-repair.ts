@@ -4,6 +4,7 @@ import {
   sealedImageRepairTargets,
   type TcgcsvProductImage,
 } from "../catalogue/sealed-image-repair";
+import { fetchWithPolicy } from "../http/fetch-with-policy";
 
 export type SealedImageRepairOptions = {
   dryRun?: boolean;
@@ -36,6 +37,8 @@ export async function repairMissingTcgcsvSealedImages({
     },
     take: safeLimit,
     where: {
+      createdByUserId: null,
+      visibility: "GLOBAL",
       OR: [
         { imageUrl: null },
         { imageUrl: "" },
@@ -87,13 +90,20 @@ export async function repairMissingTcgcsvSealedImages({
 }
 
 async function fetchTcgcsvProductImages(groupId: string, fetchImpl: typeof fetch): Promise<TcgcsvProductImage[]> {
-  const response = await fetchImpl(
+  const response = await fetchWithPolicy(
     `https://tcgcsv.com/tcgplayer/${TCGCSV_POKEMON_CATEGORY_ID}/${groupId}/products`,
     {
       headers: {
         accept: "application/json",
         "user-agent": "MintBinderLocalImporter/0.1",
       },
+    },
+    {
+      fetchImpl,
+      maxResponseBytes: 16 * 1024 * 1024,
+      provider: "TCGCSV sealed images",
+      retryAttempts: 2,
+      timeoutMs: 12_000,
     },
   );
   const body = await response.json().catch(() => ({})) as {

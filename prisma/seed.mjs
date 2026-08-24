@@ -15,7 +15,23 @@ import {
 } from "@prisma/client";
 
 const prisma = new PrismaClient();
-const demoPassword = "MintBinder2026!";
+const seedEnvironment = (process.env.NODE_ENV || "development").trim().toLowerCase();
+const demoSeedEnabled = process.env.MINTBINDER_ENABLE_DEV_SEED === "true";
+
+if (seedEnvironment === "production" || !demoSeedEnabled) {
+  throw new Error(
+    "Demo seed is disabled. Set MINTBINDER_ENABLE_DEV_SEED=true in a non-production environment to continue.",
+  );
+}
+
+const demoEmail = (process.env.MINTBINDER_DEMO_EMAIL || "demo@mintbinder.local").trim().toLowerCase();
+const configuredDemoPassword = process.env.MINTBINDER_DEMO_PASSWORD?.trim();
+const demoPassword = configuredDemoPassword || randomBytes(24).toString("base64url");
+const demoRole = process.env.MINTBINDER_DEMO_ADMIN === "true" ? UserRole.ADMIN : UserRole.USER;
+
+if (!demoEmail.includes("@") || demoPassword.length < 12) {
+  throw new Error("MINTBINDER_DEMO_EMAIL must be valid and MINTBINDER_DEMO_PASSWORD must be at least 12 characters.");
+}
 
 const ids = {
   user: "11111111-1111-4111-8111-111111111111",
@@ -58,22 +74,23 @@ async function main() {
   const demoPasswordHash = hashPassword(demoPassword);
 
   await prisma.user.upsert({
-    where: { email: "liam@example.com" },
+    where: { id: ids.user },
     update: {
+      email: demoEmail,
       displayName: "Liam",
       passwordHash: demoPasswordHash,
       preferredCurrency: "GBP",
       preferredRegion: "GB",
-      role: UserRole.ADMIN,
+      role: demoRole,
     },
     create: {
       id: ids.user,
-      email: "liam@example.com",
+      email: demoEmail,
       displayName: "Liam",
       passwordHash: demoPasswordHash,
       preferredCurrency: "GBP",
       preferredRegion: "GB",
-      role: UserRole.ADMIN,
+      role: demoRole,
     },
   });
 
@@ -542,6 +559,11 @@ main()
   .then(async () => {
     await prisma.$disconnect();
     console.log("Seed data created.");
+    console.log(`Demo email: ${demoEmail}`);
+    console.log(`Demo role: ${demoRole}`);
+    if (!configuredDemoPassword) {
+      console.log(`Generated one-time demo password: ${demoPassword}`);
+    }
   })
   .catch(async (error) => {
     console.error(error);

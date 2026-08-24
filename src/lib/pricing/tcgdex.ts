@@ -15,6 +15,7 @@ import {
   catalogueRegionLabel,
   supportedTcgdexLanguages,
 } from "@/lib/catalogue/languages";
+import { fetchWithPolicy } from "@/lib/http/fetch-with-policy";
 
 type TcgdexCardBrief = {
   id: string;
@@ -199,8 +200,13 @@ async function fetchTcgdexCardFallback(language: string, id: string) {
 }
 
 async function fetchTcgdexJson<T>(path: string): Promise<T> {
-  const response = await fetch(`https://api.tcgdex.net/v2${path}`, {
+  const response = await fetchWithPolicy(`https://api.tcgdex.net/v2${path}`, {
     headers: { accept: "application/json" },
+  }, {
+    maxResponseBytes: 16 * 1024 * 1024,
+    provider: "TCGdex",
+    retryAttempts: 2,
+    timeoutMs: 12_000,
   });
   const data = (await response.json().catch(() => ({}))) as T & { error?: string };
 
