@@ -1,6 +1,7 @@
 const optimizedCatalogueImageHosts = new Set([
   "assets.tcgdex.net",
   "images.pokemontcg.io",
+  "images.scrydex.com",
   "tcgplayer-cdn.tcgplayer.com",
 ]);
 

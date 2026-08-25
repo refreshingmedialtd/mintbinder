@@ -7,6 +7,7 @@ import {
   displayVariantLabel,
   pokemonTcgImageUrlFromProviderIds,
 } from "../src/lib/catalogue/variants.ts";
+import { catalogueVariantPriceRows } from "../src/lib/catalogue/variant-price-rows.ts";
 
 const priceHistory = [
   {
@@ -102,6 +103,54 @@ test("uses variant price when valuing a catalogue item", () => {
 
   assert.equal(catalogueValueMinorForVariant(item, "Reverse Holofoil"), 800);
   assert.equal(catalogueValueMinorForVariant(item, "Normal"), undefined);
+});
+
+test("keeps exact variant prices distinct in catalogue display rows", () => {
+  const rows = catalogueVariantPriceRows({
+    id: "card-1",
+    type: "card",
+    name: "Weedle",
+    set: "Chaos Rising",
+    number: "1",
+    rarity: "Common",
+    hasPrice: true,
+    valueMinor: 15,
+    confidence: "Weak",
+    variantOptions: [
+      { label: "Normal", valueMinor: 9 },
+      { label: "Reverse Holofoil", valueMinor: 15 },
+      { label: "Staff stamp" },
+    ],
+  });
+
+  assert.deepEqual(rows.map(({ label, valueMinor }) => ({ label, valueMinor })), [
+    { label: "Normal", valueMinor: 9 },
+    { label: "Reverse Holofoil", valueMinor: 15 },
+    { label: "Staff stamp", valueMinor: undefined },
+  ]);
+});
+
+test("uses a clearly labelled generic estimate only when variants are absent", () => {
+  const rows = catalogueVariantPriceRows({
+    id: "card-1",
+    type: "card",
+    name: "Test Card",
+    set: "Test Set",
+    number: "1",
+    rarity: "Rare",
+    hasPrice: true,
+    valueMinor: 1200,
+    confidence: "Fair",
+    priceSource: "pokemon-tcg-api",
+  });
+
+  assert.deepEqual(rows, [{
+    confidence: "Fair",
+    label: "Market estimate",
+    observedAt: undefined,
+    source: "pokemon-tcg-api",
+    valueMinor: 1200,
+  }]);
 });
 
 test("infers legacy Base Set variants without inventing prices", () => {

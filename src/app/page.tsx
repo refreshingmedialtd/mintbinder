@@ -72,6 +72,7 @@ import {
   catalogueNameAliasesForText,
 } from "@/lib/catalogue/name-aliases";
 import { isOptimizableCatalogueImageUrl } from "@/lib/catalogue/image-url";
+import { catalogueVariantPriceRows } from "@/lib/catalogue/variant-price-rows";
 import { CATALOGUE_LANGUAGE_OPTIONS, LOT_LANGUAGE_OPTIONS } from "@/lib/catalogue/languages";
 import { chunkCatalogueLookupIds } from "@/lib/catalogue/lookup";
 import {
@@ -6530,27 +6531,20 @@ function SetDetailScreen({
         {visibleCards.length ? visibleCards.map((item) => {
           const owned = collection.find((entry) => entry.catalogueId === item.id);
           const wanted = wishlist.some((entry) => entry.catalogueId === item.id);
-          const marketValue = catalogueMarketValueMinor(item);
-          const variants = item.variantOptions ?? [];
-          const visibleVariants = variants.slice(0, 2);
           const statusLabel = owned ? "Owned" : wanted ? "Want" : "";
           const statusClass = owned ? "set-print-status owned" : wanted ? "set-print-status wanted" : "";
 
           return (
             <article
-              aria-label={`View ${catalogueItemTitle(item)}`}
               className={owned ? "set-print-card owned" : wanted ? "set-print-card wanted" : "set-print-card"}
               key={item.id}
-              onClick={() => setPreviewItemId(item.id)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  setPreviewItemId(item.id);
-                }
-              }}
-              role="button"
-              tabIndex={0}
             >
+              <button
+                aria-label={`View ${catalogueItemTitle(item)} details`}
+                className="set-print-open"
+                onClick={() => setPreviewItemId(item.id)}
+                type="button"
+              />
               <div className="item-image set-print-image">{renderItemImage(item)}</div>
               <div className="set-print-body">
                 <div className="set-print-header">
@@ -6567,30 +6561,13 @@ function SetDetailScreen({
                 </div>
                 <div className="set-print-meta">
                   <span className="set-print-rarity">{item.rarity}</span>
-                  <span className={marketValue === null ? "set-print-price missing" : "set-print-price"}>
-                    <strong>{formatValuation(marketValue)}</strong>
-                    <details className="market-help" onClick={(event) => event.stopPropagation()}>
-                      <summary aria-label={`Market confidence for ${catalogueItemTitle(item)}`}>?</summary>
-                      <span className="market-help-popover">
-                        <MarketConfidencePopover item={item} marketValue={marketValue} />
-                      </span>
-                    </details>
-                  </span>
                 </div>
-                {variants.length ? (
-                  <div className="set-print-variants" aria-label={`${catalogueItemTitle(item)} variants`}>
-                    {visibleVariants.map((option) => (
-                      <span className="tag" key={option.label}>
-                        {option.label}
-                      </span>
-                    ))}
-                    {variants.length > visibleVariants.length ? <span className="tag">+{variants.length - visibleVariants.length}</span> : null}
-                  </div>
-                ) : null}
+                <CatalogueVariantPrices item={item} limit={3} />
                 <div className="set-print-actions">
                   {owned ? (
                     <button
                       className="button"
+                      type="button"
                       onClick={(event) => {
                         event.stopPropagation();
                         setAppState((current) => ({ ...current, selectedItemId: owned.id }));
@@ -6602,6 +6579,7 @@ function SetDetailScreen({
                   ) : (
                     <button
                       className="button primary"
+                      type="button"
                       onClick={(event) => {
                         event.stopPropagation();
                         setAppState((current) => ({ ...current, selectedCatalogueId: item.id, addType: "card" }));
@@ -6613,6 +6591,7 @@ function SetDetailScreen({
                     </button>
                   )}
                   <button
+                    aria-pressed={wanted}
                     className="button"
                     type="button"
                     disabled={wanted}
@@ -7087,6 +7066,61 @@ function nextBestSetBuilderChase(
   };
 }
 
+function CatalogueVariantPrices({
+  detailed = false,
+  item,
+  limit,
+}: {
+  detailed?: boolean;
+  item: CatalogueItem;
+  limit?: number;
+}) {
+  const rows = catalogueVariantPriceRows(item);
+  const visibleRows = typeof limit === "number" ? rows.slice(0, limit) : rows;
+  const hiddenCount = rows.length - visibleRows.length;
+
+  return (
+    <div
+      aria-label={`${catalogueItemTitle(item)} variant market prices`}
+      className={detailed ? "variant-price-list detailed" : "variant-price-list compact"}
+      role="group"
+    >
+      <div aria-hidden="true" className="variant-price-heading">
+        <span>Finish</span>
+        <span>Market value</span>
+      </div>
+      <dl>
+        {visibleRows.map((option) => {
+          const metadata = detailed
+            ? [
+                option.confidence ? `${option.confidence} confidence` : "",
+                option.source ? priceSourceLabel(option.source) : "",
+                option.observedAt ? formatEventDate(option.observedAt) : "",
+              ].filter(Boolean).join(" · ")
+            : "";
+          const displayValue = option.valueMinor;
+          const hasPrice = displayValue !== undefined;
+
+          return (
+            <div className="variant-price-row" key={option.label}>
+              <dt>
+                <span title={option.label}>{option.label}</span>
+                {metadata ? <small>{metadata}</small> : null}
+              </dt>
+              <dd className={hasPrice ? "variant-price-value" : "variant-price-value missing"}>
+                {displayValue !== undefined ? formatMoney(displayValue) : "Not priced"}
+              </dd>
+            </div>
+          );
+        })}
+      </dl>
+      {hiddenCount > 0 ? (
+        <p className="variant-price-more">+{hiddenCount} more {hiddenCount === 1 ? "price" : "prices"} in details</p>
+      ) : null}
+    </div>
+  );
+}
+
 function CataloguePreviewModal({
   item,
   owned,
@@ -7106,9 +7140,8 @@ function CataloguePreviewModal({
 }) {
   const [showDetails, setShowDetails] = useState(false);
   const dialogRef = useDialogFocus<HTMLElement>(true);
-  const marketValue = catalogueMarketValueMinor(item);
-  const variants = item.variantOptions ?? [];
-  const visibleVariants = variants.slice(0, 6);
+  const variantPriceRows = catalogueVariantPriceRows(item);
+  const pricedVariantCount = variantPriceRows.filter((option) => option.valueMinor !== undefined).length;
   const titleId = `catalogue-preview-${item.id}`;
 
   useEffect(() => {
@@ -7157,43 +7190,23 @@ function CataloguePreviewModal({
           </div>
           <div className="set-print-meta">
             <span className="set-print-rarity">{item.rarity}</span>
-            <span className={marketValue === null ? "set-print-price missing" : "set-print-price"}>
-              <strong>{formatValuation(marketValue)}</strong>
-              <details className="market-help">
-                <summary aria-label={`Market confidence for ${catalogueItemTitle(item)}`}>?</summary>
-                <span className="market-help-popover">
-                  <MarketConfidencePopover item={item} marketValue={marketValue} />
-                </span>
-              </details>
-            </span>
             {owned ? <span className="set-print-status owned"><Check size={14} />Owned</span> : null}
             {!owned && wanted ? <span className="set-print-status wanted"><Heart size={14} />Want</span> : null}
           </div>
-          {variants.length ? (
-            <div className="catalogue-preview-variants" aria-label={`${catalogueItemTitle(item)} variants`}>
-              {visibleVariants.map((option) => (
-                <span className="tag" key={option.label}>{option.label}</span>
-              ))}
-              {variants.length > visibleVariants.length ? <span className="tag">+{variants.length - visibleVariants.length}</span> : null}
-            </div>
-          ) : null}
+          <CatalogueVariantPrices detailed item={item} />
           {showDetails ? (
             <dl className="catalogue-preview-details">
               <div>
-                <dt>Market note</dt>
-                <dd>{marketConfidenceDescription(item, marketValue)}</dd>
+                <dt>Pricing method</dt>
+                <dd>Each finish uses its own latest matching market observation. An unpriced finish never borrows another finish&apos;s value.</dd>
               </div>
               <div>
-                <dt>Source</dt>
-                <dd>{valuationSourceLabel(item)}</dd>
-              </div>
-              <div>
-                <dt>Observed</dt>
-                <dd>{valuationObservedLabel(item)}</dd>
+                <dt>Price coverage</dt>
+                <dd>{pricedVariantCount} of {variantPriceRows.length} {variantPriceRows.length === 1 ? "finish" : "finishes"} priced</dd>
               </div>
               <div>
                 <dt>Available finishes</dt>
-                <dd>{variants.length ? variants.map((option) => option.label).join(", ") : "None listed yet"}</dd>
+                <dd>{variantPriceRows.map((option) => option.label).join(", ")}</dd>
               </div>
             </dl>
           ) : null}
@@ -10301,21 +10314,6 @@ function selectedVariantLabel(item: CatalogueItem, variant?: string) {
 
 function formatValuation(valueMinor?: number | null) {
   return valueMinor === null || valueMinor === undefined ? "Needs estimate" : formatMoney(valueMinor);
-}
-
-function marketConfidenceDescription(item: CatalogueItem, marketValue?: number | null) {
-  if (marketValue === null || marketValue === undefined) {
-    return "No market price is available yet. Use a manual value with a note, or refresh pricing when a source supports this item.";
-  }
-
-  const confidence = item.confidence || "Unknown";
-  const source = priceSourceLabel(item.priceSource);
-  const basis = priceMarketRole(item.priceSource);
-  const freshness = item.priceStatus ?? "Unknown";
-  const observed = item.priceObservedAt ? formatEventDate(item.priceObservedAt) : "unknown date";
-  const reason = marketConfidenceReason(confidence);
-
-  return `Market confidence: ${confidence}. Basis: ${basis}. Source: ${source}. Observed: ${observed}. Freshness: ${freshness}. ${reason}`;
 }
 
 function MarketConfidencePopover({

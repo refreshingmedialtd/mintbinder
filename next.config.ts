@@ -11,7 +11,7 @@ const contentSecurityPolicy = [
   "font-src 'self' data:",
   "form-action 'self'",
   "frame-ancestors 'none'",
-  "img-src 'self' data: blob: https://images.pokemontcg.io https://assets.tcgdex.net https://tcgplayer-cdn.tcgplayer.com",
+  "img-src 'self' data: blob: https://images.pokemontcg.io https://images.scrydex.com https://assets.tcgdex.net https://tcgplayer-cdn.tcgplayer.com",
   "object-src 'none'",
   "script-src 'self' 'unsafe-inline'",
   "style-src 'self' 'unsafe-inline'",
@@ -80,6 +80,10 @@ const nextConfig: NextConfig = {
       {
         protocol: "https",
         hostname: "images.pokemontcg.io",
+      },
+      {
+        protocol: "https",
+        hostname: "images.scrydex.com",
       },
       {
         protocol: "https",

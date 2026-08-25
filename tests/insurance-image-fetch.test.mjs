@@ -24,3 +24,26 @@ test("insurance images never follow an allowlisted redirect to a private address
     globalThis.fetch = originalFetch;
   }
 });
+
+test("insurance images allow the ScryDex catalogue host", async () => {
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+  globalThis.fetch = async (input, init) => {
+    requests.push({ input: String(input), redirect: init?.redirect });
+    return new Response(new Uint8Array([1, 2, 3]), {
+      status: 200,
+      headers: { "content-type": "image/png" },
+    });
+  };
+
+  try {
+    const response = await fetchInsuranceReportImage("https://images.scrydex.com/pokemon/me4-119/large");
+    assert.equal(response?.status, 200);
+    assert.deepEqual(requests, [{
+      input: "https://images.scrydex.com/pokemon/me4-119/large",
+      redirect: "manual",
+    }]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

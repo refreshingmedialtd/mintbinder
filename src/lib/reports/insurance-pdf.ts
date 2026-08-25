@@ -30,6 +30,7 @@ const COLOURS = {
 };
 const IMAGE_HOSTS = new Set([
   "images.pokemontcg.io",
+  "images.scrydex.com",
   "assets.tcgdex.net",
   "tcgplayer-cdn.tcgplayer.com",
 ]);
