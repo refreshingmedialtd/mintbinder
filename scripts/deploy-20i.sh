@@ -3,21 +3,56 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+DEPLOY_LOCK_FILE=".mintbinder-deploy.lock"
+if ! command -v flock >/dev/null 2>&1; then
+  echo "Deployment preflight failed: flock is required to prevent overlapping deployments." >&2
+  exit 1
+fi
+exec 9>"$DEPLOY_LOCK_FILE"
+if ! flock -n 9; then
+  echo "Deployment preflight failed: another Mint Binder deployment is already running." >&2
+  exit 1
+fi
+
 echo "Mint Binder deployment started at $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 echo "Working directory: $(pwd)"
 
 export NEXT_TELEMETRY_DISABLED=1
-export MINTBINDER_DEPLOY_SCRIPT_VERSION="2026-08-24.5"
-export MINTBINDER_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
+export MINTBINDER_DEPLOY_SCRIPT_VERSION="2026-08-25.1"
+EXPECTED_DEPLOY_BRANCH="main"
+export MINTBINDER_BRANCH="$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+export MINTBINDER_COMMIT="$(git rev-parse --verify "HEAD^{commit}" 2>/dev/null || true)"
 
-if [ "$MINTBINDER_BRANCH" != "unknown" ] && [ "$MINTBINDER_BRANCH" != "HEAD" ]; then
-  echo "Preparing clean Git checkout before deploy..."
-  git restore package.json package-lock.json 2>/dev/null || true
-  git fetch origin "$MINTBINDER_BRANCH"
-  git pull --ff-only origin "$MINTBINDER_BRANCH"
+if [ "$MINTBINDER_BRANCH" != "$EXPECTED_DEPLOY_BRANCH" ]; then
+  echo "Deployment preflight failed: expected branch $EXPECTED_DEPLOY_BRANCH, found ${MINTBINDER_BRANCH:-detached HEAD}." >&2
+  exit 1
+fi
+if ! [[ "$MINTBINDER_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "Deployment preflight failed: HEAD is not a valid commit." >&2
+  exit 1
 fi
 
-export MINTBINDER_COMMIT="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
+REMOTE_STATE=""
+if ! REMOTE_STATE="$(git ls-remote --exit-code --refs origin "refs/heads/$EXPECTED_DEPLOY_BRANCH")"; then
+  echo "Deployment preflight failed: could not resolve origin/$EXPECTED_DEPLOY_BRANCH." >&2
+  exit 1
+fi
+if [[ "$REMOTE_STATE" == *$'\n'* ]]; then
+  echo "Deployment preflight failed: origin returned multiple branch candidates." >&2
+  exit 1
+fi
+IFS=$'\t' read -r MINTBINDER_REMOTE_COMMIT MINTBINDER_REMOTE_REF <<< "$REMOTE_STATE"
+if ! [[ "$MINTBINDER_REMOTE_COMMIT" =~ ^[0-9a-f]{40}$ ]] || [ "$MINTBINDER_REMOTE_REF" != "refs/heads/$EXPECTED_DEPLOY_BRANCH" ]; then
+  echo "Deployment preflight failed: origin branch response was invalid." >&2
+  exit 1
+fi
+if [ "$MINTBINDER_COMMIT" != "$MINTBINDER_REMOTE_COMMIT" ]; then
+  echo "Deployment preflight failed: 20i checked out $MINTBINDER_COMMIT but origin/$EXPECTED_DEPLOY_BRANCH is $MINTBINDER_REMOTE_COMMIT." >&2
+  echo "Let 20i fast-forward the checkout, then redeploy; this script will not merge or reset server files." >&2
+  exit 1
+fi
+echo "20i Git checkout attested at origin/$EXPECTED_DEPLOY_BRANCH: $MINTBINDER_COMMIT"
+
 PREVIOUS_BUILD_INFO_FILE=".mintbinder-build.previous.json"
 PREVIOUS_COMMIT=""
 PREVIOUS_DIST_DIR=""
@@ -51,9 +86,6 @@ echo "Deploying commit: $MINTBINDER_COMMIT"
 if [ -n "$PREVIOUS_COMMIT" ] && [[ "$PREVIOUS_DIST_DIR" =~ ^\.next-releases/[0-9a-f]{40}(-[0-9]{14}-[0-9]+)?$ ]] && [ -d "$PREVIOUS_DIST_DIR" ] && [ -f "$PREVIOUS_BUILD_INFO_FILE" ]; then
   node -e 'const fs = require("node:fs"); const path = require("node:path"); const commit = process.env.MINTBINDER_PREVIOUS_COMMIT || ""; const distDir = process.env.MINTBINDER_PREVIOUS_DIST_DIR || ""; if (!/^[0-9a-f]{40}$/.test(commit) || !/^\.next-releases\/[0-9a-f]{40}(?:-[0-9]{14}-[0-9]+)?$/.test(distDir)) throw new Error("Unsafe previous release metadata path."); const target = path.join(distDir, ".mintbinder-build.json"); const root = JSON.parse(fs.readFileSync(".mintbinder-build.previous.json", "utf8")); const info = { ...root, commit, distDir }; if (fs.existsSync(target)) { const existing = JSON.parse(fs.readFileSync(target, "utf8")); if (existing.commit !== commit || existing.distDir !== distDir) throw new Error("Previous immutable release metadata does not match rollback metadata."); } else { fs.writeFileSync(target, `${JSON.stringify(info, null, 2)}\n`, { flag: "wx" }); }'
 fi
-
-# Clean up package metadata if a previous build auto-installed missing dev tools on the server.
-git restore package.json package-lock.json 2>/dev/null || true
 
 # Build identity is the exact checked-out commit, never a mixture of that
 # commit and server-side tracked edits. Preserve unexpected edits for operator
@@ -116,9 +148,14 @@ export MINTBINDER_NEXT_DIST_DIR=".next-releases/$MINTBINDER_RELEASE_ID"
 # Validate all required production configuration before building or migrating.
 npm run qa:deployment-env
 
+# Run ESLint separately so Next does not overlap its lint and TypeScript workers
+# on memory-constrained production hosts. Type validation remains enforced by
+# the subsequent Next build.
+npm run lint
+
 echo "Preparing isolated standalone release: $MINTBINDER_NEXT_DIST_DIR"
 node -e 'const fs = require("node:fs"); const path = require("node:path"); const release = process.env.MINTBINDER_RELEASE_ID || ""; const target = process.env.MINTBINDER_NEXT_DIST_DIR || ""; if (!/^[0-9a-f]{40}-[0-9]{14}-[0-9]+$/.test(release) || target !== `.next-releases/${release}`) throw new Error("Unsafe release directory."); const build = path.resolve(".next"); if (path.basename(build) !== ".next" || path.dirname(build) !== process.cwd()) throw new Error("Unsafe Next build cleanup target."); fs.rmSync(build, { force: true, recursive: true });'
-npm run build
+npm run build -- --no-lint
 git restore package.json package-lock.json 2>/dev/null || true
 node scripts/package-next-release.mjs
 

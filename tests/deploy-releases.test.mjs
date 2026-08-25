@@ -59,6 +59,20 @@ test("deployment requires the registered runtime before migration and supports p
   const gitignore = await readFile(new URL("../.gitignore", import.meta.url), "utf8");
 
   assert.match(script, /node_modules\/\.bin\/pm2/);
+  assert.doesNotMatch(script, /git pull/);
+  assert.doesNotMatch(script, /git fetch/);
+  assert.doesNotMatch(script, /git merge/);
+  assert.doesNotMatch(script, /git reset/);
+  assert.match(script, /flock -n 9/);
+  assert.match(script, /another Mint Binder deployment is already running/);
+  assert.match(script, /git ls-remote --exit-code --refs origin "refs\/heads\/\$EXPECTED_DEPLOY_BRANCH"/);
+  assert.match(script, /20i checked out \$MINTBINDER_COMMIT but origin\/\$EXPECTED_DEPLOY_BRANCH is \$MINTBINDER_REMOTE_COMMIT/);
+  assert.match(script, /20i Git checkout attested at origin\/\$EXPECTED_DEPLOY_BRANCH/);
+  assert.match(gitignore, /^\.mintbinder-deploy\.lock$/m);
+  assert.ok(script.indexOf("20i Git checkout attested") < script.indexOf("git diff --quiet --"));
+  assert.ok(script.indexOf("git diff --quiet --") < script.indexOf("git restore package.json package-lock.json"));
+  assert.ok(script.indexOf("git diff --cached --quiet --") < script.indexOf("git restore package.json package-lock.json"));
+  assert.ok(script.indexOf("git ls-files --others --exclude-standard") < script.indexOf("git restore package.json package-lock.json"));
   assert.ok(script.indexOf("git diff --quiet --") < script.indexOf("npm run build"));
   assert.ok(script.indexOf("git diff --cached --quiet --") < script.indexOf("npm run build"));
   assert.ok(script.indexOf("git diff --cached --quiet --") < script.indexOf("npm run db:deploy"));
@@ -67,6 +81,9 @@ test("deployment requires the registered runtime before migration and supports p
   assert.match(gitignore, /^\.mintbinder-build\.json\.tmp$/m);
   assert.ok(script.indexOf('PM2_APP_NAME="$app_name"') < script.indexOf("npm run db:deploy"));
   assert.ok(script.indexOf("node scripts/package-next-release.mjs") < script.indexOf("npm run db:deploy"));
+  assert.ok(script.indexOf("npm run lint") < script.indexOf("npm run build -- --no-lint"));
+  assert.ok(script.indexOf("npm run qa:deployment-env") < script.indexOf("npm run lint"));
+  assert.match(script, /npm run build -- --no-lint/);
   assert.doesNotMatch(script, /pm2 start ecosystem\.config\.js/);
   assert.doesNotMatch(script, /PREVIOUS_DIST_DIR="\.next"/);
   assert.match(script, /automatic rollback is disabled for this one transition/);

@@ -251,14 +251,15 @@ The script runs, in fail-closed order:
 npm ci --include=dev --no-audit --no-fund
 npm run db:generate
 npm run qa:deployment-env
-npm run build
+npm run lint
+npm run build -- --no-lint
 node scripts/package-next-release.mjs
 npm run db:deploy
 pm2 reload <registered app> --update-env
 node scripts/verify-runtime-build.mjs
 ```
 
-Expected behaviour: after Git deploy, 20i should run the script from the repository root, validate configuration, build Next's standalone output, copy it (including its traced dependencies, public files, and hashed assets) into `.next-releases/<commit>/runtime`, apply pending Prisma migrations only after a successful build and registered-app preflight, and reload the registered NodeJS app with that release directory. Runtime verification must report the deployed commit. If activation or verification fails and the previous build is still present, the script restores the previous build metadata/environment, reloads that release-local runtime, verifies the rollback, and still exits failed so the incident is visible.
+Expected behaviour: after Git deploy, 20i should run the script from the repository root. A non-blocking deployment lock rejects overlapping runs, and the script read-only attests that 20i checked out the exact `origin/main` commit without performing a second fetch/pull. It then validates configuration, runs lint separately to reduce peak build memory, builds Next's standalone output with TypeScript validation still enabled, copies it (including its traced dependencies, public files, and hashed assets) into `.next-releases/<commit>/runtime`, applies pending Prisma migrations only after a successful build and registered-app preflight, and reloads the registered NodeJS app with that release directory. Runtime verification must report the deployed commit. If activation or verification fails and the previous build is still present, the script restores the previous build metadata/environment, reloads that release-local runtime, verifies the rollback, and still exits failed so the incident is visible.
 
 The custom server also forces `Cache-Control: no-store` headers on normal app/API routes so the HTML app shell is not cached across deploys. Hashed Next static assets under `/_next/static/` remain cacheable.
 

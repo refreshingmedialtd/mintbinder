@@ -7,6 +7,7 @@ node_modules/
 .mintbinder-build.json
 .mintbinder-build.previous.json
 .mintbinder-build.json.tmp
+.mintbinder-deploy.lock
 out/
 dist/
 build/
