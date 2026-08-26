@@ -1,4 +1,5 @@
 import type { CatalogueItem, CollectionItem } from "./types";
+import { collectionItemValuation, collectionItemValueMinor } from "./valuation.ts";
 
 type CsvCell = string | number | null | undefined;
 type CsvColumn<T> = {
@@ -192,7 +193,16 @@ const collectionExportColumns: Array<CsvColumn<CollectionExportRow>> = [
     numeric: true,
     value: ({ owned, catalogueItem }) => ownedValueMinor(owned, catalogueItem),
   },
-  { header: "confidence", value: ({ catalogueItem }) => catalogueItem?.confidence },
+  {
+    header: "confidence",
+    value: ({ owned, catalogueItem }) => {
+      const valuation = collectionItemValuation(owned, catalogueItem);
+
+      return valuation.kind === "market"
+        ? valuation.pricePoint?.confidence ?? catalogueItem?.confidence
+        : undefined;
+    },
+  },
   { header: "notes", value: ({ owned }) => owned.notes },
   { header: "exported_at", value: ({ exportedAt }) => exportedAt },
 ];
@@ -330,9 +340,5 @@ function minorToMoney(value: string) {
 }
 
 function ownedValueMinor(item: CollectionItem, catalogueItem?: CatalogueItem) {
-  if (!catalogueItem) {
-    return undefined;
-  }
-
-  return item.overrideValueMinor ?? (catalogueItem.hasPrice ? catalogueItem.valueMinor * item.quantity : undefined);
+  return collectionItemValueMinor(item, catalogueItem);
 }

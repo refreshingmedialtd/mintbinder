@@ -7,8 +7,22 @@ import type {
   StorageLocation,
   WishlistItem,
 } from "./types";
-import { catalogueValueMinorForVariant } from "./catalogue/variants.ts";
-import { preferredPriceSeries, priceSourceLabel } from "./pricing/market-context.ts";
+import {
+  catalogueValueMinorForVariant,
+  latestPricePointForCatalogueVariant,
+} from "./catalogue/variants.ts";
+import {
+  effectivePriceConfidence,
+  preferredPriceSeries,
+  priceSourceLabel,
+} from "./pricing/market-context.ts";
+import {
+  collectionConditionMultiplier,
+  collectionGradeIdentity,
+  collectionItemPriceHistory,
+  collectionItemValuation,
+  collectionItemValueMinor,
+} from "./valuation.ts";
 
 export type HoldingInsight = {
   id: string;
@@ -275,11 +289,8 @@ function holdingFromItem(
   item: CollectionItem,
   catalogueItem?: CatalogueItem,
 ): HoldingInsight | undefined {
-  if (!catalogueItem) {
-    return undefined;
-  }
-
-  const valueMinor = ownedValueMinor(item, catalogueItem);
+  const valuation = collectionItemValuation(item, catalogueItem);
+  const valueMinor = valuation.valueMinor;
   const cost = item.purchasePriceMinor;
 
   if (valueMinor === undefined) {
@@ -289,15 +300,17 @@ function holdingFromItem(
   return {
     id: item.id,
     catalogueId: item.catalogueId,
-    name: catalogueItem.displayName ?? catalogueItem.name,
-    set: catalogueItem.displaySet ?? catalogueItem.set,
+    name: catalogueItem?.displayName ?? catalogueItem?.name ?? "Unlinked collection item",
+    set: catalogueItem?.displaySet ?? catalogueItem?.set ?? "Catalogue reference unavailable",
     quantity: item.quantity,
     valueMinor,
     gainMinor: cost === undefined ? null : valueMinor - cost,
-    confidence: catalogueItem.confidence,
-    priceObservedAt: catalogueItem.priceObservedAt,
-    priceSource: catalogueItem.priceSource,
-    valuationSource: item.overrideValueMinor === undefined ? "market" : "manual",
+    confidence: valuation.pricePoint
+      ? effectivePriceConfidence(valuation.pricePoint)
+      : catalogueItem?.confidence ?? "Weak",
+    priceObservedAt: valuation.pricePoint?.observedAt ?? catalogueItem?.priceObservedAt,
+    priceSource: valuation.pricePoint?.source ?? catalogueItem?.priceSource,
+    valuationSource: valuation.kind === "manual" ? "manual" : "market",
   };
 }
 
@@ -320,7 +333,7 @@ function duplicateInsights(
         lots: items.length,
         quantity: items.reduce((total, item) => total + item.quantity, 0),
         valueMinor: items.reduce(
-          (total, item) => total + (catalogueItem ? ownedValueMinor(item, catalogueItem) ?? 0 : 0),
+          (total, item) => total + (ownedValueMinor(item, catalogueItem) ?? 0),
           0,
         ),
       };
@@ -337,7 +350,9 @@ function wishlistDealInsights(
   return wishlist
     .map((item) => {
       const catalogueItem = catalogueById.get(item.catalogueId);
-      const currentValueMinor = catalogueItem ? catalogueMarketValueMinor(catalogueItem) : undefined;
+      const currentValueMinor = catalogueItem
+        ? catalogueMarketValueMinor(catalogueItem, item.variant)
+        : undefined;
       const targetPriceMinor = item.targetPriceMinor ?? currentValueMinor;
 
       if (!catalogueItem || currentValueMinor === undefined || targetPriceMinor === undefined || currentValueMinor > targetPriceMinor) {
@@ -370,7 +385,13 @@ function priceAlertInsights({
     .map<PriceAlertInsight | undefined>((item) => {
       const catalogueItem = catalogueById.get(item.catalogueId);
       const targetValueMinor = item.targetPriceMinor;
-      const currentValueMinor = catalogueItem ? catalogueMarketValueMinor(catalogueItem) : undefined;
+      const selectedVariant = item.variant?.trim();
+      const pricePoint = catalogueItem
+        ? latestPricePointForCatalogueVariant(catalogueItem, selectedVariant)
+        : undefined;
+      const currentValueMinor = catalogueItem
+        ? catalogueMarketValueMinor(catalogueItem, item.variant)
+        : undefined;
 
       if (!catalogueItem || currentValueMinor === undefined || targetValueMinor === undefined) {
         return undefined;
@@ -384,21 +405,30 @@ function priceAlertInsights({
         return undefined;
       }
 
+      const catalogueName = catalogueItem.displayName ?? catalogueItem.name;
+      const itemName = selectedVariant
+        ? `${catalogueName} · ${selectedVariant}`
+        : catalogueName;
+
       return {
         id: `wishlist-${item.id}`,
         catalogueId: item.catalogueId,
-        itemName: catalogueItem.displayName ?? catalogueItem.name,
+        itemName,
         category: "Wishlist" as const,
         status: deltaMinor <= 0 ? "Hit" as const : "Watch" as const,
         detail:
           deltaMinor <= 0
-            ? `${catalogueItem.displayName ?? catalogueItem.name} is at or below your target.`
-            : `${catalogueItem.displayName ?? catalogueItem.name} is within 10% of your target.`,
+            ? `${itemName} is at or below your target.`
+            : `${itemName} is within 10% of your target.`,
         explanation: wishlistAlertExplanation(deltaMinor),
         currentValueMinor,
         deltaMinor,
-        priceObservedAt: catalogueItem.priceObservedAt,
-        priceSource: catalogueItem.priceSource,
+        priceObservedAt: pricePoint?.observedAt ?? (
+          selectedVariant ? undefined : catalogueItem.priceObservedAt
+        ),
+        priceSource: pricePoint?.source ?? (
+          selectedVariant ? undefined : catalogueItem.priceSource
+        ),
         targetValueMinor,
         watchBandMinor,
         actionLabel: "Open wishlist",
@@ -480,7 +510,7 @@ function valuationCoverageInsight(
   const coverage = collection.reduce(
     (total, item) => {
       const catalogueItem = catalogueById.get(item.catalogueId);
-      const valueMinor = catalogueItem ? ownedValueMinor(item, catalogueItem) : undefined;
+      const valueMinor = ownedValueMinor(item, catalogueItem);
 
       total.totalLots += 1;
 
@@ -649,11 +679,11 @@ function portfolioHistoryEntry(
     };
   }
 
-  if (!catalogueItem?.hasPrice) {
+  if (!catalogueItem) {
     return undefined;
   }
 
-  const series = portfolioMarketSeries(catalogueItem, item.variant);
+  const series = portfolioMarketSeries(catalogueItem, item);
 
   if (!series.length) {
     return undefined;
@@ -661,19 +691,18 @@ function portfolioHistoryEntry(
 
   return {
     kind: "market",
-    multiplier: conditionValueMultiplier(item.condition, catalogueItem.type),
+    multiplier: collectionConditionMultiplier(
+      item.condition,
+      catalogueItem.type,
+      Boolean(collectionGradeIdentity(item)),
+    ),
     quantity: item.quantity,
     series,
   };
 }
 
-function portfolioMarketSeries(item: CatalogueItem, variant: string) {
-  const history = item.priceHistory ?? [];
-  const normalizedVariant = normalizeVariantLabel(variant);
-  const variantHistory = normalizedVariant
-    ? history.filter((point) => normalizeVariantLabel(point.variantLabel) === normalizedVariant)
-    : [];
-  const candidateHistory = normalizedVariant && hasVariantAwarePrices(history) ? variantHistory : history;
+function portfolioMarketSeries(item: CatalogueItem, owned: CollectionItem) {
+  const candidateHistory = collectionItemPriceHistory(owned, item);
   const preferredHistory = preferredPriceSeries(candidateHistory);
   const sourceHistory = preferredHistory.length ? preferredHistory : candidateHistory;
   const points = new Map<string, PortfolioPricePoint>();
@@ -686,19 +715,18 @@ function portfolioMarketSeries(item: CatalogueItem, variant: string) {
     }
   }
 
-  const currentObservedAt = item.priceObservedAt ? dateKey(item.priceObservedAt) : undefined;
+  const valuation = collectionItemValuation(owned, item);
+  const currentObservedAt = valuation.pricePoint?.observedAt ?? item.priceObservedAt;
+  const currentDateKey = currentObservedAt ? dateKey(currentObservedAt) : undefined;
 
-  if (currentObservedAt) {
-    const timestamp = Date.parse(`${currentObservedAt}T00:00:00.000Z`);
-    const currentValueMinor = catalogueValueMinorForVariant(item, variant) ?? item.valueMinor;
+  if (currentDateKey && valuation.unitValueMinor !== undefined) {
+    const timestamp = Date.parse(`${currentDateKey}T00:00:00.000Z`);
 
-    if (currentValueMinor !== undefined) {
-      points.set(currentObservedAt, {
-        dateKey: currentObservedAt,
-        timestamp,
-        valueMinor: currentValueMinor,
-      });
-    }
+    points.set(currentDateKey, {
+      dateKey: currentDateKey,
+      timestamp,
+      valueMinor: valuation.unitValueMinor,
+    });
   }
 
   return [...points.values()].sort((left, right) => left.timestamp - right.timestamp);
@@ -1028,43 +1056,12 @@ function valueTrend(history: PortfolioHistoryPoint[]) {
   return sampleTrend(points, 7);
 }
 
-function ownedValueMinor(item: CollectionItem, catalogueItem: CatalogueItem) {
-  const marketValueMinor = catalogueMarketValueMinor(catalogueItem, item.variant);
-
-  return item.overrideValueMinor ?? (
-    marketValueMinor === undefined
-      ? undefined
-      : Math.round(marketValueMinor * conditionValueMultiplier(item.condition, catalogueItem.type)) * item.quantity
-  );
-}
-
-function conditionValueMultiplier(condition: string, itemType?: CatalogueItem["type"]) {
-  if (itemType === "sealed") {
-    return 1;
-  }
-
-  const normalized = condition.trim().toLowerCase();
-  const multipliers: Record<string, number> = {
-    mint: 1.05,
-    "near mint": 1,
-    "near mint / mint": 1,
-    excellent: 0.85,
-    "light played": 0.7,
-    "lightly played": 0.7,
-    played: 0.55,
-    poor: 0.35,
-    unknown: 1,
-  };
-
-  return multipliers[normalized] ?? 1;
+function ownedValueMinor(item: CollectionItem, catalogueItem?: CatalogueItem) {
+  return collectionItemValueMinor(item, catalogueItem);
 }
 
 function catalogueMarketValueMinor(catalogueItem: CatalogueItem, variant?: string) {
-  return catalogueItem.hasPrice ? catalogueValueMinorForVariant(catalogueItem, variant) ?? catalogueItem.valueMinor : undefined;
-}
-
-function hasVariantAwarePrices(history: PricePoint[]) {
-  return history.some((point) => normalizeVariantLabel(point.variantLabel));
+  return catalogueValueMinorForVariant(catalogueItem, variant);
 }
 
 function share(value: number, total: number) {
@@ -1117,13 +1114,4 @@ function dateKey(value: string) {
 function uniqueSortedDateKeys(values: Array<string | undefined>) {
   return [...new Set(values.filter((value): value is string => Boolean(value)))]
     .sort((left, right) => Date.parse(`${left}T00:00:00.000Z`) - Date.parse(`${right}T00:00:00.000Z`));
-}
-
-function normalizeVariantLabel(value?: string | null) {
-  return String(value ?? "")
-    .trim()
-    .replace(/foil/i, "foil")
-    .replace(/\s+/g, " ")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "");
 }

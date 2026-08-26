@@ -5,6 +5,10 @@ import {
 } from "@prisma/client";
 import { booleanSetting, positiveInteger } from "./catalogue-batch-options.mjs";
 import { fetchJsonWithRetry } from "./provider-fetch.mjs";
+import {
+  assertPriceChartingWriteAllowed,
+  priceChartingLicenceConfirmed,
+} from "../src/lib/pricing/provider-permissions.mjs";
 
 const productEndpoint = "https://www.pricecharting.com/api/product";
 const productsEndpoint = "https://www.pricecharting.com/api/products";
@@ -41,6 +45,7 @@ export function priceChartingGradedOptionsFromEnv(env = process.env) {
   return {
     aliases: parsePriceChartingAliases(env.PRICECHARTING_GRADED_ALIASES_JSON),
     enabled: booleanSetting(env.PRICECHARTING_GRADED_ENABLED, false),
+    licenceConfirmed: priceChartingLicenceConfirmed(env),
     limit: positiveInteger(env.PRICECHARTING_GRADED_LIMIT, 5),
     priceOnlyUnpriced: booleanSetting(env.PRICECHARTING_GRADED_PRICE_ONLY_UNPRICED, true),
     retryAttempts: positiveInteger(env.PRICECHARTING_API_RETRY_ATTEMPTS, 3),
@@ -61,6 +66,7 @@ export async function syncPriceChartingGradedCardPrices(options = {}) {
   const token = stringSetting(options.token);
   const usdToGbpRate = conversionRate(options.usdToGbpRate);
   const writePrices = options.writePrices ?? false;
+  const licenceConfirmed = options.licenceConfirmed === true;
   const enabled = options.enabled ?? false;
   const priceOnlyUnpriced = options.priceOnlyUnpriced ?? true;
   const limit = positiveInteger(options.limit, 5);
@@ -77,6 +83,7 @@ export async function syncPriceChartingGradedCardPrices(options = {}) {
     explicitPricesFound: 0,
     enabled,
     mappingReview: [],
+    licenceConfirmed,
     priceOnlyUnpriced,
     pricingSnapshotsCreated: 0,
     pricingSnapshotsUpdated: 0,
@@ -97,6 +104,8 @@ export async function syncPriceChartingGradedCardPrices(options = {}) {
     if (shouldDisconnect) await prisma.$disconnect();
     return summary;
   }
+
+  assertPriceChartingWriteAllowed({ licenceConfirmed, writePrices });
 
   if (!token) {
     throw new Error("PRICECHARTING_API_TOKEN must be set for PriceCharting graded-card pricing.");

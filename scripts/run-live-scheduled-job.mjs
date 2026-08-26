@@ -61,6 +61,7 @@ export function protectedJobRequest(kind, env = process.env) {
     return {
       body: {
         batchSize: optionalPositiveInteger(env.BILLING_CHECKOUT_RETIREMENT_BATCH_SIZE) ?? 100,
+        scheduled: true,
       },
       path: "/api/jobs/billing-checkout-retirement",
     };
@@ -70,6 +71,7 @@ export function protectedJobRequest(kind, env = process.env) {
     return {
       body: {
         batchSize: optionalPositiveInteger(env.PASSWORD_RESET_DELIVERY_BATCH_SIZE) ?? 50,
+        scheduled: true,
       },
       path: "/api/jobs/password-reset-delivery",
     };
@@ -79,6 +81,7 @@ export function protectedJobRequest(kind, env = process.env) {
     return {
       body: {
         backfillNewestMissingSet: true,
+        scheduled: true,
         setPageSize: 25,
         setsOnly: true,
       },
@@ -388,7 +391,7 @@ function isLoopbackHostname(hostname) {
 }
 
 function scheduledPricingBody(env) {
-  const body = {};
+  const body = { scheduled: true };
   const page = optionalPositiveInteger(env.POKEMON_TCG_PRICING_PAGE);
   const pageSize = optionalPositiveInteger(env.POKEMON_TCG_PRICING_PAGE_SIZE);
   const maxPages = optionalPositiveInteger(env.POKEMON_TCG_PRICING_MAX_PAGES);
@@ -419,7 +422,7 @@ function scheduledPricingBody(env) {
 }
 
 function scheduledSetPricingBody(env) {
-  const body = {};
+  const body = { scheduled: true };
   const limit =
     optionalPositiveInteger(env.POKEMON_TCG_SET_PRICING_LIMIT) ??
     optionalPositiveInteger(env.POKEMON_TCG_PRICING_MAX_PAGES);
@@ -472,7 +475,7 @@ function pricingStrategy(env) {
 }
 
 function sealedPricingBody(env) {
-  const body = {};
+  const body = { scheduled: true };
   const groupIds = listSetting(env.TCGCSV_SEALED_GROUP_IDS);
   const groupLimit = optionalPositiveInteger(env.TCGCSV_SEALED_GROUP_LIMIT) ?? 1;
   const priceOnlyUnpriced = optionalBoolean(env.TCGCSV_SEALED_PRICE_ONLY_UNPRICED) ?? false;
@@ -503,23 +506,22 @@ function sealedPricingBody(env) {
 }
 
 function japanCardPricingBody(env) {
-  const body = {};
-  const categoryId = optionalPositiveInteger(env.TCGCSV_JAPAN_CARD_CATEGORY_ID);
+  const body = { scheduled: true };
+  const categoryId = optionalPositiveInteger(env.TCGCSV_JAPAN_CARD_CATEGORY_ID) ?? 85;
   const groupIds = listSetting(env.TCGCSV_JAPAN_CARD_GROUP_IDS);
   const groupLimit = optionalPositiveInteger(env.TCGCSV_JAPAN_CARD_GROUP_LIMIT);
-  const language = optionalString(env.TCGCSV_JAPAN_CARD_LANGUAGE);
+  const language = optionalString(env.TCGCSV_JAPAN_CARD_LANGUAGE) ?? "ja";
   const minUnpricedCards = optionalPositiveInteger(env.TCGCSV_JAPAN_CARD_MIN_UNPRICED);
   const onlyUnpricedGroups = optionalBoolean(env.TCGCSV_JAPAN_CARD_ONLY_UNPRICED_GROUPS);
   const priceOnlyUnpriced = optionalBoolean(env.TCGCSV_JAPAN_CARD_PRICE_ONLY_UNPRICED);
+  const source = optionalString(env.TCGCSV_JAPAN_CARD_SOURCE) ?? "tcgcsv-japan-card";
   const usdToGbpRate =
     optionalRate(env.TCGCSV_JAPAN_USD_TO_GBP_RATE) ??
     optionalRate(env.TCGCSV_USD_TO_GBP_RATE);
   const waitMs = optionalPositiveInteger(env.TCGCSV_JAPAN_CARD_WAIT_MS);
-  const writePrices = optionalBoolean(env.TCGCSV_JAPAN_CARD_WRITE_PRICES);
+  const writePrices = optionalBoolean(env.TCGCSV_JAPAN_CARD_WRITE_PRICES) ?? true;
 
-  if (categoryId) {
-    body.categoryId = categoryId;
-  }
+  body.categoryId = categoryId;
 
   if (groupIds.length) {
     body.groupIds = groupIds;
@@ -529,9 +531,7 @@ function japanCardPricingBody(env) {
     body.groupLimit = groupLimit;
   }
 
-  if (language) {
-    body.language = language;
-  }
+  body.language = language;
 
   if (minUnpricedCards) {
     body.minUnpricedCards = minUnpricedCards;
@@ -545,6 +545,8 @@ function japanCardPricingBody(env) {
     body.priceOnlyUnpriced = priceOnlyUnpriced;
   }
 
+  body.source = source;
+
   if (usdToGbpRate) {
     body.usdToGbpRate = usdToGbpRate;
   }
@@ -553,9 +555,7 @@ function japanCardPricingBody(env) {
     body.waitMs = waitMs;
   }
 
-  if (writePrices !== undefined) {
-    body.writePrices = writePrices;
-  }
+  body.writePrices = writePrices;
 
   return body;
 }
@@ -568,6 +568,7 @@ function englishCardPricingBody(env) {
     minUnpricedCards: optionalPositiveInteger(env.TCGCSV_CARD_MIN_UNPRICED) ?? 1,
     onlyUnpricedGroups: false,
     priceOnlyUnpriced: false,
+    scheduled: true,
     source: optionalString(env.TCGCSV_CARD_SOURCE) ?? "tcgcsv-card",
     waitMs: optionalNonNegativeInteger(env.TCGCSV_CARD_WAIT_MS) ?? 120,
     writePrices: true,
@@ -590,6 +591,7 @@ function gradedCardPricingBody(env) {
   const body = {
     limit: optionalPositiveInteger(env.PRICECHARTING_GRADED_LIMIT) ?? 5,
     priceOnlyUnpriced: optionalBoolean(env.PRICECHARTING_GRADED_PRICE_ONLY_UNPRICED) ?? false,
+    scheduled: true,
     waitMs: optionalNonNegativeInteger(env.PRICECHARTING_GRADED_WAIT_MS) ?? 1_100,
     writePrices: optionalBoolean(env.PRICECHARTING_GRADED_WRITE_PRICES) ?? false,
   };
@@ -607,7 +609,7 @@ function gradedCardPricingBody(env) {
 }
 
 function priceAlertsBody(env) {
-  const body = {};
+  const body = { scheduled: true };
   const settings = priceAlertScheduleSettings(env);
   const now = optionalString(env.PRICE_ALERT_DIGEST_NOW);
 

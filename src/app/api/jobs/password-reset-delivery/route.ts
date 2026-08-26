@@ -15,6 +15,7 @@ export async function POST(request: Request) {
     const body = (await request.json().catch(() => ({}))) as {
       batchSize?: unknown;
       now?: unknown;
+      scheduled?: boolean;
       staleAfterMinutes?: unknown;
     };
     const input = {
@@ -28,6 +29,7 @@ export async function POST(request: Request) {
       input: {
         batchSize: input.batchSize ?? null,
         now: input.now?.toISOString() ?? null,
+        scheduled: body.scheduled === true,
         staleAfterMinutes: input.staleAfterMs === undefined ? null : input.staleAfterMs / 60_000,
       },
       type: "password_reset_delivery",

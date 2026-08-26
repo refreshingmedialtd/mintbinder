@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { prisma } from "@/lib/db/prisma";
 import { jobErrorResultPayload } from "@/lib/jobs/error-payload";
+import { jobRunHeartbeatIntervalMs } from "@/lib/jobs/lease-policy.mjs";
 import type { JobRunStatus, JobRunType } from "@/lib/jobs/types";
 
 export type JobRunRecord = {
@@ -64,13 +65,16 @@ export async function runTrackedJob<T>({
   type: JobRunType;
 }) {
   const jobRun = await startJobRun(type, input);
+  const heartbeat = startJobRunHeartbeat(jobRun.id);
 
   try {
     const result = await task();
+    await heartbeat.stop();
     const completedRun = await completeJobRun(jobRun.id, result);
 
     return { jobRun: completedRun, result };
   } catch (error) {
+    await heartbeat.stop().catch(() => undefined);
     const failedRun = await failJobRun(jobRun.id, error);
 
     throw new JobRunExecutionError(error, failedRun);
@@ -147,7 +151,14 @@ async function startJobRun(type: JobRunType, input: unknown) {
       FROM job_runs
       WHERE job_type = ${type}::job_run_type
         AND status = 'running'::job_run_status
-        AND started_at >= ${leaseStartedAt}
+        AND COALESCE(
+          CASE
+            WHEN result_payload->>'heartbeatEpochMs' ~ '^[0-9]+$'
+              THEN TO_TIMESTAMP((result_payload->>'heartbeatEpochMs')::double precision / 1000)
+            ELSE NULL
+          END,
+          started_at
+        ) >= ${leaseStartedAt}
       ORDER BY started_at DESC
       LIMIT 1
     `;
@@ -185,6 +196,48 @@ async function startJobRun(type: JobRunType, input: unknown) {
   return mapJobRun(rows[0]);
 }
 
+function startJobRunHeartbeat(id: string) {
+  const leaseMinutes = positiveInteger(process.env.JOB_RUN_OVERLAP_LEASE_MINUTES, 45);
+  const intervalMs = jobRunHeartbeatIntervalMs(leaseMinutes);
+  let stopped = false;
+  let update = Promise.resolve();
+
+  const tick = () => {
+    if (stopped) return;
+
+    update = update
+      .catch(() => undefined)
+      .then(() => heartbeatJobRun(id));
+  };
+  const timer = setInterval(tick, intervalMs);
+
+  timer.unref?.();
+
+  return {
+    async stop() {
+      if (stopped) return;
+      stopped = true;
+      clearInterval(timer);
+      await update;
+    },
+  };
+}
+
+async function heartbeatJobRun(id: string) {
+  const now = new Date();
+
+  await prisma.$executeRaw`
+    UPDATE job_runs
+    SET result_payload = COALESCE(result_payload, '{}'::jsonb) || jsonb_build_object(
+      'heartbeatAt', ${now.toISOString()},
+      'heartbeatEpochMs', ${now.getTime()}
+    )
+    WHERE id = ${id}::uuid
+      AND status = 'running'::job_run_status
+  `;
+}
+
+
 async function completeJobRun(id: string, result: unknown) {
   const resultJson = toJsonString(result);
   const rows = await prisma.$queryRaw<DbJobRun[]>`
@@ -195,6 +248,7 @@ async function completeJobRun(id: string, result: unknown) {
       finished_at = NOW(),
       duration_ms = FLOOR(EXTRACT(EPOCH FROM (NOW() - started_at)) * 1000)::int
     WHERE id = ${id}::uuid
+      AND status = 'running'::job_run_status
     RETURNING
       id,
       job_type,
@@ -206,6 +260,10 @@ async function completeJobRun(id: string, result: unknown) {
       finished_at,
       duration_ms
   `;
+
+  if (!rows[0]) {
+    throw new Error(`Job run ${id} is no longer RUNNING and cannot be completed.`);
+  }
 
   return mapJobRun(rows[0]);
 }
@@ -222,6 +280,7 @@ async function failJobRun(id: string, error: unknown) {
       finished_at = NOW(),
       duration_ms = FLOOR(EXTRACT(EPOCH FROM (NOW() - started_at)) * 1000)::int
     WHERE id = ${id}::uuid
+      AND status = 'running'::job_run_status
     RETURNING
       id,
       job_type,
@@ -234,7 +293,31 @@ async function failJobRun(id: string, error: unknown) {
       duration_ms
   `;
 
-  return mapJobRun(rows[0]);
+  if (rows[0]) {
+    return mapJobRun(rows[0]);
+  }
+
+  const existingRows = await prisma.$queryRaw<DbJobRun[]>`
+    SELECT
+      id,
+      job_type,
+      status,
+      request_payload,
+      result_payload,
+      error_message,
+      started_at,
+      finished_at,
+      duration_ms
+    FROM job_runs
+    WHERE id = ${id}::uuid
+    LIMIT 1
+  `;
+
+  if (!existingRows[0]) {
+    throw new Error(`Job run ${id} no longer exists.`);
+  }
+
+  return mapJobRun(existingRows[0]);
 }
 
 function mapJobRun(row: DbJobRun): JobRunRecord {

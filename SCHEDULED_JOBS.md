@@ -13,12 +13,16 @@ EXCHANGE_RATES_PROVIDER="frankfurter"
 EXCHANGE_RATES_AUTO="true"
 EXCHANGE_RATES_ALLOW_ENV_FALLBACK="true"
 TCGCSV_JAPAN_CARD_GROUP_LIMIT="1"
+TCGCSV_JAPAN_CARD_SOURCE="tcgcsv-japan-card"
 TCGCSV_JAPAN_CARD_ONLY_UNPRICED_GROUPS="false"
 TCGCSV_JAPAN_CARD_PRICE_ONLY_UNPRICED="false"
 TCGCSV_SEALED_GROUP_LIMIT="1"
 TCGCSV_SEALED_PRICE_ONLY_UNPRICED="false"
 TCGCSV_SEALED_WRITE_PRICES="true"
 TCGCSV_SEALED_WAIT_MS="120"
+TCGDEX_SCHEDULE_LANGUAGES="ja,zh-tw,zh-cn,ko"
+TCGDEX_SCHEDULE_PAGE_SIZE="100"
+TCGDEX_SCHEDULE_MAX_PAGES="1"
 CARDTRADER_API_TOKEN="<bearer token from CardTrader account settings>"
 CARDTRADER_SEALED_SET_LIMIT="1"
 CARDTRADER_SEALED_PRODUCT_LIMIT="5"
@@ -26,9 +30,18 @@ CARDTRADER_SEALED_PRICE_ONLY_UNPRICED="false"
 CARDTRADER_SEALED_WRITE_PRICES="true"
 PRICECHARTING_GRADED_ENABLED="false"
 PRICECHARTING_GRADED_WRITE_PRICES="false"
+PRICECHARTING_LICENCE_CONFIRMED="false"
 PRICE_ALERT_DIGEST_DRY_RUN="true"
 PRICE_ALERT_DIGEST_ALLOW_LIVE_RECIPIENTS="false"
 JOB_MONITOR_DRY_RUN="true"
+JOB_MONITOR_CATALOGUE_DISCOVERY_MAX_AGE_HOURS="30"
+JOB_MONITOR_INTERNATIONAL_CATALOGUE_MAX_AGE_HOURS="14"
+JOB_MONITOR_CARD_PRICING_MAX_AGE_HOURS="3"
+JOB_MONITOR_ENGLISH_CARD_PRICING_MAX_AGE_HOURS="3"
+JOB_MONITOR_JAPANESE_CARD_PRICING_MAX_AGE_HOURS="3"
+JOB_MONITOR_SEALED_PRICING_MAX_AGE_HOURS="3"
+JOB_MONITOR_PASSWORD_RESET_MAX_AGE_MINUTES="10"
+JOB_MONITOR_BILLING_RETIREMENT_MAX_AGE_MINUTES="30"
 OPERATIONAL_RETENTION_ACCOUNT_TOKEN_DAYS="30"
 OPERATIONAL_RETENTION_AUTH_THROTTLE_DAYS="30"
 OPERATIONAL_RETENTION_BILLING_CHECKOUT_INTENT_DAYS="730"
@@ -42,6 +55,13 @@ OPERATIONAL_RETENTION_CRON_CONFIRM="false"
 BILLING_CHECKOUT_RETIREMENT_BATCH_SIZE="100"
 PASSWORD_RESET_DELIVERY_BATCH_SIZE="50"
 ```
+
+`qa:deployment-env` deliberately allows safe beta gates such as sandbox billing,
+dry-run monitoring, and draft legal copy. Before any unrestricted or paid public
+launch, run `npm run qa:public-launch`. That stricter check requires the final
+operator/address/support/privacy values and review flags, and also scans the
+legal page source for unresolved draft/pre-launch wording. Environment flags do
+not override draft copy; both must be complete.
 
 The deployed English pricing wrapper also refreshes one oldest-priced TCGCSV English group per hourly run. Its timeout-safe defaults are built into the live helper (`groupLimit=1`, `priceOnlyUnpriced=false`, `writePrices=true`), so this does not require another scheduled task or any new environment value.
 
@@ -76,6 +96,7 @@ cd /home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder
 /usr/bin/bash scripts/cron-live-pricing.sh
 /usr/bin/bash scripts/cron-live-japan-card-pricing.sh
 /usr/bin/bash scripts/cron-live-sealed-pricing.sh
+/usr/bin/bash scripts/cron-live-international-catalogue.sh
 /usr/bin/bash scripts/cron-password-reset-delivery.sh
 /usr/bin/bash scripts/cron-monitor-jobs.sh
 /usr/bin/bash scripts/cron-billing-checkout-retirement.sh
@@ -89,6 +110,7 @@ Expected results:
 - `cron-live-pricing.sh` runs the Pokemon TCG set rotation, then refreshes one TCGCSV English group. Both calls create `pricing_refresh` job runs, and either may fail without preventing the other from being attempted.
 - `job:live-japan-card-pricing` calls `/api/jobs/international-card-pricing`, creates a `pricing_refresh` job run, and reports `categoryId: 85` plus `language: "ja"`.
 - `job:live-sealed-pricing` creates a `sealed_pricing_refresh` job run. With `CARDTRADER_API_TOKEN` configured, its result also contains a `secondSource` diagnostic object for `cardtrader-sealed`; treat the lane as healthy only when its status is `succeeded` and it is producing snapshots.
+- `cron-live-international-catalogue.sh` refreshes one bounded 100-card TCGdex page. It chooses the least-recently visited configured language, advances that language's durable job-history cursor, and wraps only after reaching the provider total.
 - `cron-password-reset-delivery.sh` processes a bounded outbox batch. Unknown-recipient decoys are discarded without email; once a real delivery crosses the attempt boundary, any error or crash leaves it unresolved and suppresses automatic resend.
 - `monitor:jobs` prints a report. It can return a non-zero exit code when recent job failures exist, which is useful for alerting.
 - `cron-billing-checkout-retirement.sh` checks provider truth and retires expired hosted checkout links in a bounded batch; completed or ambiguous attempts remain available for webhook reconciliation.
@@ -104,6 +126,7 @@ Start conservative while beta data volume is small:
 | Daily discovery + alert dry run | `/usr/bin/bash /home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/cron-live-daily.sh` | Daily around 08:00 UK time |
 | Card pricing history | `/usr/bin/bash /home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/cron-live-pricing.sh` | Hourly, with `POKEMON_TCG_SET_PRICING_LIMIT=8` |
 | Japanese card pricing | `/usr/bin/bash /home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/cron-live-japan-card-pricing.sh` | Hourly at `:40`, with `TCGCSV_JAPAN_CARD_GROUP_LIMIT=1` |
+| International catalogue | `/usr/bin/bash /home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/cron-live-international-catalogue.sh` | Every 6 hours; one bounded language/page per run |
 | Sealed pricing history | `/usr/bin/bash /home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/cron-live-sealed-pricing.sh` | Hourly at `:50`, with `TCGCSV_SEALED_GROUP_LIMIT=1` and `TCGCSV_SEALED_PRODUCT_LIMIT=40` |
 | Password-reset delivery | `/usr/bin/bash /home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/cron-password-reset-delivery.sh` | Every minute |
 | Job monitor | `/usr/bin/bash /home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/cron-monitor-jobs.sh` | Hourly |
@@ -126,6 +149,7 @@ Use the same shape for the other commands:
 ```sh
 /usr/bin/bash /home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/cron-live-sealed-pricing.sh
 /usr/bin/bash /home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/cron-live-japan-card-pricing.sh
+/usr/bin/bash /home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/cron-live-international-catalogue.sh
 /usr/bin/bash /home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/cron-monitor-jobs.sh
 /usr/bin/bash /home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/cron-live-price-alerts.sh
 /usr/bin/bash /home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder/scripts/cron-password-reset-delivery.sh
@@ -181,14 +205,46 @@ They use the same `Authorization: Bearer <JOB_SECRET>` header. Keep the request 
 - Keep `TCGCSV_SEALED_GROUP_LIMIT=1`, `TCGCSV_SEALED_PRODUCT_LIMIT=40`, `TCGCSV_SEALED_PRICE_ONLY_UNPRICED=false`, and `TCGCSV_SEALED_WRITE_PRICES=true` for hourly sealed pricing history. The live helper defaults to a 40-product batch when `TCGCSV_SEALED_PRODUCT_LIMIT` is not set, records a per-set sealed cursor, fills blanks, and writes fresh snapshots for products that already have prices without making one long web request. A successfully scanned group with no sealed products receives a 30-day cooldown so card-only promo/subset catalogues do not consume hourly rotation slots; an explicit `TCGCSV_SEALED_GROUP_IDS` request bypasses that cooldown for manual rechecks.
 - CardTrader is the independent European sealed source. Keep its scheduled batch at one set and five products until observed latency is established. Marketplace references use eligible English listings and are stored as a separate `cardtrader-sealed` series.
 - CardTrader mapping first honors reviewed `CARDTRADER_SEALED_ALIASES_JSON` entries, then an unambiguous TCGplayer ID, exact UPC/EAN, or exact normalized product-name and compatible sealed-type match inside the already-matched expansion. Ambiguous or unmatched candidates are returned in `mappingReview`; they are never guessed. A configured CardTrader lane with no snapshots is degraded in pricing health.
-- PriceCharting sealed and graded pricing are not in the default schedule. Keep `PRICECHARTING_SEALED_WRITE_PRICES=false`, `PRICECHARTING_GRADED_ENABLED=false`, and `PRICECHARTING_GRADED_WRITE_PRICES=false` until written permission for third-party display is confirmed. The protected `npm run job:live-graded-card-pricing` helper is available for a deliberately enabled, small batch after a dry run. It imports only company-explicit PSA 10, BGS 10, and CGC 10 fields; generic graded fields and special Pristine/Black Label qualifiers are reported but never written. Exact set/name/number/variant matching is mandatory, and ambiguous products require a reviewed `PRICECHARTING_GRADED_ALIASES_JSON` entry.
-- Job starts use a bounded same-type overlap lease backed by the existing `job_runs` table. `JOB_RUN_OVERLAP_LEASE_MINUTES=45` prevents scheduler/manual overlaps while allowing an abandoned stale row to expire; the monitor still reports stale RUNNING rows.
+- PriceCharting sealed and graded pricing are not in the default schedule. Keep `PRICECHARTING_LICENCE_CONFIRMED=false`, `PRICECHARTING_SEALED_WRITE_PRICES=false`, `PRICECHARTING_GRADED_ENABLED=false`, and `PRICECHARTING_GRADED_WRITE_PRICES=false` until written commercial display permission is confirmed and retained. Both persistence and customer-facing selection fail closed while the permission flag is false. The protected `npm run job:live-graded-card-pricing` helper is available for a deliberately enabled, non-writing small batch. It imports only company-explicit PSA 10, BGS 10, and CGC 10 fields; generic graded fields and special Pristine/Black Label qualifiers are reported but never written. Exact set/name/number/variant matching is mandatory, and ambiguous products require a reviewed `PRICECHARTING_GRADED_ALIASES_JSON` entry.
+- Job starts use a bounded same-type overlap lease backed by the existing `job_runs` table. `JOB_RUN_OVERLAP_LEASE_MINUTES=45` prevents scheduler/manual overlaps while allowing an abandoned stale row to expire. Active jobs renew a JSON heartbeat three times per lease without changing their original start time; both overlap detection and stale-run monitoring use that heartbeat. A crashed worker stops renewing automatically, so the lease still expires and the monitor reports the abandoned RUNNING row.
 - Hosted checkout URLs have a 30-minute application lease. The ten-minute retirement schedule is provider-aware: it retrieves payment-link/session truth before closing anything, leaves completed or ambiguous attempts correlatable, and only marks a provider-confirmed closed attempt retired. Do not rely on a later customer request to clean these links up.
 - The public password-reset request validates with the same account-email normalizer used at registration, then writes an outbox row for both known and unknown recipients. Unknown raw addresses are never persisted. The one-minute protected worker creates reset tokens only after a real row is claimed; stale claims and all post-attempt errors are unresolved, monitored, and never retried automatically because the provider may already have accepted the message.
-- The job monitor treats provider warnings, failed/partial set counts, degraded second sources, successful CardTrader runs with zero output, and recent failed billing-webhook events as operational degradation. Billing failures include a total count and bounded provider/event/error details in both the report and alert email. The monitor also expects a price-alert job within `JOB_MONITOR_PRICE_ALERT_MAX_AGE_HOURS` (36 by default) and reports whether delivery is dry-run, live-test, explicitly live, or blocked.
+- The job monitor treats provider warnings, failed/partial set counts, degraded second sources, successful CardTrader runs with zero output, and recent failed billing-webhook events as operational degradation. Billing failures include a total count and bounded provider/event/error details in both the report and alert email.
+- Cadence monitoring fingerprints each independent schedule from its request payload, so a healthy English price run cannot hide a stalled Japanese lane and a manual catalogue repair cannot hide a stopped international rotation. Defaults require daily catalogue discovery within 30 hours, international catalogue rotation within 14 hours, each hourly pricing lane within 3 hours, password-reset delivery within 10 minutes, billing checkout retirement within 30 minutes, and price alerts within `JOB_MONITOR_PRICE_ALERT_MAX_AGE_HOURS` (36 by default). Age is based on the last successful run; a newer failed attempt is also reported.
+- The job monitor cannot detect its own scheduler being stopped. Keep an independent uptime/heartbeat service outside 20i and alert when the monitor task itself does not report on schedule.
 - Japanese single-card pricing uses TCGCSV's `Pokemon Japan` category (`TCGCSV_JAPAN_CARD_CATEGORY_ID=85`) and writes source `tcgcsv-japan-card` snapshots for `language=ja`. Use `TCGCSV_JAPAN_CARD_GROUP_LIMIT=1`, `TCGCSV_JAPAN_CARD_ONLY_UNPRICED_GROUPS=false`, and `TCGCSV_JAPAN_CARD_PRICE_ONLY_UNPRICED=false` for hourly production runs so each run fills missing Japanese prices and also creates fresh price-history snapshots for the oldest Japanese group.
 - Traditional Chinese, Simplified Chinese, and Korean pricing should stay as visible gaps until a reviewed CSV/licensed source is available. Do not scrape official pages or require Cardmarket personal/business verification for this lane.
 - Review Operations job history after the first few scheduled runs. Do not enable live recipient emails until pricing and monitor jobs are consistently clean.
+
+## Deferred constraint audit
+
+The binder/billing migration installed seven check constraints as `NOT VALID` so
+new writes were protected without making the original production migration scan
+all existing rows. Audit them read-only before creating a later validation-only
+migration:
+
+```sh
+npm run db:audit-constraints
+```
+
+The command lists every non-validated production constraint, runs explicit
+violation counts for the seven known checks, and exits non-zero on violations or
+an unknown unaudited constraint. It never runs `ALTER TABLE`, never repairs rows,
+and never marks a constraint valid. Retain a zero-violation report and take a
+database backup before adding a reviewed `VALIDATE CONSTRAINT` migration.
+
+Image coverage in the catalogue status means that a plausible URL is present;
+it is not a claim that every remote object currently responds. Run the bounded,
+read-only sample probe separately when auditing provider/CDN health:
+
+```sh
+npm run report:image-health
+```
+
+By default it probes at most 20 oldest-updated card URLs and 20 sealed URLs with
+five concurrent byte-range requests and a five-second timeout. Its reachability
+percentages are explicitly sample-scoped and never replace total URL-presence
+coverage.
 
 ## Price-snapshot capacity and retention
 

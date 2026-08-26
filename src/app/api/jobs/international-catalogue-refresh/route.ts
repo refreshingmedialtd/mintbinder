@@ -15,6 +15,7 @@ export async function POST(request: Request) {
       maxPages?: number;
       page?: number;
       pageSize?: number;
+      scheduled?: boolean;
     };
     const { jobRun, result } = await runTrackedJob({
       input: { ...body, provider: "tcgdex" },

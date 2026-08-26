@@ -26,6 +26,7 @@ import {
   catalogueDisplaySetForText,
 } from "@/lib/catalogue/name-aliases";
 import { CATALOGUE_LANGUAGE_OPTIONS } from "@/lib/catalogue/languages";
+import { isOptimizableCatalogueImageUrl } from "@/lib/catalogue/image-url";
 import type {
   DuplicateProviderReview,
   DuplicateProviderReviewCard,
@@ -228,6 +229,7 @@ type BetaEnvironmentSnapshot = {
   databaseConfigured: boolean;
   emailProvider: string;
   emailSmokeToConfigured: boolean;
+  jobMonitorAlertToConfigured: boolean;
   jobMonitorDryRun: boolean;
   jobSecretConfigured: boolean;
   priceAlertAllowLiveRecipients: boolean;
@@ -368,6 +370,11 @@ function BetaStatusPanel({
               <span>{env.databaseConfigured ? "Database configured" : "Database missing"}</span>
               <span>{env.jobSecretConfigured ? "Jobs protected" : "Job secret missing"}</span>
               <span>{env.priceAlertDryRun ? "Alerts dry run" : "Alerts live"}</span>
+              <span>
+                {!env.jobMonitorDryRun && env.jobMonitorAlertToConfigured
+                  ? "Monitor alerts live"
+                  : "Monitor alerts not live"}
+              </span>
               <span>{env.emailSmokeToConfigured ? "Smoke recipient set" : "No smoke recipient"}</span>
             </div>
           ) : null}
@@ -1467,6 +1474,7 @@ function DuplicateProviderCardReview({
             alt={cardName}
             fill
             sizes="52px"
+            unoptimized={!isOptimizableCatalogueImageUrl(visibleImageUrl)}
             onError={() => setFailedImageUrl(visibleImageUrl)}
           />
         ) : (

@@ -125,13 +125,16 @@ async function duplicateCardMergeWishlistConflicts(tx: TxClient, input: Duplicat
       primary_wishlist.priority::text AS "primaryPriority",
       source.target_price_minor AS "sourceTargetPriceMinor",
       source.target_currency AS "sourceTargetCurrency",
+      source.variant_label AS "sourceVariantLabel",
       primary_wishlist.target_price_minor AS "primaryTargetPriceMinor",
-      primary_wishlist.target_currency AS "primaryTargetCurrency"
+      primary_wishlist.target_currency AS "primaryTargetCurrency",
+      primary_wishlist.variant_label AS "primaryVariantLabel"
     FROM wishlist_items source
     JOIN wishlist_items primary_wishlist
       ON primary_wishlist.user_id = source.user_id
       AND primary_wishlist.card_printing_id = ${input.primaryCardId}::uuid
     WHERE source.card_printing_id = ${input.duplicateCardId}::uuid
+    FOR UPDATE OF source, primary_wishlist
   `;
 }
 
@@ -189,7 +192,18 @@ async function mergeWishlistConflicts(tx: TxClient, input: DuplicateCardMergeInp
           THEN source.priority
         ELSE primary_wishlist.priority
       END,
+      variant_label = CASE
+        WHEN NULLIF(BTRIM(primary_wishlist.variant_label), '') IS NULL
+          THEN source.variant_label
+        ELSE primary_wishlist.variant_label
+      END,
       target_price_minor = CASE
+        WHEN NULLIF(BTRIM(primary_wishlist.variant_label), '') IS NULL
+          AND NULLIF(BTRIM(source.variant_label), '') IS NOT NULL
+          THEN source.target_price_minor
+        WHEN NULLIF(BTRIM(primary_wishlist.variant_label), '') IS NOT NULL
+          AND NULLIF(BTRIM(source.variant_label), '') IS NULL
+          THEN primary_wishlist.target_price_minor
         WHEN primary_wishlist.target_price_minor IS NULL THEN source.target_price_minor
         WHEN source.target_price_minor IS NULL THEN primary_wishlist.target_price_minor
         WHEN primary_wishlist.target_currency IS NOT NULL
@@ -198,6 +212,12 @@ async function mergeWishlistConflicts(tx: TxClient, input: DuplicateCardMergeInp
         ELSE LEAST(primary_wishlist.target_price_minor, source.target_price_minor)
       END,
       target_currency = CASE
+        WHEN NULLIF(BTRIM(primary_wishlist.variant_label), '') IS NULL
+          AND NULLIF(BTRIM(source.variant_label), '') IS NOT NULL
+          THEN source.target_currency
+        WHEN NULLIF(BTRIM(primary_wishlist.variant_label), '') IS NOT NULL
+          AND NULLIF(BTRIM(source.variant_label), '') IS NULL
+          THEN primary_wishlist.target_currency
         WHEN primary_wishlist.target_price_minor IS NULL THEN source.target_currency
         WHEN source.target_price_minor IS NULL THEN primary_wishlist.target_currency
         WHEN primary_wishlist.target_currency IS NOT NULL

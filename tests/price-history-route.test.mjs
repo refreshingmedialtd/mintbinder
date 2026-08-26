@@ -67,3 +67,21 @@ test("price-history keeps the newest 5,000 grouped points and discloses truncati
     truncated: true,
   });
 });
+
+test("price-history UI selects one exact identity series instead of joining every returned point", async () => {
+  const page = await readFile(new URL("../src/app/page.tsx", import.meta.url), "utf8");
+  const panel = page.slice(page.indexOf("function PriceTrendPanel"), page.indexOf("type PriceHistoryRange"));
+
+  assert.match(panel, /groupPriceHistorySeries\((?:allHistory|relevantHistory)\)/);
+  assert.match(panel, /selectedHistorySeriesKey/);
+  assert.match(panel, /Each line is one exact finish, grade, condition, language, source and currency/);
+  assert.doesNotMatch(panel, /const history = preferredHistory\.length \? preferredHistory : allHistory/);
+});
+
+test("price-history hides unlicensed PriceCharting streams", async () => {
+  const route = await readFile(new URL("../src/app/api/price-history/route.ts", import.meta.url), "utf8");
+
+  assert.match(route, /customerVisiblePriceSource\(source\)/);
+  assert.match(route, /priceChartingLicenceConfirmed\(\)/);
+  assert.match(route, /providerPermissionFilter/);
+});

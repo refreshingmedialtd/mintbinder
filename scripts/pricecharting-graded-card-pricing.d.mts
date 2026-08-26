@@ -5,6 +5,7 @@ export type PriceChartingGradedOptions = {
   enabled?: boolean;
   fetchImpl?: typeof fetch;
   limit?: number;
+  licenceConfirmed?: boolean;
   observedAt?: Date | string;
   priceOnlyUnpriced?: boolean;
   prisma?: import("@prisma/client").PrismaClient;

@@ -16,6 +16,7 @@ export async function POST(request: Request) {
     const body = (await request.json().catch(() => ({}))) as {
       dryRun?: boolean;
       now?: string;
+      scheduled?: boolean;
       testRecipient?: string;
     };
     const now = parseOptionalDate(body.now);
@@ -23,6 +24,7 @@ export async function POST(request: Request) {
       input: {
         dryRun: body.dryRun === true,
         now: body.now,
+        scheduled: body.scheduled === true,
         testRecipientConfigured: Boolean(body.testRecipient?.trim()),
       },
       type: "price_alerts",

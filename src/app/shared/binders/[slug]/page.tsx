@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { isOptimizableCatalogueImageUrl } from "@/lib/catalogue/image-url";
 import { getSharedBinder } from "@/lib/db/binders";
 import styles from "./shared-binder.module.css";
 
@@ -83,6 +84,7 @@ function BinderPocket({ slot }: { slot: SharedSlot }) {
             loading="lazy"
             sizes="(max-width: 720px) 25vw, 150px"
             src={imageUrl}
+            unoptimized={!isOptimizableCatalogueImageUrl(imageUrl)}
           />
         </div>
       ) : item ? (

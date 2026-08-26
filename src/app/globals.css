@@ -323,6 +323,7 @@ html {
 
 body {
   min-height: 100vh;
+  min-height: 100dvh;
   margin: 0;
   background: var(--bg);
   color: var(--ink);
@@ -387,7 +388,8 @@ h3 {
 
 .app-shell {
   min-height: 100vh;
-  padding-bottom: 74px;
+  min-height: 100dvh;
+  padding-bottom: calc(74px + env(safe-area-inset-bottom, 0px));
 }
 
 .topbar {
@@ -6218,6 +6220,13 @@ h3 {
   font-weight: 900;
 }
 
+.account-export-form {
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--blue) 34%, var(--line));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--blue-soft) 58%, var(--surface));
+}
+
 .account-danger-zone {
   display: grid;
   gap: 12px;
@@ -6439,6 +6448,7 @@ h3 {
 
 .legal-shell {
   min-height: 100vh;
+  min-height: 100dvh;
   padding: 18px;
 }
 
@@ -7874,5 +7884,44 @@ h3 {
 
   .compact-item-row > svg {
     display: none;
+  }
+}
+
+/* Installed PWAs may render beneath device cut-outs and the home indicator. */
+.topbar {
+  padding-top: calc(8px + env(safe-area-inset-top, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+}
+
+.bottom-nav {
+  padding-right: env(safe-area-inset-right, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+}
+
+.legal-shell {
+  padding-top: max(18px, env(safe-area-inset-top, 0px));
+  padding-right: max(18px, env(safe-area-inset-right, 0px));
+  padding-bottom: max(18px, env(safe-area-inset-bottom, 0px));
+  padding-left: max(18px, env(safe-area-inset-left, 0px));
+}
+
+@media (min-width: 760px) {
+  .sidebar {
+    top: calc(57px + env(safe-area-inset-top, 0px));
+    height: calc(100dvh - 57px - env(safe-area-inset-top, 0px));
+  }
+}
+
+@media (max-width: 759px) {
+  .topbar {
+    padding-right: max(12px, env(safe-area-inset-right, 0px));
+    padding-left: max(12px, env(safe-area-inset-left, 0px));
+  }
+
+  .main {
+    padding-right: max(12px, env(safe-area-inset-right, 0px));
+    padding-left: max(12px, env(safe-area-inset-left, 0px));
   }
 }

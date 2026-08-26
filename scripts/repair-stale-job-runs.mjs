@@ -12,25 +12,30 @@ const now = new Date();
 const staleBefore = new Date(now.getTime() - staleMinutes * 60 * 1000);
 
 try {
-  const staleRuns = await prisma.jobRun.findMany({
-    orderBy: { startedAt: "asc" },
-    select: {
-      durationMs: true,
-      errorMessage: true,
-      id: true,
-      jobType: true,
-      requestPayload: true,
-      resultPayload: true,
-      startedAt: true,
-      status: true,
-    },
-    take: limit,
-    where: {
-      finishedAt: null,
-      startedAt: { lte: staleBefore },
-      status: "RUNNING",
-    },
-  });
+  const staleRuns = await prisma.$queryRaw`
+    SELECT
+      duration_ms AS "durationMs",
+      error_message AS "errorMessage",
+      id,
+      job_type AS "jobType",
+      request_payload AS "requestPayload",
+      result_payload AS "resultPayload",
+      started_at AS "startedAt",
+      status
+    FROM job_runs
+    WHERE status = 'running'::job_run_status
+      AND finished_at IS NULL
+      AND COALESCE(
+        CASE
+          WHEN result_payload->>'heartbeatEpochMs' ~ '^[0-9]+$'
+            THEN TO_TIMESTAMP((result_payload->>'heartbeatEpochMs')::double precision / 1000)
+          ELSE NULL
+        END,
+        started_at
+      ) <= ${staleBefore}
+    ORDER BY started_at ASC
+    LIMIT ${limit}
+  `;
 
   if (!confirmed) {
     console.log(JSON.stringify({
@@ -56,26 +61,38 @@ try {
       repairedAt: now.toISOString(),
       repairReason: "stale_running_job",
     };
-    const updated = await prisma.jobRun.update({
-      where: { id: run.id },
-      data: {
-        durationMs: duration.durationMs,
-        errorMessage,
-        finishedAt: now,
-        resultPayload,
-        status: "FAILED",
-      },
-      select: {
-        durationMs: true,
-        errorMessage: true,
-        id: true,
-        jobType: true,
-        startedAt: true,
-        status: true,
-      },
-    });
+    const resultPayloadJson = JSON.stringify(resultPayload);
+    const updatedRows = await prisma.$queryRaw`
+      UPDATE job_runs
+      SET
+        duration_ms = ${duration.durationMs},
+        error_message = ${errorMessage},
+        finished_at = ${now},
+        result_payload = ${resultPayloadJson}::jsonb,
+        status = 'failed'::job_run_status
+      WHERE id = ${run.id}::uuid
+        AND status = 'running'::job_run_status
+        AND finished_at IS NULL
+        AND COALESCE(
+          CASE
+            WHEN result_payload->>'heartbeatEpochMs' ~ '^[0-9]+$'
+              THEN TO_TIMESTAMP((result_payload->>'heartbeatEpochMs')::double precision / 1000)
+            ELSE NULL
+          END,
+          started_at
+        ) <= ${staleBefore}
+      RETURNING
+        duration_ms AS "durationMs",
+        error_message AS "errorMessage",
+        id,
+        job_type AS "jobType",
+        started_at AS "startedAt",
+        status
+    `;
 
-    repaired.push(summaryRow(updated));
+    if (updatedRows[0]) {
+      repaired.push(summaryRow(updatedRows[0]));
+    }
   }
 
   console.log(JSON.stringify({

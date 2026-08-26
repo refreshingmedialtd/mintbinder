@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { readBoundedTextBody, RequestBodyTooLargeError } from "@/lib/http/bounded-request-body";
 import { BillingConfigError, billingErrorStatus } from "@/lib/billing/errors";
 import { fulfillSquareWebhookEvent, fulfillStripeWebhookEvent } from "@/lib/billing/subscriptions";
 import { processBillingWebhookEvent } from "@/lib/billing/webhook-events";
@@ -21,7 +22,12 @@ export async function handleSquareBillingWebhook(request: Request) {
     );
   }
 
-  const payload = await request.text();
+  let payload: string;
+  try {
+    payload = await readBoundedTextBody(request, webhookBodyLimitBytes());
+  } catch (error) {
+    return webhookBodyErrorResponse(error);
+  }
   let event: SquareWebhookEvent;
 
   try {
@@ -62,7 +68,12 @@ export async function handleStripeBillingWebhook(request: Request) {
     );
   }
 
-  const payload = await request.text();
+  let payload: string;
+  try {
+    payload = await readBoundedTextBody(request, webhookBodyLimitBytes());
+  } catch (error) {
+    return webhookBodyErrorResponse(error);
+  }
   let event: StripeWebhookEvent;
 
   try {
@@ -128,4 +139,20 @@ function duplicateOrSuccessResponse(
 
 function squareWebhookNotificationUrl(request: Request) {
   return process.env.SQUARE_WEBHOOK_NOTIFICATION_URL?.trim() || request.url;
+}
+
+function webhookBodyLimitBytes() {
+  const configured = Number(process.env.BILLING_WEBHOOK_MAX_BODY_BYTES);
+  return Number.isSafeInteger(configured) && configured >= 1_024 && configured <= 5_242_880
+    ? configured
+    : 1_048_576;
+}
+
+function webhookBodyErrorResponse(error: unknown) {
+  if (error instanceof RequestBodyTooLargeError) {
+    return NextResponse.json({ error: "Webhook payload is too large." }, { status: 413 });
+  }
+
+  console.error("Unable to read billing webhook payload.", error);
+  return NextResponse.json({ error: "Invalid webhook payload encoding." }, { status: 400 });
 }

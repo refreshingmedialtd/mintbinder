@@ -4,9 +4,11 @@ import {
   billingProviderLifecycleSettings,
 } from "./billing-provider-lifecycle.mjs";
 import { smtpSecurityOptions } from "./smtp-policy.mjs";
+import { legalSourceReadiness } from "./legal-readiness.mjs";
 
 const jsonOutput = process.argv.includes("--json");
 const deploymentCheck = process.argv.includes("--deployment");
+const publicLaunchCheck = process.argv.includes("--public-launch") || !deploymentCheck;
 
 const checks = [];
 
@@ -144,6 +146,80 @@ if (emailProvider === "smtp") {
 if (emailProvider === "resend") {
   required("RESEND_API_KEY", "Set a Resend API key before live notification email.");
 }
+const jobMonitorDryRun = normalized("JOB_MONITOR_DRY_RUN") !== "false";
+const jobMonitorAlertTo = normalized("JOB_MONITOR_ALERT_TO") || normalized("EMAIL_SMOKE_TO");
+oneOf(
+  "JOB_MONITOR_DRY_RUN",
+  ["true", "false", ""],
+  "JOB_MONITOR_DRY_RUN must be exactly true or false when set.",
+);
+if (deploymentCheck) {
+  warnIf(
+    jobMonitorDryRun,
+    "JOB_MONITOR_DRY_RUN",
+    "Job-monitor email delivery is not live; keep this safe default until the alert recipient has passed a controlled smoke test.",
+  );
+} else {
+  required("JOB_MONITOR_DRY_RUN", "Set JOB_MONITOR_DRY_RUN=false after the controlled monitor-email smoke test.");
+  exact(
+    "JOB_MONITOR_DRY_RUN",
+    "false",
+    "JOB_MONITOR_DRY_RUN must be false before public launch so operational failures send alerts.",
+  );
+}
+
+if (publicLaunchCheck) {
+  required("LEGAL_BUSINESS_NAME", "Set the final legal operator/business name.");
+  required("LEGAL_COMPANY_NUMBER", "Set the registered company number for the named operator.");
+  required("LEGAL_REGISTERED_ADDRESS", "Set the registered/service address shown in the final legal notices.");
+  required("LEGAL_SUPPORT_EMAIL", "Set the final customer-support email address.");
+  required("LEGAL_PRIVACY_EMAIL", "Set the final privacy/data-rights contact email address.");
+  required("LEGAL_LAST_REVIEWED_AT", "Record the ISO date of the final legal review.");
+  required("LEGAL_TERMS_REVIEWED", "Set LEGAL_TERMS_REVIEWED=true after final terms review.");
+  required("LEGAL_PRIVACY_REVIEWED", "Set LEGAL_PRIVACY_REVIEWED=true after final privacy review.");
+  required(
+    "LEGAL_NON_AFFILIATION_REVIEWED",
+    "Set LEGAL_NON_AFFILIATION_REVIEWED=true after trademark/non-affiliation review.",
+  );
+  isoDate("LEGAL_LAST_REVIEWED_AT", "LEGAL_LAST_REVIEWED_AT must be a valid ISO date.");
+  exact("LEGAL_TERMS_REVIEWED", "true", "LEGAL_TERMS_REVIEWED must be true after final terms review.");
+  exact("LEGAL_PRIVACY_REVIEWED", "true", "LEGAL_PRIVACY_REVIEWED must be true after final privacy review.");
+  exact(
+    "LEGAL_NON_AFFILIATION_REVIEWED",
+    "true",
+    "LEGAL_NON_AFFILIATION_REVIEWED must be true after trademark/non-affiliation review.",
+  );
+  for (const key of [
+    "LEGAL_BUSINESS_NAME",
+    "LEGAL_COMPANY_NUMBER",
+    "LEGAL_REGISTERED_ADDRESS",
+    "LEGAL_SUPPORT_EMAIL",
+    "LEGAL_PRIVACY_EMAIL",
+  ]) {
+    notPlaceholder(key, ["example", "placeholder", "to be confirmed", "tbc"], `${key} still looks like a placeholder.`);
+  }
+
+  const legalSources = legalSourceReadiness();
+  if (!legalSources.ok) {
+    blocker(
+      "LEGAL_PAGE_COPY",
+      `Unresolved draft/pre-launch wording remains in: ${legalSources.unresolvedFiles.join(", ")}.`,
+    );
+  }
+}
+if (!jobMonitorDryRun || !deploymentCheck) {
+  if (!jobMonitorAlertTo) {
+    blocker(
+      "JOB_MONITOR_ALERT_TO",
+      "Set a dedicated JOB_MONITOR_ALERT_TO recipient before enabling live job-monitor alerts.",
+    );
+  }
+}
+notPlaceholder(
+  "JOB_MONITOR_ALERT_TO",
+  ["example.com", "alerts@example.com"],
+  "JOB_MONITOR_ALERT_TO still uses an example recipient.",
+);
 warnIf(
   normalized("PRICE_ALERT_DIGEST_DRY_RUN") !== "false",
   "PRICE_ALERT_DIGEST_DRY_RUN",
@@ -197,6 +273,22 @@ warnIf(
   "CARDTRADER_API_TOKEN",
   "CardTrader sealed-price enrichment is unavailable without a bearer token from the service account settings.",
 );
+oneOf(
+  "PRICECHARTING_LICENCE_CONFIRMED",
+  ["true", "false", ""],
+  "PRICECHARTING_LICENCE_CONFIRMED must be exactly true or false when set.",
+);
+const priceChartingLicenceConfirmed = normalized("PRICECHARTING_LICENCE_CONFIRMED") === "true";
+for (const writeFlag of ["PRICECHARTING_GRADED_WRITE_PRICES", "PRICECHARTING_SEALED_WRITE_PRICES"]) {
+  oneOf(writeFlag, ["true", "false", ""], `${writeFlag} must be exactly true or false when set.`);
+
+  if (normalized(writeFlag) === "true" && !priceChartingLicenceConfirmed) {
+    blocker(
+      "PRICECHARTING_LICENCE_CONFIRMED",
+      `${writeFlag}=true is prohibited until written commercial display permission is confirmed and PRICECHARTING_LICENCE_CONFIRMED=true.`,
+    );
+  }
+}
 
 const blockers = checks.filter((check) => check.level === "blocker");
 const warnings = checks.filter((check) => check.level === "warning");
@@ -318,6 +410,14 @@ function positiveNumber(key, message) {
 function positiveNumberValue(key) {
   const number = Number(normalized(key));
   return Number.isFinite(number) && number > 0;
+}
+
+function isoDate(key, message) {
+  const value = normalized(key);
+
+  if (value && Number.isNaN(Date.parse(value))) {
+    blocker(key, message);
+  }
 }
 
 function optionalBoolean(key) {

@@ -12,6 +12,7 @@ test("reads PriceCharting sealed pricing options from env", () => {
   assert.deepEqual(
     priceChartingSealedOptionsFromEnv({
       PRICECHARTING_API_TOKEN: "token",
+      PRICECHARTING_LICENCE_CONFIRMED: "true",
       PRICECHARTING_SEALED_LIMIT: "8",
       PRICECHARTING_SEALED_PRICE_ONLY_UNPRICED: "false",
       PRICECHARTING_SEALED_USE_NAME_SEARCH: "false",
@@ -20,6 +21,7 @@ test("reads PriceCharting sealed pricing options from env", () => {
       PRICECHARTING_USD_TO_GBP_RATE: "0.8",
     }),
     {
+      licenceConfirmed: true,
       limit: 8,
       priceOnlyUnpriced: false,
       token: "token",
@@ -127,6 +129,7 @@ test("imports PriceCharting sealed price snapshots", async () => {
   const summary = await syncPriceChartingSealedPrices({
     fetchImpl,
     limit: 1,
+    licenceConfirmed: true,
     prisma,
     token: "token",
     usdToGbpRate: 0.8,
@@ -141,4 +144,18 @@ test("imports PriceCharting sealed price snapshots", async () => {
   assert.equal(snapshots[0].priceMinor, 20000);
   assert.equal(snapshots[0].source, "pricecharting-sealed");
   assert.equal(snapshots[0].sourceRef, "12345");
+});
+
+test("fails closed before persisting PriceCharting sealed prices without confirmed permission", async () => {
+  await assert.rejects(
+    syncPriceChartingSealedPrices({
+      prisma: {
+        sealedProduct: { findMany: async () => assert.fail("unexpected database query") },
+      },
+      token: "token",
+      usdToGbpRate: 0.8,
+      writePrices: true,
+    }),
+    /PRICECHARTING_LICENCE_CONFIRMED=true/,
+  );
 });

@@ -12,8 +12,26 @@ export const metadata: Metadata = {
   description:
     "Track Pokémon cards and sealed products, monitor market values, organise binders and build complete sets.",
   applicationName: "Mint Binder",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "Mint Binder",
+  },
   category: "collectibles",
   creator: "Mint Binder",
+  icons: {
+    apple: [
+      {
+        url: "/icons/apple-touch-icon.png",
+        sizes: "180x180",
+        type: "image/png",
+      },
+    ],
+    icon: [
+      { url: "/icon.svg", type: "image/svg+xml" },
+      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+    ],
+  },
   keywords: [
     "Pokémon card collection tracker",
     "sealed Pokémon products",
@@ -47,6 +65,7 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   colorScheme: "light dark",
+  viewportFit: "cover",
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#f6f2e8" },
     { media: "(prefers-color-scheme: dark)", color: "#101923" },

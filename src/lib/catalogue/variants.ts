@@ -121,27 +121,70 @@ export function catalogueVariantLabels(item: CatalogueItem, current?: string) {
 
 export function catalogueValueMinorForVariant(item: CatalogueItem, variant?: string) {
   const normalizedVariant = normalizeVariantLabel(variant);
-  const priceHistory = item.priceHistory ?? [];
+  const priceHistory = rawPriceHistory(item.priceHistory ?? []);
 
   if (normalizedVariant) {
-    return latestPricePointForCatalogueVariant(item, variant)?.valueMinor ??
-      (hasVariantAwarePrices(priceHistory) ? undefined : item.valueMinor);
+    const point = latestPricePointForCatalogueVariant(item, variant);
+
+    if (point) {
+      return point.valueMinor;
+    }
+
+    return isGenericUnlabelledVariantSelection(item.type, variant) &&
+      !hasVariantAwarePrices(priceHistory) &&
+      item.hasPrice
+      ? item.valueMinor
+      : undefined;
   }
 
-  return item.valueMinor;
+  return item.hasPrice ? item.valueMinor : undefined;
 }
 
 export function latestPricePointForCatalogueVariant(item: CatalogueItem, variant?: string | null) {
-  const priceHistory = item.priceHistory ?? [];
-  const exact = latestPricePointForVariant(priceHistory, variant);
+  return preferredLatestPricePoint(
+    priceHistoryForCatalogueVariant(item, rawPriceHistory(item.priceHistory ?? []), variant),
+  );
+}
 
-  if (exact) {
+/**
+ * Narrows an already identity-filtered price history to the selected catalogue
+ * variant. Explicit variants fail closed: an unlabelled headline price is only
+ * eligible for the generic legacy defaults (`Standard` and `Factory sealed`).
+ */
+export function priceHistoryForCatalogueVariant(
+  item: Pick<CatalogueItem, "rarity" | "set" | "type">,
+  priceHistory: PricePoint[],
+  variant?: string | null,
+) {
+  const normalizedVariant = normalizeVariantLabel(variant);
+
+  if (!normalizedVariant) {
+    return priceHistory;
+  }
+
+  const exact = priceHistory.filter(
+    (point) => normalizeVariantLabel(point.variantLabel) === normalizedVariant,
+  );
+
+  if (exact.length) {
     return exact;
   }
 
   const genericLegacyLabel = legacyGenericVariantLabelForSelection(item, variant);
 
-  return genericLegacyLabel ? latestPricePointForVariant(priceHistory, genericLegacyLabel) : undefined;
+  if (genericLegacyLabel) {
+    const legacy = priceHistory.filter(
+      (point) => normalizeVariantLabel(point.variantLabel) === normalizeVariantLabel(genericLegacyLabel),
+    );
+
+    if (legacy.length) {
+      return legacy;
+    }
+  }
+
+  return isGenericUnlabelledVariantSelection(item.type, variant) && !hasVariantAwarePrices(priceHistory)
+    ? priceHistory
+    : [];
 }
 
 export function latestPricePointForVariant(history: PricePoint[], variant?: string | null) {
@@ -321,7 +364,10 @@ function legacyDefaultVariantLabel({
     : undefined;
 }
 
-function legacyGenericVariantLabelForSelection(item: CatalogueItem, variant?: string | null) {
+function legacyGenericVariantLabelForSelection(
+  item: Pick<CatalogueItem, "rarity" | "set" | "type">,
+  variant?: string | null,
+) {
   const legacyDefaultLabel = legacyDefaultVariantLabel({
     itemType: item.type,
     rarity: item.rarity,
@@ -557,6 +603,18 @@ function uniqueLabels(labels: string[]) {
 
 function hasVariantAwarePrices(history: PricePoint[]) {
   return history.some((point) => normalizeVariantLabel(point.variantLabel));
+}
+
+function rawPriceHistory(history: PricePoint[]) {
+  return history.filter((point) => !point.gradedCompany);
+}
+
+function isGenericUnlabelledVariantSelection(itemType: ItemType, variant?: string | null) {
+  const normalized = normalizeVariantLabel(variant);
+
+  return itemType === "sealed"
+    ? normalized === "factorysealed" || normalized === "sealed" || normalized === "standard"
+    : normalized === "standard";
 }
 
 function startCase(value: string) {

@@ -20,6 +20,7 @@ type InternationalCardPricingBody = {
   minUnpricedCards?: number | string;
   onlyUnpricedGroups?: boolean;
   priceOnlyUnpriced?: boolean;
+  scheduled?: boolean;
   source?: string;
   usdToGbpRate?: number | string;
   waitMs?: number | string;
@@ -33,7 +34,7 @@ export async function POST(request: Request) {
     const body = (await request.json().catch(() => ({}))) as InternationalCardPricingBody;
     const input = await internationalCardPricingInput(body);
     const { jobRun, result } = await runTrackedJob({
-      input,
+      input: { ...input, scheduled: body.scheduled === true },
       type: "pricing_refresh",
       task: () =>
         syncTcgcsvCardPrices({

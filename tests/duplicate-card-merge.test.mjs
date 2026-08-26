@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   buildDuplicateCardMergePlan,
@@ -42,6 +43,22 @@ test("builds a dry-run plan for a mergeable duplicate card pair", () => {
   assert.equal(plan.duplicateCardWillBeDeleted, true);
   assert.equal(plan.wishlistConflicts[0].mergedPriority, "grail");
   assert.equal(plan.wishlistConflicts[0].mergedTargetPriceMinor, 9000);
+});
+
+test("blocks duplicate merges that would discard a distinct wishlist finish", () => {
+  const plan = buildDuplicateCardMergePlan({
+    conflicts: [wishlistConflict({
+      primaryVariantLabel: "Holofoil",
+      sourceVariantLabel: "Reverse Holofoil",
+    })],
+    duplicateCard: cardRow({ id: "duplicate-card", wishlistCount: 1 }),
+    input: { duplicateCardId: "duplicate-card", primaryCardId: "primary-card" },
+    primaryCard: cardRow({ id: "primary-card", wishlistCount: 1 }),
+  });
+
+  assert.equal(plan.canMerge, false);
+  assert.equal(plan.duplicateCardWillBeDeleted, false);
+  assert.match(plan.errors.join(" "), /different card finishes/);
 });
 
 test("blocks mismatched provider IDs and same-card merges", () => {
@@ -107,6 +124,7 @@ test("resolves wishlist conflict fields conservatively", () => {
       mergedPriority: "high",
       mergedTargetCurrency: "GBP",
       mergedTargetPriceMinor: 12000,
+      mergedVariantLabel: undefined,
       primaryWishlistId: "primary-wish",
       sourceWishlistId: "source-wish",
       userId: "user-1",
@@ -124,11 +142,38 @@ test("resolves wishlist conflict fields conservatively", () => {
       mergedPriority: "high",
       mergedTargetCurrency: "GBP",
       mergedTargetPriceMinor: 15000,
+      mergedVariantLabel: undefined,
       primaryWishlistId: "primary-wish",
       sourceWishlistId: "source-wish",
       userId: "user-1",
     },
   );
+
+  assert.deepEqual(
+    duplicateCardMergeConflict(wishlistConflict({
+      primaryTargetPriceMinor: 5000,
+      primaryVariantLabel: null,
+      sourceTargetPriceMinor: 12000,
+      sourceVariantLabel: "Holofoil",
+    })),
+    {
+      mergedPriority: "high",
+      mergedTargetCurrency: "GBP",
+      mergedTargetPriceMinor: 12000,
+      mergedVariantLabel: "Holofoil",
+      primaryWishlistId: "primary-wish",
+      sourceWishlistId: "source-wish",
+      userId: "user-1",
+    },
+  );
+});
+
+test("execution SQL persists the finish and its coherent target pair", () => {
+  const source = readFileSync(new URL("../src/lib/jobs/duplicate-card-merge.ts", import.meta.url), "utf8");
+
+  assert.match(source, /variant_label = CASE/);
+  assert.match(source, /THEN source\.target_price_minor/);
+  assert.match(source, /FOR UPDATE OF source, primary_wishlist/);
 });
 
 function cardRow(overrides = {}) {
@@ -150,10 +195,12 @@ function wishlistConflict(overrides = {}) {
     primaryPriority: "high",
     primaryTargetCurrency: "GBP",
     primaryTargetPriceMinor: 10000,
+    primaryVariantLabel: null,
     primaryWishlistId: "primary-wish",
     sourcePriority: "medium",
     sourceTargetCurrency: "GBP",
     sourceTargetPriceMinor: 11000,
+    sourceVariantLabel: null,
     sourceWishlistId: "source-wish",
     userId: "user-1",
     ...overrides,

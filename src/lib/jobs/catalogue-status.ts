@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { catalogueLanguageLabel, catalogueRegionLabel } from "@/lib/catalogue/languages";
 import { recentJobRuns, type JobRunRecord } from "@/lib/jobs/runs";
@@ -9,6 +10,7 @@ import {
   type PricingBySeriesGap,
   type SealedPricingByProductTypeGap,
 } from "@/lib/jobs/catalogue-status-summary";
+import { priceChartingLicenceConfirmed } from "@/lib/pricing/provider-permissions.mjs";
 
 type CountRow = {
   count: number;
@@ -83,6 +85,9 @@ export async function catalogueStatus() {
 }
 
 async function catalogueCounts() {
+  const customerPriceSourceFilter = priceChartingLicenceConfirmed()
+    ? Prisma.empty
+    : Prisma.sql`AND ps.source NOT IN ('pricecharting-graded-card', 'pricecharting-sealed')`;
   const [
     cardRows,
     duplicateRows,
@@ -156,7 +161,11 @@ async function catalogueCounts() {
       FROM price_snapshots ps
       JOIN card_printings cp ON cp.id = ps.card_printing_id
       WHERE ps.card_printing_id IS NOT NULL
+        AND ps.item_type = 'card'::item_type
+        AND ps.currency = 'GBP'
+        AND ps.graded_company IS NULL
         AND cp.language = 'en'
+        ${customerPriceSourceFilter}
     `,
     prisma.$queryRaw<PricingByLanguageRow[]>`
       SELECT
@@ -191,6 +200,9 @@ async function catalogueCounts() {
       LEFT JOIN price_snapshots ps
         ON ps.card_printing_id = cp.id
         AND ps.item_type = 'card'
+        AND ps.currency = 'GBP'
+        AND ps.graded_company IS NULL
+        ${customerPriceSourceFilter}
       GROUP BY cp.language, cp.region
       ORDER BY
         CASE cp.language
@@ -214,6 +226,9 @@ async function catalogueCounts() {
       LEFT JOIN price_snapshots ps
         ON ps.card_printing_id = cp.id
         AND ps.item_type = 'card'
+        AND ps.currency = 'GBP'
+        AND ps.graded_company IS NULL
+        ${customerPriceSourceFilter}
       WHERE cp.language = 'en'
       GROUP BY COALESCE(cs.series, 'Other')
       ORDER BY (COUNT(DISTINCT cp.id) - COUNT(DISTINCT ps.card_printing_id)) DESC, COALESCE(cs.series, 'Other')
@@ -238,6 +253,8 @@ async function catalogueCounts() {
       LEFT JOIN price_snapshots ps
         ON ps.sealed_product_id = sp.id
         AND ps.item_type = 'sealed_product'
+        AND ps.currency = 'GBP'
+        ${customerPriceSourceFilter}
       WHERE sp.visibility = 'global'::catalogue_visibility
       GROUP BY sp.product_type
       ORDER BY (COUNT(DISTINCT sp.id) - COUNT(DISTINCT ps.sealed_product_id)) DESC, sp.product_type
@@ -249,7 +266,10 @@ async function catalogueCounts() {
       FROM price_snapshots ps
       JOIN sealed_products sp ON sp.id = ps.sealed_product_id
       WHERE ps.sealed_product_id IS NOT NULL
+        AND ps.item_type = 'sealed_product'::item_type
+        AND ps.currency = 'GBP'
         AND sp.visibility = 'global'::catalogue_visibility
+        ${customerPriceSourceFilter}
     `,
     prisma.priceSnapshot.count(),
     prisma.sealedProduct.count({ where: { visibility: "GLOBAL" } }),

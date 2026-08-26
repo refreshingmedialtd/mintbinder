@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 import {
   buildJobMonitorEmail,
   buildJobMonitorReport,
   priceAlertScheduleHealth,
+  scheduledJobCadenceHealth,
   shouldSendJobMonitorAlert,
   successfulJobDegradation,
 } from "../scripts/monitor-job-runs.mjs";
@@ -236,6 +238,10 @@ test("requires a recent daily price-alert run and reports safe delivery mode", (
     settings,
   });
   const current = priceAlertScheduleHealth({
+    latestAttempt: {
+      startedAt: new Date("2026-06-13T08:00:00.000Z"),
+      status: "SUCCEEDED",
+    },
     latestRun: { startedAt: new Date("2026-06-13T08:00:00.000Z") },
     maxAgeHours: 36,
     now,
@@ -247,6 +253,29 @@ test("requires a recent daily price-alert run and reports safe delivery mode", (
   assert.equal(current.ok, true);
   assert.equal(current.mode, "dry_run");
   assert.equal(current.ageHours, 4);
+});
+
+test("a newer failed scheduled price-alert attempt cannot be masked by an older success", () => {
+  const settings = priceAlertScheduleSettings({
+    PRICE_ALERT_DIGEST_DRY_RUN: "true",
+  });
+  const health = priceAlertScheduleHealth({
+    latestAttempt: {
+      startedAt: new Date("2026-06-13T11:00:00.000Z"),
+      status: "FAILED",
+    },
+    latestRun: {
+      startedAt: new Date("2026-06-13T08:00:00.000Z"),
+      status: "SUCCEEDED",
+    },
+    maxAgeHours: 36,
+    now,
+    settings,
+  });
+
+  assert.equal(health.ok, false);
+  assert.equal(health.latestAttemptStatus, "FAILED");
+  assert.match(health.problems.join(" "), /Latest scheduled price-alert digest attempt failed/);
 });
 
 test("blocks accidental live recipient sends without explicit authorization", () => {
@@ -262,4 +291,114 @@ test("blocks accidental live recipient sends without explicit authorization", ()
   assert.equal(settings.ok, false);
   assert.equal(settings.mode, "blocked");
   assert.match(settings.problems.join(" "), /test recipient/);
+});
+
+test("requires every independent scheduled job lane within its documented cadence", () => {
+  const latestRuns = [
+    ["catalogue_discovery", 30 * 60],
+    ["international_catalogue", 14 * 60],
+    ["card_pricing", 3 * 60],
+    ["english_card_pricing", 3 * 60],
+    ["japanese_card_pricing", 3 * 60],
+    ["sealed_pricing", 3 * 60],
+    ["password_reset_delivery", 10],
+    ["billing_checkout_retirement", 30],
+  ].map(([lane, ageMinutes]) => ({
+    lane,
+    latestAttemptAt: new Date(now.getTime() - ageMinutes * 60_000),
+    latestAttemptStatus: "SUCCEEDED",
+    latestSucceededAt: new Date(now.getTime() - ageMinutes * 60_000),
+  }));
+  const health = scheduledJobCadenceHealth({ latestRuns, now });
+
+  assert.equal(health.ok, true);
+  assert.equal(health.lanes.length, 8);
+  assert.deepEqual(health.problems, []);
+});
+
+test("fails closed for missing, stale, invalid, and latest-failed schedule evidence", () => {
+  const health = scheduledJobCadenceHealth({
+    latestRuns: [
+      {
+        lane: "card_pricing",
+        latestAttemptAt: new Date("2026-06-13T11:55:00.000Z"),
+        latestAttemptStatus: "FAILED",
+        latestSucceededAt: new Date("2026-06-13T11:00:00.000Z"),
+      },
+      {
+        lane: "sealed_pricing",
+        latestAttemptAt: new Date("2026-06-13T08:59:00.000Z"),
+        latestAttemptStatus: "SUCCEEDED",
+        latestSucceededAt: new Date("2026-06-13T08:59:00.000Z"),
+      },
+      {
+        lane: "japanese_card_pricing",
+        latestAttemptAt: "not-a-date",
+        latestAttemptStatus: "SUCCEEDED",
+        latestSucceededAt: "not-a-date",
+      },
+    ],
+    now,
+  });
+  const byKey = new Map(health.lanes.map((lane) => [lane.key, lane]));
+
+  assert.equal(health.ok, false);
+  assert.match(byKey.get("card_pricing").problem, /Latest Pokemon TCG card pricing attempt failed/);
+  assert.match(byKey.get("sealed_pricing").problem, /3\.1 hours old/);
+  assert.match(byKey.get("japanese_card_pricing").problem, /No successful Japanese card pricing job/);
+  assert.match(byKey.get("english_card_pricing").problem, /No successful English TCGCSV card pricing job/);
+});
+
+test("supports explicit cadence thresholds without letting one lane mask another", () => {
+  const health = scheduledJobCadenceHealth({
+    env: {
+      JOB_MONITOR_ENGLISH_CARD_PRICING_MAX_AGE_HOURS: "4",
+      JOB_MONITOR_JAPANESE_CARD_PRICING_MAX_AGE_HOURS: "2",
+    },
+    latestRuns: [
+      {
+        lane: "english_card_pricing",
+        latestAttemptAt: new Date("2026-06-13T09:00:00.000Z"),
+        latestAttemptStatus: "SUCCEEDED",
+        latestSucceededAt: new Date("2026-06-13T09:00:00.000Z"),
+      },
+      {
+        lane: "japanese_card_pricing",
+        latestAttemptAt: new Date("2026-06-13T09:00:00.000Z"),
+        latestAttemptStatus: "SUCCEEDED",
+        latestSucceededAt: new Date("2026-06-13T09:00:00.000Z"),
+      },
+    ],
+    now,
+  });
+  const byKey = new Map(health.lanes.map((lane) => [lane.key, lane]));
+
+  assert.equal(byKey.get("english_card_pricing").ok, true);
+  assert.equal(byKey.get("japanese_card_pricing").ok, false);
+});
+
+test("cadence evidence requires scheduler provenance and effective pricing writes", () => {
+  const source = readFileSync(new URL("../scripts/monitor-job-runs.mjs", import.meta.url), "utf8");
+  const queryStart = source.indexOf("WITH classified_runs AS");
+  const queryEnd = source.indexOf("function passwordResetOutboxProblemWhere", queryStart);
+  const query = source.slice(queryStart, queryEnd);
+
+  assert.ok(queryStart >= 0 && queryEnd > queryStart);
+  assert.equal((query.match(/request_payload->>'scheduled' = 'true'/g) ?? []).length, 8);
+  assert.equal((query.match(/request_payload->>'writePrices' = 'true'/g) ?? []).length, 4);
+  assert.match(source, /requestPayload: \{ path: \["scheduled"\], equals: true \}/);
+
+  for (const relativePath of [
+    "../src/app/api/jobs/billing-checkout-retirement/route.ts",
+    "../src/app/api/jobs/catalogue-refresh/route.ts",
+    "../src/app/api/jobs/international-card-pricing/route.ts",
+    "../src/app/api/jobs/password-reset-delivery/route.ts",
+    "../src/app/api/jobs/price-alerts/route.ts",
+    "../src/app/api/jobs/scheduled-pricing/route.ts",
+    "../src/app/api/jobs/scheduled-set-pricing/route.ts",
+    "../src/app/api/jobs/sealed-pricing-refresh/route.ts",
+  ]) {
+    const route = readFileSync(new URL(relativePath, import.meta.url), "utf8");
+    assert.match(route, /scheduled: body\.scheduled === true/, `${relativePath} must retain scheduler provenance`);
+  }
 });

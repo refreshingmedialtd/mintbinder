@@ -198,6 +198,7 @@ test("explicit live pricing page requests remain single requests", async () => {
   assert.deepEqual(request.body, {
     maxPages: 5,
     page: 9,
+    scheduled: true,
   });
 });
 
@@ -207,6 +208,7 @@ test("live catalogue discovery refreshes newly announced sets", () => {
   assert.deepEqual(request, {
     body: {
       backfillNewestMissingSet: true,
+      scheduled: true,
       setPageSize: 25,
       setsOnly: true,
     },
@@ -218,7 +220,7 @@ test("expired billing checkout retirement uses a bounded protected job", () => {
   assert.deepEqual(protectedJobRequest("billing-checkout-retirement", {
     BILLING_CHECKOUT_RETIREMENT_BATCH_SIZE: "75",
   }), {
-    body: { batchSize: 75 },
+    body: { batchSize: 75, scheduled: true },
     path: "/api/jobs/billing-checkout-retirement",
   });
 });
@@ -227,7 +229,7 @@ test("password-reset delivery uses a bounded protected job", () => {
   assert.deepEqual(protectedJobRequest("password-reset-delivery", {
     PASSWORD_RESET_DELIVERY_BATCH_SIZE: "75",
   }), {
-    body: { batchSize: 75 },
+    body: { batchSize: 75, scheduled: true },
     path: "/api/jobs/password-reset-delivery",
   });
 });
@@ -241,9 +243,14 @@ test("live Japanese card pricing posts to the international pricing endpoint", (
 
   assert.deepEqual(request, {
     body: {
+      categoryId: 85,
       groupLimit: 3,
+      language: "ja",
       priceOnlyUnpriced: false,
+      scheduled: true,
+      source: "tcgcsv-japan-card",
       waitMs: 250,
+      writePrices: true,
     },
     path: "/api/jobs/international-card-pricing",
   });
@@ -260,6 +267,7 @@ test("live English TCGCSV pricing defaults to one history-building group", () =>
       minUnpricedCards: 1,
       onlyUnpricedGroups: false,
       priceOnlyUnpriced: false,
+      scheduled: true,
       source: "tcgcsv-card",
       waitMs: 120,
       writePrices: true,
@@ -275,6 +283,7 @@ test("live PriceCharting graded-card pricing defaults to a bounded history refre
     body: {
       limit: 5,
       priceOnlyUnpriced: false,
+      scheduled: true,
       waitMs: 1100,
       writePrices: false,
     },
@@ -299,6 +308,7 @@ test("live sealed pricing defaults to a timeout-safe history-building group rota
       groupLimit: 1,
       priceOnlyUnpriced: false,
       productLimit: 40,
+      scheduled: true,
       waitMs: 120,
       writePrices: true,
     },
@@ -308,7 +318,7 @@ test("live sealed pricing defaults to a timeout-safe history-building group rota
 
 test("live price alerts default to dry-run and require explicit live authorization", () => {
   assert.deepEqual(protectedJobRequest("price-alerts", {}), {
-    body: { dryRun: true },
+    body: { dryRun: true, scheduled: true },
     path: "/api/jobs/price-alerts",
   });
 

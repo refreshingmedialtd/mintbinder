@@ -1,4 +1,5 @@
-import type { AppData, CatalogueItem, CollectionEvent, CollectionItem, StorageLocation } from "@/lib/types";
+import type { AppData, CatalogueItem, CollectionEvent, CollectionItem, StorageLocation } from "../types.ts";
+import { collectionItemValuation, collectionItemValueMinor } from "../valuation.ts";
 
 export type InsuranceReportInput = {
   data: AppData;
@@ -88,21 +89,24 @@ function collectionSection(collection: CollectionItem[], catalogueById: Map<stri
 
   return `<h2>Collection</h2>
   <table>
-    <thead><tr><th>Item</th><th>Set</th><th>Qty</th><th>Condition</th><th>Grade</th><th>Location</th><th>Paid</th><th>Value</th><th>Valuation note</th><th>Notes</th></tr></thead>
+    <thead><tr><th>Item</th><th>Set</th><th>Qty</th><th>Condition</th><th>Variant</th><th>Grade</th><th>Location</th><th>Paid</th><th>Value</th><th>Value source</th><th>Valuation note</th><th>Notes</th></tr></thead>
     <tbody>
       ${collection
         .map((owned) => {
           const catalogueItem = catalogueById.get(owned.catalogueId);
+          const valuation = collectionItemValuation(owned, catalogueItem);
 
           return `<tr>
             <td>${escapeHtml(catalogueItem?.name ?? "Unknown item")}</td>
             <td>${escapeHtml(catalogueItem?.set ?? "")}</td>
             <td>${owned.quantity}</td>
             <td>${escapeHtml(owned.condition)}</td>
+            <td>${escapeHtml(owned.variant)}</td>
             <td>${escapeHtml(owned.grade)}</td>
             <td>${escapeHtml(owned.location)}</td>
             <td>${escapeHtml(formatMoney(owned.purchasePriceMinor))}</td>
             <td>${escapeHtml(formatMoney(ownedValueMinor(owned, catalogueItem)))}</td>
+            <td>${escapeHtml(valuationEvidence(valuation))}</td>
             <td>${escapeHtml(owned.valuationNote ?? "")}</td>
             <td>${escapeHtml(owned.notes ?? "")}</td>
           </tr>`;
@@ -141,11 +145,23 @@ function historySection(events: CollectionEvent[], notice?: string) {
 }
 
 function ownedValueMinor(item: CollectionItem, catalogueItem?: CatalogueItem) {
-  if (!catalogueItem) {
-    return undefined;
+  return collectionItemValueMinor(item, catalogueItem);
+}
+
+function valuationEvidence(valuation: ReturnType<typeof collectionItemValuation>) {
+  if (valuation.kind === "manual") {
+    return "Manual total-lot value";
   }
 
-  return item.overrideValueMinor ?? (catalogueItem.hasPrice ? catalogueItem.valueMinor * item.quantity : undefined);
+  if (valuation.kind === "unvalued") {
+    return "No exact market price";
+  }
+
+  const point = valuation.pricePoint;
+
+  return point
+    ? `${point.source} · ${formatDate(point.observedAt)} · ${point.confidence}`
+    : "Generic market estimate";
 }
 
 function formatMoney(valueMinor?: number | null) {

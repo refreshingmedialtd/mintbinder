@@ -22,6 +22,14 @@ Mint Binder is a Pokemon card and sealed product collection tracking app. The pr
 - Square for subscriptions, with Stripe retained as an optional fallback provider.
 - Provider-agnostic catalogue and pricing integrations.
 
+## PWA Behaviour
+
+Mint Binder can be installed from a supporting browser. The manifest includes dedicated 192px, 512px, maskable, and Apple touch icons derived from the canonical `src/app/icon.svg` artwork. Installed layouts account for display cut-outs and home indicators.
+
+The service worker deliberately caches only versioned Next.js static assets, the manifest, icons, and a small offline page. API responses, authenticated HTML, collection data, and billing pages are never written to its cache. Navigation remains network-first and falls back to the offline page only when the server cannot be reached or returns a server error. A newly installed worker waits until existing tabs close before taking control so a collection or billing session is not replaced mid-flow.
+
+`robots.txt` is a static Next.js public asset rather than a metadata route, avoiding the production host's previous route-discovery failure.
+
 ## Next.js App
 
 The real app foundation lives in [src/](src/). The UI hydrates through local API routes, writes collection and wishlist changes through Prisma-backed handlers when a database is configured, and falls back to typed sample data when no database connection is active. Item detail views show valuation source, observed date, saved valuation notes, and recent price history when snapshots are available. Plus analytics includes a portfolio-wide value path built from dated market snapshots and manual estimates. Add/edit flows offer guided variant choices from imported Pokemon TCG metadata and variant-labelled price snapshots. Alerts explain target hits, watch-band prices, and weak-confidence refreshes. The Operations screen can run controlled catalogue/pricing import jobs, variant metadata repair, and card or sealed image repairs when you provide `JOB_SECRET`.

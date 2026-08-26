@@ -4,6 +4,10 @@ import {
   PrismaClient,
 } from "@prisma/client";
 import { booleanSetting, positiveInteger } from "./catalogue-batch-options.mjs";
+import {
+  assertPriceChartingWriteAllowed,
+  priceChartingLicenceConfirmed,
+} from "../src/lib/pricing/provider-permissions.mjs";
 
 const pricechartingBaseUrl = "https://www.pricecharting.com/api/product";
 const sourceName = "pricecharting-sealed";
@@ -37,6 +41,7 @@ const stopWords = new Set([
 
 export function priceChartingSealedOptionsFromEnv(env = process.env) {
   return {
+    licenceConfirmed: priceChartingLicenceConfirmed(env),
     limit: positiveInteger(env.PRICECHARTING_SEALED_LIMIT, 25),
     priceOnlyUnpriced: booleanSetting(env.PRICECHARTING_SEALED_PRICE_ONLY_UNPRICED, true),
     token: stringSetting(env.PRICECHARTING_API_TOKEN),
@@ -54,6 +59,7 @@ export async function syncPriceChartingSealedPrices(options = {}) {
   const shouldDisconnect = !options.prisma;
   const fetchImpl = options.fetchImpl ?? fetch;
   const limit = positiveInteger(options.limit, 25);
+  const licenceConfirmed = options.licenceConfirmed === true;
   const priceOnlyUnpriced = options.priceOnlyUnpriced ?? true;
   const token = stringSetting(options.token);
   const usdToGbp = conversionRate(options.usdToGbpRate);
@@ -66,11 +72,14 @@ export async function syncPriceChartingSealedPrices(options = {}) {
     candidatesMatched: 0,
     candidatesSkipped: 0,
     candidatesUnmatched: 0,
+    licenceConfirmed,
     priceOnlyUnpriced,
     pricingSnapshotsCreated: 0,
     sampleUnmatchedProducts: [],
     writePrices,
   };
+
+  assertPriceChartingWriteAllowed({ licenceConfirmed, writePrices });
 
   if (!token) {
     throw new Error("PRICECHARTING_API_TOKEN must be set for PriceCharting sealed pricing.");

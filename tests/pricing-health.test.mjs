@@ -109,6 +109,56 @@ test("infers CardTrader expectation from the latest sealed job when the local to
   assert.match(report.problems.join(" "), /CardTrader sealed pricing is configured/);
 });
 
+test("does not treat token CardTrader output as meaningful second-source coverage", () => {
+  const now = new Date("2026-08-21T10:00:00.000Z");
+  const report = buildPricingHealthReport({
+    cardLanguages: [],
+    collisionStreams: 0,
+    generatedAt: now,
+    sealed: { fresh: 90, priced: 90, total: 100 },
+    sealedRotation: { availableSets: 10, jobs: 10, uniqueSets: 10, zeroOutputJobs: 0 },
+    sealedSources: [
+      {
+        freshItems: 90,
+        latestObservedAt: now,
+        pricedItems: 90,
+        snapshots: 300,
+        source: "tcgcsv",
+      },
+      {
+        freshItems: 1,
+        latestObservedAt: now,
+        pricedItems: 1,
+        snapshots: 1,
+        source: "cardtrader-sealed",
+      },
+    ],
+  }, { cardTraderExpected: true, minCardTraderCoveragePercent: 5 });
+
+  assert.equal(report.ok, false);
+  assert.match(report.problems.join(" "), /meaningful second source/);
+  assert.equal(report.sealedSources.find((row) => row.source === "cardtrader-sealed").coveragePercent, 1);
+  assert.equal(report.sealedSources.find((row) => row.source === "cardtrader-sealed").freshPricedPercent, 100);
+});
+
+test("reports exact variant coverage and freshness independently of card-level health", () => {
+  const report = buildPricingHealthReport({
+    cardLanguages: [{ fresh: 100, language: "en", priced: 100, total: 100 }],
+    cardVariantStreams: [{ available: 200, fresh: 160, language: "en", priced: 180 }],
+    collisionStreams: 0,
+    generatedAt: new Date("2026-08-21T10:00:00.000Z"),
+    sealed: { fresh: 0, priced: 0, total: 0 },
+    sealedRotation: { availableSets: 0, jobs: 0, uniqueSets: 0, zeroOutputJobs: 0 },
+    sealedSources: [],
+  });
+
+  assert.equal(report.ok, false);
+  assert.equal(report.cardVariantStreams[0].coveragePercent, 90);
+  assert.equal(report.cardVariantStreams[0].freshPricedPercent, 88.9);
+  assert.match(report.problems.join(" "), /exact card-variant pricing coverage/);
+  assert.match(report.problems.join(" "), /exact card-variant pricing freshness/);
+});
+
 test("degrades configured PriceCharting graded pricing on zero output and reports ambiguous-grade limitations", () => {
   const report = buildPricingHealthReport({
     cardLanguages: [],

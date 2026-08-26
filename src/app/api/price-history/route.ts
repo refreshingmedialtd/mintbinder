@@ -8,6 +8,10 @@ import {
   serializePriceHistoryRows,
   type PriceHistoryRow,
 } from "@/lib/pricing/price-history-response";
+import {
+  customerVisiblePriceSource,
+  priceChartingLicenceConfirmed,
+} from "@/lib/pricing/provider-permissions.mjs";
 
 export const dynamic = "force-dynamic";
 
@@ -32,6 +36,10 @@ export async function GET(request: Request) {
 
     const source = sourceValue?.trim() || null;
 
+    if (source && !customerVisiblePriceSource(source)) {
+      return NextResponse.json({ error: "Price source is not available." }, { status: 400 });
+    }
+
     if (!UUID_PATTERN.test(catalogueId)) {
       return NextResponse.json({ error: "A valid catalogueId is required." }, { status: 400 });
     }
@@ -44,6 +52,9 @@ export async function GET(request: Request) {
 
     const { bucket, from } = rangeConfig(range);
     const sourceFilter = source ? Prisma.sql`AND "source" = ${source}` : Prisma.empty;
+    const providerPermissionFilter = priceChartingLicenceConfirmed()
+      ? Prisma.empty
+      : Prisma.sql`AND "source" NOT IN ('pricecharting-graded-card', 'pricecharting-sealed')`;
     const fromFilter = from ? Prisma.sql`AND "observed_at" >= ${from}` : Prisma.empty;
     const itemFilter = itemType === "card"
       ? Prisma.sql`"card_printing_id" = ${catalogueId}::uuid`
@@ -69,6 +80,7 @@ export async function GET(request: Request) {
         WHERE ${itemFilter}
           ${fromFilter}
           ${sourceFilter}
+          ${providerPermissionFilter}
         GROUP BY
           date_trunc(${bucket}, "observed_at"),
           "source",

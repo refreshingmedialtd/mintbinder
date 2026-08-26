@@ -19,7 +19,11 @@ export async function POST(request: Request) {
     if (mutationError) return mutationError;
 
     const body = await request.json();
-    const item = await createWishlistItem(session.user.id, String(body.catalogueId ?? ""));
+    const item = await createWishlistItem(
+      session.user.id,
+      String(body.catalogueId ?? ""),
+      typeof body.variant === "string" ? body.variant : undefined,
+    );
 
     return NextResponse.json({ item });
   } catch (error) {

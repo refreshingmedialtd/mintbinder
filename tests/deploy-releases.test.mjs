@@ -138,6 +138,9 @@ test("standalone release packaging keeps each dependency tree immutable", async 
     );
     await access(join(directory, first, "runtime", ".next", "static", "chunk.js"));
     await access(join(directory, first, "runtime", "public", "icon.svg"));
+    await access(join(directory, first, "runtime", "public", "icons", "icon-192.png"));
+    await access(join(directory, first, "runtime", "public", "offline.html"));
+    await access(join(directory, first, "runtime", "public", "robots.txt"));
   } finally {
     await rm(directory, { force: true, recursive: true });
   }
@@ -146,10 +149,13 @@ test("standalone release packaging keeps each dependency tree immutable", async 
 async function writeMockStandaloneBuild(directory, dependencyVersion) {
   await mkdir(join(directory, ".next", "standalone", "node_modules", "mock-runtime"), { recursive: true });
   await mkdir(join(directory, ".next", "static"), { recursive: true });
-  await mkdir(join(directory, "public"), { recursive: true });
+  await mkdir(join(directory, "public", "icons"), { recursive: true });
   await writeFile(join(directory, ".next", "standalone", "server.js"), "// fixture\n");
   await writeFile(join(directory, ".next", "standalone", "package.json"), JSON.stringify({ name: "fixture", version: "1.0.0" }));
   await writeFile(join(directory, ".next", "standalone", "node_modules", "mock-runtime", "version.txt"), dependencyVersion);
   await writeFile(join(directory, ".next", "static", "chunk.js"), "// chunk\n");
   await writeFile(join(directory, "public", "icon.svg"), "<svg/>\n");
+  await writeFile(join(directory, "public", "icons", "icon-192.png"), "png fixture\n");
+  await writeFile(join(directory, "public", "offline.html"), "<!doctype html>\n");
+  await writeFile(join(directory, "public", "robots.txt"), "User-agent: *\n");
 }

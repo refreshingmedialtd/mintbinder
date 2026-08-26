@@ -21,6 +21,7 @@ type SealedPricingBody = {
   groupLimit?: number | string;
   priceOnlyUnpriced?: boolean;
   productLimit?: number | string;
+  scheduled?: boolean;
   usdToGbpRate?: number | string;
   waitMs?: number | string;
   writePrices?: boolean;
@@ -36,6 +37,7 @@ export async function POST(request: Request) {
     const { jobRun, result } = await runTrackedJob({
       input: {
         ...input,
+        scheduled: body.scheduled === true,
         secondSource: {
           enabled: cardTraderOptions.enabled,
           limit: cardTraderOptions.limit,

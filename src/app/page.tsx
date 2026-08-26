@@ -66,7 +66,7 @@ import { canUseOperationsForUser, normalizeAppRole, type AppUserRole } from "@/l
 import {
   catalogueValueMinorForVariant,
   catalogueVariantLabels,
-  latestPricePointForCatalogueVariant,
+  normalizeVariantLabel,
 } from "@/lib/catalogue/variants";
 import {
   catalogueNameAliasesForText,
@@ -84,15 +84,26 @@ import {
 import { completionPercent, formatMoney } from "@/lib/format";
 import { priceConfidenceFromScore, priceRangeMinor } from "@/lib/pricing/price-history";
 import {
+  groupPriceHistorySeries,
+  preferredPriceHistorySeriesKey,
+} from "@/lib/pricing/price-history-series";
+import {
   effectivePriceConfidence,
   preferredLatestPricePoint,
-  preferredPriceSeries,
   priceFreshnessStatus,
   priceMarketForSource,
   priceMarketRole,
   priceSourceLabel,
 } from "@/lib/pricing/market-context";
 import { buildInsuranceReportHtml } from "@/lib/reports/insurance";
+import {
+  collectionConditionMultiplier,
+  collectionItemMarketPricePoint,
+  collectionItemPriceHistory,
+  collectionItemValuation,
+  collectionItemValueMinor,
+} from "@/lib/valuation";
+import { wishlistMatchesOwnedVariant } from "@/lib/wishlist-variant";
 import {
   appRouteHistoryMode,
   buildAppRoutePath,
@@ -171,6 +182,7 @@ type AppState = {
   selectedItemId: string;
   selectedSetId: string;
   selectedCatalogueId: string;
+  selectedCatalogueVariant: string;
   plus: boolean;
 };
 
@@ -360,6 +372,7 @@ const initialState: AppState = {
   selectedItemId: "",
   selectedSetId: "",
   selectedCatalogueId: "",
+  selectedCatalogueVariant: "",
   plus: false,
 };
 
@@ -960,6 +973,7 @@ export default function Home() {
       ...current,
       plus: false,
       selectedCatalogueId: "",
+      selectedCatalogueVariant: "",
       selectedItemId: "",
       selectedSetId: "",
     }));
@@ -1201,7 +1215,7 @@ export default function Home() {
   const wishlistTotal = useMemo(() => {
     return wishlist.reduce((total, item) => {
       const catalogueItem = catalogueById.get(item.catalogueId);
-      return total + (item.targetPriceMinor ?? (catalogueItem ? catalogueMarketValueMinor(catalogueItem) ?? 0 : 0));
+      return total + (item.targetPriceMinor ?? (catalogueItem ? wishlistMarketValueMinor(catalogueItem, item) ?? 0 : 0));
     }, 0);
   }, [catalogueById, wishlist]);
 
@@ -1226,6 +1240,7 @@ export default function Home() {
       screen: "add",
       addType: type,
       selectedCatalogueId: "",
+      selectedCatalogueVariant: "",
     }));
     setAddSearch("");
   }
@@ -1246,7 +1261,9 @@ export default function Home() {
       language: String(formData?.get("language") ?? "English"),
       variant:
         String(formData?.get("variant") ?? "") ||
-        (catalogueItem.type === "sealed" ? "Factory sealed" : "Standard"),
+        (catalogueItem.type === "sealed"
+          ? "Factory sealed"
+          : defaultWishlistVariant(catalogueItem) ?? selectedVariantLabel(catalogueItem)),
       paid: String(formData?.get("paid") ?? ""),
       purchaseDate: String(formData?.get("purchaseDate") ?? ""),
       overrideValue: String(formData?.get("overrideValue") ?? ""),
@@ -1268,14 +1285,18 @@ export default function Home() {
         }
 
         const result = (await response.json()) as { item: CollectionItem };
-        const matchingWishlist = wishlist.find((item) => item.catalogueId === catalogueId);
+        const matchingWishlist = wishlist.find((item) =>
+          wishlistMatchesOwnedVariant(item, catalogueId, payload.variant),
+        );
 
         if (matchingWishlist) {
           void removeWishlistItem(matchingWishlist.id, { quiet: true });
         }
 
         setCollection((items) => [...items, result.item]);
-        setWishlist((items) => items.filter((item) => item.catalogueId !== catalogueId));
+        setWishlist((items) => items.filter((item) =>
+          !wishlistMatchesOwnedVariant(item, catalogueId, payload.variant),
+        ));
         setAppState((current) => ({
           ...current,
           screen: "item",
@@ -1311,7 +1332,9 @@ export default function Home() {
     };
 
     setCollection((items) => [...items, nextItem]);
-    setWishlist((items) => items.filter((item) => item.catalogueId !== catalogueId));
+    setWishlist((items) => items.filter((item) =>
+      !wishlistMatchesOwnedVariant(item, catalogueId, payload.variant),
+    ));
     setAppState((current) => ({ ...current, screen: "item", selectedItemId: nextItem.id }));
     showToast(`${catalogueItemTitle(catalogueItem)} added to collection.`);
     return true;
@@ -1353,6 +1376,7 @@ export default function Home() {
           ...current,
           addType: "sealed",
           selectedCatalogueId: result.item!.id,
+          selectedCatalogueVariant: "",
         }));
         setAddSearch(result.item.name);
         void refreshAppData({ quiet: true });
@@ -1386,25 +1410,28 @@ export default function Home() {
       ...current,
       addType: "sealed",
       selectedCatalogueId: nextItem.id,
+      selectedCatalogueVariant: "",
     }));
     setAddSearch(nextItem.name);
     showToast(`${nextItem.name} created.`);
     return true;
   }
 
-  async function addToWishlist(catalogueId: string) {
+  async function addToWishlist(catalogueId: string, requestedVariant?: string) {
     const catalogueItem = catalogueById.get(catalogueId);
     if (!catalogueItem || wishlist.some((item) => item.catalogueId === catalogueId)) {
       showToast("That item is already on the wishlist.", "warning");
       return false;
     }
 
+    const variant = requestedVariant?.trim() || defaultWishlistVariant(catalogueItem);
+
     if (dataSource === "database") {
       try {
         const response = await fetch("/api/wishlist-items", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ catalogueId }),
+          body: JSON.stringify({ catalogueId, variant }),
         });
 
         if (!response.ok) {
@@ -1423,13 +1450,16 @@ export default function Home() {
       }
     }
 
-    const marketValueMinor = catalogueMarketValueMinor(catalogueItem);
+    const marketValueMinor = variant
+      ? catalogueValueMinorForVariant(catalogueItem, variant) ?? null
+      : catalogueMarketValueMinor(catalogueItem);
 
     setWishlist((items) => [
       ...items,
       {
         id: `want-${Date.now()}`,
         catalogueId,
+        variant,
         priority: marketValueMinor !== null && marketValueMinor > 10000 ? "Grail" : "High",
         targetPriceMinor: defaultWishlistTargetMinor(marketValueMinor),
         notes: "Added from set progress.",
@@ -1783,6 +1813,7 @@ export default function Home() {
 
     const payload = {
       id,
+      variant: String(formData.get("variant") ?? source.variant ?? ""),
       priority: String(formData.get("priority") ?? source.priority),
       targetPrice: String(formData.get("targetPrice") ?? ""),
       notes: String(formData.get("notes") ?? ""),
@@ -1816,6 +1847,7 @@ export default function Home() {
         item.id === id
           ? {
               ...item,
+              variant: payload.variant || undefined,
               priority: normalizePriority(payload.priority),
               targetPriceMinor: moneyInputToMinor(payload.targetPrice),
               notes: payload.notes || undefined,
@@ -1952,7 +1984,7 @@ export default function Home() {
           throw new Error(body.error ?? `Insurance report failed with ${response.status}`);
         }
 
-        downloadBlob(`mintbinder-insurance-report-${dateStamp()}.html`, await response.blob());
+        downloadBlob(`mintbinder-insurance-report-${dateStamp()}.pdf`, await response.blob());
         showToast("Insurance report exported.");
         return;
       } catch (error) {
@@ -2488,7 +2520,7 @@ type ScreenContext = {
   updateCollectionItem: (itemId: string, formData: FormData) => Promise<boolean>;
   archiveCollectionItem: (itemId: string) => Promise<boolean>;
   recordCollectionSale: (itemId: string, formData: FormData) => Promise<boolean>;
-  addToWishlist: (catalogueId: string) => Promise<boolean>;
+  addToWishlist: (catalogueId: string, variant?: string) => Promise<boolean>;
   duplicateItem: (itemId: string) => Promise<void>;
   removeWishlistItem: (id: string, options?: { quiet?: boolean }) => Promise<void>;
   updateWishlistItem: (id: string, formData: FormData) => Promise<boolean>;
@@ -5122,7 +5154,11 @@ function AddScreen({
 
   useEffect(() => {
     if (catalogueSelectionQueryRef.current !== catalogueQuerySignature) {
-      setAppState((current) => ({ ...current, selectedCatalogueId: "" }));
+      setAppState((current) => ({
+        ...current,
+        selectedCatalogueId: "",
+        selectedCatalogueVariant: "",
+      }));
       catalogueSelectionQueryRef.current = catalogueQuerySignature;
     }
     catalogueLoadMoreAbortRef.current?.abort();
@@ -5235,7 +5271,7 @@ function AddScreen({
     ? adjustedMarketValueMinor(selected, selectedVariant, addCondition, addQuantity)
     : null;
   const selectedBaseValue = selected ? catalogueMarketValueMinor(selected, selectedVariant) : null;
-  const selectedConditionMultiplier = conditionValueMultiplier(addCondition, selected?.type);
+  const selectedConditionMultiplier = collectionConditionMultiplier(addCondition, selected?.type);
   const selectedCatalogueLanguageLabel = selected?.languageLabel ?? "English";
   const usesDifferentLotLanguage = selected?.type === "card" && addLanguage !== selectedCatalogueLanguageLabel;
   const selectedNeedsLocalPricing =
@@ -5247,9 +5283,9 @@ function AddScreen({
   useEffect(() => {
     setAddCondition(selected?.type === "sealed" ? "Sealed" : "Near mint");
     setAddQuantity(1);
-    setAddVariant(undefined);
+    setAddVariant(appState.selectedCatalogueVariant || undefined);
     setAddLanguage(selected?.languageLabel ?? "English");
-  }, [selected?.id, selected?.languageLabel, selected?.type]);
+  }, [appState.selectedCatalogueVariant, selected?.id, selected?.languageLabel, selected?.type]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -5278,7 +5314,7 @@ function AddScreen({
     }
 
     setIsSavingWishlist(true);
-    await addToWishlist(itemId);
+    await addToWishlist(itemId, selected?.id === itemId ? selectedVariant : undefined);
     setIsSavingWishlist(false);
   }
 
@@ -5367,7 +5403,12 @@ function AddScreen({
           aria-pressed={appState.addType === "card"}
           className={appState.addType === "card" ? "active" : ""}
           onClick={() => {
-            setAppState((current) => ({ ...current, addType: "card", selectedCatalogueId: "" }));
+            setAppState((current) => ({
+              ...current,
+              addType: "card",
+              selectedCatalogueId: "",
+              selectedCatalogueVariant: "",
+            }));
             setCatalogueRarityFilter("all");
           }}
           type="button"
@@ -5379,7 +5420,12 @@ function AddScreen({
           aria-pressed={appState.addType === "sealed"}
           className={appState.addType === "sealed" ? "active" : ""}
           onClick={() => {
-            setAppState((current) => ({ ...current, addType: "sealed", selectedCatalogueId: "" }));
+            setAppState((current) => ({
+              ...current,
+              addType: "sealed",
+              selectedCatalogueId: "",
+              selectedCatalogueVariant: "",
+            }));
             setCatalogueRarityFilter("all");
           }}
           type="button"
@@ -5472,7 +5518,12 @@ function AddScreen({
                 quickAddDisabled={Boolean(quickAddId)}
                 onQuickAdd={() => void handleQuickAdd(item.id)}
                 selected={item.id === selected?.id}
-                onClick={() => setAppState((current) => ({ ...current, addType: item.type, selectedCatalogueId: item.id }))}
+                onClick={() => setAppState((current) => ({
+                  ...current,
+                  addType: item.type,
+                  selectedCatalogueId: item.id,
+                  selectedCatalogueVariant: "",
+                }))}
               />
             )) : (
               <EmptyState
@@ -5762,7 +5813,8 @@ function ItemDetailScreen({
   const itemName = catalogueItemTitle(item);
   const locationOptions = storageOptionNames(storageLocations, owned.location);
   const itemEvents = collectionEvents.filter((event) => event.itemId === owned.id).slice(0, 6);
-  const usesRawGradedPrice = usesRawMarketForGradedItem(owned, item);
+  const needsExactGradedPrice = isGradedCollectionItem(owned) &&
+    collectionItemValuation(owned, item).kind === "unvalued";
 
   async function handleUpdate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -5867,7 +5919,7 @@ function ItemDetailScreen({
           </section>
         </div>
         <div className="detail-stack">
-          <PriceTrendPanel item={item} overrideValueMinor={owned.overrideValueMinor} />
+          <PriceTrendPanel item={item} owned={owned} overrideValueMinor={owned.overrideValueMinor} />
           <section className="tool-panel detail-action-panel">
             <div className="panel-title-row">
               <h2>Lot actions</h2>
@@ -6055,19 +6107,18 @@ function ItemDetailScreen({
               ["Market observed", valuationObservedLabel(item, owned)],
             ]}
           />
-          {usesRawGradedPrice ? (
+          {needsExactGradedPrice ? (
             <section className="tool-panel graded-pricing-note">
               <div className="panel-title-row">
                 <h2>Graded pricing</h2>
-                <span className="tag amber">Raw market fallback</span>
+                <span className="tag amber">Exact price needed</span>
               </div>
               <p className="muted">
                 This lot is marked {owned.grade}, but Mint Binder does not have a graded price snapshot for this card yet.
-                The value above is using the raw card market value for {selectedVariantLabel(item, owned.variant)}.
+                Its value is left unestimated rather than inheriting the raw-card or another variant&apos;s price.
               </p>
               <p className="muted">
-                For PSA, BGS, CGC, ACE, SGC, or other slab values, set a Manual value and add the source in Valuation note
-                until a graded-price importer is connected.
+                Add a Manual value and record the source in Valuation note until an exact {owned.grade} price for {selectedVariantLabel(item, owned.variant)} is available.
               </p>
             </section>
           ) : null}
@@ -6582,7 +6633,12 @@ function SetDetailScreen({
                       type="button"
                       onClick={(event) => {
                         event.stopPropagation();
-                        setAppState((current) => ({ ...current, selectedCatalogueId: item.id, addType: "card" }));
+                        setAppState((current) => ({
+                          ...current,
+                          selectedCatalogueId: item.id,
+                          selectedCatalogueVariant: "",
+                          addType: "card",
+                        }));
                         navigate("add");
                       }}
                     >
@@ -6626,7 +6682,12 @@ function SetDetailScreen({
           wanted={previewWanted}
           onAdd={() => {
             setPreviewItemId(null);
-            setAppState((current) => ({ ...current, selectedCatalogueId: previewItem.id, addType: "card" }));
+            setAppState((current) => ({
+              ...current,
+              selectedCatalogueId: previewItem.id,
+              selectedCatalogueVariant: "",
+              addType: "card",
+            }));
             navigate("add");
           }}
           onClose={() => setPreviewItemId(null)}
@@ -7261,7 +7322,7 @@ function WishlistScreen({
   const wishlistInsight = wishlist.reduce(
     (summary, item) => {
       const catalogueItem = catalogueById.get(item.catalogueId);
-      const currentValue = catalogueItem ? catalogueMarketValueMinor(catalogueItem) : null;
+      const currentValue = catalogueItem ? wishlistMarketValueMinor(catalogueItem, item) : null;
       const targetValue = item.targetPriceMinor ?? currentValue;
 
       if (item.priority === "Grail") {
@@ -7290,7 +7351,7 @@ function WishlistScreen({
         return null;
       }
 
-      const currentValue = catalogueMarketValueMinor(catalogueItem);
+      const currentValue = wishlistMarketValueMinor(catalogueItem, item);
       const targetValue = item.targetPriceMinor ?? currentValue;
       const delta = currentValue === null || targetValue === null ? null : targetValue - currentValue;
 
@@ -7315,6 +7376,7 @@ function WishlistScreen({
         row.catalogueItem.set,
         catalogueItemSetLabel(row.catalogueItem),
         row.catalogueItem.number,
+        row.item.variant ?? "",
         row.item.priority,
         row.item.notes ?? "",
       ].join(" ").toLowerCase().includes(normalizedWishlistSearch);
@@ -7329,6 +7391,9 @@ function WishlistScreen({
   const previewItem = previewItemId ? catalogueById.get(previewItemId) : undefined;
   const previewOwned = previewItem
     ? collection.find((item) => item.catalogueId === previewItem.id)
+    : undefined;
+  const previewWishlist = previewItem
+    ? wishlist.find((item) => item.catalogueId === previewItem.id)
     : undefined;
 
   async function handleUpdate(event: FormEvent<HTMLFormElement>, itemId: string) {
@@ -7346,7 +7411,7 @@ function WishlistScreen({
     }
   }
 
-  function renderWishlistEditForm(item: WishlistItem) {
+  function renderWishlistEditForm(item: WishlistItem, catalogueItem: CatalogueItem) {
     return (
       <form
         className="form-stack wishlist-edit-form"
@@ -7358,6 +7423,16 @@ function WishlistScreen({
           <span className={`priority-pill priority-${item.priority.toLowerCase()}`}>{item.priority}</span>
         </div>
         <div className="field-grid">
+          {catalogueItem.type === "card" ? (
+            <Field label="Card finish">
+              <select name="variant" defaultValue={item.variant ?? ""}>
+                {!item.variant ? <option value="">Preferred market finish</option> : null}
+                {catalogueVariantLabels(catalogueItem, item.variant).map((variant) => (
+                  <option key={variant} value={variant}>{variant}</option>
+                ))}
+              </select>
+            </Field>
+          ) : null}
           <Field label="Priority">
             <select name="priority" defaultValue={item.priority}>
               <option>Low</option>
@@ -7409,6 +7484,7 @@ function WishlistScreen({
               addType: row.catalogueItem.type,
               screen: "add",
               selectedCatalogueId: row.item.catalogueId,
+              selectedCatalogueVariant: row.item.variant ?? "",
             }))
           }
           aria-label="Add owned-copy details"
@@ -7466,12 +7542,13 @@ function WishlistScreen({
           <div className="wishlist-card-copy">
             <h3>{catalogueItemTitle(row.catalogueItem)}</h3>
             <p className="collection-lot-set">{catalogueItemSetLabel(row.catalogueItem)} | {row.catalogueItem.number}</p>
+            {row.item.variant ? <span className="tag blue">{row.item.variant}</span> : null}
           </div>
           <span className={`priority-pill priority-${row.item.priority.toLowerCase()}`}>{row.item.priority}</span>
         </div>
         <div className="wishlist-card-body">
           {row.isEditing ? (
-            renderWishlistEditForm(row.item)
+            renderWishlistEditForm(row.item, row.catalogueItem)
           ) : (
             <>
               <div className="wishlist-card-meta">
@@ -7608,6 +7685,7 @@ function WishlistScreen({
                               <div>
                                 <strong>{catalogueItemTitle(row.catalogueItem)}</strong>
                                 <span>{catalogueItemSetLabel(row.catalogueItem)} | {row.catalogueItem.number}</span>
+                                {row.item.variant ? <span>{row.item.variant}</span> : null}
                               </div>
                             </div>
                           </td>
@@ -7634,7 +7712,7 @@ function WishlistScreen({
                         </tr>
                         {row.isEditing ? (
                           <tr className="wishlist-edit-row">
-                            <td colSpan={7}>{renderWishlistEditForm(row.item)}</td>
+                            <td colSpan={7}>{renderWishlistEditForm(row.item, row.catalogueItem)}</td>
                           </tr>
                         ) : null}
                       </Fragment>
@@ -7672,6 +7750,7 @@ function WishlistScreen({
               ...current,
               addType: previewItem.type,
               selectedCatalogueId: previewItem.id,
+              selectedCatalogueVariant: previewWishlist?.variant ?? "",
             }));
             navigate("add");
           }}
@@ -8243,6 +8322,10 @@ function AccountPanel({
   viewer: Viewer;
 }) {
   const [isExporting, setIsExporting] = useState(false);
+  const [isExportOpen, setIsExportOpen] = useState(false);
+  const [exportPassword, setExportPassword] = useState("");
+  const [exportError, setExportError] = useState("");
+  const [showExportPassword, setShowExportPassword] = useState(false);
   const [isSendingVerification, setIsSendingVerification] = useState(false);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -8257,19 +8340,28 @@ function AccountPanel({
     deleteEmail.trim().toLowerCase() === viewer.email.trim().toLowerCase() &&
     deletePassword.length >= 8;
 
-  async function exportAccount() {
+  async function exportAccount(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
     if (isExporting) return;
     setIsExporting(true);
+    setExportError("");
     try {
-      const response = await fetch("/api/account/export", { cache: "no-store" });
+      const response = await fetch("/api/account/export", {
+        cache: "no-store",
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ password: exportPassword }),
+      });
       if (!response.ok) {
         const body = (await response.json().catch(() => ({}))) as { error?: string };
         throw new Error(body.error ?? `Account export failed with ${response.status}.`);
       }
       downloadBlob(`mintbinder-account-${dateStamp()}.json`, await response.blob());
+      setExportPassword("");
+      setIsExportOpen(false);
       showToast("Account JSON export downloaded.");
     } catch (error) {
-      showToast(error instanceof Error ? error.message : "Account export could not be downloaded.", "error");
+      setExportError(error instanceof Error ? error.message : "Account export could not be downloaded.");
     } finally {
       setIsExporting(false);
     }
@@ -8333,9 +8425,12 @@ function AccountPanel({
         ]}
       />
       <div className="actions">
-        <button className="button" type="button" disabled={isExporting} onClick={() => void exportAccount()}>
+        <button className="button" type="button" disabled={isExporting} onClick={() => {
+          setExportError("");
+          setIsExportOpen((open) => !open);
+        }}>
           <Download size={17} />
-          {isExporting ? "Preparing export" : "Export account JSON"}
+          {isExportOpen ? "Cancel account export" : "Export account JSON"}
         </button>
         {viewer.emailVerified ? (
           <span className="account-verification verified" role="status">
@@ -8353,6 +8448,31 @@ function AccountPanel({
           Reset password
         </Link>
       </div>
+      {isExportOpen ? (
+        <form className="form-stack account-export-form" onSubmit={exportAccount}>
+          <p className="muted">For your security, confirm your current password before downloading the complete account archive.</p>
+          <Field label="Current password">
+            <input
+              autoComplete="current-password"
+              maxLength={128}
+              minLength={8}
+              onChange={(event) => setExportPassword(event.target.value)}
+              required
+              type={showExportPassword ? "text" : "password"}
+              value={exportPassword}
+            />
+          </Field>
+          <label className="check-row auth-password-visibility">
+            <input type="checkbox" checked={showExportPassword} onChange={(event) => setShowExportPassword(event.target.checked)} />
+            <span>Show password</span>
+          </label>
+          {exportError ? <p className="auth-error" role="alert">{exportError}</p> : null}
+          <button className="button primary" type="submit" disabled={isExporting || exportPassword.length < 8}>
+            <Download size={17} />
+            {isExporting ? "Preparing export" : "Confirm and download"}
+          </button>
+        </form>
+      ) : null}
       <div className="account-danger-zone">
         <button className="button danger" type="button" onClick={() => setIsDeleteOpen((open) => !open)}>
           <Trash2 size={17} />
@@ -9177,9 +9297,10 @@ function OwnedItemCard({
   const ownedValue = getOwnedValue(item, catalogueItem);
   const variantLabel = catalogueItem.type === "card" && item.variant && item.variant !== "Standard" ? item.variant : "";
   const gradeLabel = item.grade && item.grade !== "Raw" && item.grade !== "N/A" ? item.grade : "";
-  const marketValue = catalogueMarketValueMinor(catalogueItem, item.variant);
+  const valuation = collectionItemValuation(item, catalogueItem);
+  const marketValue = valuation.kind === "market" ? valuation.unitValueMinor : null;
   const usesManualValue = item.overrideValueMinor !== undefined;
-  const usesRawGradedPrice = usesRawMarketForGradedItem(item, catalogueItem);
+  const needsExactPrice = valuation.kind === "unvalued" && (Boolean(gradeLabel) || Boolean(variantLabel));
 
   return (
     <article
@@ -9208,7 +9329,12 @@ function OwnedItemCard({
             >
               <summary aria-label={`Price confidence for ${catalogueItemTitle(catalogueItem)}`}>?</summary>
               <span className="market-help-popover">
-                <MarketConfidencePopover item={catalogueItem} manualOverride={usesManualValue} marketValue={marketValue} />
+                <MarketConfidencePopover
+                  item={catalogueItem}
+                  manualOverride={usesManualValue}
+                  marketPoint={valuation.pricePoint}
+                  marketValue={marketValue}
+                />
               </span>
             </details>
           </div>
@@ -9218,7 +9344,7 @@ function OwnedItemCard({
           <span className="tag">{item.condition}</span>
           {variantLabel ? <span className="tag">{variantLabel}</span> : null}
           {gradeLabel ? <span className="tag">{gradeLabel}</span> : null}
-          {usesRawGradedPrice ? <span className="tag amber">Raw price</span> : null}
+          {needsExactPrice ? <span className="tag amber">Exact price needed</span> : null}
           <span className="tag">{item.language}</span>
           <span className="tag blue">Qty {item.quantity}</span>
         </div>
@@ -9790,9 +9916,11 @@ function InteractiveValueLineChart({
 
 function PriceTrendPanel({
   item,
+  owned,
   overrideValueMinor,
 }: {
   item: CatalogueItem;
+  owned?: CollectionItem;
   overrideValueMinor?: number;
 }) {
   const [range, setRange] = useState<PriceHistoryRange>("30d");
@@ -9800,22 +9928,34 @@ function PriceTrendPanel({
   const [historyLoadError, setHistoryLoadError] = useState("");
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [historyRetryToken, setHistoryRetryToken] = useState(0);
+  const [selectedHistorySeriesKey, setSelectedHistorySeriesKey] = useState("");
   const apiRange = priceHistoryApiRange(range);
   const shouldLoadRemoteHistory = item.type === "sealed" || range === "3m" || range === "6m" || range === "1y" || range === "all";
   const remoteHistory = remoteHistoryByRange[apiRange];
   const allHistory: DetailedPricePoint[] = remoteHistory?.length ? remoteHistory : item.priceHistory ?? [];
-  const preferredHistory = preferredPriceSeries(allHistory);
-  const history = preferredHistory.length ? preferredHistory : allHistory;
+  const relevantHistory = owned
+    ? collectionItemPriceHistory(owned, { ...item, priceHistory: allHistory })
+    : allHistory.filter((point) => !point.gradedCompany);
+  const historySeries = groupPriceHistorySeries(relevantHistory);
+  const fallbackHistorySeriesKey = preferredPriceHistorySeriesKey(relevantHistory, owned?.variant);
+  const activeHistorySeries = historySeries.find((series) => series.key === selectedHistorySeriesKey) ??
+    historySeries.find((series) => series.key === fallbackHistorySeriesKey) ??
+    historySeries[0];
+  const history = activeHistorySeries?.points ?? [];
   const visibleHistory = filterPriceHistoryByRange(history, range);
   const activeHistory = visibleHistory.length ? visibleHistory : history;
   const latest = activeHistory[activeHistory.length - 1];
   const first = activeHistory[0];
   const valueRange = priceRangeMinor(activeHistory);
   const delta = latest && first ? latest.valueMinor - first.valueMinor : null;
-  const overallLatest = preferredLatestPricePoint(allHistory);
+  const overallLatest = latest ?? preferredLatestPricePoint(history);
   const source = overallLatest?.source ?? item.priceSource;
   const observedAt = overallLatest?.observedAt ?? item.priceObservedAt;
-  const latestMarketValue = overallLatest?.valueMinor ?? catalogueMarketValueMinor(item);
+  const latestMarketValue = overallLatest?.valueMinor ?? (
+    owned
+      ? collectionItemValuation(owned, item).unitValueMinor ?? null
+      : catalogueMarketValueMinor(item)
+  );
   const deltaPercent = delta !== null && first?.valueMinor
     ? (delta / first.valueMinor) * 100
     : null;
@@ -9825,6 +9965,7 @@ function PriceTrendPanel({
     setRange("30d");
     setRemoteHistoryByRange({});
     setHistoryLoadError("");
+    setSelectedHistorySeriesKey("");
   }, [item.id]);
 
   useEffect(() => {
@@ -9853,6 +9994,10 @@ function PriceTrendPanel({
             sampleSize?: number | null;
             source?: string;
             variantLabel?: string | null;
+            condition?: string | null;
+            language?: string | null;
+            gradedCompany?: string | null;
+            gradedScore?: number | null;
           }>;
         };
         if (!response.ok) throw new Error(body.error ?? `Price history failed with ${response.status}.`);
@@ -9900,6 +10045,21 @@ function PriceTrendPanel({
           </span>
         )}
       </div>
+      {historySeries.length > 1 ? (
+        <label className="field price-history-stream-field">
+          <span>Market stream</span>
+          <select
+            aria-label="Price history market stream"
+            onChange={(event) => setSelectedHistorySeriesKey(event.target.value)}
+            value={activeHistorySeries?.key ?? ""}
+          >
+            {historySeries.map((series) => (
+              <option key={series.key} value={series.key}>{series.label}</option>
+            ))}
+          </select>
+          <small>Each line is one exact finish, grade, condition, language, source and currency.</small>
+        </label>
+      ) : null}
       {history.length ? (
         <PriceHistoryLineChart history={history} onRangeChange={setRange} range={range} />
       ) : (
@@ -9981,6 +10141,10 @@ function normalizeDetailedPricePoint(value: {
   sampleSize?: number | null;
   source?: string;
   variantLabel?: string | null;
+  condition?: string | null;
+  language?: string | null;
+  gradedCompany?: string | null;
+  gradedScore?: number | null;
 }): DetailedPricePoint | null {
   const observedAt = value.observedAt ?? value.bucket;
   const valueMinor = Number(value.priceMinor);
@@ -9989,7 +10153,11 @@ function normalizeDetailedPricePoint(value: {
   return {
     bucket: value.bucket,
     confidence: priceConfidenceFromScore(value.confidenceScore),
+    condition: value.condition?.trim() || undefined,
     currency: value.currency,
+    gradedCompany: value.gradedCompany?.trim() || undefined,
+    gradedScore: Number.isFinite(value.gradedScore) ? value.gradedScore ?? undefined : undefined,
+    language: value.language?.trim() || undefined,
     observedAt,
     pointCount: Number.isSafeInteger(value.pointCount) ? value.pointCount : undefined,
     sampleSize: value.sampleSize ?? null,
@@ -10226,37 +10394,15 @@ function CatalogueItemImage({ item }: { item: CatalogueItem }) {
 }
 
 function getOwnedValue(item: CollectionItem, catalogueItem?: CatalogueItem) {
-  if (!catalogueItem) {
-    return null;
-  }
-
-  return item.overrideValueMinor ??
-    adjustedMarketValueMinor(catalogueItem, item.variant, item.condition, item.quantity);
+  return collectionItemValueMinor(item, catalogueItem) ?? null;
 }
 
 function isGradedCollectionItem(item: CollectionItem) {
   return item.grade !== "Raw" && item.grade !== "N/A";
 }
 
-function usesRawMarketForGradedItem(item: CollectionItem, catalogueItem?: CatalogueItem) {
-  if (
-    !catalogueItem ||
-    catalogueItem.type !== "card" ||
-    item.overrideValueMinor !== undefined ||
-    !isGradedCollectionItem(item)
-  ) {
-    return false;
-  }
-
-  return catalogueMarketValueMinor(catalogueItem, item.variant) !== null;
-}
-
 function catalogueMarketValueMinor(item: CatalogueItem, variant?: string) {
-  if (!item.hasPrice) {
-    return null;
-  }
-
-  return catalogueValueMinorForVariant(item, variant) ?? item.valueMinor ?? null;
+  return catalogueValueMinorForVariant(item, variant) ?? null;
 }
 
 function adjustedMarketValueMinor(
@@ -10273,27 +10419,7 @@ function adjustedMarketValueMinor(
 
   const normalizedQuantity = Number.isFinite(quantity) ? Math.max(1, quantity) : 1;
 
-  return Math.round(marketValueMinor * conditionValueMultiplier(condition, item.type)) * normalizedQuantity;
-}
-
-function conditionValueMultiplier(condition: string, itemType?: ItemType) {
-  if (itemType === "sealed") {
-    return 1;
-  }
-
-  const normalized = condition.trim().toLowerCase();
-  const multipliers: Record<string, number> = {
-    mint: 1.05,
-    "near mint": 1,
-    excellent: 0.85,
-    "light played": 0.7,
-    played: 0.55,
-    poor: 0.35,
-    sealed: 1,
-    unknown: 1,
-  };
-
-  return multipliers[normalized] ?? 1;
+  return Math.round(marketValueMinor * collectionConditionMultiplier(condition, item.type)) * normalizedQuantity;
 }
 
 function conditionAdjustmentLabel(multiplier: number) {
@@ -10319,10 +10445,12 @@ function formatValuation(valueMinor?: number | null) {
 function MarketConfidencePopover({
   item,
   manualOverride = false,
+  marketPoint,
   marketValue,
 }: {
   item: CatalogueItem;
   manualOverride?: boolean;
+  marketPoint?: NonNullable<CatalogueItem["priceHistory"]>[number];
   marketValue?: number | null;
 }) {
   if (manualOverride) {
@@ -10347,7 +10475,9 @@ function MarketConfidencePopover({
     );
   }
 
-  const confidence = item.confidence || "Unknown";
+  const confidence = marketPoint ? effectivePriceConfidence(marketPoint) : item.confidence || "Unknown";
+  const source = marketPoint?.source ?? item.priceSource;
+  const observedAt = marketPoint?.observedAt ?? item.priceObservedAt;
 
   return (
     <span className="market-help-content">
@@ -10357,19 +10487,19 @@ function MarketConfidencePopover({
       </span>
       <span className="market-help-row">
         <span>Market basis</span>
-        <strong>{priceMarketRole(item.priceSource)}</strong>
+        <strong>{priceMarketRole(source)}</strong>
       </span>
       <span className="market-help-row">
         <span>Source</span>
-        <strong>{priceSourceLabel(item.priceSource)}</strong>
+        <strong>{priceSourceLabel(source)}</strong>
       </span>
       <span className="market-help-row">
         <span>Observed</span>
-        <strong>{item.priceObservedAt ? formatEventDate(item.priceObservedAt) : "Unknown"}</strong>
+        <strong>{observedAt ? formatEventDate(observedAt) : "Unknown"}</strong>
       </span>
       <span className="market-help-row">
         <span>Freshness</span>
-        <strong>{item.priceStatus ?? "Unknown"}</strong>
+        <strong>{marketPoint ? priceFreshnessStatus(marketPoint) : item.priceStatus ?? "Unknown"}</strong>
       </span>
       <span>{marketConfidenceReason(confidence)}</span>
     </span>
@@ -10420,15 +10550,11 @@ function valuationStatusLabel(item: CatalogueItem, owned?: CollectionItem) {
     return "Manual value";
   }
 
-  if (owned && catalogueMarketValueMinor(item, owned.variant) === null) {
-    return "Needs estimate";
+  if (owned && collectionItemValuation(owned, item).kind === "unvalued") {
+    return "Needs exact estimate";
   }
 
-  if (owned && usesRawMarketForGradedItem(owned, item)) {
-    return "Raw market fallback";
-  }
-
-  const variantPrice = owned ? latestPricePointForCatalogueVariant(item, owned.variant) : undefined;
+  const variantPrice = owned ? collectionItemMarketPricePoint(owned, item) : undefined;
 
   if ((variantPrice && priceFreshnessStatus(variantPrice) === "Stale") || (!variantPrice && item.priceStatus === "Stale")) {
     return "Price outdated";
@@ -10446,11 +10572,11 @@ function valuationPillClass(item: CatalogueItem, owned?: CollectionItem) {
     return "confidence-pill manual";
   }
 
-  if (owned && catalogueMarketValueMinor(item, owned.variant) === null) {
+  if (owned && collectionItemValuation(owned, item).kind === "unvalued") {
     return "confidence-pill missing";
   }
 
-  const variantPrice = owned ? latestPricePointForCatalogueVariant(item, owned.variant) : undefined;
+  const variantPrice = owned ? collectionItemMarketPricePoint(owned, item) : undefined;
 
   if ((variantPrice && priceFreshnessStatus(variantPrice) === "Stale") || (!variantPrice && item.priceStatus === "Stale")) {
     return "confidence-pill stale";
@@ -10464,11 +10590,11 @@ function valuationTagClass(item: CatalogueItem, owned?: CollectionItem) {
     return "tag green";
   }
 
-  if (owned && catalogueMarketValueMinor(item, owned.variant) === null) {
+  if (owned && collectionItemValuation(owned, item).kind === "unvalued") {
     return "tag amber";
   }
 
-  const variantPrice = owned ? latestPricePointForCatalogueVariant(item, owned.variant) : undefined;
+  const variantPrice = owned ? collectionItemMarketPricePoint(owned, item) : undefined;
 
   if ((variantPrice && priceFreshnessStatus(variantPrice) === "Stale") || (!variantPrice && item.priceStatus === "Stale")) {
     return "tag amber";
@@ -10482,11 +10608,11 @@ function valuationSourceLabel(item: CatalogueItem, owned?: CollectionItem) {
     return "Manual estimate";
   }
 
-  if (owned && catalogueMarketValueMinor(item, owned.variant) === null) {
+  if (owned && collectionItemValuation(owned, item).kind === "unvalued") {
     return "Needs estimate";
   }
 
-  const variantPrice = owned ? latestPricePointForCatalogueVariant(item, owned.variant) : undefined;
+  const variantPrice = owned ? collectionItemMarketPricePoint(owned, item) : undefined;
 
   if (variantPrice?.source) {
     return priceSourceLabel(variantPrice.source);
@@ -10500,11 +10626,11 @@ function valuationObservedLabel(item: CatalogueItem, owned?: CollectionItem) {
     return "Manual estimate";
   }
 
-  if (owned && catalogueMarketValueMinor(item, owned.variant) === null) {
+  if (owned && collectionItemValuation(owned, item).kind === "unvalued") {
     return "Unknown";
   }
 
-  const variantPrice = owned ? latestPricePointForCatalogueVariant(item, owned.variant) : undefined;
+  const variantPrice = owned ? collectionItemMarketPricePoint(owned, item) : undefined;
 
   if (variantPrice?.observedAt) {
     return formatEventDate(variantPrice.observedAt);
@@ -10718,8 +10844,8 @@ function sortWishlistItems(
 ) {
   const leftItem = catalogueById.get(left.catalogueId);
   const rightItem = catalogueById.get(right.catalogueId);
-  const leftMarket = leftItem ? catalogueMarketValueMinor(leftItem) : null;
-  const rightMarket = rightItem ? catalogueMarketValueMinor(rightItem) : null;
+  const leftMarket = leftItem ? wishlistMarketValueMinor(leftItem, left) : null;
+  const rightMarket = rightItem ? wishlistMarketValueMinor(rightItem, right) : null;
   const leftTarget = left.targetPriceMinor ?? leftMarket;
   const rightTarget = right.targetPriceMinor ?? rightMarket;
 
@@ -10756,6 +10882,27 @@ function sortWishlistItems(
   }
 
   return priorityRank(right.priority) - priorityRank(left.priority) || compareWishlistNames(leftItem, rightItem);
+}
+
+function wishlistMarketValueMinor(catalogueItem: CatalogueItem, wishlistItem: WishlistItem) {
+  if (catalogueItem.type === "card" && wishlistItem.variant?.trim()) {
+    return catalogueValueMinorForVariant(catalogueItem, wishlistItem.variant) ?? null;
+  }
+
+  return catalogueMarketValueMinor(catalogueItem);
+}
+
+function defaultWishlistVariant(item: CatalogueItem) {
+  if (item.type !== "card" || !item.variantOptions?.length) return undefined;
+
+  const priced = item.variantOptions.filter((option) => option.valueMinor !== undefined);
+  const baseNames = new Set(["normal", "standard"]);
+  const preferred = priced.find((option) => baseNames.has(normalizeVariantLabel(option.label))) ??
+    priced[0] ??
+    item.variantOptions.find((option) => baseNames.has(normalizeVariantLabel(option.label))) ??
+    item.variantOptions[0];
+
+  return preferred?.label;
 }
 
 function compareWishlistNames(left?: CatalogueItem, right?: CatalogueItem) {

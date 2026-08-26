@@ -1,12 +1,14 @@
 import "dotenv/config";
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import { pathToFileURL } from "node:url";
+import { priceChartingLicenceConfirmed } from "../src/lib/pricing/provider-permissions.mjs";
 
 const dayMs = 24 * 60 * 60 * 1000;
 
 export function buildPricingHealthReport({
   cardTraderConfigured = false,
   cardLanguages,
+  cardVariantStreams = [],
   collisionStreams,
   generatedAt = new Date(),
   gradedPriceCharting = {},
@@ -34,8 +36,13 @@ export function buildPricingHealthReport({
     ),
     maxTcgcsvSealedAgeHours: positiveNumber(thresholds.maxTcgcsvSealedAgeHours, 30),
     minCardFreshPricedPercent: positiveNumber(thresholds.minCardFreshPricedPercent, 98),
+    minCardTraderCoveragePercent: positiveNumber(thresholds.minCardTraderCoveragePercent, 5),
+    minCardTraderFreshPricedPercent: positiveNumber(thresholds.minCardTraderFreshPricedPercent, 75),
     minEnglishCardCoveragePercent: positiveNumber(thresholds.minEnglishCardCoveragePercent, 98),
+    minEnglishVariantCoveragePercent: positiveNumber(thresholds.minEnglishVariantCoveragePercent, 95),
     minJapaneseCardCoveragePercent: positiveNumber(thresholds.minJapaneseCardCoveragePercent, 65),
+    minJapaneseVariantCoveragePercent: positiveNumber(thresholds.minJapaneseVariantCoveragePercent, 50),
+    minVariantFreshPricedPercent: positiveNumber(thresholds.minVariantFreshPricedPercent, 90),
     minPriceChartingGradedCoveragePercent: positiveNumber(
       thresholds.minPriceChartingGradedCoveragePercent,
       80,
@@ -77,6 +84,21 @@ export function buildPricingHealthReport({
   normalizedSealed.freshPricedPercent = percent(normalizedSealed.fresh, normalizedSealed.priced);
   normalizedSealed.pricedPercent = percent(normalizedSealed.priced, normalizedSealed.total);
   normalizedSealed.stalePriced = Math.max(0, normalizedSealed.priced - normalizedSealed.fresh);
+  const normalizedVariantStreams = cardVariantStreams.map((row) => {
+    const available = numberValue(row.available);
+    const priced = numberValue(row.priced);
+    const fresh = numberValue(row.fresh);
+
+    return {
+      available,
+      coveragePercent: percent(priced, available),
+      fresh,
+      freshPricedPercent: percent(fresh, priced),
+      language: String(row.language),
+      priced,
+      stalePriced: Math.max(0, priced - fresh),
+    };
+  });
   const normalizedRotation = {
     availableSets: numberValue(sealedRotation.availableSets),
     jobs: numberValue(sealedRotation.jobs),
@@ -115,6 +137,24 @@ export function buildPricingHealthReport({
     if (lane.total > 0 && lane.pricedPercent < minimumCoverage) {
       problems.push(
         `${lane.language} card pricing coverage is ${lane.pricedPercent}%; expected at least ${minimumCoverage}%.`,
+      );
+    }
+  }
+
+  for (const lane of normalizedVariantStreams.filter((row) => ["en", "ja"].includes(row.language))) {
+    const minimumCoverage = lane.language === "en"
+      ? settings.minEnglishVariantCoveragePercent
+      : settings.minJapaneseVariantCoveragePercent;
+
+    if (lane.available > 0 && lane.coveragePercent < minimumCoverage) {
+      problems.push(
+        `${lane.language} exact card-variant pricing coverage is ${lane.coveragePercent}% of ${lane.available} known metadata variant streams; expected at least ${minimumCoverage}%.`,
+      );
+    }
+
+    if (lane.priced > 0 && lane.freshPricedPercent < settings.minVariantFreshPricedPercent) {
+      problems.push(
+        `${lane.language} exact card-variant pricing freshness is ${lane.freshPricedPercent}% of priced streams; expected at least ${settings.minVariantFreshPricedPercent}% within ${settings.cardFreshDays} days.`,
       );
     }
   }
@@ -158,10 +198,24 @@ export function buildPricingHealthReport({
 
     if (!cardTraderSource || cardTraderSource.pricedItems === 0) {
       problems.push("CardTrader sealed pricing is configured but has not produced any price snapshots.");
-    } else if (cardTraderSource.latestAgeHours > settings.maxCardTraderAgeHours) {
-      problems.push(
-        `Latest CardTrader sealed evidence is ${cardTraderSource.latestAgeHours} hours old; expected output within ${settings.maxCardTraderAgeHours} hours.`,
-      );
+    } else {
+      if (cardTraderSource.coveragePercent < settings.minCardTraderCoveragePercent) {
+        problems.push(
+          `CardTrader sealed coverage is ${cardTraderSource.coveragePercent}% (${cardTraderSource.pricedItems} of ${normalizedSealed.total}); expected at least ${settings.minCardTraderCoveragePercent}% before it counts as a meaningful second source.`,
+        );
+      }
+
+      if (cardTraderSource.freshPricedPercent < settings.minCardTraderFreshPricedPercent) {
+        problems.push(
+          `CardTrader sealed freshness is ${cardTraderSource.freshPricedPercent}% of its priced products; expected at least ${settings.minCardTraderFreshPricedPercent}% within ${settings.sealedFreshDays} days.`,
+        );
+      }
+
+      if (cardTraderSource.latestAgeHours > settings.maxCardTraderAgeHours) {
+        problems.push(
+          `Latest CardTrader sealed evidence is ${cardTraderSource.latestAgeHours} hours old; expected output within ${settings.maxCardTraderAgeHours} hours.`,
+        );
+      }
     }
   }
 
@@ -221,6 +275,7 @@ export function buildPricingHealthReport({
   return {
     cardFreshDays: settings.cardFreshDays,
     cardLanguages: normalizedCards,
+    cardVariantStreams: normalizedVariantStreams,
     collisionStreams: normalizedCollisions,
     generatedAt: generatedAt.toISOString(),
     gradedPriceCharting: normalizedGraded,
@@ -247,8 +302,12 @@ export async function loadPricingHealthMetrics({ now = new Date(), prisma, thres
   const gradedFreshSince = new Date(
     now.getTime() - positiveNumber(thresholds.maxPriceChartingGradedAgeHours, 720) * 60 * 60 * 1_000,
   );
+  const customerPriceSourceFilter = priceChartingLicenceConfirmed()
+    ? Prisma.empty
+    : Prisma.sql`AND ps.source NOT IN ('pricecharting-graded-card', 'pricecharting-sealed')`;
   const [
     cardLanguages,
+    cardVariantStreamRows,
     sealedRows,
     rotationRows,
     collisionRows,
@@ -261,11 +320,12 @@ export async function loadPricingHealthMetrics({ now = new Date(), prisma, thres
     prisma.$queryRaw`
       WITH latest AS (
         SELECT card_printing_id, MAX(observed_at) AS observed_at
-        FROM price_snapshots
-        WHERE item_type = 'card'::item_type
-          AND currency = 'GBP'
-          AND graded_company IS NULL
-        GROUP BY card_printing_id
+        FROM price_snapshots ps
+        WHERE ps.item_type = 'card'::item_type
+          AND ps.currency = 'GBP'
+          AND ps.graded_company IS NULL
+          ${customerPriceSourceFilter}
+        GROUP BY ps.card_printing_id
       )
       SELECT
         cp.language,
@@ -278,12 +338,56 @@ export async function loadPricingHealthMetrics({ now = new Date(), prisma, thres
       ORDER BY cp.language
     `,
     prisma.$queryRaw`
+      WITH available AS (
+        SELECT DISTINCT
+          cp.id AS card_printing_id,
+          cp.language,
+          REGEXP_REPLACE(LOWER(variant.value), '[^a-z0-9]+', '', 'g') AS variant_label
+        FROM card_printings cp
+        CROSS JOIN LATERAL jsonb_array_elements_text(
+          CASE
+            WHEN jsonb_typeof(cp.variant_metadata->'availablePrices') = 'array'
+              THEN cp.variant_metadata->'availablePrices'
+            ELSE '[]'::jsonb
+          END
+        ) variant(value)
+        WHERE cp.language IN ('en', 'ja')
+          AND NULLIF(REGEXP_REPLACE(LOWER(variant.value), '[^a-z0-9]+', '', 'g'), '') IS NOT NULL
+      ), latest AS (
+        SELECT
+          ps.card_printing_id,
+          REGEXP_REPLACE(LOWER(COALESCE(ps.variant_label, '')), '[^a-z0-9]+', '', 'g') AS variant_label,
+          MAX(ps.observed_at) AS observed_at
+        FROM price_snapshots ps
+        WHERE ps.item_type = 'card'::item_type
+          AND ps.currency = 'GBP'
+          AND ps.graded_company IS NULL
+          ${customerPriceSourceFilter}
+          AND NULLIF(REGEXP_REPLACE(LOWER(COALESCE(ps.variant_label, '')), '[^a-z0-9]+', '', 'g'), '') IS NOT NULL
+        GROUP BY
+          ps.card_printing_id,
+          REGEXP_REPLACE(LOWER(COALESCE(ps.variant_label, '')), '[^a-z0-9]+', '', 'g')
+      )
+      SELECT
+        available.language,
+        COUNT(*)::int AS available,
+        COUNT(latest.observed_at)::int AS priced,
+        COUNT(*) FILTER (WHERE latest.observed_at >= ${cardFreshSince})::int AS fresh
+      FROM available
+      LEFT JOIN latest
+        ON latest.card_printing_id = available.card_printing_id
+        AND latest.variant_label = available.variant_label
+      GROUP BY available.language
+      ORDER BY available.language
+    `,
+    prisma.$queryRaw`
       WITH latest AS (
         SELECT sealed_product_id, MAX(observed_at) AS observed_at
-        FROM price_snapshots
-        WHERE item_type = 'sealed_product'::item_type
-          AND currency = 'GBP'
-        GROUP BY sealed_product_id
+        FROM price_snapshots ps
+        WHERE ps.item_type = 'sealed_product'::item_type
+          AND ps.currency = 'GBP'
+          ${customerPriceSourceFilter}
+        GROUP BY ps.sealed_product_id
       )
       SELECT
         COUNT(*)::int AS total,
@@ -443,6 +547,7 @@ export async function loadPricingHealthMetrics({ now = new Date(), prisma, thres
   return {
     cardTraderConfigured: Boolean(cardTraderConfigurationRows[0]?.configured),
     cardLanguages,
+    cardVariantStreams: cardVariantStreamRows,
     collisionStreams: collisionRows[0]?.count ?? 0,
     generatedAt: now,
     gradedPriceCharting: gradedPriceChartingRows[0] ?? {},
@@ -479,6 +584,8 @@ export function pricingHealthThresholdsFromEnv(env = process.env) {
         ? true
         : undefined,
     maxCardTraderAgeHours: env.PRICING_HEALTH_MAX_CARDTRADER_AGE_HOURS,
+    minCardTraderCoveragePercent: env.PRICING_HEALTH_MIN_CARDTRADER_COVERAGE_PERCENT,
+    minCardTraderFreshPricedPercent: env.PRICING_HEALTH_MIN_CARDTRADER_FRESH_PERCENT,
     maxPriceChartingGradedAgeHours: env.PRICING_HEALTH_MAX_PRICECHARTING_GRADED_AGE_HOURS,
     maxSnapshotDailyGrowth: env.PRICING_HEALTH_MAX_SNAPSHOT_DAILY_GROWTH,
     maxSnapshotProjectedAnnualRows: env.PRICING_HEALTH_MAX_SNAPSHOT_ANNUAL_ROWS,
@@ -486,7 +593,9 @@ export function pricingHealthThresholdsFromEnv(env = process.env) {
     maxTcgcsvSealedAgeHours: env.PRICING_HEALTH_MAX_TCGCSV_SEALED_AGE_HOURS,
     minCardFreshPricedPercent: env.PRICING_HEALTH_MIN_CARD_FRESH_PERCENT,
     minEnglishCardCoveragePercent: env.PRICING_HEALTH_MIN_EN_CARD_COVERAGE_PERCENT,
+    minEnglishVariantCoveragePercent: env.PRICING_HEALTH_MIN_EN_VARIANT_COVERAGE_PERCENT,
     minJapaneseCardCoveragePercent: env.PRICING_HEALTH_MIN_JA_CARD_COVERAGE_PERCENT,
+    minJapaneseVariantCoveragePercent: env.PRICING_HEALTH_MIN_JA_VARIANT_COVERAGE_PERCENT,
     minPriceChartingGradedCoveragePercent: env.PRICING_HEALTH_MIN_PRICECHARTING_GRADED_COVERAGE_PERCENT,
     minPriceChartingGradedFreshPercent: env.PRICING_HEALTH_MIN_PRICECHARTING_GRADED_FRESH_PERCENT,
     priceChartingGradedExpected: priceChartingGradedEnabled
@@ -495,6 +604,7 @@ export function pricingHealthThresholdsFromEnv(env = process.env) {
     minSealedCoveragePercent: env.PRICING_HEALTH_MIN_SEALED_COVERAGE_PERCENT,
     minSealedFreshPricedPercent: env.PRICING_HEALTH_MIN_SEALED_FRESH_PERCENT,
     minSealedRotationPercent: env.PRICING_HEALTH_MIN_SEALED_ROTATION_PERCENT,
+    minVariantFreshPricedPercent: env.PRICING_HEALTH_MIN_VARIANT_FRESH_PERCENT,
     sealedFreshDays: env.PRICING_HEALTH_SEALED_FRESH_DAYS,
   };
 }
@@ -526,11 +636,13 @@ function normalizeSealedSources({ cardTraderExpected, generatedAt, sealedSources
   const rows = sealedSources.map((row) => {
     const latestObservedAt = optionalIso(row.latestObservedAt);
     const pricedItems = numberValue(row.pricedItems);
+    const freshItems = numberValue(row.freshItems);
 
     return {
       coveragePercent: percent(pricedItems, sealedTotal),
       expected: row.source === "tcgcsv" || (row.source === "cardtrader-sealed" && cardTraderExpected),
-      freshItems: numberValue(row.freshItems),
+      freshItems,
+      freshPricedPercent: percent(freshItems, pricedItems),
       latestAgeHours: latestObservedAt
         ? Math.round(Math.max(0, generatedAt.getTime() - Date.parse(latestObservedAt)) / 3_600) / 1_000
         : null,
@@ -547,6 +659,7 @@ function normalizeSealedSources({ cardTraderExpected, generatedAt, sealedSources
         coveragePercent: 0,
         expected: true,
         freshItems: 0,
+        freshPricedPercent: 0,
         latestAgeHours: null,
         latestObservedAt: null,
         pricedItems: 0,

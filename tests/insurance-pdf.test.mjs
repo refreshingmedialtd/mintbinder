@@ -94,7 +94,7 @@ test("international insurance rows prefer identifying display labels and preserv
     hasPrice: false,
     valueMinor: 0,
     confidence: "Weak",
-  }, { language: "Japanese" });
+  }, { language: "Japanese", variant: "Holofoil" });
   const korean = insuranceCatalogueLabels({
     id: "kr-card",
     type: "card",
@@ -115,12 +115,14 @@ test("international insurance rows prefer identifying display labels and preserv
     set: "Pokemon Card 151",
     number: "No. 025/165",
     language: "Japanese",
+    variant: "Holofoil",
   });
   assert.deepEqual(korean, {
     name: "Bulbasaur",
     set: "Pokemon Card 151",
     number: "No. 001/165",
     language: "Korean",
+    variant: undefined,
   });
   assert.equal(`${Object.values(japanese)}${Object.values(korean)}`.includes("???"), false);
   assert.equal(safeReportText("山田太郎", "Account holder"), "山田太郎");

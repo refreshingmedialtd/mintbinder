@@ -13,6 +13,11 @@ import {
 } from "pdf-lib";
 import { fetchWithPolicy } from "../http/fetch-with-policy.ts";
 import type { CatalogueItem, CollectionEvent, CollectionItem } from "../types.ts";
+import {
+  collectionItemValuation,
+  collectionItemValueMinor,
+  type CollectionItemValuation,
+} from "../valuation.ts";
 import type { InsuranceReportInput } from "./insurance.ts";
 
 const PAGE_WIDTH = 595.28;
@@ -97,7 +102,8 @@ export async function buildInsuranceReportPdf({
     .map((owned) => ({
       owned,
       catalogue: catalogueById.get(owned.catalogueId),
-      valueMinor: ownedValueMinor(owned, catalogueById.get(owned.catalogueId)),
+      valuation: collectionItemValuation(owned, catalogueById.get(owned.catalogueId)),
+      valueMinor: collectionItemValueMinor(owned, catalogueById.get(owned.catalogueId)),
     }))
     .sort((left, right) => (right.valueMinor ?? -1) - (left.valueMinor ?? -1));
   const images = await loadCatalogueImages(document, rows.map((row) => row.catalogue).filter(isCatalogueItem));
@@ -140,7 +146,12 @@ function drawCoverPage({
   generatedAt: Date;
   ownerEmail?: string;
   ownerName?: string;
-  rows: Array<{ owned: CollectionItem; catalogue?: CatalogueItem; valueMinor?: number }>;
+  rows: Array<{
+    owned: CollectionItem;
+    catalogue?: CatalogueItem;
+    valuation: CollectionItemValuation;
+    valueMinor?: number;
+  }>;
 }) {
   const page = document.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
   page.drawRectangle({ x: 0, y: 0, width: PAGE_WIDTH, height: PAGE_HEIGHT, color: COLOURS.paper });
@@ -243,7 +254,12 @@ function drawCollectionPages({
   document: PDFDocument;
   fonts: ReportFonts;
   images: Map<string, PDFImage>;
-  rows: Array<{ owned: CollectionItem; catalogue?: CatalogueItem; valueMinor?: number }>;
+  rows: Array<{
+    owned: CollectionItem;
+    catalogue?: CatalogueItem;
+    valuation: CollectionItemValuation;
+    valueMinor?: number;
+  }>;
 }) {
   if (!rows.length) {
     const page = addReportPage(document, fonts, "Collection schedule");
@@ -290,10 +306,15 @@ function drawCollectionRow(
   page: PDFPage,
   fonts: ReportFonts,
   images: Map<string, PDFImage>,
-  row: { owned: CollectionItem; catalogue?: CatalogueItem; valueMinor?: number },
+  row: {
+    owned: CollectionItem;
+    catalogue?: CatalogueItem;
+    valuation: CollectionItemValuation;
+    valueMinor?: number;
+  },
   y: number,
 ) {
-  const { owned, catalogue } = row;
+  const { owned, catalogue, valuation } = row;
   const labels = insuranceCatalogueLabels(catalogue, owned);
   page.drawLine({ start: { x: MARGIN, y: y - 40 }, end: { x: PAGE_WIDTH - MARGIN, y: y - 40 }, color: COLOURS.rule, thickness: 0.55 });
   const image = catalogue?.image ? images.get(catalogue.image) : undefined;
@@ -316,7 +337,13 @@ function drawCollectionRow(
     unicodeFonts: fonts.unicode,
     color: COLOURS.ink,
   });
-  const details = [labels.set, labels.number, labels.language, owned.purchaseDate ? `Acquired ${formatDate(owned.purchaseDate)}` : null]
+  const details = [
+    labels.set,
+    labels.number,
+    labels.language,
+    labels.variant,
+    owned.purchaseDate ? `Acquired ${formatDate(owned.purchaseDate)}` : null,
+  ]
     .filter(Boolean)
     .join(" - ");
   drawWrappedText(page, details, { x: 78, y: y - 19, maxWidth: 190, size: 6.8, lineHeight: 8, maxLines: 2, font: fonts.regular, unicodeFonts: fonts.unicode, color: COLOURS.muted });
@@ -327,15 +354,19 @@ function drawCollectionRow(
   drawWrappedText(page, owned.location, { x: 375, y: y - 1, maxWidth: 52, size: 7.2, lineHeight: 9, maxLines: 3, font: fonts.regular, unicodeFonts: fonts.unicode, color: COLOURS.ink });
   page.drawText(formatMoney(owned.purchasePriceMinor), { x: 436, y: y - 1, size: 7.2, font: fonts.regular, color: COLOURS.ink });
   page.drawText(formatMoney(row.valueMinor), { x: 493, y: y - 1, size: 7.4, font: fonts.bold, color: COLOURS.ink });
-  const provenance = catalogue?.hasPrice
-    ? `${catalogue.priceSource ?? "Unknown source"} - ${catalogue.priceObservedAt ? formatDate(catalogue.priceObservedAt) : "date unavailable"} - ${catalogue.confidence}`
-    : "No current provider valuation";
+  const provenance = valuation.kind === "manual"
+    ? "Manual total-lot value"
+    : valuation.pricePoint
+      ? `${valuation.pricePoint.source} - ${formatDate(valuation.pricePoint.observedAt)} - ${valuation.pricePoint.confidence}`
+      : valuation.kind === "market"
+        ? `${catalogue?.priceSource ?? "Generic market estimate"} - ${catalogue?.priceObservedAt ? formatDate(catalogue.priceObservedAt) : "date unavailable"} - ${catalogue?.confidence ?? "Unknown confidence"}`
+        : "No exact market valuation";
   drawWrappedText(page, provenance, { x: 307, y: y - 24, maxWidth: 226, size: 6.2, lineHeight: 8, maxLines: 2, font: fonts.regular, unicodeFonts: fonts.unicode, color: COLOURS.muted });
 }
 
 export function insuranceCatalogueLabels(
   catalogue: CatalogueItem | undefined,
-  owned: Pick<CollectionItem, "language">,
+  owned: Pick<CollectionItem, "language"> & { variant?: string },
 ) {
   return {
     name: safeReportText(
@@ -345,6 +376,7 @@ export function insuranceCatalogueLabels(
     set: safeReportText(catalogue?.displaySet || catalogue?.set || "", "Set unavailable"),
     number: catalogue?.number ? `No. ${catalogue.number}` : "Number unavailable",
     language: catalogue?.languageLabel || owned.language || "Language unavailable",
+    variant: owned.variant ? safeReportText(owned.variant, "Finish unavailable") : undefined,
   };
 }
 
@@ -810,11 +842,6 @@ function reportGraphemes(value: string) {
       (entry) => entry.segment);
   }
   return Array.from(value);
-}
-
-function ownedValueMinor(item: CollectionItem, catalogueItem?: CatalogueItem) {
-  if (!catalogueItem) return undefined;
-  return item.overrideValueMinor ?? (catalogueItem.hasPrice ? catalogueItem.valueMinor * item.quantity : undefined);
 }
 
 function formatMoney(valueMinor?: number | null) {

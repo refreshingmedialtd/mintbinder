@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /auth/
+
+Sitemap: https://mintbinder.co.uk/sitemap.xml
+Host: https://mintbinder.co.uk

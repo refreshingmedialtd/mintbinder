@@ -1,6 +1,7 @@
 import "dotenv/config";
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import { pathToFileURL } from "node:url";
+import { priceChartingLicenceConfirmed } from "../src/lib/pricing/provider-permissions.mjs";
 
 const defaultAdminEmail = process.env.ADMIN_QA_EMAIL?.trim() || "liam@refreshing.media";
 const requiredEnv = [
@@ -23,10 +24,10 @@ const jobRunTypes = [
   "SEALED_PRICING_REFRESH",
 ];
 const staleJobWarningHours = {
-  PRICE_ALERTS: 48,
-  CATALOGUE_REFRESH: 168,
+  PRICE_ALERTS: 36,
+  CATALOGUE_REFRESH: 14,
   PRICING_REFRESH: 3,
-  SEALED_PRICING_REFRESH: 48,
+  SEALED_PRICING_REFRESH: 3,
 };
 const recentFailedJobRunDetailLimit = 5;
 
@@ -320,6 +321,9 @@ async function databaseCounts(prisma) {
 }
 
 async function catalogueHealthReport(prisma) {
+  const customerPriceSourceFilter = priceChartingLicenceConfirmed()
+    ? Prisma.empty
+    : Prisma.sql`AND snapshot.source NOT IN ('pricecharting-graded-card', 'pricecharting-sealed')`;
   const [
     cardImageRows,
     cardVariantRows,
@@ -364,8 +368,12 @@ async function catalogueHealthReport(prisma) {
       SELECT
         (SELECT COUNT(*)::int FROM card_printings) AS "total",
         COUNT(DISTINCT card_printing_id)::int AS "covered"
-      FROM price_snapshots
-      WHERE card_printing_id IS NOT NULL
+      FROM price_snapshots snapshot
+      WHERE snapshot.card_printing_id IS NOT NULL
+        AND snapshot.item_type = 'card'::item_type
+        AND snapshot.currency = 'GBP'
+        AND snapshot.graded_company IS NULL
+        ${customerPriceSourceFilter}
     `,
     prisma.$queryRaw`
       SELECT
@@ -382,6 +390,10 @@ async function catalogueHealthReport(prisma) {
       INNER JOIN sealed_products AS product
         ON product.id = snapshot.sealed_product_id
        AND product.visibility = 'global'::catalogue_visibility
+      WHERE snapshot.sealed_product_id IS NOT NULL
+        AND snapshot.item_type = 'sealed_product'::item_type
+        AND snapshot.currency = 'GBP'
+        ${customerPriceSourceFilter}
     `,
     prisma.$queryRaw`
       SELECT source, COUNT(*)::int AS snapshots

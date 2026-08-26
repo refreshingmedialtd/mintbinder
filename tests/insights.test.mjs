@@ -130,7 +130,7 @@ test("does not treat manual estimates as weak market confidence", () => {
   assert.equal(intelligence.valuationCoverage.manualNotesMissing, 0);
 });
 
-test("falls back to the card market value when an owned variant has no exact price", () => {
+test("leaves an owned variant unvalued when it has no exact price", () => {
   const pricedVariantCatalogue = catalogueItem({
     id: "variant-priced",
     valueMinor: 1500,
@@ -159,9 +159,9 @@ test("falls back to the card market value when an owned variant has no exact pri
     wishlist: [],
   });
 
-  assert.equal(intelligence.valuationCoverage.knownLots, 1);
-  assert.equal(intelligence.valuationCoverage.unvaluedLots, 0);
-  assert.equal(intelligence.valuationCoverage.knownValueMinor, 1500);
+  assert.equal(intelligence.valuationCoverage.knownLots, 0);
+  assert.equal(intelligence.valuationCoverage.unvaluedLots, 1);
+  assert.equal(intelligence.valuationCoverage.knownValueMinor, 0);
 });
 
 test("explains wishlist and weak-confidence price alerts", () => {
@@ -229,6 +229,128 @@ test("explains wishlist and weak-confidence price alerts", () => {
   assert.equal(
     intelligence.priceAlerts[2].explanation,
     "Weak confidence from TCGplayer US market via TCGCSV (GBP converted) observed 01 Jun 2026; refresh pricing or add a manual estimate.",
+  );
+});
+
+test("wishlist alerts use the saved exact variant and ignore unpriced explicit variants", () => {
+  const card = catalogueItem({
+    id: "variant-wishlist-card",
+    valueMinor: 1500,
+    priceHistory: [
+      {
+        confidence: "Strong",
+        observedAt: "2026-08-20T00:00:00.000Z",
+        source: "tcgcsv-card",
+        valueMinor: 1500,
+        variantLabel: "Holofoil",
+      },
+      {
+        confidence: "Fair",
+        observedAt: "2026-08-20T00:00:00.000Z",
+        source: "tcgcsv-card",
+        valueMinor: 900,
+        variantLabel: "Normal",
+      },
+    ],
+  });
+  const intelligence = buildCollectionIntelligence({
+    catalogueById: new Map([[card.id, card]]),
+    collection: [],
+    events: [],
+    sets: [],
+    storageLocations: [],
+    wishlist: [
+      {
+        id: "wish-normal",
+        catalogueId: card.id,
+        priority: "High",
+        targetPriceMinor: 1000,
+        variant: "Normal",
+      },
+      {
+        id: "wish-reverse",
+        catalogueId: card.id,
+        priority: "High",
+        targetPriceMinor: 1000,
+        variant: "Reverse Holofoil",
+      },
+    ],
+  });
+
+  assert.deepEqual(
+    intelligence.priceAlerts.map((alert) => ({
+      currentValueMinor: alert.currentValueMinor,
+      id: alert.id,
+      itemName: alert.itemName,
+      priceObservedAt: alert.priceObservedAt,
+      priceSource: alert.priceSource,
+    })),
+    [{
+      currentValueMinor: 900,
+      id: "wishlist-wish-normal",
+      itemName: "Test Card · Normal",
+      priceObservedAt: "2026-08-20T00:00:00.000Z",
+      priceSource: "tcgcsv-card",
+    }],
+  );
+  assert.deepEqual(
+    intelligence.wishlistOpportunities.map((opportunity) => [opportunity.id, opportunity.currentValueMinor]),
+    [["wish-normal", 900]],
+  );
+});
+
+test("includes graded-only price history even when the raw catalogue headline is unpriced", () => {
+  const gradedOnlyCard = catalogueItem({
+    hasPrice: false,
+    id: "graded-only-history",
+    name: "Graded Only History",
+    priceObservedAt: undefined,
+    priceSource: undefined,
+    valueMinor: 0,
+    priceHistory: [
+      {
+        confidence: "Fair",
+        gradedCompany: "PSA",
+        gradedScore: 10,
+        observedAt: "2026-08-20T00:00:00.000Z",
+        source: "licensed-graded-market",
+        valueMinor: 25000,
+        variantLabel: "Holofoil",
+      },
+      {
+        confidence: "Strong",
+        observedAt: "2026-08-20T00:00:00.000Z",
+        source: "raw-market",
+        valueMinor: 1200,
+        variantLabel: "Holofoil",
+      },
+    ],
+  });
+  const intelligence = buildCollectionIntelligence({
+    asOf: new Date("2026-08-22T12:00:00.000Z"),
+    catalogueById: new Map([[gradedOnlyCard.id, gradedOnlyCard]]),
+    collection: [
+      collectionItem({
+        catalogueId: gradedOnlyCard.id,
+        grade: "PSA 10",
+        id: "owned-graded-only-history",
+        variant: "Holofoil",
+      }),
+    ],
+    events: [],
+    sets: [],
+    storageLocations: [],
+    wishlist: [],
+  });
+
+  assert.equal(intelligence.portfolioHistory.length, 3);
+  assert.deepEqual(
+    intelligence.portfolioHistory.map((point) => [point.observedAt, point.valueMinor]),
+    [
+      ["2026-08-20T00:00:00.000Z", 25000],
+      ["2026-08-21T00:00:00.000Z", 25000],
+      ["2026-08-22T00:00:00.000Z", 25000],
+    ],
   );
 });
 

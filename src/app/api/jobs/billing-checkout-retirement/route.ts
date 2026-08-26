@@ -16,10 +16,11 @@ export async function POST(request: Request) {
     const body = (await request.json().catch(() => ({}))) as {
       batchSize?: number;
       now?: string;
+      scheduled?: boolean;
       staleAfterMinutes?: number;
     };
     const { jobRun, result } = await runTrackedJob({
-      input: body,
+      input: { ...body, scheduled: body.scheduled === true },
       type: "billing_checkout_retirement",
       task: async () => assertBillingCheckoutRetirementHealthy(await runBillingCheckoutRetirement({
         batchSize: body.batchSize,

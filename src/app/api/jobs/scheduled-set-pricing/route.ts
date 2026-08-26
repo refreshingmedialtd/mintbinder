@@ -34,15 +34,17 @@ export async function POST(request: Request) {
   try {
     await requireJobAccess(request);
 
-    const input = scheduledSetPricingInputFromSources({
-      body: (await request.json().catch(() => ({}))) as ScheduledSetPricingBody,
-    });
+    const body = (await request.json().catch(() => ({}))) as ScheduledSetPricingBody & {
+      scheduled?: boolean;
+    };
+    const input = scheduledSetPricingInputFromSources({ body });
     const { jobRun, result } = await runTrackedJob({
       input: {
         ...input,
-        scheduled: true,
+        scheduled: body.scheduled === true,
         scheduler: "scheduled-set-pricing",
         strategy: "set-rotation",
+        writePrices: true,
       },
       type: "pricing_refresh",
       task: () => runScheduledSetPricing(input),

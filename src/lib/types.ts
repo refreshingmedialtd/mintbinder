@@ -6,9 +6,14 @@ export type PricePoint = {
   valueMinor: number;
   confidence: PriceConfidence;
   source: string;
+  currency?: string;
+  condition?: string;
+  language?: string;
   variantLabel?: string;
   gradedCompany?: string;
   gradedScore?: number;
+  pointCount?: number;
+  sampleSize?: number | null;
 };
 
 export type CatalogueVariantOption = {
@@ -66,6 +71,7 @@ export type CollectionItem = {
 export type WishlistItem = {
   id: string;
   catalogueId: string;
+  variant?: string;
   priority: "Low" | "Medium" | "High" | "Grail";
   targetPriceMinor?: number;
   notes?: string;

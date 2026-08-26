@@ -180,9 +180,10 @@ test("warns when key scheduled jobs are stale", () => {
       },
     }),
     [
-      "Latest price alerts job run is stale: 2026-06-01T08:00:00.000Z is older than 48 hours.",
+      "Latest price alerts job run is stale: 2026-06-01T08:00:00.000Z is older than 36 hours.",
+      "Latest catalogue refresh job run is stale: 2026-06-04T12:01:00.000Z is older than 14 hours.",
       "Latest pricing refresh job run is stale: 2026-06-05T08:00:00.000Z is older than 3 hours.",
-      "Latest sealed pricing refresh job run is stale: 2026-06-01T09:00:00.000Z is older than 48 hours.",
+      "Latest sealed pricing refresh job run is stale: 2026-06-01T09:00:00.000Z is older than 3 hours.",
     ],
   );
 });

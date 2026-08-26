@@ -519,6 +519,7 @@ model WishlistItem {
   itemType         ItemType         @map("item_type")
   cardPrintingId   String?          @map("card_printing_id") @db.Uuid
   sealedProductId  String?          @map("sealed_product_id") @db.Uuid
+  variantLabel     String?          @map("variant_label")
   targetPriceMinor Int?             @map("target_price_minor")
   targetCurrency   String?          @map("target_currency")
   priority         WishlistPriority @default(MEDIUM)

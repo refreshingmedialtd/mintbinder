@@ -15,6 +15,7 @@ export const runtime = "nodejs";
 type GradedCardPricingBody = {
   limit?: number | string;
   priceOnlyUnpriced?: boolean;
+  scheduled?: boolean;
   retryAttempts?: number | string;
   retryWaitMs?: number | string;
   timeoutMs?: number | string;
@@ -31,7 +32,11 @@ export async function POST(request: Request) {
     const envOptions = priceChartingGradedOptionsFromEnv(process.env);
     const input = await gradedCardPricingInput(body, envOptions);
     const { jobRun, result } = await runTrackedJob({
-      input: { ...input, provider: "pricecharting-graded-card" },
+      input: {
+        ...input,
+        provider: "pricecharting-graded-card",
+        scheduled: body.scheduled === true,
+      },
       type: "pricing_refresh",
       task: () => syncPriceChartingGradedCardPrices({
         ...envOptions,

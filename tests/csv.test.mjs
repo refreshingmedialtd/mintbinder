@@ -69,6 +69,43 @@ test("leaves estimated value blank when no market or manual value exists", () =>
   assert.equal(record.estimated_value_minor, "");
 });
 
+test("exports the exact variant, condition-adjusted lot value", () => {
+  const pricedCard = {
+    id: "card-priced",
+    type: "card",
+    name: "Priced card",
+    set: "Test Set",
+    number: "1",
+    rarity: "Rare",
+    hasPrice: true,
+    valueMinor: 2_000,
+    confidence: "Strong",
+    priceHistory: [{
+      confidence: "Fair",
+      observedAt: "2026-08-20T00:00:00.000Z",
+      source: "tcgcsv-card",
+      valueMinor: 1_000,
+      variantLabel: "Holofoil",
+    }],
+  };
+  const csv = buildCollectionCsv({
+    catalogueById: new Map([[pricedCard.id, pricedCard]]),
+    collection: [collectionItem({
+      catalogueId: pricedCard.id,
+      condition: "Light Played",
+      grade: "Raw",
+      quantity: 2,
+      variant: "Holofoil",
+    })],
+    exportedAt: new Date("2026-08-21T00:00:00.000Z"),
+  });
+  const record = csvRecord(csv);
+
+  assert.equal(record.estimated_value_minor, "1400");
+  assert.equal(record.estimated_value_gbp, "14.00");
+  assert.equal(record.confidence, "Fair");
+});
+
 test("neutralizes spreadsheet formulas in exported text without changing numeric cells", () => {
   const dangerousCatalogue = {
     ...unpricedSealed,

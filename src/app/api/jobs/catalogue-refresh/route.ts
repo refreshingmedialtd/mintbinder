@@ -16,11 +16,12 @@ export async function POST(request: Request) {
       maxPages?: number;
       q?: string;
       backfillNewestMissingSet?: boolean;
+      scheduled?: boolean;
       setPageSize?: number;
       setsOnly?: boolean;
     };
     const { jobRun, result } = await runTrackedJob({
-      input: body,
+      input: { ...body, scheduled: body.scheduled === true },
       type: "catalogue_refresh",
       task: async () => {
         if (body.setsOnly) {

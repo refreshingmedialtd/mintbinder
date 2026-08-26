@@ -45,6 +45,8 @@ test("enforces bounded, non-trivial account passwords", () => {
   assert.match(passwordPolicyError("a".repeat(PASSWORD_MIN_LENGTH - 1)), /at least/);
   assert.equal(passwordPolicyError("correct horse battery staple"), null);
   assert.match(passwordPolicyError("password1234"), /less predictable/);
+  assert.match(passwordPolicyError("AAAAAAAAAAAA"), /less predictable/);
+  assert.match(passwordPolicyError("  QWERTY123456  "), /less predictable/);
   assert.match(passwordPolicyError("a".repeat(PASSWORD_MAX_LENGTH + 1)), /no more than/);
 });
 

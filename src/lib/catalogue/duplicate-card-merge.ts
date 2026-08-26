@@ -1,3 +1,5 @@
+import { normalizeVariantLabel } from "./variants.ts";
+
 export type DuplicateCardMergeCardRow = {
   collectionCount: number;
   id: string;
@@ -13,10 +15,12 @@ export type DuplicateCardMergeWishlistConflictRow = {
   primaryPriority: string;
   primaryTargetCurrency: string | null;
   primaryTargetPriceMinor: number | null;
+  primaryVariantLabel: string | null;
   primaryWishlistId: string;
   sourcePriority: string;
   sourceTargetCurrency: string | null;
   sourceTargetPriceMinor: number | null;
+  sourceVariantLabel: string | null;
   sourceWishlistId: string;
   userId: string;
 };
@@ -31,6 +35,7 @@ export type DuplicateCardMergeConflict = {
   mergedPriority: string;
   mergedTargetCurrency?: string;
   mergedTargetPriceMinor?: number;
+  mergedVariantLabel?: string;
   primaryWishlistId: string;
   sourceWishlistId: string;
   userId: string;
@@ -71,7 +76,10 @@ export function buildDuplicateCardMergePlan({
   input?: DuplicateCardMergeInput;
   primaryCard?: DuplicateCardMergeCardRow;
 }): DuplicateCardMergePlan {
-  const errors = duplicateCardMergeErrors(primaryCard, duplicateCard);
+  const errors = [
+    ...duplicateCardMergeErrors(primaryCard, duplicateCard),
+    ...wishlistVariantConflictErrors(conflicts),
+  ];
   const wishlistConflicts = conflicts.map(duplicateCardMergeConflict);
   const nonConflictingWishlistCount = Math.max(
     0,
@@ -102,16 +110,62 @@ export function buildDuplicateCardMergePlan({
 export function duplicateCardMergeConflict(
   row: DuplicateCardMergeWishlistConflictRow,
 ): DuplicateCardMergeConflict {
-  const target = mergedWishlistTarget(row);
+  const identity = mergedWishlistIdentity(row);
 
   return {
     mergedPriority: strongerWishlistPriority(row.primaryPriority, row.sourcePriority),
-    mergedTargetCurrency: target.currency ?? undefined,
-    mergedTargetPriceMinor: target.priceMinor ?? undefined,
+    mergedTargetCurrency: identity.currency ?? undefined,
+    mergedTargetPriceMinor: identity.priceMinor ?? undefined,
+    mergedVariantLabel: identity.variantLabel ?? undefined,
     primaryWishlistId: row.primaryWishlistId,
     sourceWishlistId: row.sourceWishlistId,
     userId: row.userId,
   };
+}
+
+function wishlistVariantConflictErrors(conflicts: DuplicateCardMergeWishlistConflictRow[]) {
+  return conflicts
+    .filter((row) => wishlistVariantsConflict(row))
+    .map((row) =>
+      `Wishlist rows ${row.primaryWishlistId} and ${row.sourceWishlistId} select different card finishes (${row.primaryVariantLabel} and ${row.sourceVariantLabel}); reconcile them before merging these cards.`,
+    );
+}
+
+function wishlistVariantsConflict(row: DuplicateCardMergeWishlistConflictRow) {
+  const primary = normalizedWishlistVariant(row.primaryVariantLabel);
+  const source = normalizedWishlistVariant(row.sourceVariantLabel);
+
+  return Boolean(primary && source && primary !== source);
+}
+
+function mergedWishlistIdentity(row: DuplicateCardMergeWishlistConflictRow) {
+  const primaryVariant = normalizedWishlistVariant(row.primaryVariantLabel);
+  const sourceVariant = normalizedWishlistVariant(row.sourceVariantLabel);
+
+  if (!primaryVariant && sourceVariant) {
+    return {
+      currency: row.sourceTargetCurrency,
+      priceMinor: row.sourceTargetPriceMinor,
+      variantLabel: row.sourceVariantLabel?.trim() || null,
+    };
+  }
+
+  if (primaryVariant && !sourceVariant) {
+    return {
+      currency: row.primaryTargetCurrency,
+      priceMinor: row.primaryTargetPriceMinor,
+      variantLabel: row.primaryVariantLabel?.trim() || null,
+    };
+  }
+
+  return {
+    ...mergedWishlistTarget(row),
+    variantLabel: row.primaryVariantLabel?.trim() || row.sourceVariantLabel?.trim() || null,
+  };
+}
+
+function normalizedWishlistVariant(value: string | null) {
+  return value?.trim() ? normalizeVariantLabel(value) || undefined : undefined;
 }
 
 export function strongerWishlistPriority(left: string, right: string) {

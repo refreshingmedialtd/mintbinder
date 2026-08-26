@@ -13,7 +13,6 @@ import { sampleAppData } from "../sample-data.ts";
 import {
   buildCatalogueVariantOptions,
   catalogueValueMinorForVariant,
-  latestPricePointForVariant,
   pokemonTcgImageUrlFromProviderIds,
 } from "../catalogue/variants.ts";
 import { tcgdexJapaneseImageUrlFromProviderIds } from "../catalogue/tcgdex-images.ts";
@@ -67,6 +66,13 @@ import {
   priceFreshnessStatus,
   priceMarketForSource,
 } from "../pricing/market-context.ts";
+import {
+  customerVisiblePriceSource,
+  priceChartingLicenceConfirmed,
+} from "../pricing/provider-permissions.mjs";
+import {
+  collectionItemValueMinor as exactCollectionItemValueMinor,
+} from "../valuation.ts";
 import type {
   AppCatalogueData,
   AppCatalogueSearchData,
@@ -172,7 +178,31 @@ type CatalogueReferenceRecord = {
   sealedProduct: SealedProductWithPrices | null;
 };
 
+type ReferencedPriceSnapshot = PriceLike & {
+  cardPrintingId: string | null;
+  sealedProductId: string | null;
+};
+
 const PRICE_HISTORY_LIMIT = 8;
+const restrictedPriceChartingSources = [
+  "pricecharting-graded-card",
+  "pricecharting-sealed",
+];
+
+function customerVisiblePriceSnapshotWhere({ rawCard = false } = {}): Prisma.PriceSnapshotWhereInput {
+  return {
+    ...(rawCard ? { gradedCompany: null } : {}),
+    ...(!priceChartingLicenceConfirmed()
+      ? { source: { notIn: restrictedPriceChartingSources } }
+      : {}),
+  };
+}
+
+function customerVisiblePriceSnapshotSql() {
+  return priceChartingLicenceConfirmed()
+    ? Prisma.empty
+    : Prisma.sql`AND ps.source NOT IN ('pricecharting-graded-card', 'pricecharting-sealed')`;
+}
 
 const catalogueSearchPriceSelect = {
   priceMinor: true,
@@ -207,6 +237,7 @@ const catalogueSearchCardSelect = {
     },
   },
   priceSnapshots: {
+    where: customerVisiblePriceSnapshotWhere({ rawCard: true }),
     orderBy: [{ observedAt: "desc" as const }, { createdAt: "desc" as const }],
     take: PRICE_HISTORY_LIMIT,
     select: catalogueSearchPriceSelect,
@@ -220,6 +251,7 @@ const catalogueSearchSealedSelect = {
   imageUrl: true,
   relatedCardSet: { select: { name: true } },
   priceSnapshots: {
+    where: customerVisiblePriceSnapshotWhere(),
     orderBy: [{ observedAt: "desc" as const }, { createdAt: "desc" as const }],
     take: PRICE_HISTORY_LIMIT,
     select: catalogueSearchPriceSelect,
@@ -269,6 +301,7 @@ export type CreateSealedProductInput = {
 };
 
 export type UpdateWishlistItemInput = {
+  variant?: string;
   priority?: string;
   targetPrice?: string;
   notes?: string;
@@ -332,6 +365,7 @@ export async function getAppData(userId: string, options: AppDataOptions = {}): 
               include: {
                 cardSet: true,
                 priceSnapshots: {
+                  where: customerVisiblePriceSnapshotWhere(),
                   orderBy: { observedAt: "desc" },
                   take: PRICE_HISTORY_LIMIT,
                 },
@@ -341,6 +375,7 @@ export async function getAppData(userId: string, options: AppDataOptions = {}): 
               include: {
                 relatedCardSet: true,
                 priceSnapshots: {
+                  where: customerVisiblePriceSnapshotWhere(),
                   orderBy: { observedAt: "desc" },
                   take: PRICE_HISTORY_LIMIT,
                 },
@@ -384,14 +419,20 @@ export async function getAppData(userId: string, options: AppDataOptions = {}): 
         }),
       ]);
 
+    await hydrateReferencedPriceSnapshotsByIdentity([
+      ...(collectionItems as unknown as CatalogueReferenceRecord[]),
+      ...(wishlistItems as unknown as CatalogueReferenceRecord[]),
+    ]);
+
     const cardSetTotals = new Map(cardSetCounts.map((row) => [row.cardSetId, row._count._all]));
     const ownedCardsBySet = ownedCardCountsBySet(ownedCardRows);
     const catalogue = referencedCatalogueItems(collectionItems, wishlistItems);
+    const collection = collectionItems.map(mapCollectionItem);
 
     return {
       catalogue,
       catalogueComplete: false,
-      collection: collectionItems.map(mapCollectionItem),
+      collection,
       wishlist: wishlistItems.map(mapWishlistItem),
       sets: cardSets.map((set) =>
         mapSetProgress(set, {
@@ -399,7 +440,7 @@ export async function getAppData(userId: string, options: AppDataOptions = {}): 
           total: cardSetTotals.get(set.id) ?? 0,
         }),
       ),
-      storageLocations: mapStorageLocations(storageLocations, collectionItems),
+      storageLocations: mapStorageLocations(storageLocations, collection, catalogue),
       events: collectionEvents.map(mapCollectionEvent),
       source: "database",
       subscription,
@@ -494,6 +535,7 @@ export async function getCatalogueSetData(setName: string, setId?: string | null
       include: {
         cardSet: true,
         priceSnapshots: {
+          where: customerVisiblePriceSnapshotWhere({ rawCard: true }),
           orderBy: [{ observedAt: "desc" }, { createdAt: "desc" }],
           take: PRICE_HISTORY_LIMIT,
         },
@@ -708,6 +750,8 @@ async function searchCardPrintingsByValue(query: NormalizedCatalogueSearchInput)
         FROM price_snapshots ps
         WHERE ps.card_printing_id = cp.id
           AND ps.item_type = 'card'::item_type
+          AND ps.graded_company IS NULL
+          ${customerVisiblePriceSnapshotSql()}
         ORDER BY ps.observed_at DESC, ps.created_at DESC
         LIMIT ${PRICE_HISTORY_LIMIT}
       ) recent
@@ -770,6 +814,7 @@ async function searchSealedProductsByValue(
         FROM price_snapshots ps
         WHERE ps.sealed_product_id = sp.id
           AND ps.item_type = 'sealed_product'::item_type
+          ${customerVisiblePriceSnapshotSql()}
         ORDER BY ps.observed_at DESC, ps.created_at DESC
         LIMIT ${PRICE_HISTORY_LIMIT}
       ) recent
@@ -853,7 +898,11 @@ function referencedCatalogueItems(
 
   for (const record of [...collectionItems, ...wishlistItems]) {
     const item = record.cardPrinting
-      ? mapCardPrintingToCatalogueItem(record.cardPrinting, record.cardPrinting.priceSnapshots)
+      ? mapCardPrintingToCatalogueItem(
+          record.cardPrinting,
+          record.cardPrinting.priceSnapshots,
+          { includeGradedHistory: true },
+        )
       : record.sealedProduct
         ? mapSealedProductToCatalogueItem(record.sealedProduct, record.sealedProduct.priceSnapshots)
         : null;
@@ -864,6 +913,123 @@ function referencedCatalogueItems(
   }
 
   return Array.from(byId.values());
+}
+
+/**
+ * Prisma's nested `take` is global to a printing, so active variants or raw
+ * imports can crowd an owned grade out of the last few rows. Fetch a bounded
+ * history per exact source/variant/grade stream for only the catalogue items
+ * referenced by this tenant, then reuse it for dashboard, storage and exports.
+ */
+async function hydrateReferencedPriceSnapshotsByIdentity(records: CatalogueReferenceRecord[]) {
+  const cardIds = [...new Set(records.flatMap((record) => record.cardPrinting?.id ?? []))];
+  const sealedIds = [...new Set(records.flatMap((record) => record.sealedProduct?.id ?? []))];
+
+  if (!cardIds.length && !sealedIds.length) {
+    return;
+  }
+
+  const scopes: Prisma.Sql[] = [];
+
+  if (cardIds.length) {
+    scopes.push(Prisma.sql`"card_printing_id" IN (${Prisma.join(
+      cardIds.map((id) => Prisma.sql`${id}::uuid`),
+    )})`);
+  }
+
+  if (sealedIds.length) {
+    scopes.push(Prisma.sql`"sealed_product_id" IN (${Prisma.join(
+      sealedIds.map((id) => Prisma.sql`${id}::uuid`),
+    )})`);
+  }
+
+  const priceChartingFilter = priceChartingLicenceConfirmed()
+    ? Prisma.empty
+    : Prisma.sql`AND "source" NOT IN ('pricecharting-sealed', 'pricecharting-graded-card')`;
+  const rows = await prisma.$queryRaw<ReferencedPriceSnapshot[]>(Prisma.sql`
+    WITH "ranked_prices" AS (
+      SELECT
+        "card_printing_id" AS "cardPrintingId",
+        "sealed_product_id" AS "sealedProductId",
+        "price_minor" AS "priceMinor",
+        "confidence_score" AS "confidenceScore",
+        "source",
+        "source_ref" AS "sourceRef",
+        "observed_at" AS "observedAt",
+        "variant_label" AS "variantLabel",
+        "graded_company" AS "gradedCompany",
+        "graded_score" AS "gradedScore",
+        ROW_NUMBER() OVER (
+          PARTITION BY
+            "item_type",
+            "card_printing_id",
+            "sealed_product_id",
+            "source",
+            COALESCE("variant_label", ''),
+            COALESCE("graded_company"::text, ''),
+            COALESCE("graded_score"::text, '')
+          ORDER BY "observed_at" DESC, "created_at" DESC
+        ) AS "identityRank"
+      FROM "price_snapshots"
+      WHERE (${Prisma.join(scopes, " OR ")})
+        AND "currency" = 'GBP'
+        AND (
+          (
+            "item_type" = 'card'::item_type
+            AND ("condition" IS NULL OR "condition"::text = 'near_mint')
+          )
+          OR
+          (
+            "item_type" = 'sealed_product'::item_type
+            AND ("condition" IS NULL OR "condition"::text = 'sealed')
+          )
+        )
+        ${priceChartingFilter}
+    )
+    SELECT
+      "cardPrintingId",
+      "sealedProductId",
+      "priceMinor",
+      "confidenceScore",
+      "source",
+      "sourceRef",
+      "observedAt",
+      "variantLabel",
+      "gradedCompany",
+      "gradedScore"
+    FROM "ranked_prices"
+    WHERE "identityRank" <= ${PRICE_HISTORY_LIMIT}
+    ORDER BY "observedAt" DESC
+  `);
+  const byCard = groupReferencedPrices(rows, "cardPrintingId");
+  const bySealed = groupReferencedPrices(rows, "sealedProductId");
+
+  for (const record of records) {
+    if (record.cardPrinting) {
+      record.cardPrinting.priceSnapshots = byCard.get(record.cardPrinting.id) ?? [];
+    }
+
+    if (record.sealedProduct) {
+      record.sealedProduct.priceSnapshots = bySealed.get(record.sealedProduct.id) ?? [];
+    }
+  }
+}
+
+function groupReferencedPrices(
+  rows: ReferencedPriceSnapshot[],
+  key: "cardPrintingId" | "sealedProductId",
+) {
+  const grouped = new Map<string, PriceLike[]>();
+
+  for (const row of rows) {
+    const id = row[key];
+
+    if (id) {
+      grouped.set(id, [...(grouped.get(id) ?? []), row]);
+    }
+  }
+
+  return grouped;
 }
 
 function ownedCardCountsBySet(
@@ -1132,17 +1298,7 @@ function dashboardSummary(data: AppData) {
 }
 
 function dashboardOwnedValueMinor(item: CollectionItem, catalogueItem?: CatalogueItem) {
-  if (item.overrideValueMinor !== undefined) {
-    return item.overrideValueMinor;
-  }
-
-  if (!catalogueItem?.hasPrice) {
-    return null;
-  }
-
-  const unitValue = catalogueValueMinorForVariant(catalogueItem, item.variant) ?? catalogueItem.valueMinor;
-
-  return Math.round(unitValue * conditionValueMultiplier(item.condition)) * item.quantity;
+  return exactCollectionItemValueMinor(item, catalogueItem) ?? null;
 }
 
 export async function createCollectionItem(
@@ -1161,14 +1317,22 @@ export async function createCollectionItem(
       where: { id: catalogueId },
       include: {
         cardSet: true,
-        priceSnapshots: { orderBy: { observedAt: "desc" }, take: 1 },
+        priceSnapshots: {
+          where: customerVisiblePriceSnapshotWhere(),
+          orderBy: { observedAt: "desc" },
+          take: 1,
+        },
       },
     }),
     prisma.sealedProduct.findFirst({
       where: visibleSealedProductWhere(userId, catalogueId),
       include: {
         relatedCardSet: true,
-        priceSnapshots: { orderBy: { observedAt: "desc" }, take: 1 },
+        priceSnapshots: {
+          where: customerVisiblePriceSnapshotWhere(),
+          orderBy: { observedAt: "desc" },
+          take: 1,
+        },
       },
     }),
   ]);
@@ -1243,13 +1407,21 @@ export async function createCollectionItem(
       cardPrinting: {
         include: {
           cardSet: true,
-          priceSnapshots: { orderBy: { observedAt: "desc" }, take: 1 },
+          priceSnapshots: {
+            where: customerVisiblePriceSnapshotWhere(),
+            orderBy: { observedAt: "desc" },
+            take: 1,
+          },
         },
       },
       sealedProduct: {
         include: {
           relatedCardSet: true,
-          priceSnapshots: { orderBy: { observedAt: "desc" }, take: 1 },
+          priceSnapshots: {
+            where: customerVisiblePriceSnapshotWhere(),
+            orderBy: { observedAt: "desc" },
+            take: 1,
+          },
         },
       },
       storageLocation: true,
@@ -1692,6 +1864,7 @@ export async function createSealedProduct(
     include: {
       relatedCardSet: true,
       priceSnapshots: {
+        where: customerVisiblePriceSnapshotWhere(),
         orderBy: { observedAt: "desc" },
         take: PRICE_HISTORY_LIMIT,
       },
@@ -1741,22 +1914,45 @@ export async function deleteManualSealedProduct(userId: string, id: string) {
   });
 }
 
-export async function createWishlistItem(userId: string, catalogueId: string): Promise<WishlistItem> {
+export async function createWishlistItem(
+  userId: string,
+  catalogueId: string,
+  variant?: string,
+): Promise<WishlistItem> {
   assertDatabaseConfigured();
   const normalizedCatalogueId = boundedRequiredText(
     catalogueId,
     "Catalogue item id",
     PERSISTED_INPUT_LIMITS.catalogueId,
   );
+  const normalizedVariant = boundedOptionalText(
+    variant,
+    "Wishlist variant",
+    PERSISTED_INPUT_LIMITS.variant,
+  );
 
   const [cardPrinting, sealedProduct] = await Promise.all([
     prisma.cardPrinting.findUnique({
       where: { id: normalizedCatalogueId },
-      include: { priceSnapshots: { orderBy: { observedAt: "desc" }, take: 1 } },
+      include: {
+        cardSet: true,
+        priceSnapshots: {
+          where: customerVisiblePriceSnapshotWhere({ rawCard: true }),
+          orderBy: { observedAt: "desc" },
+          take: PRICE_HISTORY_LIMIT,
+        },
+      },
     }),
     prisma.sealedProduct.findFirst({
       where: visibleSealedProductWhere(userId, normalizedCatalogueId),
-      include: { priceSnapshots: { orderBy: { observedAt: "desc" }, take: 1 } },
+      include: {
+        relatedCardSet: true,
+        priceSnapshots: {
+          where: customerVisiblePriceSnapshotWhere(),
+          orderBy: { observedAt: "desc" },
+          take: PRICE_HISTORY_LIMIT,
+        },
+      },
     }),
   ]);
 
@@ -1764,8 +1960,11 @@ export async function createWishlistItem(userId: string, catalogueId: string): P
     throw new AppMutationError("Catalogue item not found.", 404);
   }
 
-  const priceSnapshot = cardPrinting?.priceSnapshots[0] ?? sealedProduct?.priceSnapshots[0];
-  const targetPriceMinor = defaultWishlistTargetPriceMinor(priceSnapshot?.priceMinor);
+  const catalogueItem = cardPrinting
+    ? mapCardPrintingToCatalogueItem(cardPrinting, cardPrinting.priceSnapshots)
+    : mapSealedProductToCatalogueItem(sealedProduct!, sealedProduct!.priceSnapshots);
+  const selectedValueMinor = catalogueValueMinorForVariant(catalogueItem, normalizedVariant);
+  const targetPriceMinor = defaultWishlistTargetPriceMinor(selectedValueMinor);
 
   const uniqueWhere = cardPrinting
       ? { userId_cardPrintingId: { userId, cardPrintingId: cardPrinting.id } }
@@ -1774,20 +1973,36 @@ export async function createWishlistItem(userId: string, catalogueId: string): P
     cardPrinting: {
       include: {
         cardSet: true,
-        priceSnapshots: { orderBy: { observedAt: "desc" as const }, take: 1 },
+        priceSnapshots: {
+          where: customerVisiblePriceSnapshotWhere(),
+          orderBy: { observedAt: "desc" as const },
+          take: 1,
+        },
       },
     },
     sealedProduct: {
       include: {
         relatedCardSet: true,
-        priceSnapshots: { orderBy: { observedAt: "desc" as const }, take: 1 },
+        priceSnapshots: {
+          where: customerVisiblePriceSnapshotWhere(),
+          orderBy: { observedAt: "desc" as const },
+          take: 1,
+        },
       },
     },
   };
   const created = await prisma.$transaction(async (transaction) => {
     await lockUserResourceQuota(transaction, userId, "wishlistItems");
     const existing = await transaction.wishlistItem.findUnique({ where: uniqueWhere, include });
-    if (existing) return existing;
+    if (existing) {
+      return normalizedVariant === undefined
+        ? existing
+        : transaction.wishlistItem.update({
+            where: { id: existing.id },
+            data: { variantLabel: normalizedVariant },
+            include,
+          });
+    }
     assertUserResourceQuota(
       await transaction.wishlistItem.count({ where: { userId } }),
       "wishlistItems",
@@ -1798,10 +2013,11 @@ export async function createWishlistItem(userId: string, catalogueId: string): P
       itemType: cardPrinting ? PrismaItemType.CARD : PrismaItemType.SEALED_PRODUCT,
       cardPrintingId: cardPrinting?.id,
       sealedProductId: sealedProduct?.id,
+      variantLabel: normalizedVariant,
       targetPriceMinor,
-      targetCurrency: targetPriceMinor === undefined ? undefined : priceSnapshot?.currency ?? "GBP",
+      targetCurrency: targetPriceMinor === undefined ? undefined : "GBP",
       priority:
-        (priceSnapshot?.priceMinor ?? 0) > 10000
+        (selectedValueMinor ?? 0) > 10000
           ? WishlistPriority.GRAIL
           : WishlistPriority.HIGH,
       notes: "Added from app API.",
@@ -1847,6 +2063,9 @@ export async function updateWishlistItem(
   const updated = await prisma.wishlistItem.update({
     where: { id: existing.id },
     data: {
+      variantLabel: input.variant === undefined
+        ? undefined
+        : boundedOptionalText(input.variant, "Wishlist variant", PERSISTED_INPUT_LIMITS.variant) ?? null,
       priority: input.priority === undefined ? undefined : priorityToEnum(input.priority),
       targetPriceMinor: input.targetPrice === undefined ? undefined : targetPriceMinor ?? null,
       targetCurrency: input.targetPrice === undefined ? undefined : targetPriceMinor === undefined ? null : "GBP",
@@ -1901,15 +2120,20 @@ function mapCardPrintingToCatalogueItem(
     cardSet: { id: string; name: string; language?: string | null; region?: string | null; providerIds?: unknown };
   },
   prices: PriceLike[] = [],
+  options: { includeGradedHistory?: boolean } = {},
 ): CatalogueItem {
-  const priceHistory = buildPriceHistory(priceInputsForGrade(prices));
-  const latestPrice = preferredLatestPricePoint(priceHistory);
+  const visiblePrices = prices.filter((price) => customerVisiblePriceSource(price.source, process.env));
+  const rawPriceHistory = buildPriceHistory(priceInputsForGrade(visiblePrices));
+  const priceHistory = options.includeGradedHistory
+    ? buildPriceHistory(visiblePrices)
+    : rawPriceHistory;
+  const latestPrice = preferredLatestPricePoint(rawPriceHistory);
   const image =
     usableCardImageUrl(card.imageLargeUrl) ??
     usableCardImageUrl(card.imageSmallUrl) ??
     usableCardImageUrl(pokemonTcgImageUrlFromProviderIds(card.providerIds)) ??
     tcgdexJapaneseImageUrlFromProviderIds(card.providerIds) ??
-    tcgplayerCardImageUrlFromPrices(prices);
+    tcgplayerCardImageUrlFromPrices(visiblePrices);
   const displayName = catalogueDisplayCardForText(card.name, {
     number: card.number,
     supertype: card.supertype,
@@ -1947,7 +2171,7 @@ function mapCardPrintingToCatalogueItem(
     priceHistory: priceHistory.length ? priceHistory : undefined,
     variantOptions: buildCatalogueVariantOptions({
       itemType: "card",
-      priceHistory,
+      priceHistory: rawPriceHistory,
       rarity,
       setName: card.cardSet.name,
       variantMetadata: card.variantMetadata,
@@ -1997,7 +2221,9 @@ function mapSealedProductToCatalogueItem(
   },
   prices: PriceLike[] = [],
 ): CatalogueItem {
-  const priceHistory = buildPriceHistory(prices);
+  const priceHistory = buildPriceHistory(
+    prices.filter((price) => customerVisiblePriceSource(price.source, process.env)),
+  );
   const latestPrice = preferredLatestPricePoint(priceHistory);
 
   return {
@@ -2081,12 +2307,14 @@ function mapWishlistItem(item: {
   cardPrintingId: string | null;
   sealedProductId: string | null;
   targetPriceMinor: number | null;
+  variantLabel: string | null;
   priority: string;
   notes: string | null;
 }): WishlistItem {
   return {
     id: item.id,
     catalogueId: item.cardPrintingId ?? item.sealedProductId ?? "",
+    variant: item.variantLabel ?? undefined,
     priority: enumLabel(item.priority) as WishlistItem["priority"],
     targetPriceMinor: item.targetPriceMinor ?? undefined,
     notes: item.notes ?? undefined,
@@ -2148,38 +2376,21 @@ function displayCatalogueRarity(value?: string | null) {
 
 function mapStorageLocations(
   locations: Array<{ id: string; name: string; type: string; notes: string | null }>,
-  collectionItems: Array<{
-    condition: string;
-    itemType: string;
-    storageLocationId: string | null;
-    quantity: number;
-    variantLabel: string | null;
-    gradedCompany: string | null;
-    gradedScore: unknown;
-    currentValueOverrideMinor: number | null;
-    cardPrinting: { priceSnapshots: PriceLike[] } | null;
-    sealedProduct: { priceSnapshots: PriceLike[] } | null;
-  }>,
+  collectionItems: CollectionItem[],
+  catalogue: CatalogueItem[],
 ): StorageLocation[] {
+  const catalogueById = new Map(catalogue.map((item) => [item.id, item]));
+
   return locations.map((location) => {
-    const locationItems = collectionItems.filter((item) => item.storageLocationId === location.id);
-    return mapStorageLocation(location, locationItems);
+    const locationItems = collectionItems.filter((item) => item.location === location.name);
+    return mapStorageLocation(location, locationItems, catalogueById);
   });
 }
 
 function mapStorageLocation(
   location: { id: string; name: string; type: string; notes: string | null },
-  items: Array<{
-    condition: string;
-    itemType: string;
-    quantity: number;
-    variantLabel: string | null;
-    gradedCompany: string | null;
-    gradedScore: unknown;
-    currentValueOverrideMinor: number | null;
-    cardPrinting: { priceSnapshots: PriceLike[] } | null;
-    sealedProduct: { priceSnapshots: PriceLike[] } | null;
-  }>,
+  items: CollectionItem[],
+  catalogueById: Map<string, CatalogueItem> = new Map(),
 ): StorageLocation {
   return {
     id: location.id,
@@ -2188,7 +2399,10 @@ function mapStorageLocation(
     notes: location.notes ?? undefined,
     itemCount: items.length,
     totalQuantity: items.reduce((total, item) => total + item.quantity, 0),
-    valueMinor: items.reduce((total, item) => total + collectionItemValueMinor(item), 0),
+    valueMinor: items.reduce(
+      (total, item) => total + (exactCollectionItemValueMinor(item, catalogueById.get(item.catalogueId)) ?? 0),
+      0,
+    ),
   };
 }
 
@@ -2241,66 +2455,25 @@ function saleBasisMinor(metadata: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
-function collectionItemValueMinor(item: {
-  condition: string;
-  itemType: string;
-  quantity: number;
-  variantLabel: string | null;
-  gradedCompany: string | null;
-  gradedScore: unknown;
-  currentValueOverrideMinor: number | null;
-  cardPrinting: { priceSnapshots: PriceLike[] } | null;
-  sealedProduct: { priceSnapshots: PriceLike[] } | null;
-}) {
-  if (item.currentValueOverrideMinor !== null) {
-    return item.currentValueOverrideMinor;
-  }
-
-  const prices = item.cardPrinting?.priceSnapshots ?? item.sealedProduct?.priceSnapshots ?? [];
-  const priceHistory = buildPriceHistory(
-    item.itemType === PrismaItemType.CARD
-      ? priceInputsForGrade(prices, item.gradedCompany, item.gradedScore as string | number | null)
-      : prices,
-  );
-  const latestValue = preferredLatestPricePoint(priceHistory)?.valueMinor ?? 0;
-  const unitValue = item.variantLabel
-    ? latestPricePointForVariant(priceHistory, item.variantLabel)?.valueMinor ?? latestValue
-    : latestValue;
-
-  const conditionMultiplier = item.gradedCompany
-    ? 1
-    : conditionValueMultiplier(enumLabel(item.condition));
-
-  return Math.round(unitValue * conditionMultiplier) * item.quantity;
-}
-
-function conditionValueMultiplier(condition: string) {
-  const normalized = condition.trim().toLowerCase();
-  const multipliers: Record<string, number> = {
-    mint: 1.05,
-    "near mint": 1,
-    excellent: 0.85,
-    "light played": 0.7,
-    played: 0.55,
-    poor: 0.35,
-    sealed: 1,
-    unknown: 1,
-  };
-
-  return multipliers[normalized] ?? 1;
-}
-
 const collectionItemInclude = {
   cardPrinting: {
     include: {
       cardSet: true,
-      priceSnapshots: { orderBy: { observedAt: "desc" }, take: PRICE_HISTORY_LIMIT },
+      priceSnapshots: {
+        where: customerVisiblePriceSnapshotWhere(),
+        orderBy: { observedAt: "desc" },
+        take: PRICE_HISTORY_LIMIT,
+      },
     },
   },
   sealedProduct: {
     include: {
       relatedCardSet: true,
-      priceSnapshots: { orderBy: { observedAt: "desc" }, take: PRICE_HISTORY_LIMIT },
+      priceSnapshots: {
+        where: customerVisiblePriceSnapshotWhere(),
+        orderBy: { observedAt: "desc" },
+        take: PRICE_HISTORY_LIMIT,
+      },
     },
   },
   storageLocation: true,

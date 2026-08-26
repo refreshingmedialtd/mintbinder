@@ -265,7 +265,7 @@ The custom server also forces `Cache-Control: no-store` headers on normal app/AP
 
 Note: the first successful script run auto-installed missing build-time dev dependencies because `NODE_ENV=production` had been set before dependency installation, leaving `package.json` and `package-lock.json` modified on the server. The script now restores those files and installs with dev dependencies before building. Active and rollback web runtimes no longer use that shared dependency tree: every new release contains the exact traced runtime dependencies produced by its own build. The root `app.js` is a dependency-free launcher. The pre-standalone `.next` build is deliberately not advertised as an automatic rollback because build staging replaces it; deploy the first transition in a maintenance window with a verified database restore point. Automatic immutable rollback is available after that transition succeeds and a second standalone release is deployed.
 
-The first deploy with this layout must show `Registered runtime preflight passed` before migration and `Verified Mint Binder runtime commit ...` after reload. A deployment without both checks is considered failed.
+The first deploy with this layout must show `Registered runtime preflight passed` before migration and `Verified Mint Binder runtime commit ...` after reload. A deployment without both checks is considered failed. Runtime verification authenticates its loopback health request with `JOB_SECRET`; the public `/api/health` response intentionally exposes only service status and timestamp. Full build/environment diagnostics remain available to an authenticated administrator at `/api/admin/health`.
 
 ## Monitoring And Recovery
 

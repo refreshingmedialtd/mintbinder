@@ -18,6 +18,65 @@ const notificationDeliveryLeaseMinutes = 15;
 const passwordResetOutboxLeaseMinutes = 15;
 const passwordResetOutboxQueueMinutes = 10;
 
+const scheduledJobCadenceDefinitions = [
+  {
+    defaultMaxAgeMinutes: 30 * 60,
+    envName: "JOB_MONITOR_CATALOGUE_DISCOVERY_MAX_AGE_HOURS",
+    key: "catalogue_discovery",
+    label: "catalogue discovery",
+    unit: "hours",
+  },
+  {
+    defaultMaxAgeMinutes: 14 * 60,
+    envName: "JOB_MONITOR_INTERNATIONAL_CATALOGUE_MAX_AGE_HOURS",
+    key: "international_catalogue",
+    label: "international catalogue rotation",
+    unit: "hours",
+  },
+  {
+    defaultMaxAgeMinutes: 3 * 60,
+    envName: "JOB_MONITOR_CARD_PRICING_MAX_AGE_HOURS",
+    key: "card_pricing",
+    label: "Pokemon TCG card pricing",
+    unit: "hours",
+  },
+  {
+    defaultMaxAgeMinutes: 3 * 60,
+    envName: "JOB_MONITOR_ENGLISH_CARD_PRICING_MAX_AGE_HOURS",
+    key: "english_card_pricing",
+    label: "English TCGCSV card pricing",
+    unit: "hours",
+  },
+  {
+    defaultMaxAgeMinutes: 3 * 60,
+    envName: "JOB_MONITOR_JAPANESE_CARD_PRICING_MAX_AGE_HOURS",
+    key: "japanese_card_pricing",
+    label: "Japanese card pricing",
+    unit: "hours",
+  },
+  {
+    defaultMaxAgeMinutes: 3 * 60,
+    envName: "JOB_MONITOR_SEALED_PRICING_MAX_AGE_HOURS",
+    key: "sealed_pricing",
+    label: "sealed pricing",
+    unit: "hours",
+  },
+  {
+    defaultMaxAgeMinutes: 10,
+    envName: "JOB_MONITOR_PASSWORD_RESET_MAX_AGE_MINUTES",
+    key: "password_reset_delivery",
+    label: "password-reset delivery",
+    unit: "minutes",
+  },
+  {
+    defaultMaxAgeMinutes: 30,
+    envName: "JOB_MONITOR_BILLING_RETIREMENT_MAX_AGE_MINUTES",
+    key: "billing_checkout_retirement",
+    label: "billing checkout retirement",
+    unit: "minutes",
+  },
+];
+
 export async function runJobMonitor({
   alertTo = optionalEnv("JOB_MONITOR_ALERT_TO") || optionalEnv("EMAIL_SMOKE_TO"),
   detailLimit = positiveInteger(process.env.JOB_MONITOR_DETAIL_LIMIT, defaultDetailLimit),
@@ -32,11 +91,16 @@ export async function runJobMonitor({
   try {
     const pricingThresholds = pricingHealthThresholdsFromEnv(env);
     const [runs, pricingMetrics] = await Promise.all([
-      loadProblemJobRuns({ detailLimit, lookbackMinutes, now, prisma, staleMinutes }),
+      loadProblemJobRuns({ detailLimit, env, lookbackMinutes, now, prisma, staleMinutes }),
       loadPricingHealthMetrics({ now, prisma, thresholds: pricingThresholds }),
     ]);
     const pricingHealth = buildPricingHealthReport(pricingMetrics, pricingThresholds);
     const priceAlertSettings = priceAlertScheduleSettings(env);
+    const scheduledCadence = scheduledJobCadenceHealth({
+      env,
+      latestRuns: runs.latestScheduledRuns,
+      now,
+    });
     const report = buildJobMonitorReport({
       alertTo,
       detailLimit,
@@ -45,12 +109,14 @@ export async function runJobMonitor({
       failedBillingWebhookCount: runs.failedBillingWebhookCount,
       failedBillingWebhooks: runs.failedBillingWebhooks,
       failedRuns: runs.failedRuns,
+      latestPriceAlertAttempt: runs.latestPriceAlertAttempt,
       latestPriceAlertRun: runs.latestPriceAlertRun,
       lookbackMinutes,
       now,
       priceAlertMaxAgeHours: positiveInteger(env.JOB_MONITOR_PRICE_ALERT_MAX_AGE_HOURS, 36),
       priceAlertSettings,
       pricingHealth,
+      scheduledCadence,
       passwordResetOutboxProblemCount: runs.passwordResetOutboxProblemCount,
       passwordResetOutboxOldestAt: runs.passwordResetOutboxOldestAt,
       unresolvedNotificationDeliveryCount: runs.unresolvedNotificationDeliveryCount,
@@ -91,12 +157,14 @@ export function buildJobMonitorReport({
   failedBillingWebhookCount,
   failedBillingWebhooks = [],
   failedRuns,
+  latestPriceAlertAttempt,
   latestPriceAlertRun,
   lookbackMinutes,
   now,
   priceAlertMaxAgeHours = 36,
   priceAlertSettings,
   pricingHealth,
+  scheduledCadence,
   passwordResetOutboxProblemCount = 0,
   passwordResetOutboxOldestAt = null,
   unresolvedNotificationDeliveryCount = 0,
@@ -129,6 +197,7 @@ export function buildJobMonitorReport({
       )
     : null;
   const priceAlerts = priceAlertScheduleHealth({
+    latestAttempt: latestPriceAlertAttempt,
     latestRun: latestPriceAlertRun,
     maxAgeHours: priceAlertMaxAgeHours,
     now,
@@ -160,6 +229,7 @@ export function buildJobMonitorReport({
         ]
       : []),
     ...priceAlerts.problems,
+    ...(scheduledCadence?.problems ?? []),
     ...(pricingHealth?.problems ?? []),
   ];
 
@@ -181,6 +251,7 @@ export function buildJobMonitorReport({
     },
     pricingHealth: pricingHealth ?? null,
     priceAlerts,
+    scheduledCadence: scheduledCadence ?? null,
     passwordResetOutbox: {
       count: normalizedPasswordResetOutboxProblemCount,
       oldestCreatedAt: normalizedPasswordResetOutboxOldestAt,
@@ -253,7 +324,7 @@ export function buildJobMonitorEmail(report) {
   };
 }
 
-async function loadProblemJobRuns({ detailLimit, lookbackMinutes, now, prisma, staleMinutes }) {
+async function loadProblemJobRuns({ detailLimit, env, lookbackMinutes, now, prisma, staleMinutes }) {
   const failedSince = new Date(now.getTime() - lookbackMinutes * 60 * 1000);
   const staleBefore = new Date(now.getTime() - staleMinutes * 60 * 1000);
   const billingWebhookStaleBefore = new Date(now.getTime() - billingWebhookLeaseMinutes * 60 * 1000);
@@ -270,7 +341,9 @@ async function loadProblemJobRuns({ detailLimit, lookbackMinutes, now, prisma, s
     failedRuns,
     staleRuns,
     successfulRuns,
+    latestPriceAlertAttempt,
     latestPriceAlertRun,
+    latestScheduledRuns,
     failedBillingWebhooks,
     failedBillingWebhookCount,
     unresolvedNotificationDeliveryCount,
@@ -287,16 +360,31 @@ async function loadProblemJobRuns({ detailLimit, lookbackMinutes, now, prisma, s
         status: "FAILED",
       },
     }),
-    prisma.jobRun.findMany({
-      orderBy: { startedAt: "asc" },
-      select: jobRunSelect(),
-      take: detailLimit,
-      where: {
-        finishedAt: null,
-        startedAt: { lte: staleBefore },
-        status: "RUNNING",
-      },
-    }),
+    prisma.$queryRaw`
+      SELECT
+        id,
+        job_type AS "jobType",
+        status,
+        request_payload AS "requestPayload",
+        result_payload AS "resultPayload",
+        error_message AS "errorMessage",
+        started_at AS "startedAt",
+        finished_at AS "finishedAt",
+        duration_ms AS "durationMs"
+      FROM job_runs
+      WHERE status = 'running'::job_run_status
+        AND finished_at IS NULL
+        AND COALESCE(
+          CASE
+            WHEN result_payload->>'heartbeatEpochMs' ~ '^[0-9]+$'
+              THEN TO_TIMESTAMP((result_payload->>'heartbeatEpochMs')::double precision / 1000)
+            ELSE NULL
+          END,
+          started_at
+        ) <= ${staleBefore}
+      ORDER BY started_at ASC
+      LIMIT ${detailLimit}
+    `,
     prisma.jobRun.findMany({
       orderBy: { startedAt: "desc" },
       select: jobRunSelect(),
@@ -309,8 +397,21 @@ async function loadProblemJobRuns({ detailLimit, lookbackMinutes, now, prisma, s
     prisma.jobRun.findFirst({
       orderBy: { startedAt: "desc" },
       select: jobRunSelect(),
-      where: { jobType: "PRICE_ALERTS" },
+      where: {
+        jobType: "PRICE_ALERTS",
+        requestPayload: { path: ["scheduled"], equals: true },
+      },
     }),
+    prisma.jobRun.findFirst({
+      orderBy: { startedAt: "desc" },
+      select: jobRunSelect(),
+      where: {
+        jobType: "PRICE_ALERTS",
+        requestPayload: { path: ["scheduled"], equals: true },
+        status: "SUCCEEDED",
+      },
+    }),
+    loadLatestScheduledRuns({ env, now, prisma }),
     prisma.billingWebhookEvent.findMany({
       orderBy: { updatedAt: "desc" },
       select: billingWebhookEventSelect(),
@@ -372,13 +473,87 @@ async function loadProblemJobRuns({ detailLimit, lookbackMinutes, now, prisma, s
     failedBillingWebhookCount,
     failedBillingWebhooks,
     failedRuns,
+    latestPriceAlertAttempt,
     latestPriceAlertRun,
+    latestScheduledRuns,
     passwordResetOutboxProblemCount,
     passwordResetOutboxOldestAt: passwordResetOutboxOldest?.createdAt ?? null,
     staleRuns,
     unresolvedNotificationDeliveryCount,
     unresolvedNotificationDeliveryOldestAt: unresolvedNotificationDeliveryOldest?.updatedAt ?? null,
   };
+}
+
+async function loadLatestScheduledRuns({ env, now, prisma }) {
+  const maxAgeMinutes = Math.max(
+    ...scheduledCadenceSettings(env).map((setting) => setting.maxAgeMinutes),
+  );
+  const cadenceSince = new Date(now.getTime() - (maxAgeMinutes + 24 * 60) * 60 * 1_000);
+
+  return prisma.$queryRaw`
+    WITH classified_runs AS (
+      SELECT
+        CASE
+          WHEN job_type = 'catalogue_refresh'::job_run_type
+            AND request_payload->>'setsOnly' = 'true'
+            AND request_payload->>'scheduled' = 'true'
+            THEN 'catalogue_discovery'
+          WHEN job_type = 'catalogue_refresh'::job_run_type
+            AND request_payload->>'provider' = 'tcgdex'
+            AND request_payload->>'scheduled' = 'true'
+            THEN 'international_catalogue'
+          WHEN job_type = 'pricing_refresh'::job_run_type
+            AND request_payload->>'scheduler' = 'scheduled-set-pricing'
+            AND request_payload->>'scheduled' = 'true'
+            AND request_payload->>'writePrices' = 'true'
+            THEN 'card_pricing'
+          WHEN job_type = 'pricing_refresh'::job_run_type
+            AND request_payload->>'language' = 'en'
+            AND request_payload->>'source' = 'tcgcsv-card'
+            AND request_payload->>'scheduled' = 'true'
+            AND request_payload->>'writePrices' = 'true'
+            THEN 'english_card_pricing'
+          WHEN job_type = 'pricing_refresh'::job_run_type
+            AND request_payload->>'language' = 'ja'
+            AND request_payload->>'scheduled' = 'true'
+            AND request_payload->>'writePrices' = 'true'
+            THEN 'japanese_card_pricing'
+          WHEN job_type = 'sealed_pricing_refresh'::job_run_type
+            AND request_payload->>'scheduled' = 'true'
+            AND request_payload->>'writePrices' = 'true'
+            THEN 'sealed_pricing'
+          WHEN job_type = 'password_reset_delivery'::job_run_type
+            AND request_payload->>'scheduled' = 'true'
+            THEN 'password_reset_delivery'
+          WHEN job_type = 'billing_checkout_retirement'::job_run_type
+            AND request_payload->>'scheduled' = 'true'
+            THEN 'billing_checkout_retirement'
+          ELSE NULL
+        END AS lane,
+        started_at AS "startedAt",
+        status
+      FROM job_runs
+      WHERE job_type IN (
+        'catalogue_refresh'::job_run_type,
+        'pricing_refresh'::job_run_type,
+        'sealed_pricing_refresh'::job_run_type,
+        'password_reset_delivery'::job_run_type,
+        'billing_checkout_retirement'::job_run_type
+      )
+        AND started_at >= ${cadenceSince}
+    )
+    SELECT
+      lane,
+      MAX("startedAt") AS "latestAttemptAt",
+      (ARRAY_AGG(status ORDER BY "startedAt" DESC))[1] AS "latestAttemptStatus",
+      MAX("startedAt") FILTER (
+        WHERE status = 'succeeded'::job_run_status
+      ) AS "latestSucceededAt"
+    FROM classified_runs
+    WHERE lane IS NOT NULL
+    GROUP BY lane
+    ORDER BY lane
+  `;
 }
 
 function passwordResetOutboxProblemWhere({ claimStaleBefore, queueStaleBefore }) {
@@ -640,7 +815,101 @@ export function successfulJobDegradation(run) {
   return [...new Set(reasons)].join(" ") || null;
 }
 
-export function priceAlertScheduleHealth({ latestRun, maxAgeHours = 36, now, settings }) {
+export function scheduledJobCadenceHealth({ env = {}, latestRuns = [], now }) {
+  const latestByLane = new Map(
+    latestRuns
+      .filter((run) => optionalEnvValue(run?.lane))
+      .map((run) => [String(run.lane), run]),
+  );
+  const lanes = scheduledCadenceSettings(env).map((setting) => {
+    const run = latestByLane.get(setting.key);
+    const latestAttemptAt = validDate(run?.latestAttemptAt);
+    const latestSucceededAt = validDate(run?.latestSucceededAt);
+    const latestAttemptStatus = optionalEnvValue(run?.latestAttemptStatus)?.toLowerCase() ?? null;
+    const ageMinutes = latestSucceededAt
+      ? Math.round(Math.max(0, now.getTime() - latestSucceededAt.getTime()) / 6_000) / 10
+      : null;
+    let problem = null;
+
+    if (ageMinutes === null) {
+      problem = `No successful ${setting.label} job has been recorded within ${setting.thresholdLabel}.`;
+    } else if (ageMinutes > setting.maxAgeMinutes) {
+      problem =
+        `Latest successful ${setting.label} job is ${formatAge(ageMinutes)} old; ` +
+        `expected a run within ${setting.thresholdLabel}.`;
+    }
+
+    if (latestAttemptStatus === "failed") {
+      const failure =
+        `Latest ${setting.label} attempt failed` +
+        `${latestAttemptAt ? ` at ${latestAttemptAt.toISOString()}` : " at an unknown time"}.`;
+      problem = problem ? `${problem} ${failure}` : failure;
+    }
+
+    return {
+      ageMinutes,
+      key: setting.key,
+      label: setting.label,
+      latestAttemptAt: latestAttemptAt?.toISOString() ?? null,
+      latestAttemptStatus,
+      latestSucceededAt: latestSucceededAt?.toISOString() ?? null,
+      maxAgeMinutes: setting.maxAgeMinutes,
+      ok: problem === null,
+      problem,
+    };
+  });
+  const problems = lanes.map((lane) => lane.problem).filter(Boolean);
+
+  return {
+    lanes,
+    ok: problems.length === 0,
+    problems,
+  };
+}
+
+function scheduledCadenceSettings(env) {
+  return scheduledJobCadenceDefinitions.map((definition) => {
+    const defaultThreshold = definition.unit === "hours"
+      ? definition.defaultMaxAgeMinutes / 60
+      : definition.defaultMaxAgeMinutes;
+    const configuredThreshold = positiveInteger(env[definition.envName], defaultThreshold);
+    const maxAgeMinutes = definition.unit === "hours"
+      ? configuredThreshold * 60
+      : configuredThreshold;
+
+    return {
+      ...definition,
+      maxAgeMinutes,
+      thresholdLabel: `${configuredThreshold} ${definition.unit}`,
+    };
+  });
+}
+
+function validDate(value) {
+  if (!value) {
+    return null;
+  }
+
+  const date = value instanceof Date ? value : new Date(value);
+
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatAge(minutes) {
+  if (minutes >= 120) {
+    return `${Math.ceil((minutes / 60) * 10) / 10} hours`;
+  }
+
+  return `${minutes} minutes`;
+}
+
+export function priceAlertScheduleHealth({
+  latestAttempt,
+  latestRun,
+  maxAgeHours = 36,
+  now,
+  settings,
+}) {
   if (!settings) {
     return {
       latestRunAt: null,
@@ -654,10 +923,26 @@ export function priceAlertScheduleHealth({ latestRun, maxAgeHours = 36, now, set
   const latestRunAt = latestRun?.startedAt
     ? (latestRun.startedAt instanceof Date ? latestRun.startedAt : new Date(latestRun.startedAt))
     : null;
+  const latestAttemptAt = latestAttempt?.startedAt
+    ? (latestAttempt.startedAt instanceof Date
+      ? latestAttempt.startedAt
+      : new Date(latestAttempt.startedAt))
+    : null;
+  const latestAttemptStatus = String(latestAttempt?.status ?? "").trim().toUpperCase() || null;
   const ageHours = latestRunAt && !Number.isNaN(latestRunAt.getTime())
     ? Math.round(Math.max(0, now.getTime() - latestRunAt.getTime()) / 3_600) / 1_000
     : null;
   const problems = [...settings.problems];
+
+  if (latestAttemptStatus === "FAILED") {
+    problems.push(
+      `Latest scheduled price-alert digest attempt failed${
+        latestAttemptAt && !Number.isNaN(latestAttemptAt.getTime())
+          ? ` at ${latestAttemptAt.toISOString()}`
+          : ""
+      }; inspect the job run before beta emails are enabled.`,
+    );
+  }
 
   if (ageHours === null) {
     problems.push("No price-alert digest job run has been recorded; configure the daily dry-run schedule.");
@@ -672,6 +957,10 @@ export function priceAlertScheduleHealth({ latestRun, maxAgeHours = 36, now, set
     allowLiveRecipients: settings.allowLiveRecipients,
     dryRun: settings.dryRun,
     emailConfigured: settings.emailConfigured,
+    latestAttemptAt: latestAttemptAt && !Number.isNaN(latestAttemptAt.getTime())
+      ? latestAttemptAt.toISOString()
+      : null,
+    latestAttemptStatus,
     latestRunAt: latestRunAt?.toISOString() ?? null,
     maxAgeHours,
     mode: settings.mode,

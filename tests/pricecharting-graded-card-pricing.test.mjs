@@ -24,6 +24,7 @@ test("reads bounded PriceCharting graded-card options from env", () => {
     PRICECHARTING_API_RETRY_WAIT_MS: "1700",
     PRICECHARTING_API_TIMEOUT_MS: "9000",
     PRICECHARTING_API_TOKEN: "token",
+    PRICECHARTING_LICENCE_CONFIRMED: "true",
     PRICECHARTING_GRADED_ALIASES_JSON: '{"card:card-1|holofoil":"123"}',
     PRICECHARTING_GRADED_ENABLED: "true",
     PRICECHARTING_GRADED_LIMIT: "4",
@@ -35,6 +36,7 @@ test("reads bounded PriceCharting graded-card options from env", () => {
     aliases: { "card:card-1|holofoil": "123" },
     enabled: true,
     limit: 4,
+    licenceConfirmed: true,
     priceOnlyUnpriced: false,
     retryAttempts: 2,
     retryWaitMs: 1700,
@@ -210,6 +212,7 @@ test("imports PSA/BGS/CGC 10 and reports unsupported or ambiguous fields without
     enabled: true,
     fetchImpl,
     limit: 1,
+    licenceConfirmed: true,
     observedAt: "2026-08-24T12:00:00.000Z",
     prisma,
     retryAttempts: 1,
@@ -234,6 +237,21 @@ test("imports PSA/BGS/CGC 10 and reports unsupported or ambiguous fields without
   assert.ok(snapshots.every((snapshot) => snapshot.gradedScore === 10));
   assert.ok(snapshots.every((snapshot) => snapshot.source === "pricecharting-graded-card"));
   assert.ok(snapshots.every((snapshot) => snapshot.metadata.ambiguousCompanyFieldsIgnored.includes("graded-price")));
+});
+
+test("fails closed before persisting graded PriceCharting prices without confirmed permission", async () => {
+  await assert.rejects(
+    syncPriceChartingGradedCardPrices({
+      enabled: true,
+      prisma: {
+        cardPrinting: { findMany: async () => assert.fail("unexpected database query") },
+      },
+      token: "token",
+      usdToGbpRate: 0.8,
+      writePrices: true,
+    }),
+    /PRICECHARTING_LICENCE_CONFIRMED=true/,
+  );
 });
 
 test("rejects malformed manual alias JSON", () => {

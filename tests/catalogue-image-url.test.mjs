@@ -1,18 +1,19 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import nextConfig from "../next.config.ts";
 import { isOptimizableCatalogueImageUrl } from "../src/lib/catalogue/image-url.ts";
 
-test("known catalogue image providers and local assets use the image optimizer", () => {
+test("responsive catalogue providers and local assets use the image optimizer", () => {
   assert.equal(isOptimizableCatalogueImageUrl("https://images.pokemontcg.io/sv3pt5/199_hires.png"), true);
   assert.equal(isOptimizableCatalogueImageUrl("https://images.scrydex.com/pokemon/me4-119/large"), true);
-  assert.equal(isOptimizableCatalogueImageUrl("https://assets.tcgdex.net/en/sv/sv3pt5/199/high.webp"), true);
   assert.equal(isOptimizableCatalogueImageUrl("https://tcgplayer-cdn.tcgplayer.com/product/123_in_1000x1000.jpg"), true);
   assert.equal(isOptimizableCatalogueImageUrl("/binder-placeholder.svg"), true);
 });
 
-test("unknown, insecure, and malformed remote sources remain unoptimized", () => {
+test("slow TCGdex, unknown, insecure, and malformed remote sources remain unoptimized", () => {
+  assert.equal(isOptimizableCatalogueImageUrl("https://assets.tcgdex.net/en/sv/sv3pt5/199/high.webp"), false);
   assert.equal(isOptimizableCatalogueImageUrl("https://legacy.example/card.png"), false);
   assert.equal(isOptimizableCatalogueImageUrl("http://images.pokemontcg.io/card.png"), false);
   assert.equal(isOptimizableCatalogueImageUrl("//images.pokemontcg.io/card.png"), false);
@@ -27,4 +28,16 @@ test("ScryDex is allowed by both the browser policy and Next image optimizer", a
 
   assert.match(contentSecurityPolicy ?? "", /img-src[^;]*https:\/\/images\.scrydex\.com/);
   assert.equal(remotePatterns.some((pattern) => pattern.hostname === "images.scrydex.com"), true);
+});
+
+test("every remote card-image surface can bypass the optimizer for slow providers", async () => {
+  const files = await Promise.all([
+    readFile(new URL("../src/app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/app/shared/binders/[slug]/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/components/operations-screen.tsx", import.meta.url), "utf8"),
+  ]);
+
+  for (const source of files) {
+    assert.match(source, /unoptimized=!\{?isOptimizableCatalogueImageUrl|unoptimized=\{!isOptimizableCatalogueImageUrl/);
+  }
 });
