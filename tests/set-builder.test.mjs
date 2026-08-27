@@ -226,9 +226,9 @@ test("the migration enforces one goal per user and cascades account/set deletion
 
 function bulkTransaction({ calls, currentWishlistCount = 0, inserted, ownedCards, setCards, wishlistedCards }) {
   return {
-    async $queryRaw() {
+    async $executeRaw() {
       calls.push(["lock"]);
-      return [];
+      return 1;
     },
     setGoal: {
       async findUnique(args) {

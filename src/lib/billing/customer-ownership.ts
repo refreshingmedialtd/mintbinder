@@ -4,7 +4,7 @@ import { assertBillingAccountAvailable } from "./checkout-lock.ts";
 
 type BillingCustomerClient = Pick<
   Prisma.TransactionClient,
-  "$queryRaw" | "billingCheckoutIntent" | "billingCustomer" | "user"
+  "$executeRaw" | "billingCheckoutIntent" | "billingCustomer" | "user"
 >;
 
 export class BillingCustomerOwnershipError extends Error {

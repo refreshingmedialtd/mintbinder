@@ -23,3 +23,19 @@ test("add and wishlist conversion flows carry an explicit catalogue finish", () 
   assert.match(source, /defaultWishlistVariant\(catalogueItem\) \?\? selectedVariantLabel\(catalogueItem\)/);
   assert.doesNotMatch(source, /catalogueItem\.type === "sealed" \? "Factory sealed" : "Standard"/);
 });
+
+test("wishlist-to-owned conversion finishes its persisted delete before refreshing", () => {
+  const source = readFileSync(new URL("../src/app/page.tsx", import.meta.url), "utf8");
+  const addFlow = source.slice(
+    source.indexOf("async function addToCollection"),
+    source.indexOf("async function createManualSealedProduct"),
+  );
+
+  const deleteAt = addFlow.indexOf("await removeWishlistItem(matchingWishlist.id, { quiet: true })");
+  const refreshAt = addFlow.indexOf("void refreshAppData({ quiet: true })");
+
+  assert.ok(deleteAt >= 0, "conversion must wait for the persisted wishlist deletion");
+  assert.ok(refreshAt > deleteAt, "rehydration must start after the deletion outcome is known");
+  assert.match(addFlow, /wishlistRemoved[\s\S]*wishlist target could not be removed/);
+  assert.doesNotMatch(addFlow, /void removeWishlistItem\(matchingWishlist\.id/);
+});

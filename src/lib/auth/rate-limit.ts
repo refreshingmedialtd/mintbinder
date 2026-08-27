@@ -191,7 +191,11 @@ const authThrottleStore: AtomicAuthThrottleStore = {
       // atomic for both existing and not-yet-created throttle rows. Sorting is
       // required because an attempt can share an IP key but not an email key.
       for (const keyHash of sortedHashes) {
-        await transaction.$queryRaw(Prisma.sql`
+        // The lock function returns PostgreSQL `void`. `$queryRaw` asks
+        // Prisma to deserialize that unsupported type and turns every guarded
+        // mutation into a P2010. `$executeRaw` deliberately discards result
+        // rows while still acquiring the transaction-scoped lock.
+        await transaction.$executeRaw(Prisma.sql`
           SELECT pg_advisory_xact_lock(hashtextextended(${keyHash}, 0::bigint))
         `);
       }

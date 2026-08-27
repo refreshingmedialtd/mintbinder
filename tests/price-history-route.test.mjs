@@ -78,6 +78,18 @@ test("price-history UI selects one exact identity series instead of joining ever
   assert.doesNotMatch(panel, /const history = preferredHistory\.length \? preferredHistory : allHistory/);
 });
 
+test("price history is available from unowned catalogue previews and loads real short-range history", async () => {
+  const page = await readFile(new URL("../src/app/page.tsx", import.meta.url), "utf8");
+  const addScreen = page.slice(page.indexOf("function AddScreen"), page.indexOf("function ManualSealedProductPanel"));
+  const catalogueModal = page.slice(page.indexOf("function CataloguePreviewModal"), page.indexOf("function WishlistScreen"));
+  const panel = page.slice(page.indexOf("function PriceTrendPanel"), page.indexOf("type PriceHistoryRange"));
+
+  assert.match(addScreen, /showSelectedPriceHistory \? <PriceTrendPanel item=\{selected\}/);
+  assert.match(catalogueModal, /showPriceHistory \? <PriceTrendPanel item=\{item\}/);
+  assert.match(panel, /const shouldLoadRemoteHistory = isUuid\(item\.id\)/);
+  assert.match(panel, /fetch\(`\/api\/price-history\?catalogueId=/);
+});
+
 test("price-history hides unlicensed PriceCharting streams", async () => {
   const route = await readFile(new URL("../src/app/api/price-history/route.ts", import.meta.url), "utf8");
 

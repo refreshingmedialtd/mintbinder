@@ -4594,6 +4594,10 @@ h3 {
   width: 100%;
 }
 
+.catalogue-preview-actions .catalogue-history-action {
+  grid-column: 1 / -1;
+}
+
 .card-zoom-backdrop {
   position: fixed;
   inset: 0;

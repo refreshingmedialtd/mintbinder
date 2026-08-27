@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client";
 
-type BillingLockClient = Pick<Prisma.TransactionClient, "$queryRaw" | "billingCheckoutIntent" | "user">;
+type BillingLockClient = Pick<Prisma.TransactionClient, "$executeRaw" | "billingCheckoutIntent" | "user">;
 
 export class BillingAccountDeletionError extends Error {
   constructor(message = "Billing is unavailable while account deletion is in progress.") {
@@ -15,11 +15,11 @@ export class BillingAccountDeletionError extends Error {
  * database changes inside the same transaction.
  */
 export function lockBillingCheckout(
-  transaction: Pick<Prisma.TransactionClient, "$queryRaw">,
+  transaction: Pick<Prisma.TransactionClient, "$executeRaw">,
   userId: string,
   provider: string,
 ) {
-  return transaction.$queryRaw`
+  return transaction.$executeRaw`
     SELECT pg_advisory_xact_lock(hashtext(${`mintbinder-checkout:${userId}:${provider}`}))
   `;
 }

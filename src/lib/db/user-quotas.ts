@@ -21,11 +21,11 @@ export class UserQuotaExceededError extends Error {
 }
 
 export async function lockUserResourceQuota(
-  transaction: Pick<Prisma.TransactionClient, "$queryRaw">,
+  transaction: Pick<Prisma.TransactionClient, "$executeRaw">,
   userId: string,
   resource: keyof typeof USER_RESOURCE_LIMITS,
 ) {
-  await transaction.$queryRaw(Prisma.sql`
+  await transaction.$executeRaw(Prisma.sql`
     SELECT pg_advisory_xact_lock(hashtextextended(${`mintbinder-quota:${userId}:${resource}`}, 0::bigint))
   `);
 }

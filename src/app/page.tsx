@@ -72,6 +72,7 @@ import {
   catalogueNameAliasesForText,
 } from "@/lib/catalogue/name-aliases";
 import { isOptimizableCatalogueImageUrl } from "@/lib/catalogue/image-url";
+import { catalogueItemImageCandidates } from "@/lib/catalogue/card-images";
 import { catalogueVariantPriceRows } from "@/lib/catalogue/variant-price-rows";
 import { CATALOGUE_LANGUAGE_OPTIONS, LOT_LANGUAGE_OPTIONS } from "@/lib/catalogue/languages";
 import { chunkCatalogueLookupIds } from "@/lib/catalogue/lookup";
@@ -96,6 +97,7 @@ import {
   priceSourceLabel,
 } from "@/lib/pricing/market-context";
 import { buildInsuranceReportHtml } from "@/lib/reports/insurance";
+import { BINDER_SYNC_TIMEOUT_MS, shouldShowCollectionBinderFallback } from "@/lib/binders/client-state";
 import {
   collectionConditionMultiplier,
   collectionItemMarketPricePoint,
@@ -855,6 +857,7 @@ export default function Home() {
       binderLoadKeyRef.current = "";
       setCustomBinders([]);
       setBinderNotice("");
+      setIsLoadingBinders(false);
       return;
     }
 
@@ -921,6 +924,10 @@ export default function Home() {
     void loadAndMigrateBinders();
     return () => {
       cancelled = true;
+      if (binderLoadKeyRef.current === loadKey) {
+        binderLoadKeyRef.current = "";
+      }
+      setIsLoadingBinders(false);
     };
   }, [catalogueById, collection, isLoadingData, showToast, status, viewer.email]);
 
@@ -1288,22 +1295,28 @@ export default function Home() {
         const matchingWishlist = wishlist.find((item) =>
           wishlistMatchesOwnedVariant(item, catalogueId, payload.variant),
         );
-
-        if (matchingWishlist) {
-          void removeWishlistItem(matchingWishlist.id, { quiet: true });
-        }
+        const wishlistRemoved = matchingWishlist
+          ? await removeWishlistItem(matchingWishlist.id, { quiet: true })
+          : true;
 
         setCollection((items) => [...items, result.item]);
-        setWishlist((items) => items.filter((item) =>
-          !wishlistMatchesOwnedVariant(item, catalogueId, payload.variant),
-        ));
+        if (wishlistRemoved) {
+          setWishlist((items) => items.filter((item) =>
+            !wishlistMatchesOwnedVariant(item, catalogueId, payload.variant),
+          ));
+        }
         setAppState((current) => ({
           ...current,
           screen: "item",
           selectedItemId: result.item.id,
         }));
         void refreshAppData({ quiet: true });
-        showToast(`${catalogueItemTitle(catalogueItem)} added to collection.`);
+        showToast(
+          wishlistRemoved
+            ? `${catalogueItemTitle(catalogueItem)} added to collection.`
+            : `${catalogueItemTitle(catalogueItem)} was added, but its wishlist target could not be removed. Retry that removal from Wishlist.`,
+          wishlistRemoved ? "success" : "warning",
+        );
         return true;
       } catch (error) {
         console.warn("Collection save failed.", error);
@@ -1793,7 +1806,7 @@ export default function Home() {
         if (!options?.quiet) {
           showToast("Wishlist delete failed. The target is still saved; please retry.", "error");
         }
-        return;
+        return false;
       }
     }
 
@@ -1802,6 +1815,8 @@ export default function Home() {
     if (!options?.quiet) {
       showToast("Wishlist item removed.");
     }
+
+    return true;
   }
 
   async function updateWishlistItem(id: string, formData: FormData) {
@@ -1969,9 +1984,13 @@ export default function Home() {
   }
 
   async function exportInsuranceReport() {
-    if (!appState.plus) {
-      showToast("Insurance reports are a Plus feature.", "warning");
-      setAppState((current) => ({ ...current, screen: "analytics" }));
+    if (!effectivePlus) {
+      showToast(
+        operationsEnabled
+          ? "Switch the tester plan to Plus, then click Insurance report again."
+          : "Insurance reports are a Plus feature. Upgrade to download one.",
+        "warning",
+      );
       return;
     }
 
@@ -2003,11 +2022,11 @@ export default function Home() {
         source: dataSource,
         storageLocations,
         subscription: {
-          plan: appState.plus ? "plus" : "free",
+          plan: effectivePlus ? "plus" : "free",
           entitlements: {
-            "billing.portal": appState.plus,
-            "exports.insurance_report": appState.plus,
-            "pricing.alerts": appState.plus,
+            "billing.portal": effectivePlus,
+            "exports.insurance_report": effectivePlus,
+            "pricing.alerts": effectivePlus,
           },
         },
         notificationPreferences,
@@ -2522,7 +2541,7 @@ type ScreenContext = {
   recordCollectionSale: (itemId: string, formData: FormData) => Promise<boolean>;
   addToWishlist: (catalogueId: string, variant?: string) => Promise<boolean>;
   duplicateItem: (itemId: string) => Promise<void>;
-  removeWishlistItem: (id: string, options?: { quiet?: boolean }) => Promise<void>;
+  removeWishlistItem: (id: string, options?: { quiet?: boolean }) => Promise<boolean>;
   updateWishlistItem: (id: string, formData: FormData) => Promise<boolean>;
   createStorageLocation: (formData: FormData) => Promise<boolean>;
   deleteStorageLocation: (id: string) => Promise<boolean>;
@@ -3894,7 +3913,13 @@ function BindersScreen({
     [catalogueById, collection],
   );
   const binders = useMemo(
-    () => binderSummaries(availableItems, customBinders),
+    () => {
+      const syncedBinders = binderSummaries(availableItems, customBinders);
+
+      return shouldShowCollectionBinderFallback(syncedBinders.length, availableItems.length)
+        ? [defaultBinderSummary(availableItems)]
+        : syncedBinders;
+    },
     [availableItems, customBinders],
   );
   const selectedBinder = useMemo(
@@ -4520,6 +4545,7 @@ function BindersScreen({
                 <div className="binder-arrange-bar">
                   <button
                     className={isArranging ? "button primary small" : "button small"}
+                    disabled={!activeCustomBinder}
                     type="button"
                     onClick={() => {
                       setIsArranging((current) => !current);
@@ -4527,7 +4553,7 @@ function BindersScreen({
                     }}
                   >
                     <ArrowDownUp size={15} />
-                    {isArranging ? "Finish arranging" : "Arrange cards"}
+                    {isArranging ? "Finish arranging" : activeCustomBinder ? "Arrange cards" : "Layout syncing"}
                   </button>
                   <span>
                     {isArranging
@@ -4670,7 +4696,11 @@ function BindersScreen({
                       ["Cards", activeCardCount],
                     ]}
                   />
-                  <p className="muted">Layout, blank pockets, and copy numbers sync securely across your signed-in devices.</p>
+                  <p className="muted">
+                    {activeCustomBinder
+                      ? "Layout, blank pockets, and copy numbers sync securely across your signed-in devices."
+                      : "You can browse the collection now. Layout editing unlocks as soon as secure binder sync completes."}
+                  </p>
                 </div>
 
                 <BinderSyncControls
@@ -4704,7 +4734,7 @@ function BindersScreen({
                           aria-checked={activeBinder.artworkId === artwork.id}
                           className={activeBinder.artworkId === artwork.id ? "binder-artwork-option selected" : "binder-artwork-option"}
                           key={artwork.id}
-                          disabled={isSavingBinder}
+                          disabled={!activeCustomBinder || isSavingBinder}
                           onClick={() => void updateActiveBinderAppearance(artwork.id)}
                           role="radio"
                           style={binderArtworkStyle(artwork.id)}
@@ -5139,6 +5169,7 @@ function AddScreen({
   const [isSavingWishlist, setIsSavingWishlist] = useState(false);
   const [quickAddId, setQuickAddId] = useState<string | null>(null);
   const [zoomedCatalogueItemId, setZoomedCatalogueItemId] = useState<string | null>(null);
+  const [showSelectedPriceHistory, setShowSelectedPriceHistory] = useState(false);
   const catalogueLoadMoreAbortRef = useRef<AbortController | null>(null);
   const catalogueQuerySignature = [
     addSearch.trim(),
@@ -5285,6 +5316,7 @@ function AddScreen({
     setAddQuantity(1);
     setAddVariant(appState.selectedCatalogueVariant || undefined);
     setAddLanguage(selected?.languageLabel ?? "English");
+    setShowSelectedPriceHistory(false);
   }, [appState.selectedCatalogueVariant, selected?.id, selected?.languageLabel, selected?.type]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -5593,6 +5625,20 @@ function AddScreen({
                     : `${addQuantity} x ${selectedVariant ?? "Market"} at ${addCondition}. ${conditionAdjustmentLabel(selectedConditionMultiplier)}`}
               </small>
             </div>
+          ) : null}
+          {selected ? (
+            <>
+              <button
+                aria-expanded={showSelectedPriceHistory}
+                className="button"
+                onClick={() => setShowSelectedPriceHistory((current) => !current)}
+                type="button"
+              >
+                <ChartNoAxesCombined size={17} />
+                {showSelectedPriceHistory ? "Hide price history" : "View price history"}
+              </button>
+              {showSelectedPriceHistory ? <PriceTrendPanel item={selected} /> : null}
+            </>
           ) : null}
           {selected ? (
             <form className="form-stack" key={selected.id} onSubmit={handleSubmit}>
@@ -7200,6 +7246,7 @@ function CataloguePreviewModal({
   onWant: () => void;
 }) {
   const [showDetails, setShowDetails] = useState(false);
+  const [showPriceHistory, setShowPriceHistory] = useState(false);
   const dialogRef = useDialogFocus<HTMLElement>(true);
   const variantPriceRows = catalogueVariantPriceRows(item);
   const pricedVariantCount = variantPriceRows.filter((option) => option.valueMinor !== undefined).length;
@@ -7271,6 +7318,7 @@ function CataloguePreviewModal({
               </div>
             </dl>
           ) : null}
+          {showPriceHistory ? <PriceTrendPanel item={item} /> : null}
           <div className="catalogue-preview-actions">
             {owned ? (
               <button className="button primary" type="button" onClick={onOpenOwned}>
@@ -7285,6 +7333,15 @@ function CataloguePreviewModal({
             <button className="button" type="button" disabled={wanted} onClick={onWant}>
               <Heart size={17} />
               {wanted ? "Wanted" : "Want"}
+            </button>
+            <button
+              aria-expanded={showPriceHistory}
+              className="button catalogue-history-action"
+              onClick={() => setShowPriceHistory((current) => !current)}
+              type="button"
+            >
+              <ChartNoAxesCombined size={17} />
+              {showPriceHistory ? "Hide price history" : "View price history"}
             </button>
           </div>
         </div>
@@ -9930,7 +9987,7 @@ function PriceTrendPanel({
   const [historyRetryToken, setHistoryRetryToken] = useState(0);
   const [selectedHistorySeriesKey, setSelectedHistorySeriesKey] = useState("");
   const apiRange = priceHistoryApiRange(range);
-  const shouldLoadRemoteHistory = item.type === "sealed" || range === "3m" || range === "6m" || range === "1y" || range === "all";
+  const shouldLoadRemoteHistory = isUuid(item.id);
   const remoteHistory = remoteHistoryByRange[apiRange];
   const allHistory: DetailedPricePoint[] = remoteHistory?.length ? remoteHistory : item.priceHistory ?? [];
   const relevantHistory = owned
@@ -9969,7 +10026,7 @@ function PriceTrendPanel({
   }, [item.id]);
 
   useEffect(() => {
-    if (!shouldLoadRemoteHistory || remoteHistoryByRange[apiRange] || !isUuid(item.id)) {
+    if (!shouldLoadRemoteHistory || remoteHistoryByRange[apiRange]) {
       return;
     }
 
@@ -10363,8 +10420,8 @@ function renderItemImage(item: CatalogueItem) {
 }
 
 function CatalogueItemImage({ item }: { item: CatalogueItem }) {
-  const [failedImage, setFailedImage] = useState<string | undefined>(undefined);
-  const image = item.image && item.image !== failedImage ? item.image : undefined;
+  const [failedImages, setFailedImages] = useState<string[]>([]);
+  const image = catalogueItemImageCandidates(item).find((candidate) => !failedImages.includes(candidate));
 
   if (image) {
     return (
@@ -10376,7 +10433,7 @@ function CatalogueItemImage({ item }: { item: CatalogueItem }) {
         fill
         sizes="(min-width: 760px) 340px, 96px"
         unoptimized={!isOptimizableCatalogueImageUrl(image)}
-        onError={() => setFailedImage(image)}
+        onError={() => setFailedImages((current) => current.includes(image) ? current : [...current, image])}
       />
     );
   }
@@ -11191,7 +11248,21 @@ function binderMigrationStorageKey(email: string) {
 }
 
 async function fetchServerBinders() {
-  const response = await fetch("/api/binders", { cache: "no-store" });
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), BINDER_SYNC_TIMEOUT_MS);
+  let response: Response;
+
+  try {
+    response = await fetch("/api/binders", { cache: "no-store", signal: controller.signal });
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error("Binder sync took too long. Your collection binder is still available; retry sync in a moment.");
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+
   const body = (await response.json().catch(() => ({}))) as { binders?: unknown[]; error?: string };
 
   if (!response.ok) {

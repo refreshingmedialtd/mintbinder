@@ -398,9 +398,9 @@ function customerClient(initial, options = {}) {
   const client = {
     creates: 0,
     deletionRequestedAt: options.deletionRequestedAt ?? null,
-    async $queryRaw() {
+    async $executeRaw() {
       await options.onLock?.();
-      return [];
+      return 1;
     },
     billingCheckoutIntent: {
       async findFirst() {

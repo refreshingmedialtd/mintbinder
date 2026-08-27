@@ -18,9 +18,10 @@ test("resource quotas allow the last slot and reject any additional create", () 
 });
 
 test("growth paths serialize quota count and create with transaction advisory locks", async () => {
-  const [appData, binders] = await Promise.all([
+  const [appData, binders, quotaLocks] = await Promise.all([
     readFile(new URL("../src/lib/db/app-data.ts", import.meta.url), "utf8"),
     readFile(new URL("../src/lib/db/binders.ts", import.meta.url), "utf8"),
+    readFile(new URL("../src/lib/db/user-quotas.ts", import.meta.url), "utf8"),
   ]);
 
   for (const resource of ["collectionLots", "manualSealedProducts"]) {
@@ -33,4 +34,10 @@ test("growth paths serialize quota count and create with transaction advisory lo
   const binderCount = binders.indexOf("transaction.binder.count", binderLock);
   const binderCreate = binders.indexOf("transaction.binder.create", binderCount);
   assert.ok(binderLock >= 0 && binderLock < binderCount && binderCount < binderCreate);
+
+  // PostgreSQL advisory lock functions return `void`. Prisma cannot decode
+  // that type through `$queryRaw` (P2010), so lock-only statements must use
+  // the non-decoding execution API.
+  assert.match(quotaLocks, /transaction\.\$executeRaw/);
+  assert.doesNotMatch(quotaLocks, /transaction\.\$queryRaw/);
 });

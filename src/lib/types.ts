@@ -41,6 +41,7 @@ export type CatalogueItem = {
   number: string;
   rarity: string;
   image?: string;
+  imageFallbacks?: string[];
   hasPrice: boolean;
   valueMinor: number;
   confidence: PriceConfidence;

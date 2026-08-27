@@ -46,4 +46,6 @@ test("every signed-in account-data write passes the shared verification and pers
   assert.match(limiter, /USER_MUTATION_LIMIT = 600/);
   assert.match(limiter, /IP_MUTATION_LIMIT = 3_000/);
   assert.match(limiter, /throttleHash\(action, "user", userId\)/);
+  assert.match(limiter, /transaction\.\$executeRaw\(Prisma\.sql/);
+  assert.doesNotMatch(limiter, /transaction\.\$queryRaw\(Prisma\.sql`\s*SELECT pg_advisory_xact_lock/);
 });

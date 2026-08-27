@@ -13,9 +13,8 @@ import { sampleAppData } from "../sample-data.ts";
 import {
   buildCatalogueVariantOptions,
   catalogueValueMinorForVariant,
-  pokemonTcgImageUrlFromProviderIds,
 } from "../catalogue/variants.ts";
-import { tcgdexJapaneseImageUrlFromProviderIds } from "../catalogue/tcgdex-images.ts";
+import { cardImageCandidates } from "../catalogue/card-images.ts";
 import {
   catalogueDisplayCardForText,
   catalogueNameAliasesForText,
@@ -2128,12 +2127,12 @@ function mapCardPrintingToCatalogueItem(
     ? buildPriceHistory(visiblePrices)
     : rawPriceHistory;
   const latestPrice = preferredLatestPricePoint(rawPriceHistory);
-  const image =
-    usableCardImageUrl(card.imageLargeUrl) ??
-    usableCardImageUrl(card.imageSmallUrl) ??
-    usableCardImageUrl(pokemonTcgImageUrlFromProviderIds(card.providerIds)) ??
-    tcgdexJapaneseImageUrlFromProviderIds(card.providerIds) ??
-    tcgplayerCardImageUrlFromPrices(visiblePrices);
+  const [image, ...imageFallbacks] = cardImageCandidates({
+    imageLargeUrl: card.imageLargeUrl,
+    imageSmallUrl: card.imageSmallUrl,
+    prices: visiblePrices,
+    providerIds: card.providerIds,
+  });
   const displayName = catalogueDisplayCardForText(card.name, {
     number: card.number,
     supertype: card.supertype,
@@ -2161,6 +2160,7 @@ function mapCardPrintingToCatalogueItem(
     number: card.number,
     rarity,
     image,
+    imageFallbacks: imageFallbacks.length ? imageFallbacks : undefined,
     hasPrice: Boolean(latestPrice),
     valueMinor: latestPrice?.valueMinor ?? 0,
     confidence: effectivePriceConfidence(latestPrice),
@@ -2177,38 +2177,6 @@ function mapCardPrintingToCatalogueItem(
       variantMetadata: card.variantMetadata,
     }),
   };
-}
-
-function tcgplayerCardImageUrlFromPrices(prices: PriceLike[]) {
-  const snapshot = prices.find((price) =>
-    price.source.toLowerCase().startsWith("tcgcsv") && /^\d+$/.test(price.sourceRef?.trim() ?? ""),
-  );
-
-  return snapshot?.sourceRef
-    ? `https://tcgplayer-cdn.tcgplayer.com/product/${snapshot.sourceRef.trim()}_in_1000x1000.jpg`
-    : undefined;
-}
-
-function usableCardImageUrl(value?: string | null) {
-  const url = value?.trim();
-
-  return url && !isKnownBadCardImageUrl(url) ? url : undefined;
-}
-
-function isKnownBadCardImageUrl(value?: string | null) {
-  const url = value?.trim().toLowerCase();
-
-  if (!url) {
-    return false;
-  }
-
-  return [
-    "/mcd18/",
-    "cardback",
-    "card-back",
-    "/back.png",
-    "/back_hires.png",
-  ].some((pattern) => url.includes(pattern));
 }
 
 function mapSealedProductToCatalogueItem(

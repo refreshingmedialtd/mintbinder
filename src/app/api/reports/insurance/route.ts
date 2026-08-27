@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { CollectionEventType } from "@prisma/client";
 import { auth } from "@/auth";
+import { hasInsuranceReportTesterAccess } from "@/lib/reports/insurance-access";
 import { entitlementStatus, requireEntitlement } from "@/lib/entitlements";
 import { getAppData } from "@/lib/db/app-data";
 import { buildInsuranceReportHtml } from "@/lib/reports/insurance";
@@ -22,7 +23,9 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Authentication required." }, { status: 401 });
     }
 
-    await requireEntitlement(session.user.id, "exports.insurance_report");
+    if (!hasInsuranceReportTesterAccess(session.user.role)) {
+      await requireEntitlement(session.user.id, "exports.insurance_report");
+    }
 
     const activeLotCount = await prisma.collectionItem.count({
       where: { userId: session.user.id, archivedAt: null },

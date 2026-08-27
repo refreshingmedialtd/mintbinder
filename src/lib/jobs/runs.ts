@@ -134,7 +134,7 @@ async function startJobRun(type: JobRunType, input: unknown) {
     // Serialize starters for this job type, then use the existing RUNNING row as
     // the bounded lease. The advisory lock only guards lease acquisition; the
     // durable job row remains visible while the task runs.
-    await tx.$queryRaw`
+    await tx.$executeRaw`
       SELECT pg_advisory_xact_lock(hashtextextended(${`mintbinder-job:${type}`}, 0))
     `;
     const activeRows = await tx.$queryRaw<DbJobRun[]>`
