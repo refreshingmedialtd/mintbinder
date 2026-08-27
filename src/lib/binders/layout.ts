@@ -1,4 +1,5 @@
-const MAX_BINDER_PAGES = 100;
+export const MAX_STANDARD_BINDER_PAGES = 100;
+export const MAX_MANAGED_BINDER_PAGES = 600;
 const SLOTS_PER_PAGE = 9;
 
 export type BinderLayoutInput = {
@@ -21,8 +22,8 @@ export class BinderInputError extends Error {
 }
 
 export function normalizeBinderLayout(input: BinderLayoutInput) {
-  if (!Array.isArray(input.pages) || input.pages.length < 1 || input.pages.length > MAX_BINDER_PAGES) {
-    throw new BinderInputError(`A binder must contain between 1 and ${MAX_BINDER_PAGES} pages.`);
+  if (!Array.isArray(input.pages) || input.pages.length < 1 || input.pages.length > MAX_MANAGED_BINDER_PAGES) {
+    throw new BinderInputError(`A binder must contain between 1 and ${MAX_MANAGED_BINDER_PAGES} pages.`);
   }
 
   return input.pages.map((page, pageIndex) => {

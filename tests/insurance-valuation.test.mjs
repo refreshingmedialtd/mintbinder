@@ -77,3 +77,43 @@ test("insurance values reconcile to exact variant, condition, quantity and manua
   assert.match(html, /tcgcsv-card · 20 Aug 2026 · Fair/);
   assert.match(html, /Manual total-lot value/);
 });
+
+test("insurance HTML prints the effective finish used for a repaired premium lot", () => {
+  const catalogue = [{
+    confidence: "Fair",
+    hasPrice: true,
+    id: "team-up-170",
+    name: "Latias & Latios-GX",
+    number: "170",
+    priceHistory: [{
+      confidence: "Fair",
+      observedAt: "2026-08-25T07:58:05.637Z",
+      source: "pokemon-tcg-api-cardmarket",
+      valueMinor: 83_960,
+      variantLabel: "Holofoil",
+    }],
+    rarity: "Rare Ultra",
+    set: "Team Up",
+    type: "card",
+    valueMinor: 83_960,
+    variantOptions: [{ label: "Holofoil", valueMinor: 83_960 }],
+  }];
+  const collection = [{
+    catalogueId: "team-up-170",
+    condition: "Near mint",
+    grade: "Raw",
+    id: "owned-team-up-170",
+    language: "English",
+    location: "Binder",
+    quantity: 1,
+    variant: "Normal",
+  }];
+  const html = buildInsuranceReportHtml({
+    data: appData(collection, catalogue),
+    generatedAt: new Date("2026-08-27T00:00:00.000Z"),
+  });
+
+  assert.match(html, /<td>Holofoil<\/td>/);
+  assert.doesNotMatch(html, /<td>Normal<\/td>/);
+  assert.match(html, /£839\.60/);
+});

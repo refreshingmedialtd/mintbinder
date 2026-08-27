@@ -41,4 +41,5 @@ test("preferred history stream stays raw and respects an explicit variant", () =
   const selected = preferredPriceHistorySeriesKey([rawNormal, reverse, gradedReverse], "Reverse Holofoil");
 
   assert.equal(selected, priceHistoryIdentityKey(reverse));
+  assert.equal(preferredPriceHistorySeriesKey([rawNormal], "Reverse Holofoil"), undefined);
 });

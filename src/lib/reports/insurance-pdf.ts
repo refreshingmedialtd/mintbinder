@@ -12,10 +12,12 @@ import {
   type PDFPage,
 } from "pdf-lib";
 import { fetchWithPolicy } from "../http/fetch-with-policy.ts";
+import { catalogueItemImageCandidates } from "../catalogue/card-images.ts";
 import type { CatalogueItem, CollectionEvent, CollectionItem } from "../types.ts";
 import {
   collectionItemValuation,
   collectionItemValueMinor,
+  effectiveCollectionVariant,
   type CollectionItemValuation,
 } from "../valuation.ts";
 import type { InsuranceReportInput } from "./insurance.ts";
@@ -23,6 +25,7 @@ import type { InsuranceReportInput } from "./insurance.ts";
 const PAGE_WIDTH = 595.28;
 const PAGE_HEIGHT = 841.89;
 const MARGIN = 38;
+const IMAGE_DOWNLOAD_BUDGET_MS = 8_000;
 const COLOURS = {
   ink: rgb(0.09, 0.19, 0.22),
   muted: rgb(0.38, 0.44, 0.45),
@@ -55,6 +58,18 @@ type ReportFonts = {
   bold: PDFFont;
   serif: PDFFont;
   unicode: UnicodeReportFont[];
+};
+type InsuranceCollectionRow = {
+  owned: CollectionItem;
+  catalogue?: CatalogueItem;
+  valuation: CollectionItemValuation;
+  valueMinor?: number;
+};
+type InsuranceStorageSummary = {
+  name: string;
+  itemCount: number;
+  totalQuantity: number;
+  valueMinor: number;
 };
 
 const REPORT_FONT_FILES: ReadonlyArray<{ fileName: string; region: ReportFontRegion }> = [
@@ -146,12 +161,7 @@ function drawCoverPage({
   generatedAt: Date;
   ownerEmail?: string;
   ownerName?: string;
-  rows: Array<{
-    owned: CollectionItem;
-    catalogue?: CatalogueItem;
-    valuation: CollectionItemValuation;
-    valueMinor?: number;
-  }>;
+  rows: InsuranceCollectionRow[];
 }) {
   const page = document.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
   page.drawRectangle({ x: 0, y: 0, width: PAGE_WIDTH, height: PAGE_HEIGHT, color: COLOURS.paper });
@@ -215,11 +225,11 @@ function drawCoverPage({
 
   page.drawText("Storage summary", { x: MARGIN, y: 476, size: 17, font: fonts.serif, color: COLOURS.ink });
   let y = 448;
-  const locations = data.storageLocations.length
-    ? data.storageLocations
-    : [{ name: "Unassigned", type: "Other", itemCount: rows.length, totalQuantity, valueMinor: knownValueMinor }];
+  const locations = insuranceCoverStorageSummaries(
+    insuranceStorageSummaries(rows, data.storageLocations.map((location) => location.name)),
+  );
 
-  for (const location of locations.slice(0, 10)) {
+  for (const location of locations) {
     page.drawLine({ start: { x: MARGIN, y: y - 6 }, end: { x: PAGE_WIDTH - MARGIN, y: y - 6 }, color: COLOURS.rule, thickness: 0.6 });
     drawWrappedText(page, location.name, { x: MARGIN, y: y + 5, maxWidth: 210, size: 9.5, lineHeight: 11, maxLines: 1, font: fonts.bold, unicodeFonts: fonts.unicode, color: COLOURS.ink });
     page.drawText(`${location.totalQuantity} item${location.totalQuantity === 1 ? "" : "s"}`, { x: 300, y: y + 5, size: 8.5, font: fonts.regular, color: COLOURS.muted });
@@ -245,6 +255,79 @@ function drawCoverPage({
   page.drawText(`Valuation as at ${formatDateTime(generatedAt)}`, { x: MARGIN, y: 55, size: 8.5, font: fonts.regular, color: COLOURS.muted });
 }
 
+export function insuranceStorageSummaries(
+  rows: Array<{
+    owned: Pick<CollectionItem, "location" | "quantity">;
+    valueMinor?: number;
+  }>,
+  preferredLocationNames: string[] = [],
+) {
+  const groups = new Map<string, InsuranceStorageSummary>();
+
+  for (const row of rows) {
+    const name = row.owned.location.trim() || "Unassigned";
+    const key = name.toLocaleLowerCase("en-GB");
+    const current = groups.get(key) ?? {
+      name,
+      itemCount: 0,
+      totalQuantity: 0,
+      valueMinor: 0,
+    };
+    current.itemCount += 1;
+    current.totalQuantity += row.owned.quantity;
+    current.valueMinor += row.valueMinor ?? 0;
+    groups.set(key, current);
+  }
+
+  const preferred: InsuranceStorageSummary[] = [];
+  for (const name of preferredLocationNames) {
+    const key = name.trim().toLocaleLowerCase("en-GB");
+    const summary = groups.get(key);
+    if (!summary) continue;
+    preferred.push(summary);
+    groups.delete(key);
+  }
+
+  const remaining = [...groups.values()].sort((left, right) => {
+    const leftUnassigned = left.name.toLocaleLowerCase("en-GB") === "unassigned";
+    const rightUnassigned = right.name.toLocaleLowerCase("en-GB") === "unassigned";
+    if (leftUnassigned !== rightUnassigned) return leftUnassigned ? 1 : -1;
+    return left.name.localeCompare(right.name, "en-GB");
+  });
+
+  return [...preferred, ...remaining];
+}
+
+export function insuranceCoverStorageSummaries(
+  summaries: InsuranceStorageSummary[],
+  maxRows = 9,
+) {
+  const rowLimit = Math.max(2, Math.floor(maxRows));
+  if (summaries.length <= rowLimit) return summaries;
+
+  const unassignedIndex = summaries.findIndex(
+    (summary) => summary.name.toLocaleLowerCase("en-GB") === "unassigned",
+  );
+  const unassigned = unassignedIndex >= 0 ? summaries[unassignedIndex] : undefined;
+  const named = summaries.filter((_, index) => index !== unassignedIndex);
+  const visibleNamedCount = rowLimit - 1 - (unassigned ? 1 : 0);
+  const visible = named.slice(0, visibleNamedCount);
+  const omitted = named.slice(visibleNamedCount);
+  const other = omitted.reduce<InsuranceStorageSummary>((total, summary) => ({
+    name: `Other locations (${omitted.length})`,
+    itemCount: total.itemCount + summary.itemCount,
+    totalQuantity: total.totalQuantity + summary.totalQuantity,
+    valueMinor: total.valueMinor + summary.valueMinor,
+  }), {
+    name: `Other locations (${omitted.length})`,
+    itemCount: 0,
+    totalQuantity: 0,
+    valueMinor: 0,
+  });
+
+  return [...visible, other, ...(unassigned ? [unassigned] : [])];
+}
+
 function drawCollectionPages({
   document,
   fonts,
@@ -254,12 +337,7 @@ function drawCollectionPages({
   document: PDFDocument;
   fonts: ReportFonts;
   images: Map<string, PDFImage>;
-  rows: Array<{
-    owned: CollectionItem;
-    catalogue?: CatalogueItem;
-    valuation: CollectionItemValuation;
-    valueMinor?: number;
-  }>;
+  rows: InsuranceCollectionRow[];
 }) {
   if (!rows.length) {
     const page = addReportPage(document, fonts, "Collection schedule");
@@ -306,18 +384,13 @@ function drawCollectionRow(
   page: PDFPage,
   fonts: ReportFonts,
   images: Map<string, PDFImage>,
-  row: {
-    owned: CollectionItem;
-    catalogue?: CatalogueItem;
-    valuation: CollectionItemValuation;
-    valueMinor?: number;
-  },
+  row: InsuranceCollectionRow,
   y: number,
 ) {
   const { owned, catalogue, valuation } = row;
   const labels = insuranceCatalogueLabels(catalogue, owned);
   page.drawLine({ start: { x: MARGIN, y: y - 40 }, end: { x: PAGE_WIDTH - MARGIN, y: y - 40 }, color: COLOURS.rule, thickness: 0.55 });
-  const image = catalogue?.image ? images.get(catalogue.image) : undefined;
+  const image = catalogue ? images.get(catalogue.id) : undefined;
 
   if (image) {
     const scaled = image.scaleToFit(32, 45);
@@ -376,7 +449,9 @@ export function insuranceCatalogueLabels(
     set: safeReportText(catalogue?.displaySet || catalogue?.set || "", "Set unavailable"),
     number: catalogue?.number ? `No. ${catalogue.number}` : "Number unavailable",
     language: catalogue?.languageLabel || owned.language || "Language unavailable",
-    variant: owned.variant ? safeReportText(owned.variant, "Finish unavailable") : undefined,
+    variant: owned.variant
+      ? safeReportText(effectiveCollectionVariant({ variant: owned.variant }, catalogue), "Finish unavailable")
+      : undefined,
   };
 }
 
@@ -472,30 +547,39 @@ function drawPageFooters(document: PDFDocument, fonts: ReportFonts, generatedAt:
 
 async function loadCatalogueImages(document: PDFDocument, catalogue: CatalogueItem[]) {
   // Images are supporting evidence, not a reason to hold an export open until
-  // the hosting gateway times out. Keep the optional download budget bounded.
-  const urls = [...new Set(catalogue.map((item) => item.image).filter(isString))].slice(0, 24);
+  // the hosting gateway times out. Prefer compact catalogue scans because the
+  // report renders them as 32 x 45 point thumbnails; embedding full-resolution
+  // PNGs made a small collection report exceed 20 MB without adding evidence.
+  const items = [...new Map(catalogue.map((item) => [item.id, item])).values()].slice(0, 24);
   const result = new Map<string, PDFImage>();
+  const deadline = Date.now() + IMAGE_DOWNLOAD_BUDGET_MS;
 
-  for (let index = 0; index < urls.length; index += 8) {
-    const batch = urls.slice(index, index + 8);
-    const loaded = await Promise.all(batch.map(async (url) => {
-      try {
-        const response = await fetchInsuranceReportImage(url);
-        if (!response) return null;
-        const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
-        const contentLength = Number(response.headers.get("content-length") ?? 0);
-        if (!response.ok || contentLength > 2_000_000) return null;
-        const bytes = new Uint8Array(await response.arrayBuffer());
-        if (bytes.length > 2_000_000) return null;
-        const image = contentType.includes("png")
-          ? await document.embedPng(bytes)
-          : contentType.includes("jpeg") || contentType.includes("jpg")
-            ? await document.embedJpg(bytes)
-            : null;
-        return image ? [url, image] as const : null;
-      } catch {
-        return null;
+  for (let index = 0; index < items.length; index += 8) {
+    if (Date.now() >= deadline) break;
+    const batch = items.slice(index, index + 8);
+    const loaded = await Promise.all(batch.map(async (item) => {
+      for (const url of insuranceReportImageCandidates(item)) {
+        const remainingMs = deadline - Date.now();
+        if (remainingMs <= 0) break;
+        try {
+          const response = await fetchInsuranceReportImage(url, Math.min(2_500, remainingMs));
+          if (!response) continue;
+          const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+          const contentLength = Number(response.headers.get("content-length") ?? 0);
+          if (!response.ok || contentLength > 2_000_000) continue;
+          const bytes = new Uint8Array(await response.arrayBuffer());
+          if (bytes.length > 2_000_000) continue;
+          const image = contentType.includes("png")
+            ? await document.embedPng(bytes)
+            : contentType.includes("jpeg") || contentType.includes("jpg")
+              ? await document.embedJpg(bytes)
+              : null;
+          if (image) return [item.id, image] as const;
+        } catch {
+          // Try the next reviewed image source for this catalogue item.
+        }
       }
+      return null;
     }));
 
     loaded.forEach((entry) => {
@@ -506,7 +590,25 @@ async function loadCatalogueImages(document: PDFDocument, catalogue: CatalogueIt
   return result;
 }
 
-export async function fetchInsuranceReportImage(url: string) {
+export function insuranceReportImageCandidates(item: CatalogueItem) {
+  const candidates = catalogueItemImageCandidates(item);
+  const compact = candidates.filter(isCompactInsuranceImageUrl);
+  return [...compact, ...candidates.filter((url) => !compact.includes(url))];
+}
+
+function isCompactInsuranceImageUrl(value: string) {
+  try {
+    const url = new URL(value);
+    if (url.hostname === "images.pokemontcg.io") {
+      return !/_hires\.(?:png|jpe?g)$/i.test(url.pathname);
+    }
+    return url.hostname === "images.scrydex.com" && /\/(?:small|medium)\/?$/i.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
+export async function fetchInsuranceReportImage(url: string, timeoutMs = 2_500) {
   const parsed = new URL(url);
   if (parsed.protocol !== "https:" || !IMAGE_HOSTS.has(parsed.hostname)) return null;
 
@@ -514,7 +616,7 @@ export async function fetchInsuranceReportImage(url: string) {
     maxResponseBytes: 2_000_000,
     provider: "Insurance report image",
     retryAttempts: 0,
-    timeoutMs: 2_500,
+    timeoutMs: Math.max(1, Math.min(2_500, Math.floor(timeoutMs))),
   });
 
   // Redirects are deliberately not followed: each hop would otherwise need a

@@ -65,6 +65,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { canUseOperationsForUser, normalizeAppRole, type AppUserRole } from "@/lib/auth/roles";
 import {
   catalogueValueMinorForVariant,
+  catalogueVariantSelectionLabel,
   catalogueVariantLabels,
   normalizeVariantLabel,
 } from "@/lib/catalogue/variants";
@@ -97,7 +98,23 @@ import {
   priceSourceLabel,
 } from "@/lib/pricing/market-context";
 import { buildInsuranceReportHtml } from "@/lib/reports/insurance";
-import { BINDER_SYNC_TIMEOUT_MS, shouldShowCollectionBinderFallback } from "@/lib/binders/client-state";
+import {
+  appendBinderEntriesToBlankSlots,
+  BINDER_SYNC_TIMEOUT_MS,
+  binderOccupiedCopiesValueMinor,
+  shouldCompleteMigratedDefaultBinder,
+  shouldShowCollectionBinderFallback,
+} from "@/lib/binders/client-state";
+import {
+  hasManagedDefaultBinderMarker,
+  unassignedBinderCopyIndexes,
+  unassignedBinderEntries,
+  visibleBinderDescription,
+} from "@/lib/binders/migration-state";
+import {
+  MAX_MANAGED_BINDER_PAGES,
+  MAX_STANDARD_BINDER_PAGES,
+} from "@/lib/binders/layout";
 import {
   collectionConditionMultiplier,
   collectionItemMarketPricePoint,
@@ -105,7 +122,10 @@ import {
   collectionItemValuation,
   collectionItemValueMinor,
 } from "@/lib/valuation";
-import { wishlistMatchesOwnedVariant } from "@/lib/wishlist-variant";
+import {
+  wishlistMatchesOwnedVariant,
+  wishlistVariantSelectionLabel,
+} from "@/lib/wishlist-variant";
 import {
   appRouteHistoryMode,
   buildAppRoutePath,
@@ -311,7 +331,9 @@ type CustomBinder = {
   id: string;
   interiorId: BinderInteriorId;
   isDefault: boolean;
+  legacyMigrationPending?: boolean;
   legacySource?: string;
+  managedDefault?: boolean;
   name: string;
   pages: BinderPageRecord[];
   shareSlug?: string;
@@ -679,8 +701,16 @@ export default function Home() {
   const [customBinders, setCustomBinders] = useState<CustomBinder[]>([]);
   const [isLoadingBinders, setIsLoadingBinders] = useState(false);
   const [binderNotice, setBinderNotice] = useState("");
+  const [binderRetryNonce, setBinderRetryNonce] = useState(0);
+  const [binderDraftProtected, setBinderDraftProtected] = useState(false);
   const toastTimeoutRef = useRef<number | null>(null);
+  const binderDraftProtectionRef = useRef(false);
+  const binderDraftSnapshotRef = useRef<CustomBinder[] | null>(null);
+  const binderMutationInFlightRef = useRef(false);
   const binderLoadKeyRef = useRef("");
+  const binderReloadFeedbackRef = useRef<"quiet" | "visible" | null>(null);
+  const binderSyncControllerRef = useRef<AbortController | null>(null);
+  const canLeaveBinderWorkspaceRef = useRef<() => boolean>(() => true);
   const isInitialAppRouteSyncRef = useRef(true);
   const previousAppRouteStateRef = useRef<AppRouteState | null>(null);
 
@@ -705,6 +735,25 @@ export default function Home() {
   useEffect(() => {
     const applyBrowserRoute = () => {
       const route = parseAppRouteState(window.location.search);
+      const currentRoute = previousAppRouteStateRef.current;
+
+      if (
+        currentRoute &&
+        route.screen !== currentRoute.screen &&
+        !canLeaveBinderWorkspaceRef.current()
+      ) {
+        const currentHistoryState =
+          window.history.state && typeof window.history.state === "object" ? window.history.state : {};
+        const restoredPath = buildAppRoutePath(
+          window.location.pathname,
+          window.location.search,
+          currentRoute,
+          window.location.hash,
+        );
+        window.history.pushState({ ...currentHistoryState, mintBinderRoute: true }, "", restoredPath);
+        return;
+      }
+
       setAppState((current) => ({ ...current, ...route }));
     };
 
@@ -712,6 +761,20 @@ export default function Home() {
     setIsAppRouteHydrated(true);
     window.addEventListener("popstate", applyBrowserRoute);
     return () => window.removeEventListener("popstate", applyBrowserRoute);
+  }, []);
+
+  useEffect(() => {
+    function warnAboutPendingBinderChanges(event: BeforeUnloadEvent) {
+      if (!binderDraftProtectionRef.current && !binderMutationInFlightRef.current) {
+        return;
+      }
+
+      event.preventDefault();
+      event.returnValue = "";
+    }
+
+    window.addEventListener("beforeunload", warnAboutPendingBinderChanges);
+    return () => window.removeEventListener("beforeunload", warnAboutPendingBinderChanges);
   }, []);
 
   useEffect(() => {
@@ -825,36 +888,58 @@ export default function Home() {
     window.localStorage.setItem(themeStorageKey, themeId);
   }, [effectivePlus, themeId]);
 
-  const reloadBinders = useCallback(async (options?: { quiet?: boolean }) => {
+  const reloadBinders = useCallback((options?: { quiet?: boolean }) => {
+    binderReloadFeedbackRef.current = options?.quiet ? "quiet" : "visible";
+    binderLoadKeyRef.current = "";
+    setBinderNotice("");
     setIsLoadingBinders(true);
+    setBinderRetryNonce((current) => current + 1);
+  }, []);
 
-    try {
-      const binders = await fetchServerBinders();
-      setCustomBinders(binders);
-      setBinderNotice("");
-
-      if (!options?.quiet) {
-        showToast("Binders refreshed across devices.");
-      }
-
-      return true;
-    } catch (error) {
-      console.warn("Unable to refresh binders.", error);
-      setBinderNotice(error instanceof Error ? error.message : "Binders could not be loaded.");
-
-      if (!options?.quiet) {
-        showToast(error instanceof Error ? error.message : "Binders could not be loaded.", "error");
-      }
-
-      return false;
-    } finally {
-      setIsLoadingBinders(false);
+  const beginBinderDraft = useCallback((snapshot: CustomBinder[]) => {
+    if (!binderDraftProtectionRef.current) {
+      binderDraftSnapshotRef.current = snapshot.map((binder) => ({
+        ...binder,
+        pages: cloneBinderPages(binder.pages),
+      }));
     }
-  }, [showToast]);
+    binderDraftProtectionRef.current = true;
+    setBinderDraftProtected(true);
+    binderSyncControllerRef.current?.abort();
+  }, []);
+
+  const clearBinderDraftProtection = useCallback(() => {
+    binderDraftProtectionRef.current = false;
+    binderDraftSnapshotRef.current = null;
+    setBinderDraftProtected(false);
+  }, []);
+
+  const discardBinderDraft = useCallback(() => {
+    const snapshot = binderDraftSnapshotRef.current;
+    if (snapshot) {
+      const pagesByBinderId = new Map(snapshot.map((binder) => [binder.id, binder.pages]));
+      setCustomBinders((current) => current.map((binder) => {
+        const pages = pagesByBinderId.get(binder.id);
+        return pages ? { ...binder, pages: cloneBinderPages(pages) } : binder;
+      }));
+    }
+    clearBinderDraftProtection();
+    reloadBinders({ quiet: true });
+  }, [clearBinderDraftProtection, reloadBinders]);
+
+  const setBinderMutationInFlight = useCallback((inFlight: boolean) => {
+    binderMutationInFlightRef.current = inFlight;
+  }, []);
 
   useEffect(() => {
     if (status !== "authenticated") {
+      binderDraftProtectionRef.current = false;
+      binderDraftSnapshotRef.current = null;
+      binderMutationInFlightRef.current = false;
+      binderSyncControllerRef.current?.abort();
       binderLoadKeyRef.current = "";
+      binderReloadFeedbackRef.current = null;
+      setBinderDraftProtected(false);
       setCustomBinders([]);
       setBinderNotice("");
       setIsLoadingBinders(false);
@@ -865,8 +950,20 @@ export default function Home() {
       return;
     }
 
-    const hasCardCollection = collection.some((item) => catalogueById.get(item.catalogueId)?.type === "card");
-    const loadKey = `${viewer.email.trim().toLowerCase()}:${hasCardCollection ? "cards" : "empty"}`;
+    const cardCollection = collection.filter((item) => catalogueById.get(item.catalogueId)?.type === "card");
+    const activeCardLotSignature = cardCollection
+      .map((item) => `${item.id}:${item.quantity}`)
+      .sort()
+      .join("|");
+    const hasCardCollection = cardCollection.length > 0;
+    const loadKey = `${viewer.email.trim().toLowerCase()}:${activeCardLotSignature || "empty"}`;
+
+    if (binderDraftProtectionRef.current) {
+      binderLoadKeyRef.current = "";
+      setBinderNotice("Binder refresh is paused while you have unsaved layout changes.");
+      setIsLoadingBinders(false);
+      return;
+    }
 
     if (binderLoadKeyRef.current === loadKey) {
       return;
@@ -874,6 +971,8 @@ export default function Home() {
 
     binderLoadKeyRef.current = loadKey;
     let cancelled = false;
+    const syncController = new AbortController();
+    binderSyncControllerRef.current = syncController;
 
     async function loadAndMigrateBinders() {
       setIsLoadingBinders(true);
@@ -884,14 +983,22 @@ export default function Home() {
         const legacyDefault = readStoredDefaultBinderSettings(defaultBinderSettingsStorageKey(viewer.email));
         const migrationKey = binderMigrationStorageKey(viewer.email);
         const migrationPending = window.localStorage.getItem(migrationKey) !== "1";
-        let binders = await fetchServerBinders();
+        let binders = await fetchServerBinders(syncController.signal);
+        const pendingDefaultNeedsCompletion = shouldCompleteMigratedDefaultBinder(
+          binders,
+          cardCollection.length,
+        );
 
-        if (migrationPending && (legacyBinders.length || legacyDefault.itemIds.length || (!binders.length && hasCardCollection))) {
+        if (
+          pendingDefaultNeedsCompletion ||
+          (migrationPending && (legacyBinders.length || legacyDefault.itemIds.length || (!binders.length && hasCardCollection)))
+        ) {
           const migration = await migrateLegacyBinders({
             binders,
-            collection: collection.filter((item) => catalogueById.get(item.catalogueId)?.type === "card"),
-            legacyBinders,
+            collection: cardCollection,
+            legacyBinders: migrationPending || pendingDefaultNeedsCompletion ? legacyBinders : [],
             legacyDefault,
+            signal: syncController.signal,
           });
           binders = migration.binders;
 
@@ -904,17 +1011,40 @@ export default function Home() {
           }
         }
 
-        if (!cancelled) {
+        binders = await syncManagedDefaultBinder(binders, cardCollection, syncController.signal);
+
+        if (!cancelled && !binderDraftProtectionRef.current) {
           setCustomBinders(binders);
+          if (binderReloadFeedbackRef.current === "visible") {
+            showToast("Binders refreshed across devices.");
+          }
+          binderReloadFeedbackRef.current = null;
+        } else if (!cancelled) {
+          binderLoadKeyRef.current = "";
+          setBinderNotice("Binder refresh is paused while you have unsaved layout changes.");
         }
       } catch (error) {
-        console.warn("Unable to load or migrate binders.", error);
+        if (!(syncController.signal.aborted && binderDraftProtectionRef.current)) {
+          console.warn("Unable to load or migrate binders.", error);
+        }
 
         if (!cancelled) {
+          const message = syncController.signal.aborted && binderDraftProtectionRef.current
+            ? "Binder refresh is paused while you have unsaved layout changes."
+            : error instanceof Error
+              ? error.message
+              : "Binders could not be loaded.";
           binderLoadKeyRef.current = "";
-          setBinderNotice(error instanceof Error ? error.message : "Binders could not be loaded.");
+          setBinderNotice(message);
+          if (binderReloadFeedbackRef.current === "visible") {
+            showToast(message, "error");
+          }
+          binderReloadFeedbackRef.current = null;
         }
       } finally {
+        if (binderSyncControllerRef.current === syncController) {
+          binderSyncControllerRef.current = null;
+        }
         if (!cancelled) {
           setIsLoadingBinders(false);
         }
@@ -924,12 +1054,16 @@ export default function Home() {
     void loadAndMigrateBinders();
     return () => {
       cancelled = true;
+      syncController.abort();
+      if (binderSyncControllerRef.current === syncController) {
+        binderSyncControllerRef.current = null;
+      }
       if (binderLoadKeyRef.current === loadKey) {
         binderLoadKeyRef.current = "";
       }
       setIsLoadingBinders(false);
     };
-  }, [catalogueById, collection, isLoadingData, showToast, status, viewer.email]);
+  }, [binderRetryNonce, catalogueById, collection, isLoadingData, showToast, status, viewer.email]);
 
   const applyAppData = useCallback((data: AppData) => {
     setCatalogueItems((current) =>
@@ -1237,11 +1371,36 @@ export default function Home() {
     });
   }, [catalogueById, collection, collectionEvents, sets, storageLocations, wishlist]);
 
+  function canLeaveBinderWorkspace() {
+    if (binderMutationInFlightRef.current) {
+      showToast("Wait for the current binder save to finish before leaving.", "error");
+      return false;
+    }
+    if (
+      binderDraftProtectionRef.current &&
+      !window.confirm("Leave Binders and discard the unsaved layout draft?")
+    ) {
+      return false;
+    }
+    if (binderDraftProtectionRef.current) {
+      discardBinderDraft();
+    }
+    return true;
+  }
+
+  canLeaveBinderWorkspaceRef.current = canLeaveBinderWorkspace;
+
   function navigate(screen: Screen) {
+    if (screen !== appState.screen && !canLeaveBinderWorkspace()) {
+      return;
+    }
     setAppState((current) => ({ ...current, screen }));
   }
 
   function startAdd(type: ItemType) {
+    if (appState.screen !== "add" && !canLeaveBinderWorkspace()) {
+      return;
+    }
     setAppState((current) => ({
       ...current,
       screen: "add",
@@ -1293,7 +1452,7 @@ export default function Home() {
 
         const result = (await response.json()) as { item: CollectionItem };
         const matchingWishlist = wishlist.find((item) =>
-          wishlistMatchesOwnedVariant(item, catalogueId, payload.variant),
+          wishlistMatchesOwnedVariant(item, catalogueId, payload.variant, catalogueItem),
         );
         const wishlistRemoved = matchingWishlist
           ? await removeWishlistItem(matchingWishlist.id, { quiet: true })
@@ -1302,7 +1461,7 @@ export default function Home() {
         setCollection((items) => [...items, result.item]);
         if (wishlistRemoved) {
           setWishlist((items) => items.filter((item) =>
-            !wishlistMatchesOwnedVariant(item, catalogueId, payload.variant),
+            !wishlistMatchesOwnedVariant(item, catalogueId, payload.variant, catalogueItem),
           ));
         }
         setAppState((current) => ({
@@ -1346,7 +1505,7 @@ export default function Home() {
 
     setCollection((items) => [...items, nextItem]);
     setWishlist((items) => items.filter((item) =>
-      !wishlistMatchesOwnedVariant(item, catalogueId, payload.variant),
+      !wishlistMatchesOwnedVariant(item, catalogueId, payload.variant, catalogueItem),
     ));
     setAppState((current) => ({ ...current, screen: "item", selectedItemId: nextItem.id }));
     showToast(`${catalogueItemTitle(catalogueItem)} added to collection.`);
@@ -2413,8 +2572,13 @@ export default function Home() {
     wishlist,
     wishlistTotal,
     addToCollection,
+    beginBinderDraft,
+    binderDraftProtected,
+    clearBinderDraftProtection,
     createManualSealedProduct,
+    discardBinderDraft,
     setCustomBinders,
+    setBinderMutationInFlight,
     updateCollectionItem,
     archiveCollectionItem,
     recordCollectionSale,
@@ -2462,7 +2626,11 @@ export default function Home() {
           setPlusPreviewOverride(nextPlus);
           showToast(`Previewing ${nextPlus ? "Plus" : "Free"} plan.`);
         }}
-        onSignOut={() => void signOut({ redirect: false })}
+        onSignOut={() => {
+          if (canLeaveBinderWorkspace()) {
+            void signOut({ redirect: false });
+          }
+        }}
       />
       <div className="app-body">
         <Sidebar
@@ -2534,8 +2702,13 @@ type ScreenContext = {
   wishlist: WishlistItem[];
   wishlistTotal: number;
   addToCollection: (catalogueId: string, formData?: FormData) => Promise<boolean>;
+  beginBinderDraft: (snapshot: CustomBinder[]) => void;
+  binderDraftProtected: boolean;
+  clearBinderDraftProtection: () => void;
   createManualSealedProduct: (formData: FormData) => Promise<boolean>;
+  discardBinderDraft: () => void;
   setCustomBinders: Dispatch<SetStateAction<CustomBinder[]>>;
+  setBinderMutationInFlight: (inFlight: boolean) => void;
   updateCollectionItem: (itemId: string, formData: FormData) => Promise<boolean>;
   archiveCollectionItem: (itemId: string) => Promise<boolean>;
   recordCollectionSale: (itemId: string, formData: FormData) => Promise<boolean>;
@@ -2559,7 +2732,7 @@ type ScreenContext = {
   showToast: (message: string, tone?: ToastTone) => void;
   resetSampleData: () => void;
   reloadActiveSetGoal: (options?: { quiet?: boolean }) => Promise<boolean>;
-  reloadBinders: (options?: { quiet?: boolean }) => Promise<boolean>;
+  reloadBinders: (options?: { quiet?: boolean }) => void;
   refreshAppData: (options?: { quiet?: boolean }) => Promise<boolean>;
   loadSetCatalogueData: (
     setName: string,
@@ -2971,8 +3144,10 @@ function DashboardScreen({
   intelligence,
   viewer,
   wishlist,
+  setAddSearch,
   setAppState,
 }: ScreenContext) {
+  const [portfolioCardSearch, setPortfolioCardSearch] = useState("");
   const recent = collection.slice(-5).reverse();
   const focusSets = sets
     .filter((set) => set.owned > 0)
@@ -2981,6 +3156,24 @@ function DashboardScreen({
   const dashboardSets = focusSets.length ? focusSets : sets.slice(0, 3);
   const gain = summary.value - summary.cost;
   const hasDataLoadError = dataSource === "database" && Boolean(dataNotice) && !isLoadingData;
+
+  function searchCardCatalogue(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const query = portfolioCardSearch.trim();
+
+    if (!query) {
+      return;
+    }
+
+    setAddSearch(query);
+    setAppState((current) => ({
+      ...current,
+      addType: "card",
+      screen: "add",
+      selectedCatalogueId: "",
+      selectedCatalogueVariant: "",
+    }));
+  }
 
   return (
     <section className="page">
@@ -2993,6 +3186,33 @@ function DashboardScreen({
           </button>
         }
       />
+
+      <section aria-labelledby="portfolio-card-search-title" className="portfolio-card-search">
+        <div className="portfolio-card-search-copy">
+          <span className="tag blue">Catalogue</span>
+          <div>
+            <h2 id="portfolio-card-search-title">Find any card</h2>
+            <p>Search by card name, set, or collector number to check the exact printing and its price history.</p>
+          </div>
+        </div>
+        <form className="portfolio-card-search-form" onSubmit={searchCardCatalogue} role="search">
+          <label className="search-box">
+            <Search aria-hidden="true" size={18} />
+            <span className="sr-only">Search the card catalogue</span>
+            <input
+              aria-label="Search the card catalogue"
+              autoComplete="off"
+              onChange={(event) => setPortfolioCardSearch(event.target.value)}
+              placeholder="Try Latias & Latios-GX, Team Up, or 170"
+              value={portfolioCardSearch}
+            />
+          </label>
+          <button className="button primary" disabled={!portfolioCardSearch.trim()} type="submit">
+            <Search size={17} />
+            Search cards
+          </button>
+        </form>
+      </section>
 
       <PortfolioHero
         dataNotice={dataNotice}
@@ -3495,7 +3715,7 @@ function CollectionScreen({
           item.location,
           item.notes ?? "",
           item.valuationNote ?? "",
-          item.variant,
+          selectedVariantLabel(catalogueItem, item.variant),
         ]
           .join(" ")
           .toLowerCase()
@@ -3874,13 +4094,18 @@ function CollectionScreen({
 
 function BindersScreen({
   appState,
+  beginBinderDraft,
+  binderDraftProtected,
   binderNotice,
   catalogueById,
   collection,
   customBinders,
   isLoadingBinders,
   reloadBinders,
+  clearBinderDraftProtection,
+  discardBinderDraft,
   setAppState,
+  setBinderMutationInFlight,
   setCustomBinders,
   showToast,
   startAdd,
@@ -3889,8 +4114,11 @@ function BindersScreen({
   const [isCreating, setIsCreating] = useState(false);
   const [isCreatingBinder, setIsCreatingBinder] = useState(false);
   const [isSavingBinder, setIsSavingBinder] = useState(false);
+  const [isUpdatingBinderMetadata, setIsUpdatingBinderMetadata] = useState(false);
   const [isDeletingBinder, setIsDeletingBinder] = useState(false);
-  const [binderSaveState, setBinderSaveState] = useState<"idle" | "dirty" | "saving" | "saved" | "error">("idle");
+  const [binderSaveState, setBinderSaveState] = useState<"idle" | "dirty" | "saving" | "saved" | "error">(
+    binderDraftProtected ? "dirty" : "idle",
+  );
   const [binderSaveError, setBinderSaveError] = useState("");
   const [draftName, setDraftName] = useState("");
   const [draftArtworkId, setDraftArtworkId] = useState<BinderArtworkId>("mint");
@@ -3906,7 +4134,15 @@ function BindersScreen({
   const [pageTurnDirection, setPageTurnDirection] = useState<"next" | "previous" | null>(null);
   const [pullingSlotIndex, setPullingSlotIndex] = useState<number | null>(null);
   const pageTurnTimeoutRef = useRef<number | null>(null);
+  const binderSaveStateRef = useRef(binderSaveState);
+  const currentBinderDraftProtectedRef = useRef(binderDraftProtected);
+  const reloadAfterBinderDraftRef = useRef(false);
   const swipeStartXRef = useRef<number | null>(null);
+  binderSaveStateRef.current = binderSaveState;
+  currentBinderDraftProtectedRef.current = binderDraftProtected;
+  const isBinderSyncBlocked = isLoadingBinders || Boolean(binderNotice);
+  const isBinderLayoutLocked =
+    isLoadingBinders || isCreatingBinder || isSavingBinder || isUpdatingBinderMetadata || isDeletingBinder;
   const isMobileBinder = useMediaQuery("(max-width: 759px)");
   const availableItems = useMemo(
     () => collection.filter((item) => catalogueById.get(item.catalogueId)?.type === "card"),
@@ -3939,10 +4175,12 @@ function BindersScreen({
     () => (activeBinder ? customBinders.find((binder) => binder.id === activeBinder.id) : undefined),
     [activeBinder, customBinders],
   );
-  const activeBinderValue = activeBinder?.items.reduce(
-    (total, item) => total + (getOwnedValue(item, catalogueById.get(item.catalogueId)) ?? 0),
-    0,
-  ) ?? 0;
+  const activeBinderValue = activeBinder
+    ? binderOccupiedCopiesValueMinor(
+        activeBinder.items,
+        (item) => getOwnedValue(item, catalogueById.get(item.catalogueId)),
+      )
+    : 0;
   const activeCardCount = activeBinder
     ? activeBinder.items.filter((item) => catalogueById.get(item.catalogueId)?.type === "card").length
     : 0;
@@ -3967,7 +4205,7 @@ function BindersScreen({
               catalogueItem?.set,
               catalogueItem ? catalogueItemSetLabel(catalogueItem) : undefined,
               catalogueItem?.number,
-              item.variant,
+              catalogueItem ? selectedVariantLabel(catalogueItem, item.variant) : item.variant,
               item.grade,
               item.location,
             ].filter(Boolean).join(" "),
@@ -4008,19 +4246,34 @@ function BindersScreen({
   }, [boundedPageIndex, isBinderOpening, pageTurnDirection, totalPageViews]);
 
   const closeBinderViewer = useCallback(() => {
+    if (isBinderLayoutLocked) {
+      showToast("Wait for the current binder save to finish before closing.", "error");
+      return;
+    }
+    const hasDraft = binderSaveState === "dirty" || binderSaveState === "error";
     if (
-      (binderSaveState === "dirty" || binderSaveState === "error") &&
+      hasDraft &&
       !window.confirm("Close this binder without saving its latest layout changes?")
     ) {
       return;
     }
 
+    if (hasDraft) {
+      reloadAfterBinderDraftRef.current = false;
+      discardBinderDraft();
+    }
     setOpenBinderId(null);
+    setBinderSaveState("idle");
+    setBinderSaveError("");
     setIsArranging(false);
     setLiftedSlotIndex(null);
     setFocusedItemId(null);
     setPullingSlotIndex(null);
-  }, [binderSaveState]);
+    if (reloadAfterBinderDraftRef.current) {
+      reloadAfterBinderDraftRef.current = false;
+      void reloadBinders({ quiet: true });
+    }
+  }, [binderSaveState, discardBinderDraft, isBinderLayoutLocked, reloadBinders, showToast]);
 
   useEffect(() => {
     if (binders.some((binder) => binder.id === appState.selectedBinderId)) {
@@ -4038,7 +4291,7 @@ function BindersScreen({
     setPullingSlotIndex(null);
     setPageTurnDirection(null);
     setVisiblePageIndex(0);
-    setBinderSaveState("idle");
+    setBinderSaveState(currentBinderDraftProtectedRef.current ? "dirty" : "idle");
     setBinderSaveError("");
 
     if (!activeBinder?.id) {
@@ -4051,17 +4304,6 @@ function BindersScreen({
 
     return () => window.clearTimeout(openingTimer);
   }, [activeBinder?.id]);
-
-  useEffect(() => {
-    if (binderSaveState !== "dirty" && binderSaveState !== "error") return;
-
-    function warnAboutUnsavedLayout(event: BeforeUnloadEvent) {
-      event.preventDefault();
-    }
-
-    window.addEventListener("beforeunload", warnAboutUnsavedLayout);
-    return () => window.removeEventListener("beforeunload", warnAboutUnsavedLayout);
-  }, [binderSaveState]);
 
   useEffect(() => {
     if (!openBinderId || binders.some((binder) => binder.id === openBinderId)) {
@@ -4118,6 +4360,29 @@ function BindersScreen({
     setAppState((current) => ({ ...current, selectedBinderId: id }));
   }
 
+  function refreshBindersSafely() {
+    if (isBinderLayoutLocked) {
+      showToast("Wait for the current binder save to finish before refreshing.", "error");
+      return;
+    }
+    if (
+      (binderSaveState === "dirty" || binderSaveState === "error") &&
+      !window.confirm("Refresh binders and discard this unsaved layout draft?")
+    ) {
+      return;
+    }
+
+    if (binderSaveState === "dirty" || binderSaveState === "error") {
+      setBinderSaveState("idle");
+      setBinderSaveError("");
+      reloadAfterBinderDraftRef.current = false;
+      discardBinderDraft();
+      return;
+    }
+
+    reloadBinders();
+  }
+
   function openBinder(id: string) {
     selectBinder(id);
     setOpenBinderId(id);
@@ -4139,38 +4404,69 @@ function BindersScreen({
   }
 
   function setSelectedBinderItemCopyCount(itemId: string, count: number) {
-    if (!activeCustomBinder) {
+    if (!activeCustomBinder || isBinderLayoutLocked) {
       return;
     }
 
     const owned = collection.find((item) => item.id === itemId);
     const boundedCount = Math.max(0, Math.min(Math.floor(count), owned?.quantity ?? 0));
 
-    setCustomBinders((current) =>
-      current.map((binder) => {
-        if (binder.id !== activeCustomBinder.id) {
-          return binder;
-        }
+    if (!owned) {
+      setBinderSaveError("That card lot is no longer available. Refresh binders and try again.");
+      return;
+    }
 
-        let pages = cloneBinderPages(binder.pages);
-        const existingSlots = pages.flatMap((page) => page.slots)
-          .filter((slot) => slot.collectionItemId === itemId);
-
-        existingSlots.forEach((slot, index) => {
-          if (index < boundedCount) {
-            slot.copyIndex = index + 1;
-          } else {
-            Object.assign(slot, emptyBinderSlot(slot.position));
-          }
-        });
-
-        for (let copyIndex = existingSlots.length + 1; copyIndex <= boundedCount; copyIndex += 1) {
-          pages = placeBinderCopyInFirstBlank(pages, itemId, copyIndex);
-        }
-
-        return { ...binder, pages };
-      }),
+    const existingSlots = activeCustomBinder.pages.flatMap((page) => page.slots)
+      .filter((slot) => slot.collectionItemId === itemId);
+    const managedDefault = !activeCustomBinder.managedDefault
+      ? customBinders.find((binder) => binder.isDefault && binder.managedDefault)
+      : undefined;
+    const allocatableCopyIndexes = unassignedBinderCopyIndexes(
+      owned,
+      customBinders,
+      [activeCustomBinder.id, ...(managedDefault ? [managedDefault.id] : [])],
     );
+    const existingCopyIndexes = new Set(
+      existingSlots
+        .map((slot) => slot.copyIndex)
+        .filter((copyIndex): copyIndex is number => Boolean(copyIndex)),
+    );
+    const newCopyIndexes = allocatableCopyIndexes
+      .filter((copyIndex) => !existingCopyIndexes.has(copyIndex))
+      .slice(0, Math.max(0, boundedCount - existingSlots.length));
+
+    if (existingSlots.length + newCopyIndexes.length < boundedCount) {
+      const message = "Those copies are already assigned to another custom binder.";
+      setBinderSaveError(message);
+      showToast(message, "error");
+      return;
+    }
+
+    const pages = cloneBinderPages(activeCustomBinder.pages);
+    const currentSlots = pages.flatMap((page) => page.slots)
+      .filter((slot) => slot.collectionItemId === itemId);
+    currentSlots.forEach((slot, index) => {
+      if (index >= boundedCount) {
+        Object.assign(slot, emptyBinderSlot(slot.position));
+      }
+    });
+    const entries = newCopyIndexes.map((copyIndex) => ({ collectionItemId: itemId, copyIndex }));
+    const appended = appendBinderEntriesToBlankSlots(
+      pages,
+      entries,
+      activeCustomBinder.managedDefault ? MAX_MANAGED_BINDER_PAGES : MAX_STANDARD_BINDER_PAGES,
+    );
+    if (appended.placedCount !== entries.length) {
+      const message = "This binder has no free pockets left.";
+      setBinderSaveError(message);
+      showToast(message, "error");
+      return;
+    }
+
+    beginBinderDraft(customBinders);
+    setCustomBinders((current) => current.map((binder) =>
+      binder.id === activeCustomBinder.id ? { ...binder, pages: appended.pages } : binder,
+    ));
     setBinderSaveState("dirty");
     setBinderSaveError("");
   }
@@ -4178,7 +4474,10 @@ function BindersScreen({
   async function createBinder(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (isCreatingBinder) {
+    if (isCreatingBinder || isBinderSyncBlocked) {
+      if (isBinderSyncBlocked) {
+        showToast("Wait for binder sync to finish before creating a custom binder.", "error");
+      }
       return;
     }
 
@@ -4195,19 +4494,47 @@ function BindersScreen({
       return;
     }
 
+    const managedDefault = customBinders.find((binder) => binder.isDefault && binder.managedDefault);
+    const entries = selectedDraftCopies
+      .filter(([id]) => visibleItemIds.has(id))
+      .flatMap(([collectionItemId, count]) => {
+        const owned = collection.find((item) => item.id === collectionItemId);
+        if (!owned) return [];
+        return unassignedBinderCopyIndexes(owned, customBinders, managedDefault?.id)
+          .slice(0, count)
+          .map((copyIndex) => ({ collectionItemId, copyIndex }));
+      });
+    const requestedCopyCount = selectedDraftCopies
+      .filter(([id]) => visibleItemIds.has(id))
+      .reduce((total, [, count]) => total + count, 0);
+
+    if (!requestedCopyCount) {
+      showToast("Choose at least one currently available card copy.", "error");
+      return;
+    }
+    if (entries.length !== requestedCopyCount) {
+      showToast("Some selected copies are already assigned to another custom binder.", "error");
+      return;
+    }
+    if (entries.length > MAX_STANDARD_BINDER_PAGES * 9) {
+      showToast(`A custom binder can hold at most ${MAX_STANDARD_BINDER_PAGES * 9} card copies.`, "error");
+      return;
+    }
+
+    let created: CustomBinder | null = null;
     setIsCreatingBinder(true);
+    setBinderMutationInFlight(true);
     try {
-      const created = await createServerBinder({
+      created = await createServerBinder({
         artworkId: draftArtworkId,
         description: "A curated card binder.",
         name,
       });
-      const entries = selectedDraftCopies
-        .filter(([id]) => visibleItemIds.has(id))
-        .flatMap(([collectionItemId, count]) =>
-          Array.from({ length: count }, (_, index) => ({ collectionItemId, copyIndex: index + 1 })),
-        );
-      const binder = await replaceServerBinderLayout(created.id, buildBinderPages(entries));
+      const binder = await replaceServerBinderLayout(created.id, buildBinderPages(entries), {
+        expectedUpdatedAt: created.updatedAt,
+        releaseConflictsFromDefaultBinderId: managedDefault?.id,
+        releaseConflictsFromDefaultUpdatedAt: managedDefault?.updatedAt,
+      });
       setCustomBinders((current) => [...current.map((item) => ({ ...item, isDefault: binder.isDefault ? false : item.isDefault })), binder]);
       setAppState((current) => ({ ...current, selectedBinderId: binder.id }));
       setOpenBinderId(binder.id);
@@ -4218,30 +4545,42 @@ function BindersScreen({
       setIsCreating(false);
       setBinderSaveState("saved");
       showToast(`${binder.name} created and synced.`);
+      if (managedDefault) {
+        void reloadBinders({ quiet: true });
+      }
     } catch (error) {
       console.warn("Binder creation failed.", error);
+      if (created) {
+        try {
+          await deleteServerBinder(created);
+        } catch (cleanupError) {
+          console.warn("Binder shell cleanup was not needed or could not complete safely.", cleanupError);
+        }
+      }
       showToast(error instanceof Error ? error.message : "Binder could not be created.", "error");
       void reloadBinders({ quiet: true });
     } finally {
       setIsCreatingBinder(false);
+      setBinderMutationInFlight(false);
     }
   }
 
   async function updateActiveBinderAppearance(artworkId: BinderArtworkId) {
-    if (!activeCustomBinder || isSavingBinder) {
+    if (!activeCustomBinder || isBinderLayoutLocked) {
       return;
     }
 
     setIsSavingBinder(true);
+    setBinderMutationInFlight(true);
     try {
-      const updated = await patchServerBinder(activeCustomBinder.id, {
+      const updated = await patchServerBinder(activeCustomBinder, {
         coverStyle: serverCoverStyleFromArtwork(artworkId),
       });
       setCustomBinders((current) => current.map((binder) =>
         binder.id === updated.id
           ? {
               ...updated,
-              pages: binderSaveState === "dirty" || binderSaveState === "error" ? binder.pages : updated.pages,
+              pages: binder.pages,
             }
           : binder,
       ));
@@ -4253,10 +4592,14 @@ function BindersScreen({
       showToast(message, "error");
     } finally {
       setIsSavingBinder(false);
+      setBinderMutationInFlight(false);
     }
   }
 
   function handleBinderSlotClick(slot: BinderSummary["slots"][number] | undefined, slotIndex: number) {
+    if (isBinderLayoutLocked) {
+      return;
+    }
     const item = slot?.item;
     if (!activeBinder || !isArranging) {
       if (item && pullingSlotIndex === null) {
@@ -4285,6 +4628,7 @@ function BindersScreen({
 
     if (!activeCustomBinder) return;
     const pages = swapBinderSlots(activeCustomBinder.pages, liftedSlotIndex, slotIndex);
+    beginBinderDraft(customBinders);
     setCustomBinders((current) => current.map((binder) => (binder.id === activeCustomBinder.id ? { ...binder, pages } : binder)));
     setBinderSaveState("dirty");
     setBinderSaveError("");
@@ -4294,15 +4638,30 @@ function BindersScreen({
   }
 
   async function saveActiveBinderLayout() {
-    if (!activeCustomBinder || !["dirty", "error"].includes(binderSaveState) || isSavingBinder) return;
+    if (
+      !activeCustomBinder ||
+      !["dirty", "error"].includes(binderSaveState) ||
+      isBinderLayoutLocked
+    ) return;
     setIsSavingBinder(true);
+    setBinderMutationInFlight(true);
     setBinderSaveState("saving");
     try {
-      const updated = await replaceServerBinderLayout(activeCustomBinder.id, activeCustomBinder.pages);
+      const managedDefault = !activeCustomBinder.isDefault
+        ? customBinders.find((binder) => binder.isDefault && binder.managedDefault)
+        : undefined;
+      const updated = await replaceServerBinderLayout(activeCustomBinder.id, activeCustomBinder.pages, {
+        expectedUpdatedAt: activeCustomBinder.updatedAt,
+        releaseConflictsFromDefaultBinderId: managedDefault?.id,
+        releaseConflictsFromDefaultUpdatedAt: managedDefault?.updatedAt,
+      });
       setCustomBinders((current) => current.map((binder) => (binder.id === updated.id ? updated : binder)));
       setBinderSaveState("saved");
       setBinderSaveError("");
+      clearBinderDraftProtection();
+      reloadAfterBinderDraftRef.current = false;
       showToast("Binder layout saved across devices.");
+      void reloadBinders({ quiet: true });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Binder layout could not be saved.";
       setBinderSaveState("error");
@@ -4310,11 +4669,12 @@ function BindersScreen({
       showToast(message, "error");
     } finally {
       setIsSavingBinder(false);
+      setBinderMutationInFlight(false);
     }
   }
 
   async function deleteSelectedBinder() {
-    if (!activeCustomBinder || isDeletingBinder) {
+    if (!activeCustomBinder || isBinderLayoutLocked) {
       return;
     }
 
@@ -4328,8 +4688,9 @@ function BindersScreen({
     }
 
     setIsDeletingBinder(true);
+    setBinderMutationInFlight(true);
     try {
-      await deleteServerBinder(activeCustomBinder.id);
+      await deleteServerBinder(activeCustomBinder);
       const remaining = customBinders.filter((binder) => binder.id !== activeCustomBinder.id);
       const replacement = activeCustomBinder.isDefault
         ? [...remaining].sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))[0]
@@ -4339,6 +4700,9 @@ function BindersScreen({
         isDefault: activeCustomBinder.isDefault ? binder.id === replacement?.id : binder.isDefault,
       })));
       setAppState((current) => ({ ...current, selectedBinderId: replacement?.id ?? "" }));
+      setBinderSaveState("idle");
+      setBinderSaveError("");
+      clearBinderDraftProtection();
       setOpenBinderId(null);
       showToast(`${activeCustomBinder.name} removed.`);
       void reloadBinders({ quiet: true });
@@ -4346,6 +4710,7 @@ function BindersScreen({
       showToast(error instanceof Error ? error.message : "Binder could not be deleted.", "error");
     } finally {
       setIsDeletingBinder(false);
+      setBinderMutationInFlight(false);
     }
   }
 
@@ -4381,7 +4746,7 @@ function BindersScreen({
         title="Binders"
         action={
           <>
-            <button className="button" disabled={isLoadingBinders} onClick={() => void reloadBinders()}>
+            <button className="button" disabled={isLoadingBinders || isBinderLayoutLocked} onClick={refreshBindersSafely}>
               <RefreshCw className={isLoadingBinders ? "spin" : ""} size={17} />
               {isLoadingBinders ? "Syncing" : "Refresh"}
             </button>
@@ -4389,7 +4754,11 @@ function BindersScreen({
               <Layers3 size={17} />
               Collection
             </button>
-            <button className="button primary" onClick={() => setIsCreating((open) => !open)}>
+            <button
+              className="button primary"
+              disabled={isBinderSyncBlocked}
+              onClick={() => setIsCreating((open) => !open)}
+            >
               <BookOpen size={17} />
               New binder
             </button>
@@ -4400,7 +4769,7 @@ function BindersScreen({
       {binderNotice ? (
         <div className="data-error-state" role="alert">
           <p>{binderNotice} Your legacy browser copy has not been removed.</p>
-          <button className="button small" type="button" onClick={() => void reloadBinders()}>
+          <button className="button small" type="button" onClick={refreshBindersSafely}>
             <RefreshCw size={16} />
             Retry binder sync
           </button>
@@ -4486,7 +4855,11 @@ function BindersScreen({
                   ))}
                 </div>
               </Field>
-              <button className="button primary full" type="submit" disabled={isCreatingBinder}>
+              <button
+                className="button primary full"
+                type="submit"
+                disabled={isCreatingBinder || isBinderSyncBlocked}
+              >
                 <Check size={17} />
                 {isCreatingBinder ? "Creating and syncing" : "Create binder"}
               </button>
@@ -4545,7 +4918,7 @@ function BindersScreen({
                 <div className="binder-arrange-bar">
                   <button
                     className={isArranging ? "button primary small" : "button small"}
-                    disabled={!activeCustomBinder}
+                    disabled={!activeCustomBinder || isBinderLayoutLocked}
                     type="button"
                     onClick={() => {
                       setIsArranging((current) => !current);
@@ -4553,7 +4926,13 @@ function BindersScreen({
                     }}
                   >
                     <ArrowDownUp size={15} />
-                    {isArranging ? "Finish arranging" : activeCustomBinder ? "Arrange cards" : "Layout syncing"}
+                    {isSavingBinder
+                      ? "Saving layout"
+                      : isArranging
+                        ? "Finish arranging"
+                        : activeCustomBinder
+                          ? "Arrange cards"
+                          : "Layout syncing"}
                   </button>
                   <span>
                     {isArranging
@@ -4635,6 +5014,7 @@ function BindersScreen({
                       pullingSlotIndex={pullingSlotIndex}
                       recentMoveSlotIndex={recentMoveSlotIndex}
                       onSlotClick={handleBinderSlotClick}
+                      isLocked={isBinderLayoutLocked}
                     />
                     <span className="binder-ring-strip" aria-hidden="true">
                       {Array.from({ length: 6 }, (_, index) => (
@@ -4652,6 +5032,7 @@ function BindersScreen({
                       pullingSlotIndex={pullingSlotIndex}
                       recentMoveSlotIndex={recentMoveSlotIndex}
                       onSlotClick={handleBinderSlotClick}
+                      isLocked={isBinderLayoutLocked}
                     />
                   </div>
                   <button
@@ -4677,7 +5058,7 @@ function BindersScreen({
                   {activeCustomBinder ? (
                     <button
                       className="button small danger"
-                      disabled={isDeletingBinder || customBinders.length <= 1}
+                      disabled={isBinderLayoutLocked || customBinders.length <= 1}
                       onClick={() => void deleteSelectedBinder()}
                       title={customBinders.length <= 1 ? "Create another binder before deleting your only binder." : undefined}
                       type="button"
@@ -4712,16 +5093,27 @@ function BindersScreen({
                       binder.id === updated.id
                         ? {
                             ...updated,
-                            pages: binderSaveState === "dirty" || binderSaveState === "error" ? binder.pages : updated.pages,
+                            pages: binder.pages,
                           }
                         : { ...binder, isDefault: updated.isDefault ? false : binder.isDefault },
                     ));
+                    if (updated.isDefault) {
+                      if (["dirty", "error", "saving"].includes(binderSaveStateRef.current)) {
+                        reloadAfterBinderDraftRef.current = true;
+                      } else {
+                        void reloadBinders({ quiet: true });
+                      }
+                    }
                   }}
                   onError={(message) => {
                     setBinderSaveError(message);
                     showToast(message, "error");
                   }}
                   onSaveLayout={() => void saveActiveBinderLayout()}
+                  onUpdatingChange={(updating) => {
+                    setIsUpdatingBinderMetadata(updating);
+                    setBinderMutationInFlight(updating);
+                  }}
                   saveState={binderSaveState}
                   showToast={showToast}
                 />
@@ -4734,7 +5126,7 @@ function BindersScreen({
                           aria-checked={activeBinder.artworkId === artwork.id}
                           className={activeBinder.artworkId === artwork.id ? "binder-artwork-option selected" : "binder-artwork-option"}
                           key={artwork.id}
-                          disabled={!activeCustomBinder || isSavingBinder}
+                        disabled={!activeCustomBinder || isBinderLayoutLocked}
                           onClick={() => void updateActiveBinderAppearance(artwork.id)}
                           role="radio"
                           style={binderArtworkStyle(artwork.id)}
@@ -4756,6 +5148,7 @@ function BindersScreen({
                     selectedCopyCounts={binderCopyCounts(activeCustomBinder.pages)}
                     onItemSearchChange={setItemSearch}
                     onSetItemCopyCount={setSelectedBinderItemCopyCount}
+                    disabled={isBinderLayoutLocked}
                   />
                 ) : null}
               </aside>
@@ -4782,6 +5175,7 @@ function BindersScreen({
 function BinderPage({
   catalogueById,
   isArranging,
+  isLocked,
   slots,
   liftedSlotIndex,
   offset,
@@ -4793,6 +5187,7 @@ function BinderPage({
 }: {
   catalogueById: Map<string, CatalogueItem>;
   isArranging: boolean;
+  isLocked: boolean;
   slots: BinderSummary["slots"];
   liftedSlotIndex: number | null;
   offset: number;
@@ -4838,7 +5233,7 @@ function BinderPage({
                   : `Empty binder sleeve ${offset + index + 1}`
             }
             className={pocketClassName}
-            disabled={!isFilled && !isDropTarget}
+            disabled={isLocked || (!isFilled && !isDropTarget)}
             key={`${globalSlotIndex}-${slot?.collectionItemId ?? "empty"}-${slot?.copyIndex ?? 0}`}
             onClick={() => onSlotClick(slot, globalSlotIndex)}
             type="button"
@@ -4851,7 +5246,7 @@ function BinderPage({
                 </span>
                 <span className="binder-pocket-caption">
                   <strong>{catalogueItemTitle(catalogueItem)}</strong>
-                  <small>{item.variant}{slot?.copyIndex ? ` · Copy ${slot.copyIndex}` : ""}</small>
+                  <small>{selectedVariantLabel(catalogueItem, item.variant)}{slot?.copyIndex ? ` · Copy ${slot.copyIndex}` : ""}</small>
                 </span>
               </>
             ) : (
@@ -4871,6 +5266,7 @@ function BinderSyncControls({
   onBinderChange,
   onError,
   onSaveLayout,
+  onUpdatingChange,
   saveState,
   showToast,
 }: {
@@ -4880,6 +5276,7 @@ function BinderSyncControls({
   onBinderChange: (binder: CustomBinder) => void;
   onError: (message: string) => void;
   onSaveLayout: () => void;
+  onUpdatingChange: (updating: boolean) => void;
   saveState: "idle" | "dirty" | "saving" | "saved" | "error";
   showToast: (message: string, tone?: ToastTone) => void;
 }) {
@@ -4898,28 +5295,36 @@ function BinderSyncControls({
     event.preventDefault();
     if (!binder || isUpdating || isBusy) return;
     setIsUpdating(true);
+    onUpdatingChange(true);
     try {
-      const updated = await patchServerBinder(binder.id, { description, name });
+      const updated = await patchServerBinder(binder, { description, name });
       onBinderChange(updated);
       showToast("Binder details saved.");
     } catch (updateError) {
       onError(updateError instanceof Error ? updateError.message : "Binder details could not be saved.");
     } finally {
       setIsUpdating(false);
+      onUpdatingChange(false);
     }
   }
 
   async function updateAccess(next: Partial<{ isDefault: boolean; visibility: BinderVisibility }>) {
     if (!binder || isUpdating || isBusy) return;
+    if (next.isDefault && ["dirty", "error", "saving"].includes(saveState)) {
+      onError("Save or discard the layout draft before making this the default binder.");
+      return;
+    }
     setIsUpdating(true);
+    onUpdatingChange(true);
     try {
-      const updated = await patchServerBinder(binder.id, next);
+      const updated = await patchServerBinder(binder, next);
       onBinderChange(updated);
       showToast(next.isDefault ? "Default binder updated." : updated.visibility === "unlisted" ? "Private sharing link enabled." : "Binder is private again.");
     } catch (updateError) {
       onError(updateError instanceof Error ? updateError.message : "Binder access could not be updated.");
     } finally {
       setIsUpdating(false);
+      onUpdatingChange(false);
     }
   }
 
@@ -4969,7 +5374,13 @@ function BinderSyncControls({
         </button>
       </form>
       <div className="binder-access-controls">
-        <button className="button small" type="button" disabled={binder.isDefault || isUpdating || isBusy} onClick={() => void updateAccess({ isDefault: true })}>
+        <button
+          className="button small"
+          type="button"
+          disabled={binder.isDefault || isUpdating || isBusy || ["dirty", "error", "saving"].includes(saveState)}
+          onClick={() => void updateAccess({ isDefault: true })}
+          title={["dirty", "error", "saving"].includes(saveState) ? "Save or discard layout changes first." : undefined}
+        >
           <BookOpen size={15} />
           {binder.isDefault ? "Default binder" : "Make default"}
         </button>
@@ -5001,6 +5412,7 @@ function BinderSyncControls({
 
 function BinderItemPicker({
   catalogueById,
+  disabled = false,
   itemSearch,
   items,
   selectedCopyCounts,
@@ -5008,6 +5420,7 @@ function BinderItemPicker({
   onSetItemCopyCount,
 }: {
   catalogueById: Map<string, CatalogueItem>;
+  disabled?: boolean;
   itemSearch: string;
   items: CollectionItem[];
   selectedCopyCounts: Record<string, number>;
@@ -5018,7 +5431,7 @@ function BinderItemPicker({
     <div className="binder-picker">
       <label className="search-box">
         <Search size={17} />
-        <input value={itemSearch} onChange={(event) => onItemSearchChange(event.target.value)} placeholder="Search owned cards" />
+        <input disabled={disabled} value={itemSearch} onChange={(event) => onItemSearchChange(event.target.value)} placeholder="Search owned cards" />
       </label>
       <div className="binder-picker-list">
         {items.map((item) => {
@@ -5035,13 +5448,13 @@ function BinderItemPicker({
               <span className="item-image binder-picker-image">{renderItemImage(catalogueItem)}</span>
               <span className="binder-picker-copy-details">
                 <strong>{catalogueItemTitle(catalogueItem)}</strong>
-                <small>{catalogueItemSetLabel(catalogueItem)} | {item.variant} | {item.grade}</small>
+                <small>{catalogueItemSetLabel(catalogueItem)} | {selectedVariantLabel(catalogueItem, item.variant)} | {item.grade}</small>
               </span>
               <div className="binder-copy-stepper" aria-label={`Copies of ${catalogueItemTitle(catalogueItem)} in binder`}>
                 <button
                   aria-label={`Remove one copy of ${catalogueItemTitle(catalogueItem)}`}
                   className="icon-button"
-                  disabled={selectedCount === 0}
+                  disabled={disabled || selectedCount === 0}
                   onClick={() => onSetItemCopyCount(item.id, selectedCount - 1)}
                   type="button"
                 >
@@ -5051,7 +5464,7 @@ function BinderItemPicker({
                 <button
                   aria-label={`Add one copy of ${catalogueItemTitle(catalogueItem)}`}
                   className="icon-button"
-                  disabled={selectedCount >= item.quantity}
+                  disabled={disabled || selectedCount >= item.quantity}
                   onClick={() => onSetItemCopyCount(item.id, selectedCount + 1)}
                   type="button"
                 >
@@ -5110,7 +5523,7 @@ function BinderFocusModal({
           <h2>{catalogueItemTitle(catalogueItem)}</h2>
           <p>{catalogueItemSetLabel(catalogueItem)} | No. {catalogueItem.number}</p>
           <div className="tag-row">
-            <span className="tag">{item.variant}</span>
+            <span className="tag">{selectedVariantLabel(catalogueItem, item.variant)}</span>
             <span className="tag">{item.condition}</span>
             {item.grade !== "Raw" && item.grade !== "N/A" ? <span className="tag">{item.grade}</span> : null}
           </div>
@@ -5170,6 +5583,8 @@ function AddScreen({
   const [quickAddId, setQuickAddId] = useState<string | null>(null);
   const [zoomedCatalogueItemId, setZoomedCatalogueItemId] = useState<string | null>(null);
   const [showSelectedPriceHistory, setShowSelectedPriceHistory] = useState(false);
+  const addDetailsPanelRef = useRef<HTMLElement | null>(null);
+  const requestedPriceHistoryIdRef = useRef<string | null>(null);
   const catalogueLoadMoreAbortRef = useRef<AbortController | null>(null);
   const catalogueQuerySignature = [
     addSearch.trim(),
@@ -5316,8 +5731,26 @@ function AddScreen({
     setAddQuantity(1);
     setAddVariant(appState.selectedCatalogueVariant || undefined);
     setAddLanguage(selected?.languageLabel ?? "English");
-    setShowSelectedPriceHistory(false);
   }, [appState.selectedCatalogueVariant, selected?.id, selected?.languageLabel, selected?.type]);
+
+  const revealSelectedPriceHistory = useCallback(() => {
+    window.requestAnimationFrame(() => {
+      const panel = addDetailsPanelRef.current;
+      panel?.scrollIntoView({ behavior: "smooth", block: "start" });
+      panel?.scrollTo({ behavior: "smooth", top: 0 });
+      panel?.focus({ preventScroll: true });
+    });
+  }, []);
+
+  useEffect(() => {
+    const openRequestedHistory = Boolean(selected?.id) && requestedPriceHistoryIdRef.current === selected?.id;
+    requestedPriceHistoryIdRef.current = null;
+    setShowSelectedPriceHistory(openRequestedHistory);
+
+    if (openRequestedHistory) {
+      revealSelectedPriceHistory();
+    }
+  }, [revealSelectedPriceHistory, selected?.id]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -5348,6 +5781,22 @@ function AddScreen({
     setIsSavingWishlist(true);
     await addToWishlist(itemId, selected?.id === itemId ? selectedVariant : undefined);
     setIsSavingWishlist(false);
+  }
+
+  function openPriceHistory(item: CatalogueItem) {
+    if (selected?.id === item.id) {
+      setShowSelectedPriceHistory(true);
+      revealSelectedPriceHistory();
+      return;
+    }
+
+    requestedPriceHistoryIdRef.current = item.id;
+    setAppState((current) => ({
+      ...current,
+      addType: item.type,
+      selectedCatalogueId: item.id,
+      selectedCatalogueVariant: "",
+    }));
   }
 
   async function loadMoreCatalogue() {
@@ -5549,6 +5998,7 @@ function AddScreen({
                 quickAddBusy={quickAddId === item.id}
                 quickAddDisabled={Boolean(quickAddId)}
                 onQuickAdd={() => void handleQuickAdd(item.id)}
+                onViewHistory={() => openPriceHistory(item)}
                 selected={item.id === selected?.id}
                 onClick={() => setAppState((current) => ({
                   ...current,
@@ -5601,7 +6051,7 @@ function AddScreen({
           ) : null}
         </section>
 
-        <section className="tool-panel add-details-panel">
+        <section className="tool-panel add-details-panel" ref={addDetailsPanelRef} tabIndex={-1}>
           <h2>Owned details</h2>
           {selected ? (
             <CataloguePreview
@@ -5637,7 +6087,9 @@ function AddScreen({
                 <ChartNoAxesCombined size={17} />
                 {showSelectedPriceHistory ? "Hide price history" : "View price history"}
               </button>
-              {showSelectedPriceHistory ? <PriceTrendPanel item={selected} /> : null}
+              {showSelectedPriceHistory ? (
+                <PriceTrendPanel item={selected} preferredVariant={selectedVariant} />
+              ) : null}
             </>
           ) : null}
           {selected ? (
@@ -6099,7 +6551,7 @@ function ItemDetailScreen({
                     </Field>
                   ) : (
                     <Field label="Variant">
-                      <VariantSelect item={item} defaultValue={owned.variant} />
+                      <VariantSelect item={item} defaultValue={selectedVariantLabel(item, owned.variant)} />
                     </Field>
                   )}
                 </div>
@@ -6135,7 +6587,7 @@ function ItemDetailScreen({
                 ["Quantity", owned.quantity],
                 ["Condition", owned.condition],
                 ["Language", owned.language],
-                ["Variant", owned.variant],
+                ["Variant", selectedVariantLabel(item, owned.variant)],
                 ["Grade", owned.grade],
                 ["Purchased", owned.purchaseDate ? formatEventDate(owned.purchaseDate) : "Not recorded"],
                 ["Location", owned.location],
@@ -7374,6 +7826,7 @@ function WishlistScreen({
     isEditing: boolean;
     item: WishlistItem;
     targetValue: number | null;
+    variantLabel?: string;
   };
 
   const wishlistInsight = wishlist.reduce(
@@ -7419,6 +7872,7 @@ function WishlistScreen({
         isEditing: editingId === item.id,
         item,
         targetValue,
+        variantLabel: wishlistVariantSelectionLabel(item, catalogueItem),
       };
     })
     .filter((row): row is WishlistRow => row !== null)
@@ -7433,7 +7887,7 @@ function WishlistScreen({
         row.catalogueItem.set,
         catalogueItemSetLabel(row.catalogueItem),
         row.catalogueItem.number,
-        row.item.variant ?? "",
+        row.variantLabel ?? "",
         row.item.priority,
         row.item.notes ?? "",
       ].join(" ").toLowerCase().includes(normalizedWishlistSearch);
@@ -7469,6 +7923,8 @@ function WishlistScreen({
   }
 
   function renderWishlistEditForm(item: WishlistItem, catalogueItem: CatalogueItem) {
+    const variantLabel = wishlistVariantSelectionLabel(item, catalogueItem);
+
     return (
       <form
         className="form-stack wishlist-edit-form"
@@ -7482,9 +7938,9 @@ function WishlistScreen({
         <div className="field-grid">
           {catalogueItem.type === "card" ? (
             <Field label="Card finish">
-              <select name="variant" defaultValue={item.variant ?? ""}>
-                {!item.variant ? <option value="">Preferred market finish</option> : null}
-                {catalogueVariantLabels(catalogueItem, item.variant).map((variant) => (
+              <select name="variant" defaultValue={variantLabel ?? ""}>
+                {!variantLabel ? <option value="">Preferred market finish</option> : null}
+                {catalogueVariantLabels(catalogueItem, variantLabel).map((variant) => (
                   <option key={variant} value={variant}>{variant}</option>
                 ))}
               </select>
@@ -7541,7 +7997,7 @@ function WishlistScreen({
               addType: row.catalogueItem.type,
               screen: "add",
               selectedCatalogueId: row.item.catalogueId,
-              selectedCatalogueVariant: row.item.variant ?? "",
+              selectedCatalogueVariant: row.variantLabel ?? "",
             }))
           }
           aria-label="Add owned-copy details"
@@ -7599,7 +8055,7 @@ function WishlistScreen({
           <div className="wishlist-card-copy">
             <h3>{catalogueItemTitle(row.catalogueItem)}</h3>
             <p className="collection-lot-set">{catalogueItemSetLabel(row.catalogueItem)} | {row.catalogueItem.number}</p>
-            {row.item.variant ? <span className="tag blue">{row.item.variant}</span> : null}
+            {row.variantLabel ? <span className="tag blue">{row.variantLabel}</span> : null}
           </div>
           <span className={`priority-pill priority-${row.item.priority.toLowerCase()}`}>{row.item.priority}</span>
         </div>
@@ -7742,7 +8198,7 @@ function WishlistScreen({
                               <div>
                                 <strong>{catalogueItemTitle(row.catalogueItem)}</strong>
                                 <span>{catalogueItemSetLabel(row.catalogueItem)} | {row.catalogueItem.number}</span>
-                                {row.item.variant ? <span>{row.item.variant}</span> : null}
+                                {row.variantLabel ? <span>{row.variantLabel}</span> : null}
                               </div>
                             </div>
                           </td>
@@ -8988,6 +9444,7 @@ function DataPanel({
   const [importPreview, setImportPreview] = useState<CollectionImportPreview | null>(null);
   const [isPreviewing, setIsPreviewing] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+  const [isExportingInsurance, setIsExportingInsurance] = useState(false);
 
   async function handleImportChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.currentTarget.files?.[0];
@@ -9033,6 +9490,19 @@ function DataPanel({
     setImportPreview(null);
   }
 
+  async function handleInsuranceExport() {
+    if (isExportingInsurance) {
+      return;
+    }
+
+    setIsExportingInsurance(true);
+    try {
+      await onExportInsuranceReport();
+    } finally {
+      setIsExportingInsurance(false);
+    }
+  }
+
   return (
     <section className="tool-panel">
       <h2>Data</h2>
@@ -9041,9 +9511,16 @@ function DataPanel({
           <Download size={17} />
           Export CSV
         </button>
-        <button className={plus ? "button" : "button danger"} onClick={() => void onExportInsuranceReport()}>
-          {plus ? <Download size={17} /> : <Lock size={17} />}
-          Insurance report
+        <button
+          aria-busy={isExportingInsurance}
+          aria-describedby={isExportingInsurance ? "insurance-export-progress" : undefined}
+          className={plus ? "button" : "button danger"}
+          disabled={isExportingInsurance}
+          onClick={() => void handleInsuranceExport()}
+          type="button"
+        >
+          {isExportingInsurance ? <RefreshCw aria-hidden="true" className="spin" size={17} /> : plus ? <Download size={17} /> : <Lock size={17} />}
+          {isExportingInsurance ? "Building report…" : "Insurance report"}
         </button>
         <label className="button file-button">
           <Upload size={17} />
@@ -9065,6 +9542,11 @@ function DataPanel({
           </button>
         ) : null}
       </div>
+      {isExportingInsurance ? (
+        <p className="insurance-export-progress" id="insurance-export-progress" role="status">
+          Building your PDF, including card images and valuation evidence. This can take a little while; keep this page open.
+        </p>
+      ) : null}
       {isPreviewing ? <p className="muted" role="status">Validating the selected CSV…</p> : null}
       {importFile && importPreview ? (
         <section className="import-preview" aria-labelledby="import-preview-title">
@@ -9292,7 +9774,7 @@ function CollectionTable({
                       ? item.grade
                       : catalogueItem.type === "sealed"
                         ? "Sealed"
-                        : item.variant}
+                        : selectedVariantLabel(catalogueItem, item.variant)}
                   </span>
                 </td>
                 <td>{item.quantity}</td>
@@ -9352,7 +9834,8 @@ function OwnedItemCard({
   }
 
   const ownedValue = getOwnedValue(item, catalogueItem);
-  const variantLabel = catalogueItem.type === "card" && item.variant && item.variant !== "Standard" ? item.variant : "";
+  const resolvedVariant = selectedVariantLabel(catalogueItem, item.variant);
+  const variantLabel = catalogueItem.type === "card" && resolvedVariant !== "Standard" ? resolvedVariant : "";
   const gradeLabel = item.grade && item.grade !== "Raw" && item.grade !== "N/A" ? item.grade : "";
   const valuation = collectionItemValuation(item, catalogueItem);
   const marketValue = valuation.kind === "market" ? valuation.unitValueMinor : null;
@@ -9413,6 +9896,7 @@ function OwnedItemCard({
 function CatalogueResult({
   item,
   onQuickAdd,
+  onViewHistory,
   quickAddBusy = false,
   quickAddDisabled = false,
   selected,
@@ -9420,6 +9904,7 @@ function CatalogueResult({
 }: {
   item: CatalogueItem;
   onQuickAdd: () => void;
+  onViewHistory: () => void;
   quickAddBusy?: boolean;
   quickAddDisabled?: boolean;
   selected: boolean;
@@ -9453,15 +9938,26 @@ function CatalogueResult({
           ) : null}
         </div>
       </button>
-      <button
-        className="icon-button quick-add-button"
-        type="button"
-        disabled={quickAddDisabled}
-        onClick={onQuickAdd}
-        aria-label={quickAddBusy ? `Adding ${title}` : `Quick add ${title}`}
-      >
-        {quickAddBusy ? <RefreshCw className="spin" size={18} /> : <Plus size={18} />}
-      </button>
+      <div className="catalogue-result-actions">
+        <button
+          aria-label={`View price history for ${title}`}
+          className="icon-button catalogue-result-history-button"
+          onClick={onViewHistory}
+          title="View price history"
+          type="button"
+        >
+          <ChartNoAxesCombined size={18} />
+        </button>
+        <button
+          className="icon-button quick-add-button"
+          type="button"
+          disabled={quickAddDisabled}
+          onClick={onQuickAdd}
+          aria-label={quickAddBusy ? `Adding ${title}` : `Quick add ${title}`}
+        >
+          {quickAddBusy ? <RefreshCw className="spin" size={18} /> : <Plus size={18} />}
+        </button>
+      </div>
     </article>
   );
 }
@@ -9975,10 +10471,12 @@ function PriceTrendPanel({
   item,
   owned,
   overrideValueMinor,
+  preferredVariant,
 }: {
   item: CatalogueItem;
   owned?: CollectionItem;
   overrideValueMinor?: number;
+  preferredVariant?: string;
 }) {
   const [range, setRange] = useState<PriceHistoryRange>("30d");
   const [remoteHistoryByRange, setRemoteHistoryByRange] = useState<Record<string, DetailedPricePoint[]>>({});
@@ -9994,10 +10492,14 @@ function PriceTrendPanel({
     ? collectionItemPriceHistory(owned, { ...item, priceHistory: allHistory })
     : allHistory.filter((point) => !point.gradedCompany);
   const historySeries = groupPriceHistorySeries(relevantHistory);
-  const fallbackHistorySeriesKey = preferredPriceHistorySeriesKey(relevantHistory, owned?.variant);
+  const historyPreferredVariant = preferredVariant ?? owned?.variant;
+  const fallbackHistorySeriesKey = preferredPriceHistorySeriesKey(
+    relevantHistory,
+    historyPreferredVariant,
+  );
   const activeHistorySeries = historySeries.find((series) => series.key === selectedHistorySeriesKey) ??
     historySeries.find((series) => series.key === fallbackHistorySeriesKey) ??
-    historySeries[0];
+    (historyPreferredVariant ? undefined : historySeries[0]);
   const history = activeHistorySeries?.points ?? [];
   const visibleHistory = filterPriceHistoryByRange(history, range);
   const activeHistory = visibleHistory.length ? visibleHistory : history;
@@ -10011,7 +10513,7 @@ function PriceTrendPanel({
   const latestMarketValue = overallLatest?.valueMinor ?? (
     owned
       ? collectionItemValuation(owned, item).unitValueMinor ?? null
-      : catalogueMarketValueMinor(item)
+      : catalogueMarketValueMinor(item, preferredVariant)
   );
   const deltaPercent = delta !== null && first?.valueMinor
     ? (delta / first.valueMinor) * 100
@@ -10024,6 +10526,10 @@ function PriceTrendPanel({
     setHistoryLoadError("");
     setSelectedHistorySeriesKey("");
   }, [item.id]);
+
+  useEffect(() => {
+    setSelectedHistorySeriesKey("");
+  }, [historyPreferredVariant]);
 
   useEffect(() => {
     if (!shouldLoadRemoteHistory || remoteHistoryByRange[apiRange]) {
@@ -10117,8 +10623,9 @@ function PriceTrendPanel({
           <small>Each line is one exact finish, grade, condition, language, source and currency.</small>
         </label>
       ) : null}
+      <PriceHistoryRangeControls onRangeChange={setRange} range={range} />
       {history.length ? (
-        <PriceHistoryLineChart history={history} onRangeChange={setRange} range={range} />
+        <PriceHistoryLineChart history={history} range={range} />
       ) : (
         <p className="muted">No price history yet.</p>
       )}
@@ -10182,6 +10689,30 @@ const priceHistoryRanges: Array<{ days?: number; label: string; value: PriceHist
   { label: "All", value: "all" },
 ];
 
+function PriceHistoryRangeControls({
+  onRangeChange,
+  range,
+}: {
+  onRangeChange: (range: PriceHistoryRange) => void;
+  range: PriceHistoryRange;
+}) {
+  return (
+    <div className="segmented compact price-history-ranges" aria-label="Price history timeframe">
+      {priceHistoryRanges.map((option) => (
+        <button
+          aria-pressed={range === option.value}
+          className={range === option.value ? "active" : ""}
+          key={option.value}
+          onClick={() => onRangeChange(option.value)}
+          type="button"
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function priceHistoryApiRange(range: PriceHistoryRange) {
   if (range === "3m") return "90d";
   if (range === "6m") return "1y";
@@ -10240,11 +10771,9 @@ function isUuid(value: string) {
 
 function PriceHistoryLineChart({
   history,
-  onRangeChange,
   range,
 }: {
   history: NonNullable<CatalogueItem["priceHistory"]>;
-  onRangeChange: (range: PriceHistoryRange) => void;
   range: PriceHistoryRange;
 }) {
   const points = filterPriceHistoryByRange(history, range);
@@ -10259,19 +10788,6 @@ function PriceHistoryLineChart({
 
   return (
     <div className="price-history-chart">
-      <div className="segmented compact price-history-ranges" aria-label="Price history timeframe">
-        {priceHistoryRanges.map((option) => (
-          <button
-            aria-pressed={range === option.value}
-            className={range === option.value ? "active" : ""}
-            key={option.value}
-            onClick={() => onRangeChange(option.value)}
-            type="button"
-          >
-            {option.label}
-          </button>
-        ))}
-      </div>
       <InteractiveValueLineChart
         gradientId={`price-history-area-${range}`}
         label={`Price history line chart, ${priceHistoryRangeLabel(range)}`}
@@ -10490,9 +11006,7 @@ function conditionAdjustmentLabel(multiplier: number) {
 }
 
 function selectedVariantLabel(item: CatalogueItem, variant?: string) {
-  const options = catalogueVariantLabels(item, variant);
-
-  return variant && options.includes(variant) ? variant : options[0];
+  return catalogueVariantSelectionLabel(item, variant);
 }
 
 function formatValuation(valueMinor?: number | null) {
@@ -11247,22 +11761,12 @@ function binderMigrationStorageKey(email: string) {
   return `${binderMigrationStoragePrefix}:${owner}`;
 }
 
-async function fetchServerBinders() {
-  const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), BINDER_SYNC_TIMEOUT_MS);
-  let response: Response;
-
-  try {
-    response = await fetch("/api/binders", { cache: "no-store", signal: controller.signal });
-  } catch (error) {
-    if (controller.signal.aborted) {
-      throw new Error("Binder sync took too long. Your collection binder is still available; retry sync in a moment.");
-    }
-    throw error;
-  } finally {
-    window.clearTimeout(timeout);
-  }
-
+async function fetchServerBinders(signal?: AbortSignal) {
+  const response = await fetchBinderRequest(
+    "/api/binders",
+    { cache: "no-store", signal },
+    "Binder sync took too long. Your collection binder is still available; retry sync in a moment.",
+  );
   const body = (await response.json().catch(() => ({}))) as { binders?: unknown[]; error?: string };
 
   if (!response.ok) {
@@ -11272,22 +11776,59 @@ async function fetchServerBinders() {
   return (body.binders ?? []).map(normalizeServerBinder).filter((binder): binder is CustomBinder => Boolean(binder));
 }
 
+async function fetchBinderRequest(url: string, init: RequestInit, timeoutMessage: string) {
+  const controller = new AbortController();
+  const upstreamSignal = init.signal;
+  let timedOut = false;
+  const abortFromUpstream = () => controller.abort(upstreamSignal?.reason);
+  if (upstreamSignal?.aborted) {
+    abortFromUpstream();
+  } else {
+    upstreamSignal?.addEventListener("abort", abortFromUpstream, { once: true });
+  }
+  const timeout = window.setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, BINDER_SYNC_TIMEOUT_MS);
+
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (timedOut) {
+      throw new Error(timeoutMessage);
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
+    upstreamSignal?.removeEventListener("abort", abortFromUpstream);
+  }
+}
+
 async function createServerBinder(input: {
   artworkId: BinderArtworkId;
   description?: string;
   isDefault?: boolean;
+  legacySource?: string;
+  managedDefaultBootstrap?: boolean;
   name: string;
-}) {
-  const response = await fetch("/api/binders", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      coverStyle: serverCoverStyleFromArtwork(input.artworkId),
-      description: input.description ?? "",
-      isDefault: input.isDefault,
-      name: input.name,
-    }),
-  });
+}, signal?: AbortSignal) {
+  const response = await fetchBinderRequest(
+    "/api/binders",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      signal,
+      body: JSON.stringify({
+        coverStyle: serverCoverStyleFromArtwork(input.artworkId),
+        description: input.description ?? "",
+        isDefault: input.isDefault,
+        legacySource: input.legacySource,
+        managedDefaultBootstrap: input.managedDefaultBootstrap === true,
+        name: input.name,
+      }),
+    },
+    "Binder creation took too long. Refresh binder sync before trying again.",
+  );
   const body = (await response.json().catch(() => ({}))) as { binder?: unknown; error?: string };
 
   if (!response.ok || !body.binder) {
@@ -11299,12 +11840,35 @@ async function createServerBinder(input: {
   return binder;
 }
 
-async function replaceServerBinderLayout(binderId: string, pages: BinderPageRecord[]) {
-  const response = await fetch(`/api/binders/${encodeURIComponent(binderId)}/layout`, {
-    method: "PUT",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ pages: binderLayoutPayload(pages) }),
-  });
+async function replaceServerBinderLayout(
+  binderId: string,
+  pages: BinderPageRecord[],
+  options: {
+    completeLegacyCustomMigration?: boolean;
+    completeLegacyDefaultMigration?: boolean;
+    expectedUpdatedAt: string;
+    releaseConflictsFromDefaultBinderId?: string;
+    releaseConflictsFromDefaultUpdatedAt?: string;
+    signal?: AbortSignal;
+  },
+) {
+  const response = await fetchBinderRequest(
+    `/api/binders/${encodeURIComponent(binderId)}/layout`,
+    {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      signal: options.signal,
+      body: JSON.stringify({
+        completeLegacyCustomMigration: options.completeLegacyCustomMigration === true,
+        completeLegacyDefaultMigration: options.completeLegacyDefaultMigration === true,
+        expectedUpdatedAt: options.expectedUpdatedAt,
+        pages: binderLayoutPayload(pages),
+        releaseConflictsFromDefaultBinderId: options.releaseConflictsFromDefaultBinderId,
+        releaseConflictsFromDefaultUpdatedAt: options.releaseConflictsFromDefaultUpdatedAt,
+      }),
+    },
+    "Binder layout save took too long. Refresh binder sync to confirm its state.",
+  );
   const body = (await response.json().catch(() => ({}))) as { binder?: unknown; error?: string };
 
   if (!response.ok || !body.binder) {
@@ -11317,7 +11881,7 @@ async function replaceServerBinderLayout(binderId: string, pages: BinderPageReco
 }
 
 async function patchServerBinder(
-  binderId: string,
+  binder: Pick<CustomBinder, "id" | "updatedAt">,
   input: Partial<{
     coverStyle: string;
     description: string;
@@ -11326,10 +11890,10 @@ async function patchServerBinder(
     visibility: BinderVisibility;
   }>,
 ) {
-  const response = await fetch(`/api/binders/${encodeURIComponent(binderId)}`, {
+  const response = await fetch(`/api/binders/${encodeURIComponent(binder.id)}`, {
     method: "PATCH",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(input),
+    body: JSON.stringify({ ...input, expectedUpdatedAt: binder.updatedAt }),
   });
   const body = (await response.json().catch(() => ({}))) as { binder?: unknown; error?: string };
 
@@ -11337,52 +11901,23 @@ async function patchServerBinder(
     throw new Error(body.error ?? `Binder update failed with ${response.status}.`);
   }
 
-  const binder = normalizeServerBinder(body.binder);
-  if (!binder) throw new Error("Binder update returned an invalid response.");
-  return binder;
+  const updated = normalizeServerBinder(body.binder);
+  if (!updated) throw new Error("Binder update returned an invalid response.");
+  return updated;
 }
 
-async function deleteServerBinder(binderId: string) {
-  const response = await fetch(`/api/binders/${encodeURIComponent(binderId)}`, { method: "DELETE" });
+async function deleteServerBinder(binder: Pick<CustomBinder, "id" | "updatedAt">) {
+  const response = await fetch(`/api/binders/${encodeURIComponent(binder.id)}`, {
+    method: "DELETE",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ expectedUpdatedAt: binder.updatedAt }),
+  });
   const body = (await response.json().catch(() => ({}))) as { error?: string };
   if (!response.ok) throw new Error(body.error ?? `Binder deletion failed with ${response.status}.`);
 }
 
 function cloneBinderPages(pages: BinderPageRecord[]) {
   return pages.map((page) => ({ ...page, slots: page.slots.map((slot) => ({ ...slot })) }));
-}
-
-function placeBinderCopyInFirstBlank(
-  sourcePages: BinderPageRecord[],
-  collectionItemId: string,
-  copyIndex: number,
-) {
-  const pages = cloneBinderPages(sourcePages);
-
-  for (const page of pages) {
-    const slot = page.slots.find((candidate) => !candidate.collectionItemId);
-    if (slot) {
-      page.slots = page.slots.map((candidate) =>
-        candidate.position === slot.position
-          ? { collectionItemId, copyIndex, note: null, position: candidate.position }
-          : candidate,
-      );
-      return pages;
-    }
-  }
-
-  if (pages.length < 100) {
-    pages.push({
-      position: pages.length,
-      slots: Array.from({ length: 9 }, (_, position) =>
-        position === 0
-          ? { collectionItemId, copyIndex, note: null, position }
-          : emptyBinderSlot(position),
-      ),
-    });
-  }
-
-  return pages;
 }
 
 function swapBinderSlots(sourcePages: BinderPageRecord[], sourceIndex: number, targetIndex: number) {
@@ -11403,60 +11938,158 @@ async function migrateLegacyBinders({
   collection,
   legacyBinders,
   legacyDefault,
+  signal,
 }: {
   binders: CustomBinder[];
   collection: CollectionItem[];
   legacyBinders: LegacyStoredBinder[];
   legacyDefault: DefaultBinderSettings;
+  signal?: AbortSignal;
 }) {
   let nextBinders = [...binders];
   let migratedCount = 0;
   const collectionById = new Map(collection.map((item) => [item.id, item]));
   const cardItems = collection;
-  const existingDefault = nextBinders.find((binder) => binder.isDefault);
-  const defaultMigrationMarker = "[Legacy source: default]";
+  let pendingDefault = nextBinders.find((binder) => binder.isDefault);
 
-  if (!existingDefault && cardItems.length) {
-    const orderedItems = orderedCollectionItems(cardItems, legacyDefault.itemIds);
+  if (!pendingDefault && cardItems.length) {
     const created = await createServerBinder({
       artworkId: legacyDefault.artworkId,
-      description: `Every active card lot, migrated from this device. ${defaultMigrationMarker}`,
+      description: "Every active card lot, migrated from this device.",
       isDefault: true,
+      managedDefaultBootstrap: true,
       name: uniqueBinderName("Full Card Collection", nextBinders),
-    });
-    const pages = buildBinderPages(orderedItems.map((item) => ({ collectionItemId: item.id, copyIndex: 1 })));
-    const saved = await replaceServerBinderLayout(created.id, pages);
-    nextBinders = [saved, ...nextBinders.map((binder) => ({ ...binder, isDefault: false }))];
+    }, signal);
+    pendingDefault = created;
+    nextBinders = [created, ...nextBinders.map((binder) => ({ ...binder, isDefault: false }))];
     migratedCount += 1;
-  } else if (existingDefault?.legacySource === "default") {
+  }
+
+  for (const legacy of legacyBinders) {
+    const legacySource = encodeURIComponent(legacy.id).slice(0, 120);
+    const existingMigration = nextBinders.find((binder) => binder.legacySource === legacySource);
+    if (existingMigration && !existingMigration.legacyMigrationPending) {
+      continue;
+    }
+    const created = existingMigration ?? await createServerBinder({
+      artworkId: legacy.artworkId,
+      description: "Migrated from this device. The original local copy remains available as a safety backup.",
+      legacySource,
+      name: uniqueBinderName(legacy.name.slice(0, 70), nextBinders),
+    }, signal);
+    const existingHasAssignments = Boolean(existingMigration?.pages.some((page) =>
+      page.slots.some((slot) => slot.collectionItemId),
+    ));
+    if (existingMigration && existingHasAssignments) {
+      const completed = await replaceServerBinderLayout(existingMigration.id, existingMigration.pages, {
+        completeLegacyCustomMigration: true,
+        expectedUpdatedAt: existingMigration.updatedAt,
+        signal,
+      });
+      nextBinders = nextBinders.map((binder) => (binder.id === completed.id ? completed : binder));
+      continue;
+    }
+    const legacyItems = legacy.itemIds
+      .map((itemId) => collectionById.get(itemId))
+      .filter((item): item is CollectionItem => Boolean(item));
+    const releasePendingDefault = pendingDefault && (
+      shouldCompleteMigratedDefaultBinder([pendingDefault], cardItems.length) ||
+      (pendingDefault.isDefault && pendingDefault.managedDefault)
+    ) ? pendingDefault : null;
+    const entries = unassignedBinderEntries(
+      legacyItems,
+      nextBinders,
+      [created.id, ...(releasePendingDefault ? [releasePendingDefault.id] : [])],
+    );
+    const saved = await replaceServerBinderLayout(created.id, buildBinderPages(entries), {
+      completeLegacyCustomMigration: true,
+      expectedUpdatedAt: created.updatedAt,
+      releaseConflictsFromDefaultBinderId: releasePendingDefault?.id,
+      releaseConflictsFromDefaultUpdatedAt: releasePendingDefault?.updatedAt,
+      signal,
+    });
+    nextBinders = releasePendingDefault
+      ? await fetchServerBinders(signal)
+      : existingMigration
+        ? nextBinders.map((binder) => (binder.id === saved.id ? saved : binder))
+        : [...nextBinders, saved];
+    pendingDefault = nextBinders.find((binder) => binder.isDefault);
+    if (!existingMigration) migratedCount += 1;
+  }
+
+  if (
+    pendingDefault &&
+    shouldCompleteMigratedDefaultBinder([pendingDefault], cardItems.length)
+  ) {
     const orderedItems = orderedCollectionItems(cardItems, legacyDefault.itemIds);
+    const representedLotIds = new Set(
+      pendingDefault.pages
+        .flatMap((page) => page.slots)
+        .map((slot) => slot.collectionItemId)
+        .filter((itemId): itemId is string => Boolean(itemId)),
+    );
+    const missingItems = orderedItems.filter((item) => !representedLotIds.has(item.id));
+    const entries = unassignedBinderEntries(missingItems, nextBinders, pendingDefault.id);
+    const appended = appendBinderEntriesToBlankSlots(
+      pendingDefault.pages,
+      entries,
+      MAX_MANAGED_BINDER_PAGES,
+    );
+    if (appended.placedCount !== entries.length) {
+      throw new Error("The Full Card Collection binder is at capacity and could not finish syncing.");
+    }
     const saved = await replaceServerBinderLayout(
-      existingDefault.id,
-      buildBinderPages(orderedItems.map((item) => ({ collectionItemId: item.id, copyIndex: 1 }))),
+      pendingDefault.id,
+      appended.pages,
+      {
+        completeLegacyDefaultMigration: true,
+        expectedUpdatedAt: pendingDefault.updatedAt,
+        signal,
+      },
     );
     nextBinders = nextBinders.map((binder) => (binder.id === saved.id ? saved : binder));
   }
 
-  for (const legacy of legacyBinders) {
-    const legacySource = legacy.id.slice(0, 120);
-    const migrationMarker = `[Legacy source: ${legacySource}]`;
-    const existingMigration = nextBinders.find((binder) => binder.legacySource === legacySource);
-    const created = existingMigration ?? await createServerBinder({
-      artworkId: legacy.artworkId,
-      description: `Migrated from this device. The original local copy remains available as a safety backup. ${migrationMarker}`,
-      name: uniqueBinderName(legacy.name.slice(0, 70), nextBinders),
-    });
-    const entries = legacy.itemIds
-      .filter((itemId) => collectionById.has(itemId))
-      .map((collectionItemId) => ({ collectionItemId, copyIndex: 1 }));
-    const saved = await replaceServerBinderLayout(created.id, buildBinderPages(entries));
-    nextBinders = existingMigration
-      ? nextBinders.map((binder) => (binder.id === saved.id ? saved : binder))
-      : [...nextBinders, saved];
-    if (!existingMigration) migratedCount += 1;
-  }
-
   return { binders: nextBinders, complete: true, migratedCount };
+}
+
+async function syncManagedDefaultBinder(
+  binders: CustomBinder[],
+  collection: CollectionItem[],
+  signal?: AbortSignal,
+) {
+  const managedDefault = binders.find((binder) => binder.isDefault && binder.managedDefault);
+  if (!managedDefault || !collection.length) return binders;
+
+  const representedLotIds = new Set(
+    managedDefault.pages
+      .flatMap((page) => page.slots)
+      .map((slot) => slot.collectionItemId)
+      .filter((itemId): itemId is string => Boolean(itemId)),
+  );
+  const missingLots = collection.filter((item) => !representedLotIds.has(item.id));
+  const entries = unassignedBinderEntries(missingLots, binders, managedDefault.id);
+  if (!entries.length) return binders;
+
+  const assignedBefore = managedDefault.pages
+    .flatMap((page) => page.slots)
+    .filter((slot) => slot.collectionItemId).length;
+  const appended = appendBinderEntriesToBlankSlots(
+    managedDefault.pages,
+    entries,
+    MAX_MANAGED_BINDER_PAGES,
+  );
+  if (appended.placedCount !== entries.length) {
+    throw new Error("The Full Card Collection binder is at capacity and could not finish syncing.");
+  }
+  const assignedAfter = appended.pages.flatMap((page) => page.slots).filter((slot) => slot.collectionItemId).length;
+  if (assignedAfter === assignedBefore) return binders;
+
+  const saved = await replaceServerBinderLayout(managedDefault.id, appended.pages, {
+    expectedUpdatedAt: managedDefault.updatedAt,
+    signal,
+  });
+  return binders.map((binder) => (binder.id === saved.id ? saved : binder));
 }
 
 function normalizeServerBinder(value: unknown): CustomBinder | null {
@@ -11467,7 +12100,8 @@ function normalizeServerBinder(value: unknown): CustomBinder | null {
   if (!id || !name) return null;
   const coverStyle = typeof source.coverStyle === "string" ? source.coverStyle : "forest";
   const rawDescription = typeof source.description === "string" ? source.description : "";
-  const legacySourceMatch = rawDescription.match(/\s*\[Legacy source: ([^\]]+)]\s*$/);
+  const legacySourceMatch = rawDescription.match(/\s*\[Legacy (source|migrated): ([^\]]+)]\s*$/);
+  const managedDefault = hasManagedDefaultBinderMarker(rawDescription);
   const pages = Array.isArray(source.pages)
     ? source.pages.map(normalizeServerBinderPage).filter((page): page is BinderPageRecord => Boolean(page))
     : [];
@@ -11476,11 +12110,13 @@ function normalizeServerBinder(value: unknown): CustomBinder | null {
     artworkId: artworkFromServerCoverStyle(coverStyle),
     coverStyle,
     createdAt: typeof source.createdAt === "string" ? source.createdAt : new Date().toISOString(),
-    description: rawDescription.replace(/\s*\[Legacy source: [^\]]+]\s*$/, "").trim(),
+    description: visibleBinderDescription(rawDescription) ?? "",
     id,
     interiorId: "classic",
     isDefault: source.isDefault === true,
-    legacySource: legacySourceMatch?.[1],
+    legacyMigrationPending: legacySourceMatch?.[1] === "source",
+    legacySource: legacySourceMatch?.[2],
+    managedDefault,
     name,
     pages: pages.length ? pages : buildBinderPages([]),
     shareSlug: typeof source.shareSlug === "string" && source.shareSlug ? source.shareSlug : undefined,
@@ -11537,8 +12173,15 @@ function binderCopyCounts(pages: BinderPageRecord[]) {
   }, {});
 }
 
-function buildBinderPages(entries: Array<{ collectionItemId: string; copyIndex: number }>, minimumPages = 2) {
-  const pageCount = Math.min(100, Math.max(minimumPages, Math.ceil(entries.length / 9), 1));
+function buildBinderPages(
+  entries: Array<{ collectionItemId: string; copyIndex: number }>,
+  minimumPages = 2,
+  maxPages = MAX_STANDARD_BINDER_PAGES,
+) {
+  if (entries.length > maxPages * 9) {
+    throw new Error(`This binder cannot hold more than ${maxPages * 9} card copies.`);
+  }
+  const pageCount = Math.max(minimumPages, Math.ceil(entries.length / 9), 1);
   return Array.from({ length: pageCount }, (_, pagePosition): BinderPageRecord => ({
     position: pagePosition,
     slots: Array.from({ length: 9 }, (_entry, slotPosition) => {
@@ -11657,8 +12300,16 @@ function defaultBinderSummary(
     isDefault: true,
     items: collection,
     name: "Full Card Collection",
-    pages: buildBinderPages(collection.map((item) => ({ collectionItemId: item.id, copyIndex: 1 }))),
-    slots: buildBinderPages(collection.map((item) => ({ collectionItemId: item.id, copyIndex: 1 })))
+    pages: buildBinderPages(
+      collection.map((item) => ({ collectionItemId: item.id, copyIndex: 1 })),
+      2,
+      MAX_MANAGED_BINDER_PAGES,
+    ),
+    slots: buildBinderPages(
+      collection.map((item) => ({ collectionItemId: item.id, copyIndex: 1 })),
+      2,
+      MAX_MANAGED_BINDER_PAGES,
+    )
       .flatMap((page) => page.slots.map((slot) => ({ ...slot, item: slot.collectionItemId ? collection.find((item) => item.id === slot.collectionItemId) : undefined }))),
     visibility: "private",
   };

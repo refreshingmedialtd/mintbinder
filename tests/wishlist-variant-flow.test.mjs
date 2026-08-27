@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { wishlistMatchesOwnedVariant } from "../src/lib/wishlist-variant.ts";
+import {
+  wishlistMatchesOwnedVariant,
+  wishlistVariantSelectionLabel,
+} from "../src/lib/wishlist-variant.ts";
 
 test("an exact wishlist finish is only cleared by the same owned finish", () => {
   const holofoil = { catalogueId: "card-1", variant: "Holofoil" };
@@ -15,10 +18,32 @@ test("an exact wishlist finish is only cleared by the same owned finish", () => 
   );
 });
 
+test("a legacy generic premium target resolves to its sole supported finish", () => {
+  const catalogueItem = {
+    id: "card-1",
+    type: "card",
+    name: "Latias & Latios-GX",
+    set: "Team Up",
+    number: "170",
+    rarity: "Rare Ultra",
+    valueMinor: 83_960,
+    hasPrice: true,
+    imageUrl: "",
+    variantOptions: [{ label: "Holofoil", valueMinor: 83_960 }],
+  };
+  const legacyTarget = { catalogueId: "card-1", variant: "Normal" };
+
+  assert.equal(wishlistVariantSelectionLabel(legacyTarget, catalogueItem), "Holofoil");
+  assert.equal(
+    wishlistMatchesOwnedVariant(legacyTarget, "card-1", "Holofoil", catalogueItem),
+    true,
+  );
+});
+
 test("add and wishlist conversion flows carry an explicit catalogue finish", () => {
   const source = readFileSync(new URL("../src/app/page.tsx", import.meta.url), "utf8");
 
-  assert.match(source, /selectedCatalogueVariant: row\.item\.variant \?\? ""/);
+  assert.match(source, /selectedCatalogueVariant: row\.variantLabel \?\? ""/);
   assert.match(source, /addToWishlist\(itemId, selected\?\.id === itemId \? selectedVariant : undefined\)/);
   assert.match(source, /defaultWishlistVariant\(catalogueItem\) \?\? selectedVariantLabel\(catalogueItem\)/);
   assert.doesNotMatch(source, /catalogueItem\.type === "sealed" \? "Factory sealed" : "Standard"/);

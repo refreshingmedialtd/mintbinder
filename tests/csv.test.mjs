@@ -106,6 +106,43 @@ test("exports the exact variant, condition-adjusted lot value", () => {
   assert.equal(record.confidence, "Fair");
 });
 
+test("exports the effective finish used to value a legacy premium holo-only lot", () => {
+  const premiumCard = {
+    id: "team-up-170",
+    type: "card",
+    name: "Latias & Latios-GX",
+    set: "Team Up",
+    number: "170",
+    rarity: "Rare Ultra",
+    hasPrice: true,
+    valueMinor: 83_960,
+    confidence: "Fair",
+    variantOptions: [{ label: "Holofoil", valueMinor: 83_960 }],
+    priceHistory: [{
+      confidence: "Fair",
+      observedAt: "2026-08-25T07:58:05.637Z",
+      source: "pokemon-tcg-api-cardmarket",
+      valueMinor: 83_960,
+      variantLabel: "Holofoil",
+    }],
+  };
+  const csv = buildCollectionCsv({
+    catalogueById: new Map([[premiumCard.id, premiumCard]]),
+    collection: [collectionItem({
+      catalogueId: premiumCard.id,
+      condition: "Near mint",
+      grade: "Raw",
+      quantity: 1,
+      variant: "Normal",
+    })],
+    exportedAt: new Date("2026-08-27T00:00:00.000Z"),
+  });
+  const record = csvRecord(csv);
+
+  assert.equal(record.variant, "Holofoil");
+  assert.equal(record.estimated_value_minor, "83960");
+});
+
 test("neutralizes spreadsheet formulas in exported text without changing numeric cells", () => {
   const dangerousCatalogue = {
     ...unpricedSealed,

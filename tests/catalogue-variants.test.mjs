@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   buildCatalogueVariantOptions,
   catalogueValueMinorForVariant,
+  catalogueVariantSelectionLabel,
   catalogueVariantLabels,
   displayVariantLabel,
   pokemonTcgImageUrlFromProviderIds,
@@ -204,6 +206,69 @@ test("infers standard modern finishes when provider metadata is thin", () => {
     }).map((option) => option.label),
     ["Holofoil"],
   );
+});
+
+test("treats legacy Rare Ultra ordering as a premium holo-only rarity", () => {
+  const item = {
+    id: "team-up-170",
+    type: "card",
+    name: "Latias & Latios-GX",
+    set: "Team Up",
+    number: "170",
+    rarity: "Rare Ultra",
+    hasPrice: true,
+    valueMinor: 83_960,
+    confidence: "Fair",
+    priceHistory: [{
+      confidence: "Fair",
+      observedAt: "2026-08-25T07:58:05.637Z",
+      source: "pokemon-tcg-api-cardmarket",
+      valueMinor: 83_960,
+      variantLabel: "Holofoil",
+    }],
+  };
+  item.variantOptions = buildCatalogueVariantOptions({
+    itemType: item.type,
+    priceHistory: item.priceHistory,
+    rarity: item.rarity,
+    setName: item.set,
+    variantMetadata: { availablePrices: ["holofoil"] },
+  });
+
+  assert.deepEqual(item.variantOptions.map((option) => option.label), ["Holofoil"]);
+  assert.equal(catalogueVariantSelectionLabel(item, undefined), "Holofoil");
+  assert.equal(catalogueVariantSelectionLabel(item, "Normal"), "Holofoil");
+  assert.equal(catalogueValueMinorForVariant(item, "Normal"), 83_960);
+
+  const legitimateNormal = {
+    ...item,
+    priceHistory: [
+      ...item.priceHistory,
+      {
+        confidence: "Fair",
+        observedAt: "2026-08-25T07:58:05.637Z",
+        source: "pokemon-tcg-api-cardmarket",
+        valueMinor: 50_000,
+        variantLabel: "Normal",
+      },
+    ],
+    variantOptions: [
+      { label: "Normal", valueMinor: 50_000 },
+      { label: "Holofoil", valueMinor: 83_960 },
+    ],
+  };
+  assert.equal(catalogueVariantSelectionLabel(legitimateNormal, "Normal"), "Normal");
+  assert.equal(catalogueValueMinorForVariant(legitimateNormal, "Normal"), 50_000);
+});
+
+test("collection search indexes the effective catalogue finish", async () => {
+  const source = await readFile(new URL("../src/app/page.tsx", import.meta.url), "utf8");
+  const collection = source.slice(
+    source.indexOf("function CollectionScreen("),
+    source.indexOf("function BindersScreen("),
+  );
+
+  assert.match(collection, /selectedVariantLabel\(catalogueItem, item\.variant\)/);
 });
 
 test("derives Pokemon TCG image URLs from provider IDs", () => {

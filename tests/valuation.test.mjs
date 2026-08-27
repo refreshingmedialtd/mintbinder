@@ -76,6 +76,19 @@ test("explicit unpriced variants fail closed instead of inheriting the headline"
   assert.equal(valuation.valueMinor, undefined);
 });
 
+test("repairs the obsolete Normal default for a proven premium holo-only card", () => {
+  const valuation = collectionItemValuation(
+    collectionItem({ variant: "Normal" }),
+    catalogueItem({
+      rarity: "Rare Ultra",
+      variantOptions: [{ label: "Holofoil", valueMinor: 1_000 }],
+    }),
+  );
+
+  assert.equal(valuation.kind, "market");
+  assert.equal(valuation.valueMinor, 1_000);
+});
+
 test("graded lots require exact company, score and variant and receive no raw condition adjustment", () => {
   const exact = collectionItem({ condition: "Poor", grade: "PSA 10", quantity: 2 });
   const missingScore = collectionItem({ grade: "PSA 9" });

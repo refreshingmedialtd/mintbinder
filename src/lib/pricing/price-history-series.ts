@@ -65,8 +65,9 @@ export function preferredPriceHistorySeriesKey(history: PricePoint[], preferredV
   const candidates = normalizedVariant
     ? series.filter((candidate) => normalized(candidate.points.at(-1)?.variantLabel) === normalizedVariant)
     : series;
+  if (normalizedVariant && !candidates.length) return undefined;
   const rawCandidates = candidates.filter((candidate) => !candidate.points.at(-1)?.gradedCompany);
-  const pool = rawCandidates.length ? rawCandidates : candidates.length ? candidates : series;
+  const pool = rawCandidates.length ? rawCandidates : candidates;
 
   return [...pool].sort(compareSeries)[0]?.key;
 }

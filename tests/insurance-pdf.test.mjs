@@ -3,12 +3,74 @@ import test from "node:test";
 import { PDFDocument } from "pdf-lib";
 import {
   buildInsuranceReportPdf,
+  insuranceCoverStorageSummaries,
   insuranceCatalogueLabels,
+  insuranceReportImageCandidates,
+  insuranceStorageSummaries,
   safeReportText,
 } from "../src/lib/reports/insurance-pdf.ts";
 
 const catalogueId = "11111111-1111-4111-8111-111111111111";
 const collectionId = "22222222-2222-4222-8222-222222222222";
+
+test("insurance storage summary includes named and unassigned lots", () => {
+  const summaries = insuranceStorageSummaries([
+    { owned: { location: "Main binder", quantity: 1 }, valueMinor: 1_250 },
+    { owned: { location: "", quantity: 2 }, valueMinor: 500 },
+    { owned: { location: "Unassigned", quantity: 1 } },
+  ], ["Main binder"]);
+
+  assert.deepEqual(summaries, [
+    { name: "Main binder", itemCount: 1, totalQuantity: 1, valueMinor: 1_250 },
+    { name: "Unassigned", itemCount: 2, totalQuantity: 3, valueMinor: 500 },
+  ]);
+});
+
+test("insurance cover keeps unassigned visible and aggregates overflow locations", () => {
+  const named = Array.from({ length: 11 }, (_, index) => ({
+    name: `Location ${index + 1}`,
+    itemCount: 1,
+    totalQuantity: 1,
+    valueMinor: 100,
+  }));
+  const unassigned = { name: "Unassigned", itemCount: 2, totalQuantity: 3, valueMinor: 500 };
+  const cover = insuranceCoverStorageSummaries([...named, unassigned]);
+
+  assert.equal(cover.length, 9);
+  assert.deepEqual(cover.at(-1), unassigned);
+  assert.deepEqual(cover.at(-2), {
+    name: "Other locations (4)",
+    itemCount: 4,
+    totalQuantity: 4,
+    valueMinor: 400,
+  });
+  assert.equal(cover.reduce((total, row) => total + row.valueMinor, 0), 1_600);
+});
+
+test("insurance thumbnails prefer compact image sources before full-resolution scans", () => {
+  const candidates = insuranceReportImageCandidates({
+    id: catalogueId,
+    type: "card",
+    name: "Pikachu",
+    set: "Base Set",
+    number: "58/102",
+    rarity: "Common",
+    image: "https://images.pokemontcg.io/base1/58_hires.png",
+    imageFallbacks: [
+      "https://images.pokemontcg.io/base1/58.png",
+      "https://images.scrydex.com/pokemon/base1-58/medium",
+    ],
+    hasPrice: true,
+    valueMinor: 1_250,
+    confidence: "Strong",
+  });
+
+  assert.deepEqual(candidates, [
+    "https://images.pokemontcg.io/base1/58.png",
+    "https://images.scrydex.com/pokemon/base1-58/medium",
+    "https://images.pokemontcg.io/base1/58_hires.png",
+  ]);
+});
 
 test("insurance export creates a readable, multi-page PDF", async () => {
   const pdf = await buildInsuranceReportPdf({
@@ -128,6 +190,36 @@ test("international insurance rows prefer identifying display labels and preserv
   assert.equal(safeReportText("山田太郎", "Account holder"), "山田太郎");
   assert.equal(safeReportText("Pokemon 151 ポケモン", "Set unavailable"), "Pokemon 151 ポケモン");
   assert.equal(safeReportText("\u0000\u0007", "Unavailable"), "Unavailable");
+});
+
+test("insurance PDF labels use the same effective premium finish as valuation", () => {
+  const premium = {
+    id: "team-up-170",
+    type: "card",
+    name: "Latias & Latios-GX",
+    set: "Team Up",
+    number: "170",
+    rarity: "Rare Ultra",
+    hasPrice: true,
+    valueMinor: 83_960,
+    confidence: "Fair",
+    variantOptions: [{ label: "Holofoil", valueMinor: 83_960 }],
+  };
+
+  assert.equal(
+    insuranceCatalogueLabels(premium, { language: "English", variant: "Normal" }).variant,
+    "Holofoil",
+  );
+  assert.equal(
+    insuranceCatalogueLabels({
+      ...premium,
+      variantOptions: [
+        { label: "Normal", valueMinor: 50_000 },
+        { label: "Holofoil", valueMinor: 83_960 },
+      ],
+    }, { language: "English", variant: "Normal" }).variant,
+    "Normal",
+  );
 });
 
 test("insurance export embeds CJK owner, storage, catalogue, and history text", async () => {

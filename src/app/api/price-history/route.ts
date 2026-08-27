@@ -61,7 +61,7 @@ export async function GET(request: Request) {
       : Prisma.sql`"sealed_product_id" = ${catalogueId}::uuid`;
 
     const rows = await prisma.$queryRaw<Array<PriceHistoryRow & { availablePointCount: number }>>(Prisma.sql`
-      WITH "grouped_history" AS (
+      WITH "bucketed_history" AS (
         SELECT
           date_trunc(${bucket}, "observed_at") AS "bucket",
           "source",
@@ -71,25 +71,41 @@ export async function GET(request: Request) {
           "variant_label" AS "variantLabel",
           "graded_company" AS "gradedCompany",
           "graded_score" AS "gradedScore",
-          ROUND(AVG("price_minor"))::int AS "priceMinor",
-          ROUND(AVG("confidence_score"))::int AS "confidenceScore",
-          CASE WHEN COUNT("sample_size") = 0 THEN NULL ELSE SUM("sample_size")::int END AS "sampleSize",
-          COUNT(*)::int AS "pointCount",
-          MAX("observed_at") AS "observedAt"
+          "price_minor" AS "priceMinor",
+          "confidence_score" AS "confidenceScore",
+          "sample_size" AS "sampleSize",
+          "observed_at" AS "observedAt"
         FROM "price_snapshots"
         WHERE ${itemFilter}
           ${fromFilter}
           ${sourceFilter}
           ${providerPermissionFilter}
-        GROUP BY
-          date_trunc(${bucket}, "observed_at"),
+      ),
+      "grouped_history" AS (
+        SELECT
+          "bucket",
           "source",
           "currency",
           "condition",
           "language",
-          "variant_label",
-          "graded_company",
-          "graded_score"
+          "variantLabel",
+          "gradedCompany",
+          "gradedScore",
+          ROUND(AVG("priceMinor"))::int AS "priceMinor",
+          ROUND(AVG("confidenceScore"))::int AS "confidenceScore",
+          CASE WHEN COUNT("sampleSize") = 0 THEN NULL ELSE SUM("sampleSize")::int END AS "sampleSize",
+          COUNT(*)::int AS "pointCount",
+          MAX("observedAt") AS "observedAt"
+        FROM "bucketed_history"
+        GROUP BY
+          "bucket",
+          "source",
+          "currency",
+          "condition",
+          "language",
+          "variantLabel",
+          "gradedCompany",
+          "gradedScore"
       ),
       "newest_history" AS (
         SELECT

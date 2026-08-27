@@ -8,6 +8,7 @@ import type {
   WishlistItem,
 } from "./types";
 import {
+  catalogueVariantSelectionLabel,
   catalogueValueMinorForVariant,
   latestPricePointForCatalogueVariant,
 } from "./catalogue/variants.ts";
@@ -385,12 +386,14 @@ function priceAlertInsights({
     .map<PriceAlertInsight | undefined>((item) => {
       const catalogueItem = catalogueById.get(item.catalogueId);
       const targetValueMinor = item.targetPriceMinor;
-      const selectedVariant = item.variant?.trim();
+      const selectedVariant = catalogueItem && item.variant?.trim()
+        ? catalogueVariantSelectionLabel(catalogueItem, item.variant)
+        : undefined;
       const pricePoint = catalogueItem
         ? latestPricePointForCatalogueVariant(catalogueItem, selectedVariant)
         : undefined;
       const currentValueMinor = catalogueItem
-        ? catalogueMarketValueMinor(catalogueItem, item.variant)
+        ? catalogueMarketValueMinor(catalogueItem, selectedVariant)
         : undefined;
 
       if (!catalogueItem || currentValueMinor === undefined || targetValueMinor === undefined) {

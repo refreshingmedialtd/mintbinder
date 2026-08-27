@@ -45,12 +45,23 @@ test("price-history aggregation groups every grade and condition identity field"
   for (const field of [
     '"condition"',
     '"language"',
-    '"variant_label"',
-    '"graded_company"',
-    '"graded_score"',
+    '"variantLabel"',
+    '"gradedCompany"',
+    '"gradedScore"',
   ]) {
     assert.match(groupBy, new RegExp(field.replace(/["_]/g, "\\$&")));
   }
+});
+
+test("price-history calculates a parameterized time bucket once before grouping", async () => {
+  const route = await readFile(new URL("../src/app/api/price-history/route.ts", import.meta.url), "utf8");
+  const bucketed = route.slice(route.indexOf('WITH "bucketed_history"'), route.indexOf('"grouped_history" AS'));
+  const grouped = route.slice(route.indexOf('"grouped_history" AS'), route.indexOf('"newest_history" AS'));
+
+  assert.match(bucketed, /date_trunc\(\$\{bucket\}, "observed_at"\) AS "bucket"/);
+  assert.match(grouped, /FROM "bucketed_history"/);
+  assert.match(grouped, /GROUP BY\s+"bucket"/);
+  assert.doesNotMatch(grouped, /date_trunc\(\$\{bucket\}/);
 });
 
 test("price-history keeps the newest 5,000 grouped points and discloses truncation", async () => {
@@ -84,10 +95,31 @@ test("price history is available from unowned catalogue previews and loads real 
   const catalogueModal = page.slice(page.indexOf("function CataloguePreviewModal"), page.indexOf("function WishlistScreen"));
   const panel = page.slice(page.indexOf("function PriceTrendPanel"), page.indexOf("type PriceHistoryRange"));
 
-  assert.match(addScreen, /showSelectedPriceHistory \? <PriceTrendPanel item=\{selected\}/);
+  assert.match(addScreen, /showSelectedPriceHistory \? \([\s\S]*?<PriceTrendPanel item=\{selected\}/);
+  assert.match(addScreen, /preferredVariant=\{selectedVariant\}/);
+  assert.match(addScreen, /onViewHistory=\{\(\) => openPriceHistory\(item\)\}/);
+  assert.match(addScreen, /requestedPriceHistoryIdRef/);
+  assert.match(addScreen, /scrollIntoView\(\{ behavior: "smooth", block: "start" \}\)/);
+  assert.match(addScreen, /add-details-panel" ref=\{addDetailsPanelRef\} tabIndex=\{-1\}/);
   assert.match(catalogueModal, /showPriceHistory \? <PriceTrendPanel item=\{item\}/);
   assert.match(panel, /const shouldLoadRemoteHistory = isUuid\(item\.id\)/);
+  assert.match(panel, /preferredVariant \?\? owned\?\.variant/);
+  assert.match(panel, /historyPreferredVariant \? undefined : historySeries\[0\]/);
+  assert.match(panel, /catalogueMarketValueMinor\(item, preferredVariant\)/);
+  assert.match(panel, /setSelectedHistorySeriesKey\(""\);\s*}, \[historyPreferredVariant\]\)/);
   assert.match(panel, /fetch\(`\/api\/price-history\?catalogueId=/);
+});
+
+test("price-history range controls remain available when the selected stream has no recent points", async () => {
+  const page = await readFile(new URL("../src/app/page.tsx", import.meta.url), "utf8");
+  const panel = page.slice(page.indexOf("function PriceTrendPanel"), page.indexOf("type PriceHistoryRange"));
+  const controls = page.slice(page.indexOf("function PriceHistoryRangeControls"), page.indexOf("function priceHistoryApiRange"));
+  const chart = page.slice(page.indexOf("function PriceHistoryLineChart"), page.indexOf("function filterPriceHistoryByRange"));
+
+  assert.match(panel, /<PriceHistoryRangeControls onRangeChange=\{setRange\} range=\{range\} \/>\s*\{history\.length \? \(/);
+  assert.match(controls, /aria-label="Price history timeframe"/);
+  assert.match(controls, /onClick=\{\(\) => onRangeChange\(option\.value\)\}/);
+  assert.doesNotMatch(chart, /Price history timeframe/);
 });
 
 test("price-history hides unlicensed PriceCharting streams", async () => {

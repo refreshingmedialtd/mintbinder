@@ -1,5 +1,9 @@
 import type { AppData, CatalogueItem, CollectionEvent, CollectionItem, StorageLocation } from "../types.ts";
-import { collectionItemValuation, collectionItemValueMinor } from "../valuation.ts";
+import {
+  collectionItemValuation,
+  collectionItemValueMinor,
+  effectiveCollectionVariant,
+} from "../valuation.ts";
 
 export type InsuranceReportInput = {
   data: AppData;
@@ -101,7 +105,7 @@ function collectionSection(collection: CollectionItem[], catalogueById: Map<stri
             <td>${escapeHtml(catalogueItem?.set ?? "")}</td>
             <td>${owned.quantity}</td>
             <td>${escapeHtml(owned.condition)}</td>
-            <td>${escapeHtml(owned.variant)}</td>
+            <td>${escapeHtml(effectiveCollectionVariant(owned, catalogueItem))}</td>
             <td>${escapeHtml(owned.grade)}</td>
             <td>${escapeHtml(owned.location)}</td>
             <td>${escapeHtml(formatMoney(owned.purchasePriceMinor))}</td>

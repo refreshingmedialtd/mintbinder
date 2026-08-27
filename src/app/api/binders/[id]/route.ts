@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { auth } from "@/auth";
-import { BinderInputError, deleteBinder, getBinder, updateBinder } from "@/lib/db/binders";
+import {
+  BinderInputError,
+  BinderVersionConflictError,
+  deleteBinder,
+  getBinder,
+  updateBinder,
+} from "@/lib/db/binders";
 import { accountMutationGuard } from "@/lib/auth/mutation-guard";
 
 export const dynamic = "force-dynamic";
@@ -56,7 +62,8 @@ export async function DELETE(request: Request, context: RouteContext) {
     if (mutationError) return mutationError;
 
     const { id } = await context.params;
-    await deleteBinder(session.user.id, id);
+    const body = await request.json().catch(() => ({}));
+    await deleteBinder(session.user.id, id, body?.expectedUpdatedAt);
     return NextResponse.json({ ok: true });
   } catch (error) {
     return binderErrorResponse(error, "Unable to delete binder.");
@@ -64,6 +71,12 @@ export async function DELETE(request: Request, context: RouteContext) {
 }
 
 function binderErrorResponse(error: unknown, fallback: string) {
+  if (error instanceof BinderVersionConflictError) {
+    return NextResponse.json(
+      { code: "BINDER_STALE", error: error.message },
+      { status: 409 },
+    );
+  }
   if (error instanceof BinderInputError) {
     return NextResponse.json({ error: error.message }, { status: 400 });
   }

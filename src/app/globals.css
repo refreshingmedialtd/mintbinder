@@ -769,6 +769,66 @@ h3 {
   margin-bottom: 0;
 }
 
+.portfolio-card-search {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid color-mix(in srgb, var(--blue) 28%, var(--line));
+  border-radius: var(--radius);
+  background:
+    radial-gradient(circle at 92% 10%, color-mix(in srgb, var(--blue) 13%, transparent), transparent 36%),
+    var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.portfolio-card-search-copy {
+  display: flex;
+  min-width: 0;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.portfolio-card-search-copy .tag {
+  flex: 0 0 auto;
+}
+
+.portfolio-card-search-copy h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.portfolio-card-search-copy p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.portfolio-card-search-form {
+  display: grid;
+  gap: 10px;
+}
+
+.portfolio-card-search-form .search-box {
+  min-width: 0;
+}
+
+.portfolio-card-search-form .button {
+  justify-content: center;
+}
+
+.insurance-export-progress {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 750;
+  line-height: 1.45;
+}
+
 .portfolio-hero {
   display: grid;
   gap: 18px;
@@ -1758,6 +1818,16 @@ h3 {
 .quick-add-button {
   align-self: center;
   color: var(--accent);
+}
+
+.catalogue-result-actions {
+  display: grid;
+  gap: 8px;
+  align-self: center;
+}
+
+.catalogue-result-history-button {
+  color: var(--blue);
 }
 
 .item-image {
@@ -4904,6 +4974,7 @@ h3 {
 }
 
 .add-details-panel {
+  scroll-margin-top: 82px;
   scrollbar-color: color-mix(in srgb, var(--accent) 76%, var(--theme-c)) color-mix(in srgb, var(--control) 76%, transparent);
   scrollbar-gutter: stable;
   scrollbar-width: thin;
@@ -6564,6 +6635,10 @@ h3 {
     align-items: center;
   }
 
+  .portfolio-card-search-form {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
   .portfolio-dashboard-grid {
     grid-template-columns: minmax(0, 1fr) minmax(320px, 0.72fr);
   }
@@ -6712,6 +6787,11 @@ h3 {
 }
 
 @media (min-width: 1080px) {
+  .portfolio-card-search {
+    grid-template-columns: minmax(0, 0.72fr) minmax(0, 1.28fr);
+    align-items: center;
+  }
+
   .dashboard-grid {
     grid-template-columns: minmax(0, 1fr) 380px;
   }

@@ -1,4 +1,5 @@
 import {
+  catalogueVariantSelectionLabel,
   catalogueValueMinorForVariant,
   priceHistoryForCatalogueVariant,
 } from "./catalogue/variants.ts";
@@ -18,6 +19,16 @@ export type CollectionItemValuation = {
   unitValueMinor?: number;
   valueMinor?: number;
 };
+
+/** Returns the catalogue-supported finish used for valuation and evidence exports. */
+export function effectiveCollectionVariant(
+  item: Pick<CollectionItem, "variant">,
+  catalogueItem?: CatalogueItem,
+) {
+  return catalogueItem
+    ? catalogueVariantSelectionLabel(catalogueItem, item.variant)
+    : item.variant;
+}
 
 /**
  * The single collection condition policy. Manual values are total-lot values,
@@ -93,7 +104,11 @@ export function collectionItemPriceHistory(
       normalizeGradeScore(point.gradedScore) === grade.score;
   });
 
-  return priceHistoryForCatalogueVariant(catalogueItem, identityHistory, item.variant);
+  return priceHistoryForCatalogueVariant(
+    catalogueItem,
+    identityHistory,
+    effectiveCollectionVariant(item, catalogueItem),
+  );
 }
 
 export function collectionItemMarketPricePoint(

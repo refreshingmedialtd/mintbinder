@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { auth } from "@/auth";
-import { BinderInputError, replaceBinderLayout } from "@/lib/db/binders";
+import {
+  BinderInputError,
+  BinderVersionConflictError,
+  replaceBinderLayout,
+} from "@/lib/db/binders";
 import { accountMutationGuard } from "@/lib/auth/mutation-guard";
 
 export const dynamic = "force-dynamic";
@@ -22,10 +26,22 @@ export async function PUT(request: Request, context: RouteContext) {
 
     const { id } = await context.params;
     const body = await request.json().catch(() => ({}));
-    const binder = await replaceBinderLayout(session.user.id, id, body);
+    const binder = await replaceBinderLayout(session.user.id, id, body, {
+      completeLegacyCustomMigration: body?.completeLegacyCustomMigration === true,
+      completeLegacyDefaultMigration: body?.completeLegacyDefaultMigration === true,
+      expectedUpdatedAt: body?.expectedUpdatedAt,
+      releaseConflictsFromDefaultBinderId: body?.releaseConflictsFromDefaultBinderId,
+      releaseConflictsFromDefaultUpdatedAt: body?.releaseConflictsFromDefaultUpdatedAt,
+    });
 
     return NextResponse.json({ binder });
   } catch (error) {
+    if (error instanceof BinderVersionConflictError) {
+      return NextResponse.json(
+        { code: "BINDER_LAYOUT_STALE", error: error.message },
+        { status: 409 },
+      );
+    }
     if (error instanceof BinderInputError) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }

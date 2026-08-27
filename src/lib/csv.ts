@@ -1,5 +1,9 @@
 import type { CatalogueItem, CollectionItem } from "./types";
-import { collectionItemValuation, collectionItemValueMinor } from "./valuation.ts";
+import {
+  collectionItemValuation,
+  collectionItemValueMinor,
+  effectiveCollectionVariant,
+} from "./valuation.ts";
 
 type CsvCell = string | number | null | undefined;
 type CsvColumn<T> = {
@@ -174,7 +178,10 @@ const collectionExportColumns: Array<CsvColumn<CollectionExportRow>> = [
   { header: "quantity", numeric: true, value: ({ owned }) => owned.quantity },
   { header: "condition", value: ({ owned }) => owned.condition },
   { header: "language", value: ({ owned }) => owned.language },
-  { header: "variant", value: ({ owned }) => owned.variant },
+  {
+    header: "variant",
+    value: ({ owned, catalogueItem }) => effectiveCollectionVariant(owned, catalogueItem),
+  },
   { header: "grade", value: ({ owned }) => owned.grade },
   { header: "purchase_price_gbp", numeric: true, value: ({ owned }) => moneyValue(owned.purchasePriceMinor) },
   { header: "purchase_price_minor", numeric: true, value: ({ owned }) => owned.purchasePriceMinor },

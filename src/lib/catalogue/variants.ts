@@ -119,18 +119,55 @@ export function catalogueVariantLabels(item: CatalogueItem, current?: string) {
   return [...labels.values()].sort(compareVariantLabels);
 }
 
+/**
+ * Resolves a UI/persisted finish to a supported catalogue label. A previous
+ * client default stored `Normal` for some premium, holo-only cards; repair
+ * that impossible generic choice when the catalogue now proves there is one
+ * supported finish. Other explicit choices continue to fail closed.
+ */
+export function catalogueVariantSelectionLabel(item: CatalogueItem, variant?: string | null) {
+  const requested = variant?.trim();
+  const options = item.variantOptions ?? [];
+
+  if (requested) {
+    const exact = options.find(
+      (option) => normalizeVariantLabel(option.label) === normalizeVariantLabel(requested),
+    );
+
+    if (exact) {
+      return exact.label;
+    }
+
+    const normalized = normalizeVariantLabel(requested);
+    if (
+      item.type === "card" &&
+      (normalized === "normal" || normalized === "standard") &&
+      isPremiumSingleFinishRarity(item.rarity.toLowerCase()) &&
+      options.length === 1 &&
+      normalizeVariantLabel(options[0].label) === "holofoil"
+    ) {
+      return options[0].label;
+    }
+
+    return requested;
+  }
+
+  return options[0]?.label ?? defaultVariantLabel(item.type);
+}
+
 export function catalogueValueMinorForVariant(item: CatalogueItem, variant?: string) {
-  const normalizedVariant = normalizeVariantLabel(variant);
+  const resolvedVariant = variant ? catalogueVariantSelectionLabel(item, variant) : variant;
+  const normalizedVariant = normalizeVariantLabel(resolvedVariant);
   const priceHistory = rawPriceHistory(item.priceHistory ?? []);
 
   if (normalizedVariant) {
-    const point = latestPricePointForCatalogueVariant(item, variant);
+    const point = latestPricePointForCatalogueVariant(item, resolvedVariant);
 
     if (point) {
       return point.valueMinor;
     }
 
-    return isGenericUnlabelledVariantSelection(item.type, variant) &&
+    return isGenericUnlabelledVariantSelection(item.type, resolvedVariant) &&
       !hasVariantAwarePrices(priceHistory) &&
       item.hasPrice
       ? item.valueMinor
@@ -141,8 +178,10 @@ export function catalogueValueMinorForVariant(item: CatalogueItem, variant?: str
 }
 
 export function latestPricePointForCatalogueVariant(item: CatalogueItem, variant?: string | null) {
+  const resolvedVariant = variant ? catalogueVariantSelectionLabel(item, variant) : variant;
+
   return preferredLatestPricePoint(
-    priceHistoryForCatalogueVariant(item, rawPriceHistory(item.priceHistory ?? []), variant),
+    priceHistoryForCatalogueVariant(item, rawPriceHistory(item.priceHistory ?? []), resolvedVariant),
   );
 }
 
@@ -461,6 +500,9 @@ function isPremiumSingleFinishRarity(normalizedRarity: string) {
     "rare holo vmax",
     "rare holo vstar",
     "rare prime",
+    "rare rainbow",
+    "rare secret",
+    "rare ultra",
     "secret rare",
     "shiny rare",
     "shiny ultra rare",

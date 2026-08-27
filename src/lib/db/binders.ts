@@ -3,10 +3,21 @@ import { BinderVisibility, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import {
   BinderInputError,
+  MAX_STANDARD_BINDER_PAGES,
   normalizeBinderLayout,
   type BinderLayoutInput,
 } from "@/lib/binders/layout";
 import { lockCollectionItemsForBinderConsistency } from "@/lib/binders/slot-reconciliation";
+import {
+  consumeLegacyCustomBinderMarker,
+  consumeLegacyDefaultBinderMarker,
+  hasLegacyDefaultBinderMarker,
+  hasManagedDefaultBinderMarker,
+  preserveBinderDescriptionMarker,
+  visibleBinderDescription,
+  withLegacyCustomBinderMarker,
+  withLegacyDefaultBinderMarker,
+} from "@/lib/binders/migration-state";
 import {
   assertUserResourceQuota,
   lockUserResourceQuota,
@@ -17,6 +28,13 @@ export { BinderInputError, normalizeBinderLayout, type BinderLayoutInput } from 
 const DEFAULT_PAGE_COUNT = 2;
 const SLOTS_PER_PAGE = 9;
 const COVER_STYLES = new Set(["forest", "midnight", "oxblood", "sapphire", "sunset", "ivory"]);
+
+export class BinderVersionConflictError extends Error {
+  constructor() {
+    super("This binder changed in another tab or sync. Refresh it before saving again.");
+    this.name = "BinderVersionConflictError";
+  }
+}
 
 const binderInclude = {
   pages: {
@@ -91,31 +109,71 @@ export async function getBinder(userId: string, binderId: string) {
 }
 
 export async function getSharedBinder(shareSlug: string) {
-  return prisma.binder.findFirst({
+  const binder = await prisma.binder.findFirst({
     where: {
       shareSlug: normalizeShareSlug(shareSlug),
       visibility: BinderVisibility.UNLISTED,
     },
     include: sharedBinderInclude,
   });
+
+  return binder ? { ...binder, description: visibleBinderDescription(binder.description) } : null;
 }
 
 export async function createBinder(
   userId: string,
-  input: { coverStyle?: unknown; description?: unknown; isDefault?: unknown; name?: unknown },
+  input: {
+    coverStyle?: unknown;
+    description?: unknown;
+    isDefault?: unknown;
+    legacySource?: unknown;
+    managedDefaultBootstrap?: unknown;
+    name?: unknown;
+  },
 ) {
   const name = requiredText(input.name, "Binder name", 80);
-  const description = optionalText(input.description, 500);
+  const visibleDescription = visibleBinderDescription(optionalText(input.description, 500));
+  const legacySource = optionalLegacyMigrationSource(input.legacySource);
+  const managedDefaultBootstrap = input.managedDefaultBootstrap === true;
   const coverStyle = normalizeCoverStyle(input.coverStyle);
+
+  if (managedDefaultBootstrap && legacySource) {
+    throw new BinderInputError("A binder cannot use two migration sources.");
+  }
 
   return prisma.$transaction(async (transaction) => {
     await lockUserResourceQuota(transaction, userId, "binders");
     const binderCount = await transaction.binder.count({ where: { userId } });
     assertUserResourceQuota(binderCount, "binders");
-    const isDefault = input.isDefault === true || binderCount === 0;
+    const currentDefaults = await transaction.binder.findMany({
+      where: { isDefault: true, userId },
+      select: { id: true, updatedAt: true },
+    });
+
+    if (managedDefaultBootstrap && currentDefaults.length) {
+      throw new BinderInputError("The full-collection binder has already been initialized.");
+    }
+    if (!managedDefaultBootstrap && !currentDefaults.length) {
+      throw new BinderInputError("The full-collection binder must finish initializing before custom binders can be created.");
+    }
+
+    const isDefault = managedDefaultBootstrap || input.isDefault === true;
+    const description = managedDefaultBootstrap
+      ? withLegacyDefaultBinderMarker(visibleDescription)
+      : legacySource
+        ? withLegacyCustomBinderMarker(visibleDescription, legacySource)
+        : visibleDescription;
 
     if (isDefault) {
-      await transaction.binder.updateMany({ where: { userId }, data: { isDefault: false } });
+      for (const currentDefault of currentDefaults) {
+        await transaction.binder.update({
+          where: { id: currentDefault.id },
+          data: {
+            isDefault: false,
+            updatedAt: nextBinderVersion(currentDefault.updatedAt),
+          },
+        });
+      }
     }
 
     return transaction.binder.create({
@@ -147,19 +205,28 @@ export async function updateBinder(
   input: {
     coverStyle?: unknown;
     description?: unknown;
+    expectedUpdatedAt?: unknown;
     isDefault?: unknown;
     name?: unknown;
     visibility?: unknown;
   },
 ) {
+  const expectedUpdatedAt = requiredBinderTimestamp(input.expectedUpdatedAt, "Expected binder version");
+
   return prisma.$transaction(async (transaction) => {
     await lockUserResourceQuota(transaction, userId, "binders");
     const existing = await transaction.binder.findFirst({ where: { id: binderId, userId } });
     if (!existing) throw new BinderInputError("Binder not found.");
+    if (existing.updatedAt.getTime() !== expectedUpdatedAt.getTime()) {
+      throw new BinderVersionConflictError();
+    }
 
-    const data: Prisma.BinderUpdateInput = {};
+    const data: Prisma.BinderUpdateInput = { updatedAt: nextBinderVersion(existing.updatedAt) };
     if (input.name !== undefined) data.name = requiredText(input.name, "Binder name", 80);
-    if (input.description !== undefined) data.description = optionalText(input.description, 500);
+    if (input.description !== undefined) {
+      const description = optionalText(input.description, 500);
+      data.description = preserveBinderDescriptionMarker(existing.description, description);
+    }
     if (input.coverStyle !== undefined) data.coverStyle = normalizeCoverStyle(input.coverStyle);
     if (input.visibility !== undefined) {
       const visibility = normalizeVisibility(input.visibility);
@@ -170,7 +237,19 @@ export async function updateBinder(
     }
 
     if (input.isDefault === true) {
-      await transaction.binder.updateMany({ where: { userId }, data: { isDefault: false } });
+      const previousDefaults = await transaction.binder.findMany({
+        where: { id: { not: binderId }, isDefault: true, userId },
+        select: { id: true, updatedAt: true },
+      });
+      for (const previousDefault of previousDefaults) {
+        await transaction.binder.update({
+          where: { id: previousDefault.id },
+          data: {
+            isDefault: false,
+            updatedAt: nextBinderVersion(previousDefault.updatedAt),
+          },
+        });
+      }
       data.isDefault = true;
     } else if (input.isDefault === false && existing.isDefault) {
       throw new BinderInputError("Choose another default binder before removing this default.");
@@ -184,19 +263,53 @@ export async function updateBinder(
   });
 }
 
-export async function replaceBinderLayout(userId: string, binderId: string, input: BinderLayoutInput) {
+export async function replaceBinderLayout(
+  userId: string,
+  binderId: string,
+  input: BinderLayoutInput,
+  options: {
+    completeLegacyCustomMigration?: boolean;
+    completeLegacyDefaultMigration?: boolean;
+    expectedUpdatedAt?: unknown;
+    releaseConflictsFromDefaultBinderId?: unknown;
+    releaseConflictsFromDefaultUpdatedAt?: unknown;
+  } = {},
+) {
   const pages = normalizeBinderLayout(input);
+  const expectedUpdatedAt = requiredBinderTimestamp(options.expectedUpdatedAt, "Expected binder version");
+  const releaseBinderId = optionalBinderId(options.releaseConflictsFromDefaultBinderId);
+  const releaseExpectedUpdatedAt = releaseBinderId
+    ? requiredBinderTimestamp(options.releaseConflictsFromDefaultUpdatedAt, "Expected default binder version")
+    : null;
   const itemIds = [...new Set(
     pages.flatMap((page) => page.slots.map((slot) => slot.collectionItemId).filter(isString)),
   )];
 
   return retrySerializableTransaction(() => prisma.$transaction(async (transaction) => {
+    await lockUserResourceQuota(transaction, userId, "binders");
     const binder = await transaction.binder.findFirst({
       where: { id: binderId, userId },
-      select: { id: true },
+      select: { description: true, id: true, isDefault: true, updatedAt: true },
     });
 
     if (!binder) throw new BinderInputError("Binder not found.");
+    if (binder.updatedAt.getTime() !== expectedUpdatedAt.getTime()) {
+      throw new BinderVersionConflictError();
+    }
+    const allowsManagedCapacity = hasManagedDefaultBinderMarker(binder.description) || (
+      binder.isDefault && hasLegacyDefaultBinderMarker(binder.description)
+    );
+    if (pages.length > MAX_STANDARD_BINDER_PAGES && !allowsManagedCapacity) {
+      throw new BinderInputError(
+        `Custom binders support at most ${MAX_STANDARD_BINDER_PAGES} pages.`,
+      );
+    }
+    if (releaseBinderId === binder.id) {
+      throw new BinderInputError("A binder cannot release conflicting copies from itself.");
+    }
+    if (releaseBinderId && binder.isDefault) {
+      throw new BinderInputError("Only a non-default binder can receive copies from the full-collection binder.");
+    }
 
     await lockCollectionItemsForBinderConsistency(transaction, userId, itemIds);
     const ownedItems = itemIds.length
@@ -207,24 +320,100 @@ export async function replaceBinderLayout(userId: string, binderId: string, inpu
       : [];
     validateAssignedCopies(pages, new Map(ownedItems.map((item) => [item.id, item.quantity])));
 
-    await transaction.binderPage.deleteMany({ where: { binderId } });
-    await transaction.binder.update({
-      where: { id: binderId },
-      data: {
-        pages: {
-          create: pages.map((page) => ({
-            position: page.position,
-            slots: {
-              create: page.slots.map((slot) => ({
-                position: slot.position,
+    if (releaseBinderId && releaseExpectedUpdatedAt) {
+      const releaseBinder = await transaction.binder.findFirst({
+        where: { id: releaseBinderId, userId },
+        select: { description: true, id: true, isDefault: true, updatedAt: true },
+      });
+
+      if (
+        !releaseBinder ||
+        !releaseBinder.isDefault ||
+        !(
+          hasLegacyDefaultBinderMarker(releaseBinder.description) ||
+          hasManagedDefaultBinderMarker(releaseBinder.description)
+        )
+      ) {
+        throw new BinderInputError("The managed full-collection binder is no longer available for this transfer.");
+      }
+
+      const assignments = pages.flatMap((page) => page.slots).filter((slot) => slot.collectionItemId && slot.copyIndex);
+      const conflictingSlots = assignments.length
+        ? await transaction.binderSlot.findMany({
+            where: {
+              binderPage: { binderId: releaseBinder.id },
+              OR: assignments.map((slot) => ({
                 collectionItemId: slot.collectionItemId,
                 copyIndex: slot.copyIndex,
-                note: slot.note,
               })),
             },
-          })),
-        },
+            select: {
+              collectionItemId: true,
+              copyIndex: true,
+              id: true,
+              note: true,
+            },
+          })
+        : [];
+
+      if (conflictingSlots.length) {
+        if (releaseBinder.updatedAt.getTime() !== releaseExpectedUpdatedAt.getTime()) {
+          throw new BinderVersionConflictError();
+        }
+        const releasedNotes = new Map(
+          conflictingSlots
+            .filter((slot) => slot.collectionItemId && slot.copyIndex && slot.note)
+            .map((slot) => [`${slot.collectionItemId}:${slot.copyIndex}`, slot.note] as const),
+        );
+
+        for (const page of pages) {
+          for (const slot of page.slots) {
+            if (slot.note || !slot.collectionItemId || !slot.copyIndex) continue;
+            slot.note = releasedNotes.get(`${slot.collectionItemId}:${slot.copyIndex}`) ?? null;
+          }
+        }
+
+        await transaction.binderSlot.updateMany({
+          where: { id: { in: conflictingSlots.map((slot) => slot.id) } },
+          data: { collectionItemId: null, copyIndex: null, note: null },
+        });
+        await transaction.binder.update({
+          where: { id: releaseBinder.id },
+          data: { updatedAt: nextBinderVersion(releaseBinder.updatedAt) },
+        });
+      }
+    }
+
+    await transaction.binderPage.deleteMany({ where: { binderId } });
+    const binderUpdate: Prisma.BinderUpdateInput = {
+      updatedAt: nextBinderVersion(binder.updatedAt),
+      pages: {
+        create: pages.map((page) => ({
+          position: page.position,
+          slots: {
+            create: page.slots.map((slot) => ({
+              position: slot.position,
+              collectionItemId: slot.collectionItemId,
+              copyIndex: slot.copyIndex,
+              note: slot.note,
+            })),
+          },
+        })),
       },
+    };
+    const migrationCompletion = binder.isDefault && options.completeLegacyDefaultMigration
+      ? consumeLegacyDefaultBinderMarker(binder.description)
+      : !binder.isDefault && options.completeLegacyCustomMigration
+        ? consumeLegacyCustomBinderMarker(binder.description)
+        : null;
+
+    if (migrationCompletion?.consumed) {
+      binderUpdate.description = migrationCompletion.description;
+    }
+
+    await transaction.binder.update({
+      where: { id: binderId },
+      data: binderUpdate,
     });
 
     return transaction.binder.findUniqueOrThrow({ where: { id: binderId }, include: binderInclude });
@@ -270,13 +459,18 @@ async function retrySerializableTransaction<T>(operation: () => Promise<T>) {
   throw new Error("Binder layout could not be saved safely.");
 }
 
-export async function deleteBinder(userId: string, binderId: string) {
+export async function deleteBinder(userId: string, binderId: string, expectedVersion: unknown) {
+  const expectedUpdatedAt = requiredBinderTimestamp(expectedVersion, "Expected binder version");
+
   return prisma.$transaction(async (transaction) => {
     await lockUserResourceQuota(transaction, userId, "binders");
     const binder = await transaction.binder.findFirst({ where: { id: binderId, userId } });
 
     if (!binder) {
       throw new BinderInputError("Binder not found.");
+    }
+    if (binder.updatedAt.getTime() !== expectedUpdatedAt.getTime()) {
+      throw new BinderVersionConflictError();
     }
 
     await transaction.binder.delete({ where: { id: binderId } });
@@ -288,7 +482,13 @@ export async function deleteBinder(userId: string, binderId: string) {
       });
 
       if (replacement) {
-        await transaction.binder.update({ where: { id: replacement.id }, data: { isDefault: true } });
+        await transaction.binder.update({
+          where: { id: replacement.id },
+          data: {
+            isDefault: true,
+            updatedAt: nextBinderVersion(replacement.updatedAt),
+          },
+        });
       }
     }
   });
@@ -310,6 +510,43 @@ function optionalText(value: unknown, maxLength: number) {
   if (text.length > maxLength) throw new BinderInputError(`Text must be ${maxLength} characters or fewer.`);
 
   return text || null;
+}
+
+function optionalBinderId(value: unknown) {
+  if (value === undefined || value === null || value === "") return null;
+  const id = typeof value === "string" ? value.trim() : "";
+
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
+    throw new BinderInputError("Default binder ID is invalid.");
+  }
+
+  return id;
+}
+
+function optionalLegacyMigrationSource(value: unknown) {
+  if (value === undefined || value === null || value === "") return null;
+  const source = typeof value === "string" ? value.trim() : "";
+
+  if (!source || source === "default" || source.length > 120 || /[\]\r\n]/.test(source)) {
+    throw new BinderInputError("Legacy binder source is invalid.");
+  }
+
+  return source;
+}
+
+function requiredBinderTimestamp(value: unknown, label: string) {
+  const timestamp = typeof value === "string" ? value.trim() : "";
+  const date = timestamp ? new Date(timestamp) : new Date(Number.NaN);
+
+  if (!timestamp || Number.isNaN(date.getTime())) {
+    throw new BinderInputError(`${label} is missing or invalid. Refresh binders and try again.`);
+  }
+
+  return date;
+}
+
+function nextBinderVersion(current: Date) {
+  return new Date(Math.max(Date.now(), current.getTime() + 1));
 }
 
 function normalizeCoverStyle(value: unknown) {

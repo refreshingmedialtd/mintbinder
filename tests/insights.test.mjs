@@ -299,6 +299,41 @@ test("wishlist alerts use the saved exact variant and ignore unpriced explicit v
   );
 });
 
+test("wishlist alerts label a repaired legacy premium finish consistently with its price", () => {
+  const card = catalogueItem({
+    id: "legacy-premium-wishlist-card",
+    name: "Latias & Latios-GX",
+    rarity: "Rare Ultra",
+    valueMinor: 83_960,
+    variantOptions: [{ label: "Holofoil", valueMinor: 83_960 }],
+    priceHistory: [{
+      confidence: "Strong",
+      observedAt: "2026-08-25T00:00:00.000Z",
+      source: "pokemon-tcg-api-cardmarket",
+      valueMinor: 83_960,
+      variantLabel: "Holofoil",
+    }],
+  });
+  const intelligence = buildCollectionIntelligence({
+    catalogueById: new Map([[card.id, card]]),
+    collection: [],
+    events: [],
+    sets: [],
+    storageLocations: [],
+    wishlist: [{
+      id: "legacy-premium-target",
+      catalogueId: card.id,
+      priority: "Grail",
+      targetPriceMinor: 90_000,
+      variant: "Normal",
+    }],
+  });
+
+  assert.equal(intelligence.priceAlerts[0]?.itemName, "Latias & Latios-GX · Holofoil");
+  assert.equal(intelligence.priceAlerts[0]?.currentValueMinor, 83_960);
+  assert.equal(intelligence.priceAlerts[0]?.priceSource, "pokemon-tcg-api-cardmarket");
+});
+
 test("includes graded-only price history even when the raw catalogue headline is unpriced", () => {
   const gradedOnlyCard = catalogueItem({
     hasPrice: false,
