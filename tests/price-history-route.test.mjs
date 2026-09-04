@@ -103,7 +103,8 @@ test("price history is available from unowned catalogue previews and loads real 
   assert.match(addScreen, /add-details-panel" ref=\{addDetailsPanelRef\} tabIndex=\{-1\}/);
   assert.match(catalogueModal, /showPriceHistory \? <PriceTrendPanel item=\{item\}/);
   assert.match(panel, /const shouldLoadRemoteHistory = isUuid\(item\.id\)/);
-  assert.match(panel, /preferredVariant \?\? owned\?\.variant/);
+  assert.match(panel, /preferredVariant \?\? \(\s*owned \? effectiveCollectionVariant\(owned, item\) : undefined\s*\)/);
+  assert.match(panel, /preferredPriceHistorySeriesKey\(\s*relevantHistory,\s*owned \? undefined : historyPreferredVariant/);
   assert.match(panel, /historyPreferredVariant \? undefined : historySeries\[0\]/);
   assert.match(panel, /catalogueMarketValueMinor\(item, preferredVariant\)/);
   assert.match(panel, /setSelectedHistorySeriesKey\(""\);\s*}, \[historyPreferredVariant\]\)/);
@@ -128,4 +129,17 @@ test("price-history hides unlicensed PriceCharting streams", async () => {
   assert.match(route, /customerVisiblePriceSource\(source\)/);
   assert.match(route, /priceChartingLicenceConfirmed\(\)/);
   assert.match(route, /providerPermissionFilter/);
+});
+
+test("price-history presents sealed provider aliases as Factory sealed", async () => {
+  const route = await readFile(new URL("../src/app/api/price-history/route.ts", import.meta.url), "utf8");
+
+  assert.match(
+    route,
+    /canonicalVariantLabelForItemType\(itemType, point\.variantLabel\) \?\? null/,
+  );
+  assert.match(route, /const variantLabelExpression = itemType === "sealed"/);
+  assert.match(route, /IN \('normal', 'standard', 'sealed', 'factorysealed', 'newsealed', 'unopenedsealed'\)/);
+  assert.match(route, /\$\{variantLabelExpression\} AS "variantLabel"/);
+  assert.match(route, /FROM "bucketed_history"[\s\S]*GROUP BY[\s\S]*"variantLabel"/);
 });

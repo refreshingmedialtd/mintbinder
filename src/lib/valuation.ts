@@ -22,12 +22,28 @@ export type CollectionItemValuation = {
 
 /** Returns the catalogue-supported finish used for valuation and evidence exports. */
 export function effectiveCollectionVariant(
-  item: Pick<CollectionItem, "variant">,
+  item: Pick<CollectionItem, "variant"> & Partial<Pick<CollectionItem, "grade">>,
   catalogueItem?: CatalogueItem,
 ) {
-  return catalogueItem
-    ? catalogueVariantSelectionLabel(catalogueItem, item.variant)
-    : item.variant;
+  if (!catalogueItem) {
+    return item.variant;
+  }
+
+  const grade = item.grade === undefined
+    ? undefined
+    : collectionGradeIdentity({ grade: item.grade });
+
+  // An incomplete custom grade has no safe market identity. Preserve its
+  // explicit finish; valuation will continue to fail closed below.
+  if (grade === null) {
+    return item.variant;
+  }
+
+  return catalogueVariantSelectionLabel(
+    catalogueItem,
+    item.variant,
+    grade ? { gradedCompany: grade.company, gradedScore: grade.score } : undefined,
+  );
 }
 
 /**

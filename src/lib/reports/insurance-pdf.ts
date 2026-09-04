@@ -439,7 +439,7 @@ function drawCollectionRow(
 
 export function insuranceCatalogueLabels(
   catalogue: CatalogueItem | undefined,
-  owned: Pick<CollectionItem, "language"> & { variant?: string },
+  owned: Pick<CollectionItem, "language"> & Partial<Pick<CollectionItem, "grade" | "variant">>,
 ) {
   return {
     name: safeReportText(
@@ -450,7 +450,10 @@ export function insuranceCatalogueLabels(
     number: catalogue?.number ? `No. ${catalogue.number}` : "Number unavailable",
     language: catalogue?.languageLabel || owned.language || "Language unavailable",
     variant: owned.variant
-      ? safeReportText(effectiveCollectionVariant({ variant: owned.variant }, catalogue), "Finish unavailable")
+      ? safeReportText(
+          effectiveCollectionVariant({ grade: owned.grade, variant: owned.variant }, catalogue),
+          "Finish unavailable",
+        )
       : undefined,
   };
 }

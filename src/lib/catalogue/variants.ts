@@ -12,6 +12,11 @@ type VariantOptionInput = {
   variantMetadata?: unknown;
 };
 
+export type CatalogueVariantPriceIdentity = {
+  gradedCompany: string;
+  gradedScore: number;
+};
+
 export function buildCatalogueVariantOptions({
   itemType,
   priceHistory = [],
@@ -29,11 +34,11 @@ export function buildCatalogueVariantOptions({
       continue;
     }
 
-    const label = displayVariantLabelForCatalogue({
+    const label = canonicalVariantLabelForItemType(itemType, displayVariantLabelForCatalogue({
       label: point.variantLabel,
       legacyDefaultLabel,
       rarity,
-    });
+    })) ?? displayVariantLabel(point.variantLabel);
     const normalized = normalizeVariantLabel(label);
     const candidate = pricedOptions.get(normalized) ?? { label, points: [] };
 
@@ -58,11 +63,11 @@ export function buildCatalogueVariantOptions({
   }
 
   for (const label of variantLabelsFromMetadata(variantMetadata)) {
-    const displayLabel = displayVariantLabelForCatalogue({
+    const displayLabel = canonicalVariantLabelForItemType(itemType, displayVariantLabelForCatalogue({
       label,
       legacyDefaultLabel,
       rarity,
-    });
+    })) ?? displayVariantLabel(label);
     const normalized = normalizeVariantLabel(displayLabel);
 
     if (!options.has(normalized)) {
@@ -102,10 +107,11 @@ export function catalogueVariantLabels(item: CatalogueItem, current?: string) {
   const labels = new Map<string, string>();
 
   for (const option of item.variantOptions ?? []) {
-    labels.set(normalizeVariantLabel(option.label), option.label);
+    const label = canonicalVariantLabelForItemType(item.type, option.label) ?? option.label;
+    labels.set(normalizeVariantLabel(label), label);
   }
 
-  const currentLabel = current?.trim();
+  const currentLabel = canonicalVariantLabelForItemType(item.type, current);
 
   if (currentLabel) {
     labels.set(normalizeVariantLabel(currentLabel), currentLabel);
@@ -125,34 +131,90 @@ export function catalogueVariantLabels(item: CatalogueItem, current?: string) {
  * that impossible generic choice when the catalogue now proves there is one
  * supported finish. Other explicit choices continue to fail closed.
  */
-export function catalogueVariantSelectionLabel(item: CatalogueItem, variant?: string | null) {
+export function catalogueVariantSelectionLabel(
+  item: CatalogueItem,
+  variant?: string | null,
+  priceIdentity?: CatalogueVariantPriceIdentity,
+) {
   const requested = variant?.trim();
   const options = item.variantOptions ?? [];
 
   if (requested) {
+    const canonicalRequested = canonicalVariantLabelForItemType(item.type, requested) ?? requested;
     const exact = options.find(
-      (option) => normalizeVariantLabel(option.label) === normalizeVariantLabel(requested),
+      (option) => variantLabelsMatch(item.type, option.label, canonicalRequested),
     );
+
+    if (item.type === "sealed") {
+      return canonicalVariantLabelForItemType(item.type, exact?.label ?? canonicalRequested) ?? canonicalRequested;
+    }
+
+    const normalized = normalizeVariantLabel(requested);
+    if (normalized === "normal" || normalized === "standard") {
+      // A slab's persisted finish is part of its exact market identity. Never
+      // rewrite a literal graded stream merely because the card's raw rarity
+      // would normally repair a legacy generic default.
+      if (priceIdentity && hasExactPricedVariantEvidence(item, requested, priceIdentity)) {
+        return exact?.label ?? requested;
+      }
+
+      const normalEvidence = hasExactPricedVariantEvidence(item, "Normal", priceIdentity);
+
+      if (priceIdentity) {
+        if (normalized === "standard" && normalEvidence) {
+          return optionLabel(item, "Normal") ?? "Normal";
+        }
+
+        if (
+          isPremiumSingleFinishRarity(item.rarity.toLowerCase()) &&
+          hasExactPricedVariantEvidence(item, "Holofoil", priceIdentity)
+        ) {
+          return optionLabel(item, "Holofoil") ?? "Holofoil";
+        }
+
+        // No exact company/score evidence means there is no safe graded
+        // canonicalisation. Retain the stored label rather than borrowing a
+        // finish from raw rarity metadata or another grade.
+        return exact?.label ?? requested;
+      }
+
+      // `Standard` was the original generic raw-card default. Once a real
+      // Normal stream exists, persist and select the concrete provider finish.
+      if (normalEvidence) {
+        return optionLabel(item, "Normal") ?? "Normal";
+      }
+
+      // Older clients also wrote Normal/Standard for premium cards whose only
+      // valid raw finish is Holofoil. Metadata can be absent or advertise
+      // unpriced generic variants, so the rarity plus the absence of actual
+      // Normal evidence is the reliable repair boundary.
+      if (isPremiumSingleFinishRarity(item.rarity.toLowerCase())) {
+        return optionLabel(item, "Holofoil") ?? "Holofoil";
+      }
+    }
 
     if (exact) {
       return exact.label;
     }
 
-    const normalized = normalizeVariantLabel(requested);
-    if (
-      item.type === "card" &&
-      (normalized === "normal" || normalized === "standard") &&
-      isPremiumSingleFinishRarity(item.rarity.toLowerCase()) &&
-      options.length === 1 &&
-      normalizeVariantLabel(options[0].label) === "holofoil"
-    ) {
-      return options[0].label;
-    }
-
     return requested;
   }
 
-  return options[0]?.label ?? defaultVariantLabel(item.type);
+  const fallback = options[0]?.label ?? defaultVariantLabel(item.type);
+  return canonicalVariantLabelForItemType(item.type, fallback) ?? fallback;
+}
+
+/** Canonical label persisted by collection and wishlist mutation paths. */
+export function catalogueVariantWriteLabel(
+  item: CatalogueItem,
+  variant?: string | null,
+  priceIdentity?: CatalogueVariantPriceIdentity,
+) {
+  return catalogueVariantSelectionLabel(
+    item,
+    variant?.trim() || defaultVariantLabel(item.type),
+    priceIdentity,
+  );
 }
 
 export function catalogueValueMinorForVariant(item: CatalogueItem, variant?: string) {
@@ -195,14 +257,14 @@ export function priceHistoryForCatalogueVariant(
   priceHistory: PricePoint[],
   variant?: string | null,
 ) {
-  const normalizedVariant = normalizeVariantLabel(variant);
+  const normalizedVariant = normalizedVariantLabelForItemType(item.type, variant);
 
   if (!normalizedVariant) {
     return priceHistory;
   }
 
   const exact = priceHistory.filter(
-    (point) => normalizeVariantLabel(point.variantLabel) === normalizedVariant,
+    (point) => normalizedVariantLabelForItemType(item.type, point.variantLabel) === normalizedVariant,
   );
 
   if (exact.length) {
@@ -224,6 +286,39 @@ export function priceHistoryForCatalogueVariant(
   return isGenericUnlabelledVariantSelection(item.type, variant) && !hasVariantAwarePrices(priceHistory)
     ? priceHistory
     : [];
+}
+
+/**
+ * Presents synonymous sealed marketplace labels as one exact finish without
+ * changing the meaning of Normal/Standard on raw cards.
+ */
+export function canonicalCataloguePriceHistory(itemType: ItemType, history: PricePoint[]) {
+  if (itemType !== "sealed") {
+    return history;
+  }
+
+  return history.map((point) => {
+    const variantLabel = canonicalVariantLabelForItemType(itemType, point.variantLabel);
+
+    return variantLabel && variantLabel !== point.variantLabel
+      ? { ...point, variantLabel }
+      : point;
+  });
+}
+
+export function canonicalVariantLabelForItemType(
+  itemType: ItemType,
+  variant?: string | null,
+) {
+  const requested = variant?.trim();
+
+  if (!requested) {
+    return undefined;
+  }
+
+  return itemType === "sealed" && isSealedVariantAlias(requested)
+    ? "Factory sealed"
+    : requested;
 }
 
 export function latestPricePointForVariant(history: PricePoint[], variant?: string | null) {
@@ -643,6 +738,83 @@ function uniqueLabels(labels: string[]) {
   return [...unique.values()];
 }
 
+function optionLabel(item: CatalogueItem, variant: string) {
+  return item.variantOptions?.find((option) =>
+    variantLabelsMatch(item.type, option.label, variant)
+  )?.label;
+}
+
+function hasExactPricedVariantEvidence(
+  item: CatalogueItem,
+  variant: string,
+  priceIdentity?: CatalogueVariantPriceIdentity,
+) {
+  const normalized = normalizedVariantLabelForItemType(item.type, variant);
+  const identityHistory = priceIdentity ? item.priceHistory ?? [] : rawPriceHistory(item.priceHistory ?? []);
+  const historyEvidence = identityHistory.some(
+    (point) =>
+      normalizedVariantLabelForItemType(item.type, point.variantLabel) === normalized &&
+      pricePointMatchesIdentity(point, priceIdentity),
+  );
+
+  if (historyEvidence) {
+    return true;
+  }
+
+  // Catalogue options describe raw prices. They are not evidence for a slab's
+  // exact company/score stream.
+  if (priceIdentity) {
+    return false;
+  }
+
+  return item.variantOptions?.some((option) =>
+    option.valueMinor !== undefined &&
+    normalizedVariantLabelForItemType(item.type, option.label) === normalized
+  ) ?? false;
+}
+
+function pricePointMatchesIdentity(
+  point: PricePoint,
+  priceIdentity?: CatalogueVariantPriceIdentity,
+) {
+  if (!priceIdentity) {
+    return !point.gradedCompany;
+  }
+
+  return normalizeGradeCompany(point.gradedCompany) === normalizeGradeCompany(priceIdentity.gradedCompany) &&
+    normalizeGradeScore(point.gradedScore) === normalizeGradeScore(priceIdentity.gradedScore);
+}
+
+function normalizeGradeCompany(value?: string | null) {
+  return String(value ?? "").trim().toUpperCase();
+}
+
+function normalizeGradeScore(value?: number | null) {
+  const score = Number(value);
+
+  return Number.isFinite(score) ? score : undefined;
+}
+
+function variantLabelsMatch(itemType: ItemType, left?: string | null, right?: string | null) {
+  return normalizedVariantLabelForItemType(itemType, left) ===
+    normalizedVariantLabelForItemType(itemType, right);
+}
+
+function normalizedVariantLabelForItemType(itemType: ItemType, variant?: string | null) {
+  return normalizeVariantLabel(canonicalVariantLabelForItemType(itemType, variant));
+}
+
+function isSealedVariantAlias(variant?: string | null) {
+  return new Set([
+    "factorysealed",
+    "newsealed",
+    "normal",
+    "sealed",
+    "standard",
+    "unopenedsealed",
+  ]).has(normalizeVariantLabel(variant));
+}
+
 function hasVariantAwarePrices(history: PricePoint[]) {
   return history.some((point) => normalizeVariantLabel(point.variantLabel));
 }
@@ -652,10 +824,10 @@ function rawPriceHistory(history: PricePoint[]) {
 }
 
 function isGenericUnlabelledVariantSelection(itemType: ItemType, variant?: string | null) {
-  const normalized = normalizeVariantLabel(variant);
+  const normalized = normalizedVariantLabelForItemType(itemType, variant);
 
   return itemType === "sealed"
-    ? normalized === "factorysealed" || normalized === "sealed" || normalized === "standard"
+    ? normalized === "factorysealed"
     : normalized === "standard";
 }
 

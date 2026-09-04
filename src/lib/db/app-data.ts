@@ -12,6 +12,8 @@ import {
 import { sampleAppData } from "../sample-data.ts";
 import {
   buildCatalogueVariantOptions,
+  canonicalCataloguePriceHistory,
+  catalogueVariantWriteLabel,
   catalogueValueMinorForVariant,
 } from "../catalogue/variants.ts";
 import { cardImageCandidates } from "../catalogue/card-images.ts";
@@ -105,6 +107,7 @@ type PriceLike = {
   confidenceScore: number;
   source: string;
   sourceRef?: string | null;
+  createdAt?: Date;
   observedAt: Date;
   variantLabel: string | null;
   gradedCompany: string | null;
@@ -179,7 +182,9 @@ type CatalogueReferenceRecord = {
 
 type ReferencedPriceSnapshot = PriceLike & {
   cardPrintingId: string | null;
+  createdAt: Date;
   sealedProductId: string | null;
+  snapshotId: string;
 };
 
 const PRICE_HISTORY_LIMIT = 8;
@@ -269,12 +274,11 @@ export type CreateCollectionItemInput = {
   valuationNote?: string;
   location?: string;
   notes?: string;
-};
-
-export type UpdateCollectionItemInput = Omit<CreateCollectionItemInput, "catalogueId"> & {
   gradeCompany?: string;
   gradeScore?: string;
 };
+
+export type UpdateCollectionItemInput = Omit<CreateCollectionItemInput, "catalogueId">;
 
 export type SellCollectionItemInput = {
   amount?: string;
@@ -955,6 +959,8 @@ async function hydrateReferencedPriceSnapshotsByIdentity(records: CatalogueRefer
         "source",
         "source_ref" AS "sourceRef",
         "observed_at" AS "observedAt",
+        "created_at" AS "createdAt",
+        "id" AS "snapshotId",
         "variant_label" AS "variantLabel",
         "graded_company" AS "gradedCompany",
         "graded_score" AS "gradedScore",
@@ -967,7 +973,7 @@ async function hydrateReferencedPriceSnapshotsByIdentity(records: CatalogueRefer
             COALESCE("variant_label", ''),
             COALESCE("graded_company"::text, ''),
             COALESCE("graded_score"::text, '')
-          ORDER BY "observed_at" DESC, "created_at" DESC
+          ORDER BY "observed_at" DESC, "created_at" DESC, "id" DESC
         ) AS "identityRank"
       FROM "price_snapshots"
       WHERE (${Prisma.join(scopes, " OR ")})
@@ -993,12 +999,14 @@ async function hydrateReferencedPriceSnapshotsByIdentity(records: CatalogueRefer
       "source",
       "sourceRef",
       "observedAt",
+      "createdAt",
+      "snapshotId",
       "variantLabel",
       "gradedCompany",
       "gradedScore"
     FROM "ranked_prices"
     WHERE "identityRank" <= ${PRICE_HISTORY_LIMIT}
-    ORDER BY "observedAt" DESC
+    ORDER BY "observedAt" DESC, "createdAt" DESC, "snapshotId" DESC
   `);
   const byCard = groupReferencedPrices(rows, "cardPrintingId");
   const bySealed = groupReferencedPrices(rows, "sealedProductId");
@@ -1300,6 +1308,47 @@ function dashboardOwnedValueMinor(item: CollectionItem, catalogueItem?: Catalogu
   return exactCollectionItemValueMinor(item, catalogueItem) ?? null;
 }
 
+/**
+ * Loads the same identity-preserving catalogue evidence used by account reads
+ * before a mutation chooses a persisted finish. A global nested `take` can
+ * otherwise hide an older exact Normal stream behind frequent Holofoil rows.
+ */
+async function mutationCatalogueReference(userId: string, catalogueId: string) {
+  if (!catalogueId) {
+    return { cardPrinting: null, catalogueItem: null, sealedProduct: null };
+  }
+
+  const [cardPrinting, sealedProduct] = await Promise.all([
+    prisma.cardPrinting.findUnique({
+      where: { id: catalogueId },
+      select: catalogueSearchCardSelect,
+    }),
+    prisma.sealedProduct.findFirst({
+      where: visibleSealedProductWhere(userId, catalogueId),
+      select: catalogueSearchSealedSelect,
+    }),
+  ]);
+  const reference: CatalogueReferenceRecord = {
+    cardPrinting: cardPrinting as CardPrintingWithPrices | null,
+    sealedProduct: sealedProduct as SealedProductWithPrices | null,
+  };
+
+  if (!reference.cardPrinting && !reference.sealedProduct) {
+    return { ...reference, catalogueItem: null };
+  }
+
+  await hydrateReferencedPriceSnapshotsByIdentity([reference]);
+  const catalogueItem = reference.cardPrinting
+    ? mapCardPrintingToCatalogueItem(
+        reference.cardPrinting,
+        reference.cardPrinting.priceSnapshots,
+        { includeGradedHistory: true },
+      )
+    : mapSealedProductToCatalogueItem(reference.sealedProduct!, reference.sealedProduct!.priceSnapshots);
+
+  return { ...reference, catalogueItem };
+}
+
 export async function createCollectionItem(
   userId: string,
   input: CreateCollectionItemInput,
@@ -1311,32 +1360,12 @@ export async function createCollectionItem(
     PERSISTED_INPUT_LIMITS.catalogueId,
   );
 
-  const [cardPrinting, sealedProduct] = await Promise.all([
-    prisma.cardPrinting.findUnique({
-      where: { id: catalogueId },
-      include: {
-        cardSet: true,
-        priceSnapshots: {
-          where: customerVisiblePriceSnapshotWhere(),
-          orderBy: { observedAt: "desc" },
-          take: 1,
-        },
-      },
-    }),
-    prisma.sealedProduct.findFirst({
-      where: visibleSealedProductWhere(userId, catalogueId),
-      include: {
-        relatedCardSet: true,
-        priceSnapshots: {
-          where: customerVisiblePriceSnapshotWhere(),
-          orderBy: { observedAt: "desc" },
-          take: 1,
-        },
-      },
-    }),
-  ]);
+  const { cardPrinting, catalogueItem, sealedProduct } = await mutationCatalogueReference(
+    userId,
+    catalogueId,
+  );
 
-  if (!cardPrinting && !sealedProduct) {
+  if (!catalogueItem || (!cardPrinting && !sealedProduct)) {
     throw new AppMutationError("Catalogue item not found.", 404);
   }
 
@@ -1344,6 +1373,18 @@ export async function createCollectionItem(
   const paidMinor = moneyInputToMinor(input.paid, "Purchase price");
   const overrideMinor = moneyInputToMinor(input.overrideValue, "Value override");
   const variant = boundedOptionalText(input.variant, "Variant", PERSISTED_INPUT_LIMITS.variant);
+  const gradedCompany = itemType === PrismaItemType.CARD
+    ? gradingCompanyToEnum(input.gradeCompany)
+    : null;
+  const gradedScore = gradedCompany ? parseGradingScore(input.gradeScore) : null;
+  const canonicalVariant = gradedCompany && gradedScore !== null
+    ? catalogueVariantWriteLabel(catalogueItem, variant, {
+        gradedCompany,
+        gradedScore: Number(gradedScore),
+      })
+    : gradedCompany
+      ? variant ?? defaultVariant(itemType)
+      : catalogueVariantWriteLabel(catalogueItem, variant);
   const notes = boundedOptionalText(input.notes, "Notes", PERSISTED_INPUT_LIMITS.notes);
   const valuationNote = boundedOptionalText(
     input.valuationNote,
@@ -1380,7 +1421,9 @@ export async function createCollectionItem(
       quantity,
       condition: conditionToEnum(input.condition, itemType),
       language: languageToCode(input.language),
-      variantLabel: variant || defaultVariant(itemType),
+      variantLabel: canonicalVariant,
+      gradedCompany,
+      gradedScore,
       purchasePriceMinor: paidMinor,
       purchaseCurrency: paidMinor === undefined ? undefined : "GBP",
       purchaseDate,
@@ -1398,7 +1441,11 @@ export async function createCollectionItem(
           currency: overrideMinor === undefined ? undefined : "GBP",
           occurredAt: new Date(),
           notes: "Created from app API.",
-          metadata: { source: "app_api" },
+          metadata: {
+            source: "app_api",
+            ...(gradedCompany ? { grade_company: gradedCompany } : {}),
+            ...(gradedScore ? { grade_score: gradedScore } : {}),
+          },
         },
       },
     },
@@ -1447,6 +1494,9 @@ export async function updateCollectionItem(
     select: {
       id: true,
       itemType: true,
+      cardPrintingId: true,
+      sealedProductId: true,
+      variantLabel: true,
       gradedCompany: true,
       gradedScore: true,
       currentValueOverrideMinor: true,
@@ -1461,9 +1511,6 @@ export async function updateCollectionItem(
 
   const paidMinor = moneyInputToMinor(input.paid, "Purchase price");
   const overrideMinor = moneyInputToMinor(input.overrideValue, "Value override");
-  const variant = input.variant === undefined
-    ? undefined
-    : boundedOptionalText(input.variant, "Variant", PERSISTED_INPUT_LIMITS.variant);
   const notes = input.notes === undefined
     ? undefined
     : boundedOptionalText(input.notes, "Notes", PERSISTED_INPUT_LIMITS.notes);
@@ -1492,6 +1539,37 @@ export async function updateCollectionItem(
     input.gradeCompany !== undefined &&
     (existing.gradedCompany !== gradedCompany ||
       existingGradeScore !== nextGradeScore);
+  const variantNeedsUpdate = input.variant !== undefined || gradingChanged;
+  const requestedVariant = input.variant === undefined
+    ? existing.variantLabel
+    : boundedOptionalText(input.variant, "Variant", PERSISTED_INPUT_LIMITS.variant);
+  const variantCatalogue = variantNeedsUpdate
+    ? (await mutationCatalogueReference(
+        userId,
+        existing.cardPrintingId ?? existing.sealedProductId ?? "",
+      )).catalogueItem
+    : undefined;
+  if (variantNeedsUpdate && !variantCatalogue) {
+    throw new AppMutationError("Catalogue item not found.", 404);
+  }
+  const effectiveGradeCompany = input.gradeCompany === undefined
+    ? existing.gradedCompany
+    : gradedCompany;
+  const effectiveGradeScore = input.gradeCompany === undefined
+    ? existingGradeScore
+    : nextGradeScore;
+  const canonicalVariant = !variantNeedsUpdate
+    ? undefined
+    : effectiveGradeCompany && effectiveGradeScore !== null
+      ? catalogueVariantWriteLabel(variantCatalogue!, requestedVariant, {
+          gradedCompany: effectiveGradeCompany,
+          gradedScore: effectiveGradeScore,
+        })
+      : effectiveGradeCompany
+        // Incomplete grade input has no exact market identity. Preserve the
+        // chosen label and let graded valuation continue to fail closed.
+        ? requestedVariant ?? defaultVariant(existing.itemType)
+        : catalogueVariantWriteLabel(variantCatalogue!, requestedVariant);
   const overrideChanged =
     input.overrideValue !== undefined &&
     (existing.currentValueOverrideMinor ?? null) !== (overrideMinor ?? null);
@@ -1518,7 +1596,7 @@ export async function updateCollectionItem(
       quantity,
       condition: conditionToEnum(input.condition, existing.itemType),
       language: languageToCode(input.language),
-      variantLabel: input.variant === undefined ? undefined : variant || defaultVariant(existing.itemType),
+      variantLabel: canonicalVariant,
       purchasePriceMinor: paidMinor ?? null,
       purchaseCurrency: paidMinor === undefined ? null : "GBP",
       purchaseDate:
@@ -1924,44 +2002,22 @@ export async function createWishlistItem(
     "Catalogue item id",
     PERSISTED_INPUT_LIMITS.catalogueId,
   );
-  const normalizedVariant = boundedOptionalText(
+  const requestedVariant = boundedOptionalText(
     variant,
     "Wishlist variant",
     PERSISTED_INPUT_LIMITS.variant,
   );
 
-  const [cardPrinting, sealedProduct] = await Promise.all([
-    prisma.cardPrinting.findUnique({
-      where: { id: normalizedCatalogueId },
-      include: {
-        cardSet: true,
-        priceSnapshots: {
-          where: customerVisiblePriceSnapshotWhere({ rawCard: true }),
-          orderBy: { observedAt: "desc" },
-          take: PRICE_HISTORY_LIMIT,
-        },
-      },
-    }),
-    prisma.sealedProduct.findFirst({
-      where: visibleSealedProductWhere(userId, normalizedCatalogueId),
-      include: {
-        relatedCardSet: true,
-        priceSnapshots: {
-          where: customerVisiblePriceSnapshotWhere(),
-          orderBy: { observedAt: "desc" },
-          take: PRICE_HISTORY_LIMIT,
-        },
-      },
-    }),
-  ]);
+  const { cardPrinting, catalogueItem, sealedProduct } = await mutationCatalogueReference(
+    userId,
+    normalizedCatalogueId,
+  );
 
-  if (!cardPrinting && !sealedProduct) {
+  if (!catalogueItem || (!cardPrinting && !sealedProduct)) {
     throw new AppMutationError("Catalogue item not found.", 404);
   }
 
-  const catalogueItem = cardPrinting
-    ? mapCardPrintingToCatalogueItem(cardPrinting, cardPrinting.priceSnapshots)
-    : mapSealedProductToCatalogueItem(sealedProduct!, sealedProduct!.priceSnapshots);
+  const normalizedVariant = catalogueVariantWriteLabel(catalogueItem, requestedVariant);
   const selectedValueMinor = catalogueValueMinorForVariant(catalogueItem, normalizedVariant);
   const targetPriceMinor = defaultWishlistTargetPriceMinor(selectedValueMinor);
 
@@ -1994,7 +2050,7 @@ export async function createWishlistItem(
     await lockUserResourceQuota(transaction, userId, "wishlistItems");
     const existing = await transaction.wishlistItem.findUnique({ where: uniqueWhere, include });
     if (existing) {
-      return normalizedVariant === undefined
+      return requestedVariant === undefined
         ? existing
         : transaction.wishlistItem.update({
             where: { id: existing.id },
@@ -2051,20 +2107,39 @@ export async function updateWishlistItem(
       id,
       userId,
     },
-    select: { id: true },
+    select: {
+      id: true,
+      cardPrintingId: true,
+      sealedProductId: true,
+    },
   });
 
   if (!existing) {
     throw new AppMutationError("Wishlist item not found.", 404);
   }
 
+  const requestedVariant = input.variant === undefined
+    ? undefined
+    : boundedOptionalText(input.variant, "Wishlist variant", PERSISTED_INPUT_LIMITS.variant);
+  const variantCatalogue = input.variant === undefined
+    ? undefined
+    : (await mutationCatalogueReference(
+        userId,
+        existing.cardPrintingId ?? existing.sealedProductId ?? "",
+      )).catalogueItem;
+  if (input.variant !== undefined && !variantCatalogue) {
+    throw new AppMutationError("Catalogue item not found.", 404);
+  }
+  const canonicalVariant = input.variant === undefined
+    ? undefined
+    : catalogueVariantWriteLabel(variantCatalogue!, requestedVariant);
   const targetPriceMinor = moneyInputToMinor(input.targetPrice, "Wishlist target price");
   const updated = await prisma.wishlistItem.update({
     where: { id: existing.id },
     data: {
       variantLabel: input.variant === undefined
         ? undefined
-        : boundedOptionalText(input.variant, "Wishlist variant", PERSISTED_INPUT_LIMITS.variant) ?? null,
+        : canonicalVariant,
       priority: input.priority === undefined ? undefined : priorityToEnum(input.priority),
       targetPriceMinor: input.targetPrice === undefined ? undefined : targetPriceMinor ?? null,
       targetCurrency: input.targetPrice === undefined ? undefined : targetPriceMinor === undefined ? null : "GBP",
@@ -2189,8 +2264,11 @@ function mapSealedProductToCatalogueItem(
   },
   prices: PriceLike[] = [],
 ): CatalogueItem {
-  const priceHistory = buildPriceHistory(
-    prices.filter((price) => customerVisiblePriceSource(price.source, process.env)),
+  const priceHistory = canonicalCataloguePriceHistory(
+    "sealed",
+    buildPriceHistory(
+      prices.filter((price) => customerVisiblePriceSource(price.source, process.env)),
+    ),
   );
   const latestPrice = preferredLatestPricePoint(priceHistory);
 

@@ -3,8 +3,10 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   buildCatalogueVariantOptions,
+  canonicalCataloguePriceHistory,
   catalogueValueMinorForVariant,
   catalogueVariantSelectionLabel,
+  catalogueVariantWriteLabel,
   catalogueVariantLabels,
   displayVariantLabel,
   pokemonTcgImageUrlFromProviderIds,
@@ -259,6 +261,108 @@ test("treats legacy Rare Ultra ordering as a premium holo-only rarity", () => {
   };
   assert.equal(catalogueVariantSelectionLabel(legitimateNormal, "Normal"), "Normal");
   assert.equal(catalogueValueMinorForVariant(legitimateNormal, "Normal"), 50_000);
+});
+
+test("repairs premium legacy defaults despite noisy unpriced metadata", () => {
+  const item = {
+    id: "sv10-290",
+    type: "card",
+    name: "Mega Dragonite ex",
+    set: "Ascended Heroes",
+    number: "290",
+    rarity: "Special Illustration Rare",
+    hasPrice: true,
+    valueMinor: 48_934,
+    confidence: "Fair",
+    priceHistory: [{
+      confidence: "Fair",
+      observedAt: "2026-09-03T09:00:00.000Z",
+      source: "tcgcsv-card",
+      valueMinor: 48_934,
+      variantLabel: "Holofoil",
+    }],
+    variantOptions: [
+      { label: "Normal" },
+      { label: "Holofoil", valueMinor: 48_934 },
+      { label: "Reverse Holofoil" },
+    ],
+  };
+
+  assert.equal(catalogueVariantSelectionLabel(item, "Normal"), "Holofoil");
+  assert.equal(catalogueVariantSelectionLabel(item, "Standard"), "Holofoil");
+  assert.equal(catalogueVariantWriteLabel(item), "Holofoil");
+  assert.equal(catalogueValueMinorForVariant(item, "Standard"), 48_934);
+});
+
+test("maps historical card Standard to priced Normal without changing explicit card semantics", () => {
+  const item = {
+    id: "sv11-32",
+    type: "card",
+    name: "Pawmi",
+    set: "Phantasmal Flames",
+    number: "32",
+    rarity: "Common",
+    hasPrice: true,
+    valueMinor: 7,
+    confidence: "Weak",
+    priceHistory: [{
+      confidence: "Weak",
+      observedAt: "2026-09-03T09:00:00.000Z",
+      source: "tcgcsv-card",
+      valueMinor: 7,
+      variantLabel: "Normal",
+    }],
+    variantOptions: [{ label: "Normal", valueMinor: 7 }, { label: "Reverse Holofoil" }],
+  };
+
+  assert.equal(catalogueVariantSelectionLabel(item, "Standard"), "Normal");
+  assert.equal(catalogueValueMinorForVariant(item, "Standard"), 7);
+  assert.equal(catalogueVariantSelectionLabel(item, "Reverse Holofoil"), "Reverse Holofoil");
+  assert.equal(catalogueValueMinorForVariant(item, "Reverse Holofoil"), undefined);
+});
+
+test("collapses sealed marketplace aliases into one Factory sealed option and history", () => {
+  const aliases = [
+    "Normal",
+    "Standard",
+    "Sealed",
+    "Factory sealed",
+    "New / sealed",
+    "Unopened / sealed",
+  ];
+  const history = aliases.map((variantLabel, index) => ({
+    confidence: "Fair",
+    observedAt: `2026-08-${String(index + 1).padStart(2, "0")}T09:00:00.000Z`,
+    source: `provider-${index}`,
+    valueMinor: 2_600 + index,
+    variantLabel,
+  }));
+  const options = buildCatalogueVariantOptions({ itemType: "sealed", priceHistory: history });
+  const item = {
+    id: "sealed-bundle",
+    type: "sealed",
+    name: "Chaos Rising Booster Bundle",
+    set: "Chaos Rising",
+    number: "Sealed",
+    rarity: "Booster Bundle",
+    hasPrice: true,
+    valueMinor: 2_605,
+    confidence: "Fair",
+    priceHistory: history,
+    variantOptions: options,
+  };
+
+  assert.deepEqual(options.map((option) => option.label), ["Factory sealed"]);
+  assert.equal(canonicalCataloguePriceHistory("sealed", history).every(
+    (point) => point.variantLabel === "Factory sealed",
+  ), true);
+  for (const alias of aliases) {
+    assert.equal(catalogueVariantSelectionLabel(item, alias), "Factory sealed");
+    assert.notEqual(catalogueValueMinorForVariant(item, alias), undefined);
+  }
+
+  // The same labels retain their raw-card meaning outside sealed products.
+  assert.equal(canonicalCataloguePriceHistory("card", history), history);
 });
 
 test("collection search indexes the effective catalogue finish", async () => {

@@ -40,6 +40,30 @@ test("a legacy generic premium target resolves to its sole supported finish", ()
   );
 });
 
+test("sealed wishlist and owned aliases resolve to the same Factory sealed finish", () => {
+  const catalogueItem = {
+    id: "sealed-1",
+    type: "sealed",
+    name: "Chaos Rising Booster Bundle",
+    set: "Chaos Rising",
+    number: "Sealed",
+    rarity: "Booster Bundle",
+    valueMinor: 2_656,
+    hasPrice: true,
+    variantOptions: [{ label: "Factory sealed", valueMinor: 2_656 }],
+  };
+
+  assert.equal(
+    wishlistMatchesOwnedVariant(
+      { catalogueId: "sealed-1", variant: "New / sealed" },
+      "sealed-1",
+      "Normal",
+      catalogueItem,
+    ),
+    true,
+  );
+});
+
 test("add and wishlist conversion flows carry an explicit catalogue finish", () => {
   const source = readFileSync(new URL("../src/app/page.tsx", import.meta.url), "utf8");
 

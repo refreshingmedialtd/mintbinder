@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { access, readFile } from "node:fs/promises";
 import test from "node:test";
+import { runInNewContext } from "node:vm";
 import manifest from "../src/app/manifest.ts";
 import {
   detailedHealthPayload,
@@ -48,6 +49,10 @@ test("manifest exposes scoped raster and dedicated maskable install icons", asyn
 
 test("service worker never caches API or account navigation responses", async () => {
   const worker = await readFile(new URL("../public/sw.js", import.meta.url), "utf8");
+  const installHandler = worker.slice(
+    worker.indexOf('self.addEventListener("install"'),
+    worker.indexOf('self.addEventListener("message"'),
+  );
 
   assert.match(worker, /url\.pathname\.startsWith\("\/api\/"\)/);
   assert.match(worker, /request\.mode === "navigate"/);
@@ -55,8 +60,81 @@ test("service worker never caches API or account navigation responses", async ()
   assert.match(worker, /MAX_CACHE_ENTRIES = 96/);
   assert.match(worker, /key\.startsWith\(CACHE_PREFIX\)/);
   assert.match(worker, /LEGACY_CACHE_NAMES\.has\(key\)/);
-  assert.doesNotMatch(worker, /skipWaiting/);
+  assert.doesNotMatch(installHandler, /skipWaiting/);
   assert.doesNotMatch(worker, /caches\.match\(request\)[\s\S]*request\.mode === "navigate"/);
+});
+
+test("service worker activates a waiting release only after the explicit update message", async () => {
+  const worker = await readFile(new URL("../public/sw.js", import.meta.url), "utf8");
+  const listeners = new Map();
+  let skipWaitingCalls = 0;
+
+  runInNewContext(worker, {
+    self: {
+      addEventListener: (name, listener) => listeners.set(name, listener),
+      skipWaiting: () => {
+        skipWaitingCalls += 1;
+        return Promise.resolve();
+      },
+    },
+  });
+
+  const messageListener = listeners.get("message");
+  assert.equal(typeof messageListener, "function");
+
+  messageListener({
+    data: { type: "unrelated-message" },
+    waitUntil: () => assert.fail("Unrelated messages must not activate the waiting worker."),
+  });
+  assert.equal(skipWaitingCalls, 0);
+
+  let activation;
+  messageListener({
+    data: { type: "mintbinder:activate-update" },
+    waitUntil: (promise) => {
+      activation = promise;
+    },
+  });
+  await activation;
+  assert.equal(skipWaitingCalls, 1);
+});
+
+test("waiting application updates surface an accessible, draft-protected reload action", async () => {
+  const [registration, page, styles] = await Promise.all([
+    readFile(new URL("../src/app/service-worker-registration.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/app/globals.css", import.meta.url), "utf8"),
+  ]);
+  const activationFlow = registration.slice(
+    registration.indexOf("const activateUpdate"),
+    registration.indexOf('if (updateState === "idle")'),
+  );
+
+  assert.match(registration, /registration\.waiting/);
+  assert.match(registration, /updatefound/);
+  assert.match(registration, /controllerchange/);
+  assert.match(registration, /role="status"/);
+  assert.match(registration, /aria-live="polite"/);
+  assert.match(registration, /Update and reload/);
+  assert.ok(
+    activationFlow.indexOf("APP_UPDATE_RELOAD_GUARD_EVENT") >= 0 &&
+      activationFlow.indexOf("APP_UPDATE_RELOAD_GUARD_EVENT") < activationFlow.indexOf("waitingWorker.postMessage"),
+    "The dirty-draft guard must run before the waiting worker is activated.",
+  );
+  assert.match(activationFlow, /reloadRequestedRef\.current = true/);
+  assert.match(registration, /const handleControllerChange = \(\) => \{[\s\S]*reloadRequestedRef\.current[\s\S]*reloadOnce\(\)/);
+  assert.doesNotMatch(registration, /controllerChangedRef/);
+  assert.match(registration, /reloadStartedRef\.current/);
+
+  assert.match(page, /canLeaveBinderWorkspaceRef\.current\("app-update"\)/);
+  assert.match(page, /APP_UPDATE_RELOAD_GUARD_EVENT[\s\S]*protectBinderDraftDuringAppUpdate/);
+  assert.match(page, /protectBinderDraftDuringAppUpdate[\s\S]*event\.preventDefault\(\)/);
+  assert.match(page, /Update Mint Binder now and discard the unsaved binder layout changes\?/);
+  assert.match(page, /current binder save to finish before updating Mint Binder/);
+
+  assert.match(styles, /\.app-update-banner\s*\{/);
+  assert.match(styles, /\.app-update-banner[\s\S]*z-index: 100/);
+  assert.match(styles, /bottom: calc\(78px \+ env\(safe-area-inset-bottom/);
 });
 
 test("offline fallback makes the private-data boundary explicit", async () => {

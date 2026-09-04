@@ -11,7 +11,11 @@ import {
   shouldContinuePokemonTcgPaging,
   summarizePokemonTcgPageResults,
 } from "@/lib/pricing/pokemon-tcg-pagination";
-import { bestPokemonTcgCardPrice, type PokemonPricingRates } from "@/lib/pricing/pokemon-tcg-card-prices";
+import {
+  bestPokemonTcgCardPrice,
+  pokemonProviderObservedAt,
+  type PokemonPricingRates,
+} from "@/lib/pricing/pokemon-tcg-card-prices";
 import { retryAfterMilliseconds, retryDelayMilliseconds } from "../../../scripts/provider-fetch.mjs";
 import { fetchWithPolicy, ProviderRequestError } from "@/lib/http/fetch-with-policy";
 
@@ -356,6 +360,7 @@ export async function syncPokemonTcgCards({
     ? await existingPriceSnapshotCardIds(cards.map((card) => cardPrintingId(card.id)))
     : new Set<string>();
   const priceSnapshots: Prisma.PriceSnapshotCreateManyInput[] = [];
+  const importedAt = new Date();
   let snapshotsCreated = 0;
 
   for (const card of uniqueCardsBySet(cards)) {
@@ -453,7 +458,7 @@ export async function syncPokemonTcgCards({
             exchangeRateSourceDate: resolvedPricingRates.metadata?.[price.originalCurrency]?.sourceDate,
             priceSource: price.sourceLabel,
           }),
-          observedAt: new Date(),
+          observedAt: pokemonProviderObservedAt(price.providerUpdatedAt, importedAt),
           priceMinor: Math.round(price.originalPrice * price.conversionRate * 100),
           source: price.source,
           sourceRef: card.id,

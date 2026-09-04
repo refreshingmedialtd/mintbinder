@@ -3,6 +3,7 @@ const CACHE_NAME = `${CACHE_PREFIX}v2`;
 const LEGACY_CACHE_NAMES = new Set(["mintbinder-static-v1"]);
 const OFFLINE_URL = "/offline.html";
 const MAX_CACHE_ENTRIES = 96;
+const ACTIVATE_UPDATE_MESSAGE = "mintbinder:activate-update";
 const PUBLIC_SHELL_PATHS = [
   OFFLINE_URL,
   "/icon.svg",
@@ -17,6 +18,14 @@ const STATIC_PATHS = new Set(PUBLIC_SHELL_PATHS.filter((path) => path !== OFFLIN
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(PUBLIC_SHELL_PATHS)));
+});
+
+self.addEventListener("message", (event) => {
+  if (event.data?.type !== ACTIVATE_UPDATE_MESSAGE) {
+    return;
+  }
+
+  event.waitUntil(self.skipWaiting());
 });
 
 self.addEventListener("activate", (event) => {

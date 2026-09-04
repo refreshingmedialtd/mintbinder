@@ -13,9 +13,12 @@ export function wishlistMatchesOwnedVariant(
   if (item.catalogueId !== catalogueId) return false;
 
   const wantedVariant = wishlistVariantSelectionLabel(item, catalogueItem);
+  const resolvedOwnedVariant = catalogueItem
+    ? catalogueVariantSelectionLabel(catalogueItem, ownedVariant)
+    : ownedVariant;
 
   // Legacy targets without a saved finish represent the whole catalogue item.
-  return !wantedVariant || normalizeVariantLabel(wantedVariant) === normalizeVariantLabel(ownedVariant);
+  return !wantedVariant || normalizeVariantLabel(wantedVariant) === normalizeVariantLabel(resolvedOwnedVariant);
 }
 
 export function wishlistVariantSelectionLabel(

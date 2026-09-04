@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { CatalogueVisibility, Prisma } from "@prisma/client";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/db/prisma";
+import { canonicalVariantLabelForItemType } from "@/lib/catalogue/variants";
 import {
   isValidPriceHistorySource,
   priceHistoryTruncation,
@@ -59,6 +60,16 @@ export async function GET(request: Request) {
     const itemFilter = itemType === "card"
       ? Prisma.sql`"card_printing_id" = ${catalogueId}::uuid`
       : Prisma.sql`"sealed_product_id" = ${catalogueId}::uuid`;
+    const variantLabelExpression = itemType === "sealed"
+      ? Prisma.sql`
+          CASE
+            WHEN regexp_replace(LOWER(COALESCE("variant_label", '')), '[^a-z0-9]+', '', 'g')
+              IN ('normal', 'standard', 'sealed', 'factorysealed', 'newsealed', 'unopenedsealed')
+              THEN 'Factory sealed'
+            ELSE "variant_label"
+          END
+        `
+      : Prisma.sql`"variant_label"`;
 
     const rows = await prisma.$queryRaw<Array<PriceHistoryRow & { availablePointCount: number }>>(Prisma.sql`
       WITH "bucketed_history" AS (
@@ -68,7 +79,7 @@ export async function GET(request: Request) {
           "currency",
           "condition",
           "language",
-          "variant_label" AS "variantLabel",
+          ${variantLabelExpression} AS "variantLabel",
           "graded_company" AS "gradedCompany",
           "graded_score" AS "gradedScore",
           "price_minor" AS "priceMinor",
@@ -139,7 +150,10 @@ export async function GET(request: Request) {
       bucket,
       source: source ?? "all",
       ...priceHistoryTruncation(availablePointCount, rows.length),
-      points: serializePriceHistoryRows(rows),
+      points: serializePriceHistoryRows(rows).map((point) => ({
+        ...point,
+        variantLabel: canonicalVariantLabelForItemType(itemType, point.variantLabel) ?? null,
+      })),
     });
   } catch (error) {
     console.error("Unable to load price history.", error);

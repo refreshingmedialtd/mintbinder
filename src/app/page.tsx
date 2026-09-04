@@ -62,6 +62,7 @@ import type {
   SetStateAction,
 } from "react";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { APP_UPDATE_RELOAD_GUARD_EVENT } from "./service-worker-registration";
 import { canUseOperationsForUser, normalizeAppRole, type AppUserRole } from "@/lib/auth/roles";
 import {
   catalogueValueMinorForVariant,
@@ -117,6 +118,7 @@ import {
 } from "@/lib/binders/layout";
 import {
   collectionConditionMultiplier,
+  effectiveCollectionVariant,
   collectionItemMarketPricePoint,
   collectionItemPriceHistory,
   collectionItemValuation,
@@ -710,7 +712,7 @@ export default function Home() {
   const binderLoadKeyRef = useRef("");
   const binderReloadFeedbackRef = useRef<"quiet" | "visible" | null>(null);
   const binderSyncControllerRef = useRef<AbortController | null>(null);
-  const canLeaveBinderWorkspaceRef = useRef<() => boolean>(() => true);
+  const canLeaveBinderWorkspaceRef = useRef<(reason?: "navigation" | "app-update") => boolean>(() => true);
   const isInitialAppRouteSyncRef = useRef(true);
   const previousAppRouteStateRef = useRef<AppRouteState | null>(null);
 
@@ -775,6 +777,17 @@ export default function Home() {
 
     window.addEventListener("beforeunload", warnAboutPendingBinderChanges);
     return () => window.removeEventListener("beforeunload", warnAboutPendingBinderChanges);
+  }, []);
+
+  useEffect(() => {
+    function protectBinderDraftDuringAppUpdate(event: Event) {
+      if (!canLeaveBinderWorkspaceRef.current("app-update")) {
+        event.preventDefault();
+      }
+    }
+
+    window.addEventListener(APP_UPDATE_RELOAD_GUARD_EVENT, protectBinderDraftDuringAppUpdate);
+    return () => window.removeEventListener(APP_UPDATE_RELOAD_GUARD_EVENT, protectBinderDraftDuringAppUpdate);
   }, []);
 
   useEffect(() => {
@@ -1371,14 +1384,23 @@ export default function Home() {
     });
   }, [catalogueById, collection, collectionEvents, sets, storageLocations, wishlist]);
 
-  function canLeaveBinderWorkspace() {
+  function canLeaveBinderWorkspace(reason: "navigation" | "app-update" = "navigation") {
     if (binderMutationInFlightRef.current) {
-      showToast("Wait for the current binder save to finish before leaving.", "error");
+      showToast(
+        reason === "app-update"
+          ? "Wait for the current binder save to finish before updating Mint Binder."
+          : "Wait for the current binder save to finish before leaving.",
+        "error",
+      );
       return false;
     }
     if (
       binderDraftProtectionRef.current &&
-      !window.confirm("Leave Binders and discard the unsaved layout draft?")
+      !window.confirm(
+        reason === "app-update"
+          ? "Update Mint Binder now and discard the unsaved binder layout changes?"
+          : "Leave Binders and discard the unsaved layout draft?",
+      )
     ) {
       return false;
     }
@@ -10492,10 +10514,12 @@ function PriceTrendPanel({
     ? collectionItemPriceHistory(owned, { ...item, priceHistory: allHistory })
     : allHistory.filter((point) => !point.gradedCompany);
   const historySeries = groupPriceHistorySeries(relevantHistory);
-  const historyPreferredVariant = preferredVariant ?? owned?.variant;
+  const historyPreferredVariant = preferredVariant ?? (
+    owned ? effectiveCollectionVariant(owned, item) : undefined
+  );
   const fallbackHistorySeriesKey = preferredPriceHistorySeriesKey(
     relevantHistory,
-    historyPreferredVariant,
+    owned ? undefined : historyPreferredVariant,
   );
   const activeHistorySeries = historySeries.find((series) => series.key === selectedHistorySeriesKey) ??
     historySeries.find((series) => series.key === fallbackHistorySeriesKey) ??
