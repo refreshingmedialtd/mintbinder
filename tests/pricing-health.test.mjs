@@ -141,6 +141,52 @@ test("does not treat token CardTrader output as meaningful second-source coverag
   assert.equal(report.sealedSources.find((row) => row.source === "cardtrader-sealed").freshPricedPercent, 100);
 });
 
+test("uses aggregate CardTrader coverage and freshness instead of per-batch discovery yield", () => {
+  const now = new Date("2026-09-05T14:00:00.000Z");
+  const metrics = {
+    cardLanguages: [],
+    collisionStreams: 0,
+    generatedAt: now,
+    sealed: { fresh: 90, priced: 90, total: 100 },
+    sealedRotation: { availableSets: 10, jobs: 10, uniqueSets: 10, zeroOutputJobs: 3 },
+    sealedSources: [
+      {
+        freshItems: 90,
+        latestObservedAt: now,
+        pricedItems: 90,
+        snapshots: 300,
+        source: "tcgcsv",
+      },
+      {
+        freshItems: 5,
+        latestObservedAt: now,
+        pricedItems: 5,
+        snapshots: 5,
+        source: "cardtrader-sealed",
+      },
+    ],
+  };
+  const healthy = buildPricingHealthReport(metrics, { cardTraderExpected: true });
+  const stale = buildPricingHealthReport({
+    ...metrics,
+    generatedAt: new Date("2026-09-08T15:00:00.000Z"),
+    sealedSources: metrics.sealedSources.map((source) => source.source === "tcgcsv"
+      ? { ...source, latestObservedAt: new Date("2026-09-08T15:00:00.000Z") }
+      : source),
+  }, { cardTraderExpected: true });
+  const insufficientFreshness = buildPricingHealthReport({
+    ...metrics,
+    sealedSources: metrics.sealedSources.map((source) => source.source === "cardtrader-sealed"
+      ? { ...source, freshItems: 3 }
+      : source),
+  }, { cardTraderExpected: true });
+
+  assert.equal(healthy.ok, true);
+  assert.equal(healthy.sealedRotation7d.zeroOutputJobs, 3);
+  assert.match(stale.problems.join(" "), /Latest CardTrader sealed evidence/);
+  assert.match(insufficientFreshness.problems.join(" "), /CardTrader sealed freshness is 60%/);
+});
+
 test("reports exact variant coverage and freshness independently of card-level health", () => {
   const report = buildPricingHealthReport({
     cardLanguages: [{ fresh: 100, language: "en", priced: 100, total: 100 }],

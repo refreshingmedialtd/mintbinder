@@ -39,6 +39,27 @@ const cardGroupNameProviderAliases = new Map([
   ["xypromos", ["xyp"]],
 ]);
 
+// These set names differ substantially between Pokemon TCG API and TCGplayer.
+// Keep the reviewed aliases tied to both the immutable TCGplayer group ID and
+// its normalized name: if either identity changes, the importer leaves the
+// group unmatched instead of guessing.
+const reviewedCardGroupProviderAliases = new Map([
+  ["1375:expedition", ["ecard1"]],
+  ["1381:triumphant", ["hgss4"]],
+  ["1387:xybaseset", ["xy1"]],
+  ["1399:unleashed", ["hgss2"]],
+  ["1402:heartgoldsoulsilver", ["hgss1"]],
+  ["1403:undaunted", ["hgss3"]],
+  ["1455:bestofpromos", ["bp"]],
+  ["2782:mcdonalds25thanniversarypromos", ["mcd21"]],
+  ["22873:sv01scarletvioletbaseset", ["sv1"]],
+  ["23237:svscarletviolet151", ["sv3pt5"]],
+]);
+const {
+  ambiguousProviderCodes: ambiguousReviewedProviderCodes,
+  ownerByProviderCode: reviewedOwnerByProviderCode,
+} = buildReviewedProviderOwnership(reviewedCardGroupProviderAliases);
+
 export function cardPricingOptionsFromEnv(env = process.env) {
   const language = optionalString(env.TCGCSV_CARD_LANGUAGE);
   const categoryId = positiveInteger(env.TCGCSV_CARD_CATEGORY_ID, categoryIdForLanguage(language));
@@ -211,20 +232,40 @@ export async function syncTcgcsvCardPrices(options = {}) {
 }
 
 export function matchTcgcsvCardGroupsToSets(groups, sets) {
-  const matches = [...matchTcgcsvGroupsToSets(groups, sets)];
   const setByProviderCode = new Map();
-  const seen = new Set(matches.map(matchKey));
+  const ambiguousProviderCodes = new Set();
 
   for (const set of sets) {
     const providerCode = normalizedProviderCode(setProviderId(set));
 
-    if (providerCode) {
+    if (!providerCode || ambiguousProviderCodes.has(providerCode)) {
+      continue;
+    }
+
+    if (setByProviderCode.has(providerCode)) {
+      // An alias is only safe when its target provider identity is unique.
+      // Do not silently let the last duplicate set win.
+      setByProviderCode.delete(providerCode);
+      ambiguousProviderCodes.add(providerCode);
+    } else {
       setByProviderCode.set(providerCode, set);
     }
   }
 
+  // A reviewed identity is stronger than the generic name matcher. Exclude
+  // those groups from the generic pass so a coincidentally similar local name
+  // cannot make one provider group feed two different sets.
+  const matches = matchTcgcsvGroupsToSets(groups, sets)
+    .filter(({ group }) => reviewedCardGroupProviderCodes(group).length === 0);
+  const seen = new Set(matches.map(matchKey));
+
   for (const group of groups) {
-    for (const providerCode of cardGroupProviderCodes(group)) {
+    const reviewedProviderCodes = reviewedCardGroupProviderCodes(group);
+    const providerCodes = reviewedProviderCodes.length
+      ? reviewedProviderCodes
+      : cardGroupProviderCodes(group);
+
+    for (const providerCode of providerCodes) {
       const set = setByProviderCode.get(providerCode);
 
       if (!set) {
@@ -241,7 +282,19 @@ export function matchTcgcsvCardGroupsToSets(groups, sets) {
     }
   }
 
-  return matches;
+  // Reviewed provider targets stay reserved even if an upstream group is
+  // absent or renamed. That identity drift must make the set unmatched, not
+  // allow a coincidental generic group to take ownership of its price feed.
+  return matches.filter(({ group, set }) => {
+    const providerCode = normalizedProviderCode(setProviderId(set));
+
+    if (ambiguousReviewedProviderCodes.has(providerCode)) {
+      return false;
+    }
+
+    const reviewedOwner = reviewedOwnerByProviderCode.get(providerCode);
+    return !reviewedOwner || reviewedCardGroupIdentity(group) === reviewedOwner;
+  });
 }
 
 export function matchTcgcsvCardProduct(product, cards) {
@@ -789,9 +842,48 @@ function cardGroupProviderCodes(group) {
   const idAliases = cardGroupProviderAliases.get(String(group.groupId));
   const nameAliases = cardGroupNameProviderAliases.get(normalizedAliasKey(group.name));
 
-  return [...new Set([group.abbreviation, ...(idAliases ?? []), ...(nameAliases ?? [])])]
+  return [...new Set([
+    group.abbreviation,
+    ...(idAliases ?? []),
+    ...(nameAliases ?? []),
+  ])]
     .map(normalizedProviderCode)
     .filter(Boolean);
+}
+
+function reviewedCardGroupProviderCodes(group) {
+  return (reviewedCardGroupProviderAliases.get(reviewedCardGroupIdentity(group)) ?? [])
+    .map(normalizedProviderCode)
+    .filter(Boolean);
+}
+
+function reviewedCardGroupIdentity(group) {
+  return `${String(group.groupId)}:${normalizedAliasKey(group.name)}`;
+}
+
+function buildReviewedProviderOwnership(reviewedAliases) {
+  const ownerByProviderCode = new Map();
+  const ambiguousProviderCodes = new Set();
+
+  for (const [owner, aliases] of reviewedAliases) {
+    for (const alias of aliases) {
+      const providerCode = normalizedProviderCode(alias);
+      const existingOwner = ownerByProviderCode.get(providerCode);
+
+      if (!providerCode || ambiguousProviderCodes.has(providerCode)) {
+        continue;
+      }
+
+      if (existingOwner && existingOwner !== owner) {
+        ownerByProviderCode.delete(providerCode);
+        ambiguousProviderCodes.add(providerCode);
+      } else {
+        ownerByProviderCode.set(providerCode, owner);
+      }
+    }
+  }
+
+  return { ambiguousProviderCodes, ownerByProviderCode };
 }
 
 function matchKey({ group, set }) {

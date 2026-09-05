@@ -164,6 +164,94 @@ test("matches card-only TCGCSV promo and trainer kit groups to local sets", () =
   );
 });
 
+const reviewedEnglishGroupMappings = [
+  [22873, "SV01: Scarlet & Violet Base Set", "Scarlet & Violet", "sv1"],
+  [23237, "SV: Scarlet & Violet 151", "151", "sv3pt5"],
+  [1375, "Expedition", "Expedition Base Set", "ecard1"],
+  [1387, "XY Base Set", "XY", "xy1"],
+  [1402, "HeartGold SoulSilver", "HeartGold & SoulSilver", "hgss1"],
+  [1381, "Triumphant", "HS—Triumphant", "hgss4"],
+  [1403, "Undaunted", "HS—Undaunted", "hgss3"],
+  [1399, "Unleashed", "HS—Unleashed", "hgss2"],
+  [2782, "McDonald's 25th Anniversary Promos", "McDonald's Collection 2021", "mcd21"],
+  [1455, "Best of Promos", "Best of Game", "bp"],
+];
+
+for (const [groupId, groupName, setName, providerId] of reviewedEnglishGroupMappings) {
+  test(`maps reviewed TCGCSV group ${groupId} to ${providerId}`, () => {
+    const group = { groupId, name: groupName };
+    const set = { id: `set-${providerId}`, name: setName, providerId };
+
+    assert.deepEqual(matchTcgcsvCardGroupsToSets([group], [set]), [{ group, set }]);
+  });
+}
+
+test("requires both parts of a reviewed TCGCSV group identity", () => {
+  const sets = [
+    { id: "set-sv1", name: "Scarlet & Violet", providerId: "sv1" },
+    { id: "set-ecard1", name: "Expedition Base Set", providerId: "ecard1" },
+  ];
+
+  assert.deepEqual(matchTcgcsvCardGroupsToSets([
+    { groupId: 22873, name: "Unexpected replacement group" },
+    { groupId: 99999, name: "Expedition" },
+  ], sets), []);
+});
+
+test("does not apply a reviewed group alias when its provider identity is ambiguous", () => {
+  const duplicateSets = [
+    { id: "set-sv1-a", name: "Local set A", providerId: "sv1" },
+    { id: "set-sv1-b", name: "Local set B", providerId: "sv1" },
+  ];
+
+  assert.deepEqual(matchTcgcsvCardGroupsToSets([
+    { groupId: 22873, name: "SV01: Scarlet & Violet Base Set" },
+  ], duplicateSets), []);
+});
+
+test("gives an exact reviewed identity precedence over a coincidental set-name match", () => {
+  const reviewedTarget = { id: "set-sv1", name: "Scarlet & Violet", providerId: "sv1" };
+  const coincidentalName = {
+    id: "set-other",
+    name: "Scarlet & Violet Base Set",
+    providerId: "other1",
+  };
+  const group = { groupId: 22873, name: "SV01: Scarlet & Violet Base Set" };
+
+  assert.deepEqual(matchTcgcsvCardGroupsToSets([group], [coincidentalName]), []);
+  assert.deepEqual(
+    matchTcgcsvCardGroupsToSets([group], [reviewedTarget, coincidentalName]),
+    [{ group, set: reviewedTarget }],
+  );
+});
+
+test("lets a reviewed group exclusively own its local set target", () => {
+  const target = { id: "set-sv1", name: "Scarlet & Violet", providerId: "sv1" };
+  const genericGroup = { groupId: 99999, name: "Scarlet & Violet" };
+  const reviewedGroup = { groupId: 22873, name: "SV01: Scarlet & Violet Base Set" };
+
+  assert.deepEqual(
+    matchTcgcsvCardGroupsToSets([genericGroup, reviewedGroup], [target]),
+    [{ group: reviewedGroup, set: target }],
+  );
+  assert.deepEqual(
+    matchTcgcsvCardGroupsToSets([reviewedGroup, genericGroup], [target]),
+    [{ group: reviewedGroup, set: target }],
+  );
+});
+
+test("keeps a reviewed set target reserved when its provider group is absent or renamed", () => {
+  const target = { id: "set-sv1", name: "Scarlet & Violet", providerId: "sv1" };
+  const genericGroup = { groupId: 99999, name: "Scarlet & Violet" };
+  const renamedReviewedGroup = { groupId: 22873, name: "Unexpected replacement group" };
+
+  assert.deepEqual(matchTcgcsvCardGroupsToSets([genericGroup], [target]), []);
+  assert.deepEqual(
+    matchTcgcsvCardGroupsToSets([genericGroup, renamedReviewedGroup], [target]),
+    [],
+  );
+});
+
 test("matches Pokemon Japan TCGCSV groups to TCGdex-backed Japanese sets", () => {
   const sets = [
     {

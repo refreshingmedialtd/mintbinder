@@ -8,6 +8,7 @@ import { fetchJsonWithRetry } from "./provider-fetch.mjs";
 import { groupDisplayName, normalizedSetName } from "./tcgcsv-sealed-products.mjs";
 
 const cardTraderBaseUrl = "https://api.cardtrader.com/api/v2";
+const hourMs = 60 * 60 * 1_000;
 const pokemonGameId = 5;
 const maxTargetedProductIds = 20;
 const sourceName = "cardtrader-sealed";
@@ -25,6 +26,7 @@ export function cardTraderSealedOptionsFromEnv(env = process.env) {
     limit: positiveInteger(env.CARDTRADER_SEALED_PRODUCT_LIMIT, 5),
     manualAliases: stringSetting(env.CARDTRADER_SEALED_ALIASES_JSON),
     priceOnlyUnpriced: booleanSetting(env.CARDTRADER_SEALED_PRICE_ONLY_UNPRICED, false),
+    refreshEveryHours: positiveInteger(env.CARDTRADER_SEALED_REFRESH_EVERY_HOURS, 4),
     setLimit: positiveInteger(env.CARDTRADER_SEALED_SET_LIMIT, 1),
     token,
     usdToGbpRate: conversionRate(env.CARDTRADER_USD_TO_GBP_RATE) ??
@@ -40,7 +42,9 @@ export async function syncCardTraderSealedPrices(options = {}) {
   const shouldDisconnect = !options.prisma;
   const fetchImpl = options.fetchImpl ?? fetch;
   const limit = positiveInteger(options.limit, 5);
+  const now = validDate(options.now) ?? new Date();
   const priceOnlyUnpriced = options.priceOnlyUnpriced ?? false;
+  const refreshEveryHours = positiveInteger(options.refreshEveryHours, 4);
   const setLimit = positiveInteger(options.setLimit, 1);
   const token = stringSetting(options.token);
   const waitMs = nonNegativeInteger(options.waitMs, 1_000);
@@ -77,11 +81,14 @@ export async function syncCardTraderSealedPrices(options = {}) {
     },
     mappingReview: [],
     marketplaceMatches: 0,
+    outcome: "pending",
     priceOnlyUnpriced,
     pricingSnapshotsCreated: 0,
     pricingSnapshotsUpdated: 0,
     provider: sourceName,
+    refreshEveryHours,
     sampleUnmatchedProducts: [],
+    selectionMode: productIds.length ? "targeted" : "discovery",
     setsChecked: 0,
     setsUnmatched: 0,
     status: "succeeded",
@@ -125,14 +132,21 @@ export async function syncCardTraderSealedPrices(options = {}) {
         } : {}),
       },
     });
-    const candidates = products
-      .filter((product) => product.relatedCardSet?.id)
-      .sort(compareCandidates);
-    const selectedCandidates = selectCandidateSets(candidates, { limit, setLimit });
+    const candidates = products.filter((product) => product.relatedCardSet?.id);
+    const selection = selectCardTraderCandidates(candidates, {
+      limit: productIds.length || limit,
+      now,
+      refreshEveryHours,
+      setLimit: productIds.length ? Math.max(setLimit, productIds.length) : setLimit,
+      targeted: productIds.length > 0,
+    });
+    const selectedCandidates = selection.candidates;
 
     summary.candidatesAvailable = candidates.length;
+    summary.selectionMode = selection.mode;
 
     if (!selectedCandidates.length) {
+      summary.outcome = "no_candidates";
       summary.status = "degraded";
       return summary;
     }
@@ -190,6 +204,7 @@ export async function syncCardTraderSealedPrices(options = {}) {
           summary.candidatesChecked += 1;
           summary.candidatesUnmatched += 1;
           await recordCardTraderAttempt(prisma, product, {
+            attemptedAt: now,
             error: `No CardTrader expansion matched ${set.name}.`,
           });
           addUnmatchedSample(summary, product, "expansion");
@@ -198,9 +213,9 @@ export async function syncCardTraderSealedPrices(options = {}) {
         continue;
       }
 
-      const blueprints = cardTraderCollection(await request("/blueprints/export", {
+      const blueprints = cardTraderBlueprintCollection(await request("/blueprints/export", {
         expansion_id: expansion.id,
-      }), "blueprints");
+      }));
       const blueprintIndex = buildCardTraderBlueprintIndex(blueprints);
 
       summary.blueprintsAvailable += blueprints.length;
@@ -217,6 +232,7 @@ export async function syncCardTraderSealedPrices(options = {}) {
           summary.candidatesUnmatched += 1;
           summary.ambiguousMatches += mapping.ambiguous ? 1 : 0;
           await recordCardTraderAttempt(prisma, product, {
+            attemptedAt: now,
             error: mapping.reason,
             expansion,
           });
@@ -231,11 +247,15 @@ export async function syncCardTraderSealedPrices(options = {}) {
           blueprint_id: blueprint.id,
           language: "en",
         });
-        const marketPrice = cardTraderMarketplacePrice(marketplace, rates);
+        assertCardTraderMarketplacePayload(marketplace, blueprint.id);
+        const marketPrice = cardTraderMarketplacePrice({
+          [String(blueprint.id)]: marketplace[String(blueprint.id)] ?? [],
+        }, rates);
 
         if (!marketPrice) {
           summary.candidatesUnmatched += 1;
           await recordCardTraderAttempt(prisma, product, {
+            attemptedAt: now,
             blueprint,
             error: "No eligible CardTrader sealed listings had a supported GBP, EUR, or USD price.",
             expansion,
@@ -247,6 +267,7 @@ export async function syncCardTraderSealedPrices(options = {}) {
         summary.marketplaceMatches += 1;
         summary.listingOffersUsed += marketPrice.offerCount;
         await recordCardTraderAttempt(prisma, product, {
+          attemptedAt: now,
           blueprint,
           expansion,
           listingCount: marketPrice.listingCount,
@@ -276,7 +297,7 @@ export async function syncCardTraderSealedPrices(options = {}) {
             mappingMethod: mapping.method,
             tcgplayerProductId: tcgplayerId,
           },
-          observedAt: new Date(),
+          observedAt: now,
           priceMinor: marketPrice.priceMinor,
           sealedProductId: product.id,
           source: sourceName,
@@ -289,9 +310,7 @@ export async function syncCardTraderSealedPrices(options = {}) {
     }
 
     summary.mappingCoveragePercent = percent(summary.blueprintsMatched, summary.candidatesChecked);
-    if (summary.candidatesChecked > 0 && summary.marketplaceMatches === 0) {
-      summary.status = "degraded";
-    }
+    summary.outcome = cardTraderOutcome(summary);
 
     return summary;
   } finally {
@@ -299,6 +318,52 @@ export async function syncCardTraderSealedPrices(options = {}) {
       await prisma.$disconnect();
     }
   }
+}
+
+export function selectCardTraderCandidates(candidates, {
+  limit = 5,
+  now = new Date(),
+  refreshEveryHours = 4,
+  setLimit = 1,
+  targeted = false,
+} = {}) {
+  const normalizedNow = validDate(now) ?? new Date();
+  const normalizedRefreshEveryHours = positiveInteger(refreshEveryHours, 4);
+  const priced = candidates.filter(hasCardTraderPrice);
+  const unpriced = candidates.filter((candidate) => !hasCardTraderPrice(candidate));
+
+  if (targeted) {
+    return {
+      candidates: selectCandidateSets([...candidates].sort(compareCandidates), {
+        limit: positiveInteger(limit, candidates.length || 1),
+        setLimit: positiveInteger(setLimit, candidates.length || 1),
+      }),
+      mode: "targeted",
+    };
+  }
+
+  // The production lane runs hourly. A deterministic UTC bucket reserves a
+  // bounded refresh slot without adding state, jobs, sets, or provider calls.
+  const refreshSlot = Math.floor(normalizedNow.getTime() / hourMs) % normalizedRefreshEveryHours === 0;
+  const mode = refreshSlot && priced.length > 0
+    ? "refresh"
+    : unpriced.length > 0
+      ? "discovery"
+      : "refresh";
+  const preferred = mode === "refresh"
+    ? priced.sort(compareRefreshCandidates)
+    : unpriced.sort(compareCandidates);
+  const fillers = mode === "refresh"
+    ? unpriced.sort(compareCandidates)
+    : priced.sort(compareRefreshCandidates);
+
+  return {
+    candidates: selectCandidateSets([...preferred, ...fillers], {
+      limit: positiveInteger(limit, 5),
+      setLimit: positiveInteger(setLimit, 1),
+    }),
+    mode,
+  };
 }
 
 export function normalizeCardTraderProductIds(value) {
@@ -578,10 +643,40 @@ function selectCandidateSets(candidates, { limit, setLimit }) {
   return selected;
 }
 
+function cardTraderOutcome(summary) {
+  const snapshotsWritten = summary.pricingSnapshotsCreated + summary.pricingSnapshotsUpdated;
+
+  if (snapshotsWritten > 0) return "priced";
+  if (summary.marketplaceMatches > 0 && summary.writePrices === false) return "dry_run";
+  if (summary.blueprintsMatched === 0) return "no_blueprint_match";
+  if (summary.marketplaceMatches === 0) return "no_eligible_listing";
+
+  return "completed_without_snapshot";
+}
+
 function compareCandidates(left, right) {
   return cardTraderAttemptMs(left) - cardTraderAttemptMs(right) ||
     latestCardTraderPriceMs(left) - latestCardTraderPriceMs(right) ||
-    left.name.localeCompare(right.name);
+    compareCandidateIdentity(left, right);
+}
+
+function compareRefreshCandidates(left, right) {
+  const leftRefreshMs = Math.max(cardTraderAttemptMs(left), latestCardTraderPriceMs(left));
+  const rightRefreshMs = Math.max(cardTraderAttemptMs(right), latestCardTraderPriceMs(right));
+
+  return leftRefreshMs - rightRefreshMs ||
+    latestCardTraderPriceMs(left) - latestCardTraderPriceMs(right) ||
+    compareCandidateIdentity(left, right);
+}
+
+function compareCandidateIdentity(left, right) {
+  return String(left.relatedCardSet?.id ?? "").localeCompare(String(right.relatedCardSet?.id ?? "")) ||
+    String(left.name ?? "").localeCompare(String(right.name ?? "")) ||
+    String(left.id ?? "").localeCompare(String(right.id ?? ""));
+}
+
+function hasCardTraderPrice(product) {
+  return latestCardTraderPriceMs(product) > 0;
 }
 
 function cardTraderAttemptMs(product) {
@@ -599,6 +694,7 @@ function latestCardTraderPriceMs(product) {
 }
 
 async function recordCardTraderAttempt(prisma, product, {
+  attemptedAt = new Date(),
   blueprint,
   error = null,
   expansion,
@@ -606,7 +702,7 @@ async function recordCardTraderAttempt(prisma, product, {
   mappingMethod,
   matched = false,
 }) {
-  const attemptedAt = new Date().toISOString();
+  const attemptedAtIso = (validDate(attemptedAt) ?? new Date()).toISOString();
   const metadata = {
     ...(isObject(product.metadata) ? product.metadata : {}),
     cardTraderBlueprintId: blueprint?.id
@@ -615,11 +711,11 @@ async function recordCardTraderAttempt(prisma, product, {
     cardTraderExpansionId: expansion?.id
       ? String(expansion.id)
       : product.metadata?.cardTraderExpansionId ?? null,
-    cardTraderLastAttemptAt: attemptedAt,
+    cardTraderLastAttemptAt: attemptedAtIso,
     cardTraderLastError: error,
     cardTraderLastListingCount: listingCount,
     cardTraderLastMatchedAt: matched
-      ? attemptedAt
+      ? attemptedAtIso
       : product.metadata?.cardTraderLastMatchedAt ?? null,
     cardTraderMappingMethod: mappingMethod ?? product.metadata?.cardTraderMappingMethod ?? null,
   };
@@ -1048,6 +1144,65 @@ function cardTraderCollection(value, resourceName) {
   return values.length > 0 && values.every(isObject) ? values : [];
 }
 
+function cardTraderBlueprintCollection(value) {
+  const errorShaped = isObject(value) &&
+    ["error", "errors"].some((key) => Object.hasOwn(value, key));
+  let blueprints;
+
+  if (Array.isArray(value)) {
+    blueprints = value;
+  } else if (isObject(value) && !errorShaped) {
+    const collectionKeys = ["blueprints", "data", "results", "items"]
+      .filter((key) => Object.hasOwn(value, key));
+
+    if (collectionKeys.length === 1 && Array.isArray(value[collectionKeys[0]])) {
+      blueprints = value[collectionKeys[0]];
+    }
+  }
+
+  if (!blueprints || !blueprints.every(isCardTraderBlueprint)) {
+    throw new Error(
+      `CardTrader returned an invalid blueprint payload (${jsonShape(value)}).`,
+    );
+  }
+
+  return blueprints;
+}
+
+function isCardTraderBlueprint(value) {
+  return isObject(value) &&
+    Number.isSafeInteger(value.id) &&
+    value.id > 0 &&
+    typeof value.name === "string" &&
+    Boolean(value.name.trim());
+}
+
+function assertCardTraderMarketplacePayload(value, blueprintId) {
+  const entries = isObject(value) ? Object.entries(value) : [];
+  const requestedKey = String(blueprintId);
+  const valid = isObject(value) &&
+    entries.every(([key, offers]) =>
+      /^\d+$/.test(key) && Array.isArray(offers) && offers.every(isCardTraderMarketplaceOffer)
+    ) &&
+    (entries.length === 0 || Object.hasOwn(value, requestedKey));
+
+  if (!valid) {
+    throw new Error(
+      `CardTrader returned an invalid marketplace payload for blueprint ${requestedKey}.`,
+    );
+  }
+}
+
+function isCardTraderMarketplaceOffer(value) {
+  const cents = value?.price?.cents ?? value?.price_cents;
+  const currency = value?.price?.currency ?? value?.price_currency;
+
+  return isObject(value) &&
+    Number.isFinite(Number(value.quantity)) &&
+    Number.isFinite(Number(cents)) &&
+    Boolean(String(currency ?? "").trim());
+}
+
 function jsonShape(value) {
   if (Array.isArray(value)) {
     return `array(${value.length})`;
@@ -1066,6 +1221,12 @@ function conversionRate(value) {
   const rate = Number(value);
 
   return Number.isFinite(rate) && rate > 0 ? rate : undefined;
+}
+
+function validDate(value) {
+  const date = value instanceof Date ? value : new Date(value);
+
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 function percent(value, total) {

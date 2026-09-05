@@ -807,12 +807,28 @@ export function successfulJobDegradation(run) {
 
     if (status && !["succeeded", "not_configured"].includes(status)) {
       reasons.push(`${provider} reported ${status}.`);
-    } else if (status === "succeeded" && candidatesChecked > 0 && output === 0) {
+    } else if (
+      status === "succeeded" &&
+      candidatesChecked > 0 &&
+      output === 0 &&
+      !isExpectedCardTraderDiscoveryMiss(secondSource, provider)
+    ) {
       reasons.push(`${provider} checked ${candidatesChecked} candidate(s) but produced no price snapshots.`);
     }
   }
 
   return [...new Set(reasons)].join(" ") || null;
+}
+
+function isExpectedCardTraderDiscoveryMiss(result, provider) {
+  const outcome = optionalEnvValue(result.outcome);
+  const selectionMode = optionalEnvValue(result.selectionMode);
+  const apiRequests = positiveCount(result.apiRequests);
+
+  return provider === "cardtrader-sealed" &&
+    selectionMode === "discovery" &&
+    ["no_blueprint_match", "no_eligible_listing"].includes(outcome) &&
+    apiRequests > 0;
 }
 
 export function scheduledJobCadenceHealth({ env = {}, latestRuns = [], now }) {

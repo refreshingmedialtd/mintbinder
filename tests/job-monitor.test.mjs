@@ -195,18 +195,78 @@ test("surfaces stale or unresolved password-reset outbox work", () => {
 });
 
 test("surfaces partial provider failures hidden inside successful jobs", () => {
-  assert.match(successfulJobDegradation({
+  const degradation = successfulJobDegradation({
     resultPayload: {
       failedSets: 2,
       secondSource: {
+        apiRequests: 3,
         candidatesChecked: 5,
+        outcome: "no_blueprint_match",
         pricingSnapshotsCreated: 0,
         pricingSnapshotsUpdated: 0,
         provider: "cardtrader-sealed",
+        selectionMode: "discovery",
         status: "succeeded",
       },
     },
-  }), /2 provider set refresh[\s\S]*cardtrader-sealed checked 5 candidate/);
+  });
+
+  assert.match(degradation, /2 provider set refresh/);
+  assert.doesNotMatch(degradation, /cardtrader-sealed/);
+});
+
+test("keeps API-healthy CardTrader discovery misses out of operational alerts", () => {
+  assert.equal(successfulJobDegradation({
+    resultPayload: {
+      secondSource: {
+        apiRequests: 4,
+        candidatesChecked: 5,
+        outcome: "no_eligible_listing",
+        pricingSnapshotsCreated: 0,
+        pricingSnapshotsUpdated: 0,
+        provider: "cardtrader-sealed",
+        selectionMode: "discovery",
+        status: "succeeded",
+      },
+    },
+  }), null);
+});
+
+test("keeps zero-output refreshes and unrecognized discovery results actionable", () => {
+  for (const secondSource of [
+    {
+      apiRequests: 4,
+      candidatesChecked: 5,
+      outcome: "no_eligible_listing",
+      provider: "cardtrader-sealed",
+      selectionMode: "refresh",
+      status: "succeeded",
+    },
+    {
+      apiRequests: 3,
+      candidatesChecked: 5,
+      outcome: "unknown_result",
+      provider: "cardtrader-sealed",
+      selectionMode: "discovery",
+      status: "succeeded",
+    },
+  ]) {
+    assert.match(successfulJobDegradation({
+      resultPayload: { secondSource },
+    }), /produced no price snapshots/);
+  }
+});
+
+test("keeps failed CardTrader work in operational alerts", () => {
+  assert.match(successfulJobDegradation({
+    resultPayload: {
+      secondSource: {
+        error: "CardTrader timed out.",
+        provider: "cardtrader-sealed",
+        status: "failed",
+      },
+    },
+  }), /cardtrader-sealed reported failed/);
 });
 
 test("surfaces a partial top-level graded provider result", () => {

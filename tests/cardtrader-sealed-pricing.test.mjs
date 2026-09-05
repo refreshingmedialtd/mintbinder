@@ -8,6 +8,7 @@ import {
   normalizeCardTraderProductIds,
   normalizeManualAliases,
   resolveCardTraderBlueprint,
+  selectCardTraderCandidates,
   syncCardTraderSealedPrices,
 } from "../scripts/cardtrader-sealed-pricing.mjs";
 import { cardTraderSealedImportOptionsFromEnv } from "../scripts/import-cardtrader-sealed-prices.mjs";
@@ -33,6 +34,7 @@ test("reads CardTrader sealed pricing options and enables them when a token exis
       limit: 7,
       manualAliases: undefined,
       priceOnlyUnpriced: true,
+      refreshEveryHours: 4,
       setLimit: 2,
       token: "token",
       usdToGbpRate: 0.75,
@@ -40,6 +42,127 @@ test("reads CardTrader sealed pricing options and enables them when a token exis
       writePrices: false,
     },
   );
+});
+
+test("reserves every fourth UTC-hour slot for priced CardTrader refreshes", () => {
+  const products = [
+    rotationProduct("priced-old", "set-refresh", {
+      attemptedAt: "2026-08-01T00:00:00.000Z",
+      observedAt: "2026-08-01T00:00:00.000Z",
+    }),
+    rotationProduct("priced-new", "set-other", {
+      attemptedAt: "2026-09-01T00:00:00.000Z",
+      observedAt: "2026-09-01T00:00:00.000Z",
+    }),
+    rotationProduct("refresh-filler", "set-refresh", {
+      attemptedAt: "2026-07-01T00:00:00.000Z",
+    }),
+    rotationProduct("discovery-old", "set-discovery", {
+      attemptedAt: "2026-06-01T00:00:00.000Z",
+    }),
+  ];
+  const selection = selectCardTraderCandidates(products, {
+    limit: 5,
+    now: "2026-09-05T12:50:00.000Z",
+    refreshEveryHours: 4,
+    setLimit: 1,
+  });
+
+  assert.equal(selection.mode, "refresh");
+  assert.deepEqual(selection.candidates.map((product) => product.id), [
+    "priced-old",
+    "refresh-filler",
+  ]);
+});
+
+test("uses the other three UTC-hour slots for oldest-attempt discovery", () => {
+  const products = [
+    rotationProduct("priced", "set-priced", {
+      observedAt: "2026-08-01T00:00:00.000Z",
+    }),
+    rotationProduct("discovery-new", "set-new", {
+      attemptedAt: "2026-09-01T00:00:00.000Z",
+    }),
+    rotationProduct("discovery-old", "set-old", {
+      attemptedAt: "2026-06-01T00:00:00.000Z",
+    }),
+    rotationProduct("same-set-filler", "set-old", {
+      attemptedAt: "2026-08-01T00:00:00.000Z",
+    }),
+  ];
+  const selection = selectCardTraderCandidates(products, {
+    limit: 5,
+    now: "2026-09-05T13:50:00.000Z",
+    refreshEveryHours: 4,
+    setLimit: 1,
+  });
+
+  assert.equal(selection.mode, "discovery");
+  assert.deepEqual(selection.candidates.map((product) => product.id), [
+    "discovery-old",
+    "same-set-filler",
+  ]);
+});
+
+test("keeps automatic rotation inside one set and five products", () => {
+  const products = [
+    ...Array.from({ length: 7 }, (_, index) => rotationProduct(`a-${index}`, "set-anchor")),
+    ...Array.from({ length: 3 }, (_, index) => rotationProduct(`z-${index}`, "set-other")),
+  ];
+  const selection = selectCardTraderCandidates(products, {
+    limit: 5,
+    now: "2026-09-05T13:50:00.000Z",
+    setLimit: 1,
+  });
+  const reversedSelection = selectCardTraderCandidates([...products].reverse(), {
+    limit: 5,
+    now: "2026-09-05T13:50:00.000Z",
+    setLimit: 1,
+  });
+
+  assert.equal(selection.candidates.length, 5);
+  assert.deepEqual(
+    reversedSelection.candidates.map((product) => product.id),
+    selection.candidates.map((product) => product.id),
+  );
+  assert.deepEqual(new Set(selection.candidates.map((product) => product.relatedCardSet.id)), new Set([
+    "set-anchor",
+  ]));
+});
+
+test("automatic selection falls back when one rotation pool is empty", () => {
+  const unpriced = [rotationProduct("unpriced", "set-unpriced")];
+  const priced = [rotationProduct("priced", "set-priced", {
+    observedAt: "2026-08-01T00:00:00.000Z",
+  })];
+
+  assert.equal(selectCardTraderCandidates(unpriced, {
+    now: "2026-09-05T12:50:00.000Z",
+  }).mode, "discovery");
+  assert.equal(selectCardTraderCandidates(priced, {
+    now: "2026-09-05T13:50:00.000Z",
+  }).mode, "refresh");
+});
+
+test("targeted selection bypasses the automatic refresh/discovery split", () => {
+  const products = [
+    rotationProduct("requested-unpriced", "set-one"),
+    rotationProduct("requested-priced", "set-two", {
+      observedAt: "2026-08-01T00:00:00.000Z",
+    }),
+  ];
+  const selection = selectCardTraderCandidates(products, {
+    limit: 2,
+    now: "2026-09-05T12:50:00.000Z",
+    setLimit: 2,
+    targeted: true,
+  });
+
+  assert.equal(selection.mode, "targeted");
+  assert.deepEqual(new Set(selection.candidates.map((product) => product.id)), new Set([
+    "requested-unpriced",
+    "requested-priced",
+  ]));
 });
 
 test("validates and bounds importer-only CardTrader product IDs", () => {
@@ -100,6 +223,219 @@ test("filters a targeted CardTrader sync to its validated product IDs", async ()
   assert.deepEqual(where.id, { in: [productId] });
   assert.equal(summary.targetedProductCount, 1);
   assert.equal(summary.status, "degraded");
+});
+
+test("a targeted importer processes every requested ID across sets without automatic rotation", async () => {
+  const productIds = [
+    "11111111-1111-1111-1111-111111111111",
+    "22222222-2222-2222-2222-222222222222",
+  ];
+  const updates = [];
+  let where;
+  const prisma = {
+    sealedProduct: {
+      findMany: async (request) => {
+        where = request.where;
+        return productIds.map((id, index) => rotationProduct(id, `set-${index + 1}`));
+      },
+      update: async ({ where: target }) => {
+        updates.push(target.id);
+        return target;
+      },
+    },
+  };
+  const fetchImpl = async (url) => {
+    if (url.pathname.endsWith("/games")) {
+      return jsonResponse({ data: [{ id: 15, display_name: "Pokémon" }] });
+    }
+
+    return jsonResponse({ expansions: [{ game_id: 15, id: 10, name: "Different Set" }] });
+  };
+  const summary = await syncCardTraderSealedPrices({
+    fetchImpl,
+    now: "2026-09-05T12:50:00.000Z",
+    prisma,
+    productIds,
+    setLimit: 1,
+    token: "token",
+    waitMs: 0,
+  });
+
+  assert.deepEqual(where.id, { in: productIds });
+  assert.equal(summary.selectionMode, "targeted");
+  assert.equal(summary.candidatesChecked, 2);
+  assert.equal(summary.setsChecked, 2);
+  assert.deepEqual(new Set(updates), new Set(productIds));
+});
+
+test("an API-healthy discovery miss completes without operational degradation", async () => {
+  const prisma = {
+    sealedProduct: {
+      findMany: async () => [rotationProduct("sealed-1", "set-one")],
+      update: async ({ where }) => where,
+    },
+  };
+  const fetchImpl = async (url) => {
+    if (url.pathname.endsWith("/games")) {
+      return jsonResponse({ data: [{ id: 15, display_name: "Pokémon" }] });
+    }
+
+    return jsonResponse({ expansions: [{ game_id: 15, id: 10, name: "Different Set" }] });
+  };
+  const summary = await syncCardTraderSealedPrices({
+    fetchImpl,
+    now: "2026-09-05T13:50:00.000Z",
+    prisma,
+    token: "token",
+    waitMs: 0,
+  });
+
+  assert.equal(summary.selectionMode, "discovery");
+  assert.equal(summary.status, "succeeded");
+  assert.equal(summary.outcome, "no_blueprint_match");
+  assert.equal(summary.candidatesChecked, 1);
+  assert.equal(summary.pricingSnapshotsCreated, 0);
+  assert.equal(summary.pricingSnapshotsUpdated, 0);
+});
+
+test("CardTrader API and database failures still reject the import", async () => {
+  const candidatePrisma = {
+    sealedProduct: {
+      findMany: async () => [rotationProduct("sealed-1", "set-one")],
+    },
+  };
+
+  await assert.rejects(
+    syncCardTraderSealedPrices({
+      apiRetryAttempts: 1,
+      apiRetryWaitMs: 0,
+      fetchImpl: async () => jsonResponse({ error: "unavailable" }, 503),
+      now: "2026-09-05T13:50:00.000Z",
+      prisma: candidatePrisma,
+      token: "token",
+      waitMs: 0,
+    }),
+    /CardTrader \/(?:games|expansions) request failed with HTTP 503/,
+  );
+  await assert.rejects(
+    syncCardTraderSealedPrices({
+      prisma: {
+        sealedProduct: {
+          findMany: async () => {
+            throw new Error("database unavailable");
+          },
+        },
+      },
+      token: "token",
+    }),
+    /database unavailable/,
+  );
+});
+
+test("accepts a legitimate empty CardTrader blueprint collection as a discovery miss", async () => {
+  const prisma = {
+    sealedProduct: {
+      findMany: async () => [rotationProduct("sealed-1", "set-one")],
+      update: async ({ where }) => where,
+    },
+  };
+  const fetchImpl = async (url) => {
+    if (url.pathname.endsWith("/games")) {
+      return jsonResponse({ data: [{ id: 15, display_name: "Pokémon" }] });
+    }
+    if (url.pathname.endsWith("/expansions")) {
+      return jsonResponse({ expansions: [{ game_id: 15, id: 10, name: "set-one" }] });
+    }
+
+    return jsonResponse([]);
+  };
+  const summary = await syncCardTraderSealedPrices({
+    fetchImpl,
+    now: "2026-09-05T13:50:00.000Z",
+    prisma,
+    token: "token",
+    waitMs: 0,
+  });
+
+  assert.equal(summary.apiRequests, 3);
+  assert.equal(summary.blueprintsAvailable, 0);
+  assert.equal(summary.candidatesChecked, 1);
+  assert.equal(summary.outcome, "no_blueprint_match");
+  assert.equal(summary.selectionMode, "discovery");
+  assert.equal(summary.status, "succeeded");
+});
+
+test("rejects malformed HTTP-successful CardTrader blueprint payloads", async () => {
+  const malformedPayloads = [
+    { error: "temporarily unavailable" },
+    { error: "temporarily unavailable", results: [] },
+    { results: "not a collection" },
+    { results: [{ name: "Missing blueprint ID" }] },
+    { results: [{ id: "20", name: "String blueprint ID" }] },
+    { results: [{ id: 20, name: null }] },
+  ];
+
+  for (const blueprintPayload of malformedPayloads) {
+    const prisma = {
+      sealedProduct: {
+        findMany: async () => [rotationProduct("sealed-1", "set-one")],
+      },
+    };
+    const fetchImpl = async (url) => {
+      if (url.pathname.endsWith("/games")) {
+        return jsonResponse({ data: [{ id: 15, display_name: "Pokémon" }] });
+      }
+      if (url.pathname.endsWith("/expansions")) {
+        return jsonResponse({ expansions: [{ game_id: 15, id: 10, name: "set-one" }] });
+      }
+
+      return jsonResponse(blueprintPayload);
+    };
+
+    await assert.rejects(
+      syncCardTraderSealedPrices({
+        fetchImpl,
+        now: "2026-09-05T13:50:00.000Z",
+        prisma,
+        token: "token",
+        waitMs: 0,
+      }),
+      /invalid blueprint payload/,
+    );
+  }
+});
+
+test("rejects a malformed HTTP-successful CardTrader marketplace payload", async () => {
+  const prisma = {
+    sealedProduct: {
+      findMany: async () => [rotationProduct("sealed-1", "set-one")],
+      update: async ({ where }) => where,
+    },
+  };
+  const fetchImpl = async (url) => {
+    if (url.pathname.endsWith("/games")) {
+      return jsonResponse({ data: [{ id: 15, display_name: "Pokémon" }] });
+    }
+    if (url.pathname.endsWith("/expansions")) {
+      return jsonResponse({ expansions: [{ game_id: 15, id: 10, name: "set-one" }] });
+    }
+    if (url.pathname.endsWith("/blueprints/export")) {
+      return jsonResponse({ results: [{ id: 20, name: "sealed-1", product_type: "BOOSTER_PACK" }] });
+    }
+
+    return jsonResponse({ error: "temporarily unavailable" });
+  };
+
+  await assert.rejects(
+    syncCardTraderSealedPrices({
+      fetchImpl,
+      now: "2026-09-05T13:50:00.000Z",
+      prisma,
+      token: "token",
+      waitMs: 0,
+    }),
+    /invalid marketplace payload for blueprint 20/,
+  );
 });
 
 test("matches expansion-scoped blueprints by UPC before normalized name and type", () => {
@@ -368,6 +704,59 @@ test("imports a CardTrader sealed marketplace snapshot by direct TCGplayer ident
   assert.equal(requestedUrls.length, 4);
 });
 
+test("a same-day CardTrader refresh updates the daily snapshot instead of growing rows", async () => {
+  const snapshotUpdates = [];
+  const observedAt = new Date("2026-09-05T12:50:00.000Z");
+  const prisma = {
+    priceSnapshot: {
+      create: async () => {
+        throw new Error("unexpected daily create");
+      },
+      findFirst: async () => ({ id: "snapshot-existing" }),
+      update: async (request) => {
+        snapshotUpdates.push(request);
+        return request.data;
+      },
+    },
+    sealedProduct: {
+      findMany: async () => [rotationProduct("sealed-1", "set-one", {
+        attemptedAt: "2026-09-01T00:00:00.000Z",
+        observedAt: "2026-09-05T08:00:00.000Z",
+      })],
+      update: async ({ data, where }) => ({ id: where.id, ...data }),
+    },
+  };
+  const fetchImpl = async (url) => {
+    if (url.pathname.endsWith("/games")) {
+      return jsonResponse({ data: [{ id: 15, display_name: "Pokémon" }] });
+    }
+    if (url.pathname.endsWith("/expansions")) {
+      return jsonResponse({ expansions: [{ game_id: 15, id: 10, name: "set-one" }] });
+    }
+    if (url.pathname.endsWith("/blueprints/export")) {
+      return jsonResponse({ results: [{ id: 20, name: "sealed-1", product_type: "BOOSTER_PACK" }] });
+    }
+
+    return jsonResponse({ 20: [listing(10_000, "GBP")] });
+  };
+  const summary = await syncCardTraderSealedPrices({
+    fetchImpl,
+    now: observedAt,
+    prisma,
+    token: "token",
+    waitMs: 0,
+  });
+
+  assert.equal(summary.selectionMode, "refresh");
+  assert.equal(summary.status, "succeeded");
+  assert.equal(summary.outcome, "priced");
+  assert.equal(summary.pricingSnapshotsCreated, 0);
+  assert.equal(summary.pricingSnapshotsUpdated, 1);
+  assert.equal(snapshotUpdates.length, 1);
+  assert.equal(snapshotUpdates[0].where.id, "snapshot-existing");
+  assert.equal(snapshotUpdates[0].data.observedAt.toISOString(), observedAt.toISOString());
+});
+
 test("includes products without a TCGplayer ID so conservative fallback mapping can produce output", async () => {
   const updates = [];
   const prisma = {
@@ -440,6 +829,18 @@ function sealedProduct(overrides = {}) {
     productType: "BOOSTER_BOX",
     providerIds: { tcgplayer: "100" },
     ...overrides,
+  };
+}
+
+function rotationProduct(id, setId, { attemptedAt, observedAt } = {}) {
+  return {
+    id,
+    metadata: attemptedAt ? { cardTraderLastAttemptAt: attemptedAt } : {},
+    name: id,
+    priceSnapshots: observedAt ? [{ observedAt: new Date(observedAt) }] : [],
+    productType: "BOOSTER_PACK",
+    providerIds: {},
+    relatedCardSet: { id: setId, name: setId },
   };
 }
 

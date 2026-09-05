@@ -563,7 +563,7 @@ function japanCardPricingBody(env) {
 function englishCardPricingBody(env) {
   const body = {
     categoryId: optionalPositiveInteger(env.TCGCSV_CARD_CATEGORY_ID) ?? 3,
-    groupLimit: optionalPositiveInteger(env.TCGCSV_CARD_GROUP_LIMIT) ?? 1,
+    groupLimit: optionalPositiveInteger(env.TCGCSV_CARD_GROUP_LIMIT) ?? 2,
     language: optionalString(env.TCGCSV_CARD_LANGUAGE) ?? "en",
     minUnpricedCards: optionalPositiveInteger(env.TCGCSV_CARD_MIN_UNPRICED) ?? 1,
     onlyUnpricedGroups: false,
@@ -694,12 +694,28 @@ export function scheduledResponseDegradation(payload) {
 
     if (status && !["succeeded", "not_configured"].includes(status)) {
       reasons.push(`${provider} reported ${status}.`);
-    } else if (status === "succeeded" && candidatesChecked > 0 && output === 0) {
+    } else if (
+      status === "succeeded" &&
+      candidatesChecked > 0 &&
+      output === 0 &&
+      !isExpectedCardTraderDiscoveryMiss(secondSource, provider)
+    ) {
       reasons.push(`${provider} checked ${candidatesChecked} candidate(s) but produced no price snapshots.`);
     }
   }
 
   return [...new Set(reasons)].join(" ") || null;
+}
+
+function isExpectedCardTraderDiscoveryMiss(result, provider) {
+  const outcome = optionalString(result.outcome);
+  const selectionMode = optionalString(result.selectionMode);
+  const apiRequests = optionalPositiveInteger(result.apiRequests) ?? 0;
+
+  return provider === "cardtrader-sealed" &&
+    selectionMode === "discovery" &&
+    ["no_blueprint_match", "no_eligible_listing"].includes(outcome) &&
+    apiRequests > 0;
 }
 
 function normalizeJob(value) {

@@ -43,6 +43,7 @@ export async function POST(request: Request) {
           limit: cardTraderOptions.limit,
           priceOnlyUnpriced: cardTraderOptions.priceOnlyUnpriced,
           provider: "cardtrader-sealed",
+          refreshEveryHours: cardTraderOptions.refreshEveryHours,
           setLimit: cardTraderOptions.setLimit,
           writePrices: cardTraderOptions.writePrices,
         },

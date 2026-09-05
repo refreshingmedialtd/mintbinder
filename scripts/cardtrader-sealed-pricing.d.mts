@@ -10,9 +10,11 @@ export type CardTraderSealedPricingOptions = {
     blueprintId: string;
     localKey: string;
   }>;
+  now?: Date | number | string;
   priceOnlyUnpriced?: boolean;
   prisma?: unknown;
   productIds?: string[] | string;
+  refreshEveryHours?: number;
   setLimit?: number;
   token?: string;
   usdToGbpRate?: number;
@@ -39,11 +41,21 @@ export type CardTraderSealedPricingSummary = {
   >;
   mappingReview: Array<Record<string, unknown>>;
   marketplaceMatches: number;
+  outcome:
+    | "completed_without_snapshot"
+    | "dry_run"
+    | "no_blueprint_match"
+    | "no_candidates"
+    | "no_eligible_listing"
+    | "pending"
+    | "priced";
   priceOnlyUnpriced: boolean;
   pricingSnapshotsCreated: number;
   pricingSnapshotsUpdated: number;
   provider: "cardtrader-sealed";
+  refreshEveryHours: number;
   sampleUnmatchedProducts: Array<Record<string, unknown>>;
+  selectionMode: "discovery" | "refresh" | "targeted";
   setsChecked: number;
   setsUnmatched: number;
   status: "degraded" | "succeeded";
@@ -62,6 +74,19 @@ export function syncCardTraderSealedPrices(
 export function buildCardTraderBlueprintIndex(blueprints: Array<Record<string, unknown>>): unknown;
 export function normalizeCardTraderProductIds(value: unknown): string[];
 export function normalizeManualAliases(value: unknown): Map<string, string>;
+export function selectCardTraderCandidates(
+  candidates: Array<Record<string, unknown>>,
+  options?: {
+    limit?: number;
+    now?: Date | number | string;
+    refreshEveryHours?: number;
+    setLimit?: number;
+    targeted?: boolean;
+  },
+): {
+  candidates: Array<Record<string, unknown>>;
+  mode: "discovery" | "refresh" | "targeted";
+};
 export function resolveCardTraderBlueprint(
   product: Record<string, unknown>,
   blueprintIndex: unknown,

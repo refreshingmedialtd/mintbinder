@@ -175,18 +175,50 @@ test("marks HTTP-successful provider partial failures as degraded", async () => 
   assert.match(result.degradation, /1 failed set/);
 });
 
-test("marks a zero-output configured second source as degraded", async () => {
+test("does not mark an API-healthy zero-output discovery as degraded", () => {
   const reason = scheduledResponseDegradation({
     secondSource: {
+      apiRequests: 3,
       candidatesChecked: 5,
+      outcome: "no_blueprint_match",
       pricingSnapshotsCreated: 0,
       pricingSnapshotsUpdated: 0,
       provider: "cardtrader-sealed",
+      selectionMode: "discovery",
+      status: "succeeded",
+    },
+  });
+
+  assert.equal(reason, null);
+});
+
+test("marks a zero-output CardTrader refresh as degraded", () => {
+  const reason = scheduledResponseDegradation({
+    secondSource: {
+      apiRequests: 4,
+      candidatesChecked: 5,
+      outcome: "no_eligible_listing",
+      pricingSnapshotsCreated: 0,
+      pricingSnapshotsUpdated: 0,
+      provider: "cardtrader-sealed",
+      selectionMode: "refresh",
       status: "succeeded",
     },
   });
 
   assert.match(reason, /produced no price snapshots/);
+});
+
+test("continues to mark a failed CardTrader second source as degraded", () => {
+  const reason = scheduledResponseDegradation({
+    secondSource: {
+      error: "CardTrader timed out.",
+      provider: "cardtrader-sealed",
+      status: "failed",
+    },
+  });
+
+  assert.match(reason, /cardtrader-sealed reported failed/);
 });
 
 test("explicit live pricing page requests remain single requests", async () => {
@@ -256,13 +288,13 @@ test("live Japanese card pricing posts to the international pricing endpoint", (
   });
 });
 
-test("live English TCGCSV pricing defaults to one history-building group", () => {
+test("live English TCGCSV pricing defaults to two history-building groups", () => {
   const request = protectedJobRequest("english-card-pricing", {});
 
   assert.deepEqual(request, {
     body: {
       categoryId: 3,
-      groupLimit: 1,
+      groupLimit: 2,
       language: "en",
       minUnpricedCards: 1,
       onlyUnpricedGroups: false,
