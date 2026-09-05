@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { access, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { packageNextRelease } from "../scripts/package-next-release.mjs";
 import { planNextReleasePrune } from "../scripts/prune-next-releases.mjs";
+import { selectMintBinderPm2App } from "../scripts/select-pm2-app.mjs";
 
 const commit = (character) => character.repeat(40);
 const release = (character, timestamp, pid) => `${commit(character)}-${timestamp}-${pid}`;
@@ -79,7 +82,7 @@ test("deployment requires the registered runtime before migration and supports p
   assert.ok(script.indexOf("git ls-files --others --exclude-standard") < script.indexOf("npm run build"));
   assert.match(gitignore, /^\.mintbinder-build\.previous\.json$/m);
   assert.match(gitignore, /^\.mintbinder-build\.json\.tmp$/m);
-  assert.ok(script.indexOf('PM2_APP_NAME="$app_name"') < script.indexOf("npm run db:deploy"));
+  assert.ok(script.indexOf('PM2_APP_NAME="$(PM2_SILENT=true "$PM2_BIN" jlist') < script.indexOf("npm run db:deploy"));
   assert.ok(script.indexOf("node scripts/package-next-release.mjs") < script.indexOf("npm run db:deploy"));
   assert.ok(script.indexOf("npm run lint") < script.indexOf("npm run build -- --no-lint"));
   assert.ok(script.indexOf("npm run qa:deployment-env") < script.indexOf("npm run lint"));
@@ -88,6 +91,106 @@ test("deployment requires the registered runtime before migration and supports p
   assert.doesNotMatch(script, /PREVIOUS_DIST_DIR="\.next"/);
   assert.match(script, /automatic rollback is disabled for this one transition/);
   assert.doesNotMatch(script, /PREVIOUS_DIST_DIR="\.next-releases\/\$PREVIOUS_COMMIT"/);
+});
+
+test("deployment recovers and verifies memory headroom before npm ci", async () => {
+  const script = await readFile(new URL("../scripts/deploy-20i.sh", import.meta.url), "utf8");
+  const guardStart = script.indexOf("ensure_npm_ci_memory_headroom() {");
+  const guardCall = script.indexOf("if ! ensure_npm_ci_memory_headroom; then");
+  const install = script.indexOf("npm ci --include=dev --no-audit --no-fund");
+  const guardInvocation = script.slice(guardCall, install);
+  const refreshStart = script.indexOf("refresh_previous_runtime_for_install() {");
+  const refreshEnd = script.indexOf("\n}\n\nensure_npm_ci_memory_headroom()", refreshStart);
+  const refresh = script.slice(refreshStart, refreshEnd);
+  const verifier = await readFile(new URL("../scripts/verify-runtime-build.mjs", import.meta.url), "utf8");
+  const verifierHelperStart = script.indexOf("verify_previous_runtime() {");
+  const verifierHelperEnd = script.indexOf("\n}\n\nrefresh_previous_runtime_for_install()", verifierHelperStart);
+  const verifierHelper = script.slice(verifierHelperStart, verifierHelperEnd);
+  const preverify = refresh.indexOf("if ! verify_previous_runtime; then");
+  const reload = refresh.indexOf('"$PM2_BIN" reload "$PM2_APP_NAME"');
+  const postverify = refresh.indexOf("if ! verify_previous_runtime; then", preverify + 1);
+
+  assert.ok(guardStart !== -1 && guardStart < guardCall);
+  assert.ok(guardCall !== -1 && guardCall < install);
+  assert.match(guardInvocation, /if ! ensure_npm_ci_memory_headroom; then\s+exit 1\s+fi/);
+  assert.match(script, /NPM_CI_MIN_AVAILABLE_KIB=\$\(\(960 \* 1024\)\)/);
+  assert.match(script, /PM2_REFRESH_MIN_AVAILABLE_KIB=\$\(\(384 \* 1024\)\)/);
+  assert.match(script, /awk '\$1 == "MemAvailable:" \{ print \$2; exit \}' \/proc\/meminfo/);
+  assert.match(refresh, /if ! find_registered_pm2_app; then[\s\S]*return 1[\s\S]*fi/);
+  assert.match(refresh, /"\$PM2_BIN" reload "\$PM2_APP_NAME"/);
+  assert.doesNotMatch(refresh, /--update-env/);
+  assert.match(
+    verifierHelper,
+    /MINTBINDER_COMMIT="\$PREVIOUS_COMMIT"[\s\\\n]+MINTBINDER_NEXT_DIST_DIR="\$PREVIOUS_DIST_DIR"[\s\\\n]+node scripts\/verify-runtime-build\.mjs/,
+  );
+  assert.ok(preverify !== -1 && preverify < reload);
+  assert.ok(reload < postverify && postverify !== -1);
+  assert.ok(refreshStart + postverify < install);
+  assert.ok(verifierHelperStart !== -1 && verifierHelperStart < refreshStart);
+  assert.match(refresh, /refreshed current runtime could not be verified; npm ci was not started/);
+  assert.match(refresh, /current immutable runtime did not match its authenticated release metadata; PM2 was not reloaded/);
+  assert.match(refresh, /git diff --quiet "\$PREVIOUS_COMMIT" "\$MINTBINDER_COMMIT" -- app\.js/);
+  assert.match(refresh, /app\.js changed between the current and incoming releases; refusing an automatic low-memory PM2 reload/);
+  assert.match(script, /PM2_SILENT=true "\$PM2_BIN" jlist 2>\/dev\/null \| node scripts\/select-pm2-app\.mjs/);
+  assert.match(script, /previous\?\.scripts\?\.start !== "node app\.js" \|\| current\?\.scripts\?\.start !== "node app\.js"/);
+  assert.ok(refresh.indexOf("if ! verify_npm_start_contract; then") < preverify);
+  assert.match(script, /available_kib < PM2_REFRESH_MIN_AVAILABLE_KIB/);
+  assert.match(script, /if \(\( available_kib < NPM_CI_MIN_AVAILABLE_KIB \)\); then[\s\S]*return 1[\s\S]*fi/);
+  assert.doesNotMatch(verifier, /dotenv\/config/);
+  assert.match(verifier, /process\.loadEnvFile/);
+});
+
+test("only final activation reloads PM2 with the prospective environment", async () => {
+  const script = await readFile(new URL("../scripts/deploy-20i.sh", import.meta.url), "utf8");
+  const preinstallReload = script.indexOf('"$PM2_BIN" reload "$PM2_APP_NAME"');
+  const install = script.indexOf("npm ci --include=dev --no-audit --no-fund");
+  const activationReload = script.indexOf('"$PM2_BIN" reload "$PM2_APP_NAME" --update-env');
+
+  assert.ok(preinstallReload !== -1 && preinstallReload < install);
+  assert.ok(activationReload > install);
+  assert.equal(script.match(/--update-env/g)?.length, 1);
+  assert.match(script, /Deploy script version: \$MINTBINDER_DEPLOY_SCRIPT_VERSION/);
+  assert.match(script, /MINTBINDER_DEPLOY_SCRIPT_VERSION="2026-09-05\.3"/);
+});
+
+test("PM2 selection accepts only one online npm start process in the deployment directory", () => {
+  const cwd = "/home/virtual/example/mintbinder";
+  const valid = {
+    name: "MintBinder",
+    pm2_env: {
+      args: ["start"],
+      pm_cwd: cwd,
+      pm_exec_path: "/usr/bin/npm",
+      status: "online",
+    },
+  };
+
+  assert.equal(selectMintBinderPm2App([valid], { cwd }), "MintBinder");
+  assert.throws(() => selectMintBinderPm2App([{ ...valid, pm2_env: { ...valid.pm2_env, status: "stopped" } }], { cwd }), /not online/);
+  assert.throws(() => selectMintBinderPm2App([{ ...valid, pm2_env: { ...valid.pm2_env, pm_cwd: "/tmp" } }], { cwd }), /working directory/);
+  assert.throws(() => selectMintBinderPm2App([{ ...valid, pm2_env: { ...valid.pm2_env, pm_exec_path: "/usr/bin/node" } }], { cwd }), /execute \/usr\/bin\/npm/);
+  assert.throws(() => selectMintBinderPm2App([{ ...valid, pm2_env: { ...valid.pm2_env, args: ["run", "start"] } }], { cwd }), /npm start arguments/);
+  assert.throws(() => selectMintBinderPm2App([valid, { ...valid, name: "Mint" }], { cwd }), /exactly one/);
+});
+
+test("PM2 selection CLI consumes a clean jlist JSON stream without project dependencies", async () => {
+  const cwd = process.cwd();
+  const result = await runNodeScript(
+    new URL("../scripts/select-pm2-app.mjs", import.meta.url),
+    JSON.stringify([{
+      name: "mintbinder",
+      pm2_env: {
+        args: ["start"],
+        pm_cwd: cwd,
+        pm_exec_path: "/usr/bin/npm",
+        status: "online",
+      },
+    }]),
+  );
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.stdout, "mintbinder");
+  assert.equal(result.stderr, "");
 });
 
 test("legacy build cleanup can never be certified as a successful rollback", async () => {
@@ -158,4 +261,23 @@ async function writeMockStandaloneBuild(directory, dependencyVersion) {
   await writeFile(join(directory, "public", "icons", "icon-192.png"), "png fixture\n");
   await writeFile(join(directory, "public", "offline.html"), "<!doctype html>\n");
   await writeFile(join(directory, "public", "robots.txt"), "User-agent: *\n");
+}
+
+function runNodeScript(scriptUrl, input) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [fileURLToPath(scriptUrl)], {
+      cwd: process.cwd(),
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    child.once("error", reject);
+    child.once("close", (exitCode) => resolve({ exitCode, stderr, stdout }));
+    child.stdin.end(input);
+  });
 }

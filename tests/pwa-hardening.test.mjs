@@ -199,4 +199,7 @@ test("runtime attestation authenticates diagnostics and rejects plaintext remote
 
   assert.match(verifier, /authorization: `Bearer \$\{jobSecret\}`/);
   assert.match(verifier, /must use HTTPS outside local loopback/);
+  assert.doesNotMatch(verifier, /dotenv\/config/);
+  assert.match(verifier, /process\.loadEnvFile/);
+  assert.match(verifier, /error\?\.code !== "ENOENT"/);
 });

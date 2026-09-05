@@ -1,4 +1,6 @@
-import "dotenv/config";
+import { fileURLToPath } from "node:url";
+
+loadRootEnvironment();
 
 const expectedCommit = required(process.env.MINTBINDER_COMMIT, "MINTBINDER_COMMIT is required for runtime verification.");
 const expectedDistDir = required(process.env.MINTBINDER_NEXT_DIST_DIR, "MINTBINDER_NEXT_DIST_DIR is required for runtime verification.");
@@ -41,6 +43,20 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
 }
 
 throw new Error(`Mint Binder runtime verification failed: ${latestProblem}`);
+
+function loadRootEnvironment() {
+  if (typeof process.loadEnvFile !== "function") {
+    throw new Error("Node.js 22 or newer is required for dependency-free runtime verification.");
+  }
+
+  try {
+    process.loadEnvFile(fileURLToPath(new URL("../.env", import.meta.url)));
+  } catch (error) {
+    if (error?.code !== "ENOENT") {
+      throw error;
+    }
+  }
+}
 
 function required(value, message) {
   const normalized = value?.trim();

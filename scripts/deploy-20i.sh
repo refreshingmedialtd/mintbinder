@@ -18,7 +18,7 @@ echo "Mint Binder deployment started at $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 echo "Working directory: $(pwd)"
 
 export NEXT_TELEMETRY_DISABLED=1
-export MINTBINDER_DEPLOY_SCRIPT_VERSION="2026-08-25.1"
+export MINTBINDER_DEPLOY_SCRIPT_VERSION="2026-09-05.3"
 EXPECTED_DEPLOY_BRANCH="main"
 export MINTBINDER_BRANCH="$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
 export MINTBINDER_COMMIT="$(git rev-parse --verify "HEAD^{commit}" 2>/dev/null || true)"
@@ -107,6 +107,146 @@ if [ -n "$UNTRACKED_FILES" ]; then
   exit 1
 fi
 
+# npm ci has a measured peak close to 850 MiB on the 20i host. Keep enough
+# genuinely available memory for it without weakening npm's clean, locked
+# install. A long-lived Next process can retain substantially more memory than
+# a freshly reloaded copy of the same immutable release, so refresh the current
+# verified runtime first when installation headroom is tight.
+NPM_CI_MIN_AVAILABLE_KIB=$((960 * 1024))
+PM2_REFRESH_MIN_AVAILABLE_KIB=$((384 * 1024))
+PM2_BIN=""
+PM2_APP_NAME=""
+
+read_mem_available_kib() {
+  local available_kib=""
+
+  if [ ! -r "/proc/meminfo" ]; then
+    return 1
+  fi
+
+  available_kib="$(awk '$1 == "MemAvailable:" { print $2; exit }' /proc/meminfo)"
+  if ! [[ "$available_kib" =~ ^[0-9]+$ ]]; then
+    return 1
+  fi
+
+  printf '%s\n' "$available_kib"
+}
+
+find_registered_pm2_app() {
+  PM2_BIN=""
+  PM2_APP_NAME=""
+
+  if command -v pm2 >/dev/null 2>&1; then
+    PM2_BIN="$(command -v pm2)"
+  elif [ -x "./node_modules/.bin/pm2" ]; then
+    PM2_BIN="./node_modules/.bin/pm2"
+  else
+    echo "Deployment preflight failed: neither global nor project-local PM2 is available." >&2
+    return 1
+  fi
+
+  # PM2 can write a CLI-version warning to stdout before its JSON. Silent mode
+  # keeps the machine-readable stream clean; suppress PM2 stderr so a failed
+  # query cannot print process environment data into deployment logs.
+  if ! PM2_APP_NAME="$(PM2_SILENT=true "$PM2_BIN" jlist 2>/dev/null | node scripts/select-pm2-app.mjs)"; then
+    echo "Deployment preflight failed: no unique, online Mint Binder PM2 application matched this directory and the registered npm start command." >&2
+    return 1
+  fi
+}
+
+verify_npm_start_contract() {
+  node -e 'const fs = require("node:fs"); const { execFileSync } = require("node:child_process"); const commit = process.env.MINTBINDER_PREVIOUS_COMMIT || ""; try { if (!/^[0-9a-f]{40}$/.test(commit)) process.exit(1); const previous = JSON.parse(execFileSync("git", ["show", `${commit}:package.json`], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] })); const current = JSON.parse(fs.readFileSync("package.json", "utf8")); if (previous?.scripts?.start !== "node app.js" || current?.scripts?.start !== "node app.js") process.exit(1); } catch { process.exit(1); }'
+}
+
+verify_previous_runtime() {
+  MINTBINDER_COMMIT="$PREVIOUS_COMMIT" \
+  MINTBINDER_NEXT_DIST_DIR="$PREVIOUS_DIST_DIR" \
+  node scripts/verify-runtime-build.mjs
+}
+
+refresh_previous_runtime_for_install() {
+  if [ -z "$PREVIOUS_COMMIT" ] || [ -z "$PREVIOUS_DIST_DIR" ] || [ ! -d "$PREVIOUS_DIST_DIR" ] || [ ! -f "$PREVIOUS_DIST_DIR/.mintbinder-build.json" ]; then
+    echo "Deployment preflight failed: installation memory is low and no verified immutable current release is available to refresh." >&2
+    return 1
+  fi
+
+  if ! git cat-file -e "${PREVIOUS_COMMIT}^{commit}" 2>/dev/null; then
+    echo "Deployment preflight failed: the current runtime commit is unavailable locally, so its startup code cannot be compared safely." >&2
+    return 1
+  fi
+  if ! git diff --quiet "$PREVIOUS_COMMIT" "$MINTBINDER_COMMIT" -- app.js; then
+    echo "Deployment preflight failed: app.js changed between the current and incoming releases; refusing an automatic low-memory PM2 reload." >&2
+    return 1
+  fi
+  if ! verify_npm_start_contract; then
+    echo "Deployment preflight failed: the current and incoming releases must both use the verified 'node app.js' npm start command for an automatic low-memory PM2 reload." >&2
+    return 1
+  fi
+
+  if ! find_registered_pm2_app; then
+    echo "Deployment preflight failed: installation memory is low and the current runtime could not be refreshed safely." >&2
+    return 1
+  fi
+
+  if ! verify_previous_runtime; then
+    echo "Deployment preflight failed: the current immutable runtime did not match its authenticated release metadata; PM2 was not reloaded." >&2
+    return 1
+  fi
+
+  echo "Refreshing current Mint Binder runtime via PM2 to recover installation memory..."
+  # Deliberately retain the registered process environment. The checked-out
+  # commit is the prospective release; refreshing that environment here could
+  # point the live process at it before the release has been built and verified.
+  if ! "$PM2_BIN" reload "$PM2_APP_NAME"; then
+    echo "Deployment preflight failed: PM2 could not reload the current Mint Binder runtime." >&2
+    return 1
+  fi
+
+  if ! verify_previous_runtime; then
+    echo "Deployment preflight failed: the refreshed current runtime could not be verified; npm ci was not started." >&2
+    return 1
+  fi
+}
+
+ensure_npm_ci_memory_headroom() {
+  local available_kib=""
+
+  if ! available_kib="$(read_mem_available_kib)"; then
+    echo "Deployment preflight failed: unable to read MemAvailable from /proc/meminfo; npm ci was not started." >&2
+    return 1
+  fi
+
+  echo "Available memory before npm ci: $((available_kib / 1024)) MiB (minimum $((NPM_CI_MIN_AVAILABLE_KIB / 1024)) MiB)."
+  if (( available_kib >= NPM_CI_MIN_AVAILABLE_KIB )); then
+    return 0
+  fi
+
+  if (( available_kib < PM2_REFRESH_MIN_AVAILABLE_KIB )); then
+    echo "Deployment preflight failed: only $((available_kib / 1024)) MiB is available, which is below the $((PM2_REFRESH_MIN_AVAILABLE_KIB / 1024)) MiB minimum for a safe PM2 refresh; npm ci was not started." >&2
+    return 1
+  fi
+
+  echo "Available memory is below the safe npm ci threshold; attempting a verified refresh of the current immutable runtime."
+  if ! refresh_previous_runtime_for_install; then
+    return 1
+  fi
+
+  if ! available_kib="$(read_mem_available_kib)"; then
+    echo "Deployment preflight failed: unable to re-read MemAvailable after the runtime refresh; npm ci was not started." >&2
+    return 1
+  fi
+
+  echo "Available memory after verified runtime refresh: $((available_kib / 1024)) MiB."
+  if (( available_kib < NPM_CI_MIN_AVAILABLE_KIB )); then
+    echo "Deployment preflight failed: only $((available_kib / 1024)) MiB is available after the verified runtime refresh; at least $((NPM_CI_MIN_AVAILABLE_KIB / 1024)) MiB is required for npm ci." >&2
+    return 1
+  fi
+}
+
+if ! ensure_npm_ci_memory_headroom; then
+  exit 1
+fi
+
 npm ci --include=dev --no-audit --no-fund
 git restore package.json package-lock.json 2>/dev/null || true
 npm run db:generate
@@ -114,28 +254,7 @@ npm run db:generate
 # 20i's non-login Git deployment shell may not expose its global PM2 binary.
 # The locked project dependency provides the same CLI and connects to the
 # registered application's PM2 daemon without relying on shell PATH setup.
-PM2_BIN=""
-PM2_APP_NAME=""
-
-if command -v pm2 >/dev/null 2>&1; then
-  PM2_BIN="$(command -v pm2)"
-elif [ -x "./node_modules/.bin/pm2" ]; then
-  PM2_BIN="./node_modules/.bin/pm2"
-else
-  echo "Deployment preflight failed: neither global nor project-local PM2 is available." >&2
-  exit 1
-fi
-
-for app_name in MintBinder Mint mintbinder; do
-  if "$PM2_BIN" describe "$app_name" >/dev/null 2>&1; then
-    PM2_APP_NAME="$app_name"
-    break
-  fi
-done
-
-if [ -z "$PM2_APP_NAME" ]; then
-  echo "Deployment preflight failed: the registered Mint Binder PM2 application was not found." >&2
-  echo "Rediscover/register the application in 20i before applying a database migration." >&2
+if ! find_registered_pm2_app; then
   exit 1
 fi
 
