@@ -16,6 +16,13 @@ import {
   pokemonProviderObservedAt,
   type PokemonPricingRates,
 } from "@/lib/pricing/pokemon-tcg-card-prices";
+import {
+  exhaustedPokemonTcgRequestError,
+  isRetryablePokemonTcgStatus,
+  PokemonTcgApiRequestError,
+  pokemonTcgApiTimeoutMs,
+  pokemonTcgMaxRetryWaitMs,
+} from "@/lib/pricing/pokemon-tcg-request-policy";
 import { retryAfterMilliseconds, retryDelayMilliseconds } from "../../../scripts/provider-fetch.mjs";
 import { fetchWithPolicy, ProviderRequestError } from "@/lib/http/fetch-with-policy";
 
@@ -111,17 +118,7 @@ export class PricingProviderConfigError extends Error {
   }
 }
 
-export class PokemonTcgApiRequestError extends Error {
-  retryAfterMs?: number;
-  status: number;
-
-  constructor(message: string, status: number, retryAfterMs?: number) {
-    super(message);
-    this.name = "PokemonTcgApiRequestError";
-    this.retryAfterMs = retryAfterMs;
-    this.status = status;
-  }
-}
+export { PokemonTcgApiRequestError } from "@/lib/pricing/pokemon-tcg-request-policy";
 
 export class PokemonTcgPartialSyncError extends Error {
   originalError: unknown;
@@ -508,12 +505,17 @@ async function fetchPokemonCards({
     } catch (error) {
       lastError = error;
 
-      if (!isRetryablePokemonTcgError(error) || attempt >= retryAttempts) {
+      if (!isRetryablePokemonTcgError(error)) {
         throw error;
+      }
+
+      if (attempt >= retryAttempts) {
+        throw exhaustedPokemonTcgRequestError(error, attempt, "cards");
       }
 
       await wait(retryDelayMilliseconds({
         attempt,
+        maxRetryWaitMs: pokemonTcgMaxRetryWaitMs,
         retryAfterMs: error instanceof PokemonTcgApiRequestError ? error.retryAfterMs : undefined,
         retryWaitMs,
       }));
@@ -568,12 +570,17 @@ async function fetchPokemonSets({ page, pageSize }: { page: number; pageSize: nu
     } catch (error) {
       lastError = error;
 
-      if (!isRetryablePokemonTcgError(error) || attempt >= retryAttempts) {
+      if (!isRetryablePokemonTcgError(error)) {
         throw error;
+      }
+
+      if (attempt >= retryAttempts) {
+        throw exhaustedPokemonTcgRequestError(error, attempt, "sets");
       }
 
       await wait(retryDelayMilliseconds({
         attempt,
+        maxRetryWaitMs: pokemonTcgMaxRetryWaitMs,
         retryAfterMs: error instanceof PokemonTcgApiRequestError ? error.retryAfterMs : undefined,
         retryWaitMs,
       }));
@@ -638,7 +645,7 @@ async function fetchPokemonCardsOnce({
 
 function isRetryablePokemonTcgError(error: unknown) {
   if (error instanceof PokemonTcgApiRequestError) {
-    return error.status === 429 || error.status >= 500;
+    return isRetryablePokemonTcgStatus(error.status);
   }
 
   return isFetchNetworkError(error);
@@ -650,15 +657,11 @@ function isFetchNetworkError(error: unknown) {
     return true;
   }
 
-  return error instanceof TypeError && /fetch|network/i.test(error.message);
+  return error instanceof TypeError && /fetch|network|socket|timeout/i.test(error.message);
 }
 
 function pokemonTcgFetchSignal() {
   return AbortSignal.timeout(pokemonTcgApiTimeoutMs());
-}
-
-function pokemonTcgApiTimeoutMs() {
-  return optionalPositiveInteger(process.env.POKEMON_TCG_API_TIMEOUT_MS) ?? 8000;
 }
 
 function optionalPositiveInteger(value: unknown) {

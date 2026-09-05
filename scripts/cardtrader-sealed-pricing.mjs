@@ -9,6 +9,7 @@ import { groupDisplayName, normalizedSetName } from "./tcgcsv-sealed-products.mj
 
 const cardTraderBaseUrl = "https://api.cardtrader.com/api/v2";
 const pokemonGameId = 5;
+const maxTargetedProductIds = 20;
 const sourceName = "cardtrader-sealed";
 
 export function cardTraderSealedOptionsFromEnv(env = process.env) {
@@ -53,6 +54,7 @@ export async function syncCardTraderSealedPrices(options = {}) {
   const apiRetryWaitMs = nonNegativeInteger(options.apiRetryWaitMs, 500);
   const apiTimeoutMs = positiveInteger(options.apiTimeoutMs, 10_000);
   const manualAliases = normalizeManualAliases(options.manualAliases);
+  const productIds = normalizeCardTraderProductIds(options.productIds);
   const summary = {
     ambiguousMatches: 0,
     apiAttempts: 0,
@@ -70,6 +72,7 @@ export async function syncCardTraderSealedPrices(options = {}) {
       identifier: 0,
       manualAlias: 0,
       normalizedNameType: 0,
+      normalizedTokenType: 0,
       tcgplayerId: 0,
     },
     mappingReview: [],
@@ -82,6 +85,7 @@ export async function syncCardTraderSealedPrices(options = {}) {
     setsChecked: 0,
     setsUnmatched: 0,
     status: "succeeded",
+    targetedProductCount: productIds.length,
     writePrices,
   };
 
@@ -113,6 +117,7 @@ export async function syncCardTraderSealedPrices(options = {}) {
       where: {
         createdByUserId: null,
         visibility: "GLOBAL",
+        ...(productIds.length ? { id: { in: productIds } } : {}),
         ...(priceOnlyUnpriced ? {
           priceSnapshots: {
             none: { itemType: ItemType.SEALED_PRODUCT },
@@ -296,6 +301,25 @@ export async function syncCardTraderSealedPrices(options = {}) {
   }
 }
 
+export function normalizeCardTraderProductIds(value) {
+  if (value === undefined || value === null || value === "") {
+    return [];
+  }
+
+  const values = Array.isArray(value) ? value : String(value).split(",");
+  const productIds = uniqueValues(values.map((entry) => String(entry).trim()).filter(Boolean));
+
+  if (productIds.length > maxTargetedProductIds) {
+    throw new Error(`CardTrader targeted imports support at most ${maxTargetedProductIds} product IDs.`);
+  }
+
+  if (productIds.some((id) => !isUuid(id))) {
+    throw new Error("CardTrader targeted product IDs must all be valid UUIDs.");
+  }
+
+  return productIds;
+}
+
 export function cardTraderMarketplacePrice(response, rates = {}) {
   const offers = Object.values(isObject(response) ? response : {})
     .flatMap((value) => asArray(value))
@@ -342,6 +366,7 @@ export function buildCardTraderBlueprintIndex(blueprints) {
     byId: new Map(),
     byIdentifier: new Map(),
     byNameType: new Map(),
+    byTokenType: new Map(),
     byTcgplayerId: new Map(),
   };
 
@@ -368,6 +393,15 @@ export function buildCardTraderBlueprintIndex(blueprints) {
 
     if (nameTypeKey) {
       addIndexValue(index.byNameType, nameTypeKey, blueprint);
+    }
+
+    const tokenTypeKey = normalizedProductTokenTypeKey(
+      blueprintName(blueprint),
+      blueprintProductType(blueprint),
+    );
+
+    if (tokenTypeKey) {
+      addIndexValue(index.byTokenType, tokenTypeKey, blueprint);
     }
   }
 
@@ -450,12 +484,27 @@ export function resolveCardTraderBlueprint(product, blueprintIndex, aliases = ne
     );
   }
 
+  const tokenTypeKey = normalizedProductTokenTypeKey(product.name, localProductType(product));
+  const tokenCandidates = tokenTypeKey ? blueprintIndex.byTokenType.get(tokenTypeKey) ?? [] : [];
+
+  if (tokenCandidates.length === 1) {
+    return resolvedBlueprint(tokenCandidates[0], "normalizedTokenType");
+  }
+
+  if (tokenCandidates.length > 1) {
+    return unresolvedBlueprint(
+      `Multiple CardTrader blueprints matched the normalized name tokens and product type for ${product.name}.`,
+      tokenCandidates,
+      true,
+    );
+  }
+
   const staleManualAlias = manualTargets.length === 1
     ? ` Manual alias ${manualTargets[0]} was not present in the matched expansion.`
     : "";
 
   return unresolvedBlueprint(
-    `No unique CardTrader blueprint matched ${product.name} by TCGplayer ID, UPC/EAN, or normalized name and type.${staleManualAlias}`,
+    `No unique CardTrader blueprint matched ${product.name} by TCGplayer ID, UPC/EAN, normalized name and type, or normalized name tokens and type.${staleManualAlias}`,
   );
 }
 
@@ -805,6 +854,15 @@ function normalizedProductNameTypeKey(name, productType) {
   return normalizedName && productType ? `${normalizedName}|${productType}` : undefined;
 }
 
+function normalizedProductTokenTypeKey(name, productType) {
+  const normalizedName = normalizedProductName(name);
+  const tokenSignature = normalizedName
+    ? normalizedName.split(" ").filter(Boolean).sort().join(" ")
+    : "";
+
+  return tokenSignature && productType ? `${tokenSignature}|${productType}` : undefined;
+}
+
 function normalizedProductName(value) {
   return normalizedWords(value)
     .replace(/\b(?:pokemon tcg|trading card game|pokemon)\b/g, " ")
@@ -909,6 +967,10 @@ function normalizedText(value) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "")
     .trim();
+}
+
+function isUuid(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(value));
 }
 
 function median(values) {

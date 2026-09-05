@@ -5,10 +5,12 @@ import {
   cardTraderMarketplacePrice,
   cardTraderSealedOptionsFromEnv,
   matchCardTraderExpansion,
+  normalizeCardTraderProductIds,
   normalizeManualAliases,
   resolveCardTraderBlueprint,
   syncCardTraderSealedPrices,
 } from "../scripts/cardtrader-sealed-pricing.mjs";
+import { cardTraderSealedImportOptionsFromEnv } from "../scripts/import-cardtrader-sealed-prices.mjs";
 
 test("reads CardTrader sealed pricing options and enables them when a token exists", () => {
   assert.deepEqual(
@@ -38,6 +40,66 @@ test("reads CardTrader sealed pricing options and enables them when a token exis
       writePrices: false,
     },
   );
+});
+
+test("validates and bounds importer-only CardTrader product IDs", () => {
+  const first = "11111111-1111-1111-1111-111111111111";
+  const second = "22222222-2222-2222-2222-222222222222";
+
+  assert.deepEqual(normalizeCardTraderProductIds(`${first}, ${second},${first}`), [first, second]);
+  assert.throws(
+    () => normalizeCardTraderProductIds("not-a-uuid"),
+    /must all be valid UUIDs/,
+  );
+  assert.throws(
+    () => normalizeCardTraderProductIds(
+      Array.from({ length: 21 }, (_, index) =>
+        `${String(index + 1).padStart(8, "0")}-0000-0000-0000-000000000000`
+      ),
+    ),
+    /at most 20 product IDs/,
+  );
+});
+
+test("applies targeted IDs only to the direct CardTrader importer options", () => {
+  const first = "11111111-1111-1111-1111-111111111111";
+  const second = "22222222-2222-2222-2222-222222222222";
+  const options = cardTraderSealedImportOptionsFromEnv({
+    CARDTRADER_API_TOKEN: "token",
+    CARDTRADER_SEALED_PRODUCT_IDS: `${first},${second}`,
+  });
+
+  assert.deepEqual(options.productIds, [first, second]);
+  assert.equal(options.limit, 2);
+  assert.equal(options.setLimit, 2);
+  assert.equal(
+    Object.hasOwn(cardTraderSealedOptionsFromEnv({ CARDTRADER_API_TOKEN: "token" }), "productIds"),
+    false,
+  );
+});
+
+test("filters a targeted CardTrader sync to its validated product IDs", async () => {
+  const productId = "11111111-1111-1111-1111-111111111111";
+  let where;
+  const prisma = {
+    sealedProduct: {
+      findMany: async (request) => {
+        where = request.where;
+        return [];
+      },
+    },
+  };
+
+  const summary = await syncCardTraderSealedPrices({
+    prisma,
+    productIds: [productId],
+    token: "token",
+    waitMs: 0,
+  });
+
+  assert.deepEqual(where.id, { in: [productId] });
+  assert.equal(summary.targetedProductCount, 1);
+  assert.equal(summary.status, "degraded");
 });
 
 test("matches expansion-scoped blueprints by UPC before normalized name and type", () => {
@@ -87,6 +149,80 @@ test("rejects ambiguous normalized fallback matches and emits review candidates"
   assert.equal(result.blueprint, null);
   assert.equal(result.ambiguous, true);
   assert.deepEqual(result.candidates.map((candidate) => candidate.id), [20, 21]);
+});
+
+test("matches a uniquely reordered sealed product name with the same complete token set and type", () => {
+  const result = resolveCardTraderBlueprint(
+    sealedProduct({
+      name: "Mega Evolution 3 Pack Blister [Psyduck]",
+      productType: "BLISTER",
+    }),
+    buildCardTraderBlueprintIndex([
+      { id: 20, name: "Mega Evolution: Psyduck 3-Pack Blister" },
+      { id: 21, name: "Mega Evolution: Golduck 3-Pack Blister" },
+    ]),
+  );
+
+  assert.equal(result.blueprint.id, 20);
+  assert.equal(result.method, "normalizedTokenType");
+});
+
+test("rejects an ambiguous reordered-token fallback", () => {
+  const result = resolveCardTraderBlueprint(
+    sealedProduct({
+      name: "Mega Evolution 3 Pack Blister [Psyduck]",
+      productType: "BLISTER",
+    }),
+    buildCardTraderBlueprintIndex([
+      { id: 20, name: "Mega Evolution: Psyduck 3-Pack Blister" },
+      { id: 21, name: "Psyduck Mega Evolution 3 Pack Blister" },
+    ]),
+  );
+
+  assert.equal(result.blueprint, null);
+  assert.equal(result.ambiguous, true);
+  assert.deepEqual(result.candidates.map((candidate) => candidate.id), [20, 21]);
+});
+
+test("does not use reordered-token fallback when a product name token is missing or extra", () => {
+  const index = buildCardTraderBlueprintIndex([
+    { id: 20, name: "Mega Evolution: Psyduck 3-Pack Blister" },
+  ]);
+  const missingToken = resolveCardTraderBlueprint(
+    sealedProduct({
+      name: "Evolution 3 Pack Blister [Psyduck]",
+      productType: "BLISTER",
+    }),
+    index,
+  );
+  const extraToken = resolveCardTraderBlueprint(
+    sealedProduct({
+      name: "Mega Evolution 3 Pack Promo Blister [Psyduck]",
+      productType: "BLISTER",
+    }),
+    index,
+  );
+
+  assert.equal(missingToken.blueprint, null);
+  assert.equal(extraToken.blueprint, null);
+});
+
+test("does not use reordered-token fallback across incompatible product types", () => {
+  const result = resolveCardTraderBlueprint(
+    sealedProduct({
+      name: "Mega Evolution 3 Pack Blister [Psyduck]",
+      productType: "BLISTER",
+    }),
+    buildCardTraderBlueprintIndex([
+      {
+        id: 20,
+        name: "Mega Evolution: Psyduck 3-Pack Blister",
+        product_type: "TIN",
+      },
+    ]),
+  );
+
+  assert.equal(result.blueprint, null);
 });
 
 test("manual aliases only resolve to a blueprint inside the matched expansion", () => {

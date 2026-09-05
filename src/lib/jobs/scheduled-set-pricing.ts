@@ -1,10 +1,13 @@
 import { prisma } from "@/lib/db/prisma";
 import {
-  PokemonTcgApiRequestError,
   PokemonTcgPartialSyncError,
   PricingProviderConfigError,
   syncPokemonTcgCardPages,
 } from "@/lib/pricing/pokemon-tcg-api";
+import {
+  isSkippablePokemonTcgSetPricingError,
+  PokemonTcgApiRequestError,
+} from "@/lib/pricing/pokemon-tcg-request-policy";
 import type { ScheduledSetPricingInput } from "@/lib/jobs/scheduled-set-pricing-input";
 
 type DbSetPricingTarget = {
@@ -108,12 +111,12 @@ export async function runScheduledSetPricing(input: ScheduledSetPricingInput) {
           totalCount: result.totalCount,
         });
       } else {
-        if (!isSkippableSetPricingError(error)) {
+        if (!isSkippablePokemonTcgSetPricingError(error)) {
           throw error;
         }
 
         const message = error instanceof Error ? error.message : "Set pricing refresh failed.";
-        await recordSetPricingAttempt(target, message);
+        await recordSetPricingAttempt(target, error, message);
 
         setResults.push({
           cardsFetched: 0,
@@ -319,15 +322,15 @@ async function recordSetPricingProgress(target: SetPricingTarget, result: SetPri
   `;
 }
 
-async function recordSetPricingAttempt(target: SetPricingTarget, message: string) {
+async function recordSetPricingAttempt(target: SetPricingTarget, error: unknown, message: string) {
   const attemptedAt = new Date().toISOString();
-  const status = providerErrorStatus(message);
+  const status = providerErrorStatus(error, message);
   const metadata = JSON.stringify({
     scheduledPricingLastAttemptAt: attemptedAt,
     scheduledPricingLastError: message,
     scheduledPricingLastErrorStatus: status,
     scheduledPricingNextPage: target.nextPage,
-    scheduledPricingRetryAfter: retryAfterForProviderStatus(status, attemptedAt),
+    scheduledPricingRetryAfter: retryAfterForProviderError(error, status, attemptedAt),
   });
 
   await prisma.$executeRaw`
@@ -345,34 +348,30 @@ function scheduledNextPage(value: unknown, expectedPages: number) {
   return Math.min(expectedPages, Math.max(1, page));
 }
 
-function providerErrorStatus(message: string) {
+function providerErrorStatus(error: unknown, message: string) {
+  if (error instanceof PokemonTcgApiRequestError && error.status > 0) {
+    return error.status;
+  }
+
   const match = message.match(/\b(4\d\d|5\d\d)\b/);
 
-  return match ? Number(match[1]) : undefined;
+  return match ? Number(match[1]) : null;
 }
 
-function retryAfterForProviderStatus(status: number | undefined, attemptedAt: string) {
+function retryAfterForProviderError(error: unknown, status: number | null, attemptedAt: string) {
+  if (
+    error instanceof PokemonTcgApiRequestError &&
+    Number.isFinite(error.retryAfterMs) &&
+    Number(error.retryAfterMs) > 0
+  ) {
+    return new Date(Date.parse(attemptedAt) + Number(error.retryAfterMs)).toISOString();
+  }
+
   if (status !== 404) {
     return null;
   }
 
   return new Date(Date.parse(attemptedAt) + 7 * 24 * 60 * 60 * 1000).toISOString();
-}
-
-function isSkippableSetPricingError(error: unknown) {
-  if (error instanceof PokemonTcgApiRequestError) {
-    return true;
-  }
-
-  if (error instanceof DOMException && ["AbortError", "TimeoutError"].includes(error.name)) {
-    return true;
-  }
-
-  if (error instanceof TypeError && /fetch|network/i.test(error.message)) {
-    return true;
-  }
-
-  return false;
 }
 
 function sumResults(results: Array<Record<string, unknown>>, key: string) {

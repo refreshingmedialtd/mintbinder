@@ -12,6 +12,7 @@ export type CardTraderSealedPricingOptions = {
   }>;
   priceOnlyUnpriced?: boolean;
   prisma?: unknown;
+  productIds?: string[] | string;
   setLimit?: number;
   token?: string;
   usdToGbpRate?: number;
@@ -32,7 +33,10 @@ export type CardTraderSealedPricingSummary = {
   candidatesUnmatched: number;
   listingOffersUsed: number;
   mappingCoveragePercent: number;
-  mappingMethods: Record<"identifier" | "manualAlias" | "normalizedNameType" | "tcgplayerId", number>;
+  mappingMethods: Record<
+    "identifier" | "manualAlias" | "normalizedNameType" | "normalizedTokenType" | "tcgplayerId",
+    number
+  >;
   mappingReview: Array<Record<string, unknown>>;
   marketplaceMatches: number;
   priceOnlyUnpriced: boolean;
@@ -43,6 +47,7 @@ export type CardTraderSealedPricingSummary = {
   setsChecked: number;
   setsUnmatched: number;
   status: "degraded" | "succeeded";
+  targetedProductCount: number;
   writePrices: boolean;
 };
 
@@ -55,6 +60,7 @@ export function syncCardTraderSealedPrices(
 ): Promise<CardTraderSealedPricingSummary>;
 
 export function buildCardTraderBlueprintIndex(blueprints: Array<Record<string, unknown>>): unknown;
+export function normalizeCardTraderProductIds(value: unknown): string[];
 export function normalizeManualAliases(value: unknown): Map<string, string>;
 export function resolveCardTraderBlueprint(
   product: Record<string, unknown>,
