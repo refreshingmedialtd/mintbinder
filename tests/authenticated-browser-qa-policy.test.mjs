@@ -238,6 +238,9 @@ test("the browser journey authenticates health attestation and uses cancellable 
 
   assert.match(source, /authorization: `Bearer \$\{runtimeAttestation\.jobSecret\}`/);
   assert.match(source, /health\.body\?\.build\?\.commit/);
+  assert.match(source, /pathname: "\/api\/auth\/callback\/credentials"/);
+  assert.match(source, /responseJsonWithTimeout\(signInResponse, "credentials sign-in response"\)/);
+  assert.match(source, /waitForSuccessfulSignIn\(page\)/);
   assert.match(source, /runWithPrearmedWaiters/);
   assert.doesNotMatch(source, /page\.waitFor(?:Event|Response)\(/);
 });
@@ -253,6 +256,7 @@ test("the browser journey adds independent card and sealed fixtures after one-ro
   assert.ok(directAddAt > archiveAt, "direct card mutation must not invalidate one-row export assertions");
   assert.ok(sealedAddAt > directAddAt, "sealed mutation must remain independent of the direct card add");
   assert.match(source, /addCatalogueSetFilter\(page\)/);
+  assert.match(source, /\.catalogue-controls:visible/);
   assert.doesNotMatch(source, /getByLabel\("Set", \{ exact: true \}\)/);
   assert.match(source, /visibility: CatalogueVisibility\.GLOBAL/);
   assert.match(source, /condition, "Sealed"/);

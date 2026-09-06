@@ -159,8 +159,21 @@ try {
     await page.getByRole("heading", { name: "Sign in", exact: true }).waitFor();
     await page.getByLabel("Email", { exact: true }).fill(identity.email);
     await page.getByLabel("Password", { exact: true }).fill(password);
-    await page.locator("form.auth-card button[type='submit']").click();
-    await page.getByRole("heading", { name: "Portfolio", exact: true }).waitFor();
+    const [signInResponse] = await runWithPrearmedWaiters([
+      () => expectFirstPartyResponse(page, {
+        label: "credentials sign-in response",
+        method: "POST",
+        pathname: "/api/auth/callback/credentials",
+      }),
+    ], () => page.locator("form.auth-card button[type='submit']").click());
+    assert.equal(signInResponse.status(), 200, `Credentials sign-in returned ${signInResponse.status()}.`);
+    const signInBody = await responseJsonWithTimeout(signInResponse, "credentials sign-in response");
+    assert.doesNotMatch(
+      typeof signInBody?.url === "string" ? signInBody.url : "",
+      /[?&]error=/,
+      `Credentials sign-in was rejected: ${signInBody?.url ?? "no response URL"}`,
+    );
+    await waitForSuccessfulSignIn(page);
 
     const session = await browserJson(page, new URL("/api/auth/session", settings.baseUrl).href);
     assert.equal(session.status, 200);
@@ -1129,13 +1142,46 @@ async function clickDesktopNav(page, name) {
   await nav.getByRole("button", { name, exact: name !== "Alerts" }).click();
 }
 
+async function waitForSuccessfulSignIn(page, timeoutMs = 45_000) {
+  const portfolio = page.getByRole("heading", { name: "Portfolio", exact: true });
+  const authError = page.locator(".auth-error[role='alert']");
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    if (await portfolio.isVisible()) return;
+    if (await authError.isVisible()) {
+      throw new Error(`Sign-in UI reported: ${(await authError.innerText()).trim()}`);
+    }
+    await page.waitForTimeout(100);
+  }
+
+  throw new Error(`Credentials sign-in succeeded at the callback but the authenticated Portfolio did not load within ${timeoutMs}ms.`);
+}
+
 async function addCatalogueSetFilter(page) {
-  const setFilters = page
-    .locator(".catalogue-controls > label.sort-control")
-    .filter({ hasText: /^\s*Set\b/ })
-    .locator("select");
-  await setFilters.first().waitFor({ timeout: 30_000 });
-  return uniqueVisible(setFilters, "Add catalogue set filter");
+  const controlGroups = page.locator(".catalogue-controls:visible");
+  await controlGroups.first().waitFor({ state: "visible", timeout: 30_000 });
+  const controls = await uniqueVisible(controlGroups, "Add catalogue controls");
+  const filters = controls.locator("select");
+  assert.equal(await filters.count(), 4, "Add catalogue controls did not contain the four expected filters.");
+  return filters.nth(0);
+}
+
+async function responseJsonWithTimeout(response, label, timeoutMs = 10_000) {
+  let timer;
+  const body = response.json().catch(() => null);
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`Timed out after ${timeoutMs}ms reading ${label}.`)),
+      timeoutMs,
+    );
+  });
+
+  try {
+    return await Promise.race([body, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function settingsPanel(page, heading) {
