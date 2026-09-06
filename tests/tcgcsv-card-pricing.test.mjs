@@ -12,11 +12,12 @@ import {
   tcgcsvCardVariantLabel,
 } from "../scripts/tcgcsv-card-pricing.mjs";
 
-test("prioritizes the largest missing-price gap during unpriced backfills", () => {
+test("rotates past a recently attempted zero-output pricing group", () => {
   const zeroOutputOldest = {
     cardPrintings: [
       { priceSnapshots: [] },
     ],
+    metadata: {},
     name: "Old zero-output group",
   };
   const productiveRecent = {
@@ -24,14 +25,23 @@ test("prioritizes the largest missing-price gap during unpriced backfills", () =
       { priceSnapshots: [{ observedAt: new Date("2026-09-06T12:00:00.000Z") }] },
       ...Array.from({ length: 5 }, () => ({ priceSnapshots: [] })),
     ],
+    metadata: {},
     name: "Large unpriced group",
   };
 
   assert.ok(compareCardGroupRefreshPriority(zeroOutputOldest, productiveRecent) < 0);
+  zeroOutputOldest.metadata = {
+    tcgcsvCardPricingAttempts: {
+      "tcgcsv-japan-card": {
+        attemptedAt: "2026-09-06T13:00:00.000Z",
+        outcome: "zero_output",
+      },
+    },
+  };
   assert.ok(compareCardGroupRefreshPriority(
     productiveRecent,
     zeroOutputOldest,
-    { prioritizeUnpriced: true },
+    { source: "tcgcsv-japan-card" },
   ) < 0);
 });
 
@@ -495,11 +505,16 @@ test("matches Pokemon Japan TCGCSV groups to TCGdex-backed Japanese sets", () =>
 });
 
 test("imports Japanese card price snapshots from the Pokemon Japan category", async () => {
+  const attemptWrites = [];
   const imageUpdates = [];
   const snapshots = [];
   const requestedUrls = [];
   const cardSetFinds = [];
   const prisma = {
+    $executeRaw: async (query) => {
+      attemptWrites.push(query);
+      return 1;
+    },
     cardPrinting: {
       findMany: async () => [
         { id: "card-ja-1", name: "ヤンマ", number: "002" },
@@ -604,6 +619,15 @@ test("imports Japanese card price snapshots from the Pokemon Japan category", as
   assert.equal(snapshots[0].priceMinor, 400);
   assert.equal(snapshots[0].source, "tcgcsv-japan-card");
   assert.equal(snapshots[0].metadata.categoryId, 85);
+  assert.equal(attemptWrites.length, 1);
+  assert.match(attemptWrites[0].text, /UPDATE card_sets/);
+  assert.ok(attemptWrites[0].values.includes("tcgcsv-japan-card"));
+  assert.ok(attemptWrites[0].values.includes("set-m2a"));
+  const attemptRecord = JSON.parse(attemptWrites[0].values.find((value) =>
+    typeof value === "string" && value.startsWith('{"attemptedAt"')));
+  assert.equal(attemptRecord.groupId, "24499");
+  assert.equal(attemptRecord.outcome, "priced");
+  assert.equal(attemptRecord.pricingSnapshotsCreated, 1);
   assert.deepEqual(imageUpdates, [
     {
       data: {

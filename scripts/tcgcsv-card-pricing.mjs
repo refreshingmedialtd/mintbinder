@@ -1,6 +1,7 @@
 import {
   ItemCondition,
   ItemType,
+  Prisma,
   PrismaClient,
 } from "@prisma/client";
 import { booleanSetting, positiveInteger } from "./catalogue-batch-options.mjs";
@@ -155,6 +156,7 @@ export async function syncTcgcsvCardPrices(options = {}) {
         select: {
           id: true,
           language: true,
+          metadata: true,
           name: true,
           providerIds: true,
           cardPrintings: {
@@ -189,9 +191,7 @@ export async function syncTcgcsvCardPrices(options = {}) {
     const availableMatches = matchTcgcsvCardGroupsToSets(groups.results ?? [], sets)
       .filter(({ group }) => groupIds.size === 0 || groupIds.has(String(group.groupId)))
       .filter(({ set }) => !onlyUnpricedGroups || unpricedCardCount(set) >= minUnpricedCards)
-      .sort((a, b) => compareCardGroupRefreshPriority(a.set, b.set, {
-        prioritizeUnpriced: onlyUnpricedGroups,
-      }));
+      .sort((a, b) => compareCardGroupRefreshPriority(a.set, b.set, { source }));
     const matches = availableMatches.slice(0, groupLimit);
     const summary = {
       cardProductsMatched: 0,
@@ -628,7 +628,51 @@ async function importCardGroup({
     }
   }
 
+  await recordTcgcsvCardPricingAttempt(prisma, {
+    attemptedAt: new Date(),
+    groupId: group.groupId,
+    pricingSnapshotsCreated: summary.pricingSnapshotsCreated,
+    productsFetched: summary.productsFetched,
+    setId: set.id,
+    source,
+  });
+
   return summary;
+}
+
+async function recordTcgcsvCardPricingAttempt(prisma, {
+  attemptedAt,
+  groupId,
+  pricingSnapshotsCreated,
+  productsFetched,
+  setId,
+  source,
+}) {
+  if (typeof prisma.$executeRaw !== "function") {
+    return;
+  }
+
+  const record = JSON.stringify({
+    attemptedAt: attemptedAt.toISOString(),
+    groupId: String(groupId),
+    outcome: pricingSnapshotsCreated > 0 ? "priced" : "zero_output",
+    pricingSnapshotsCreated,
+    productsFetched,
+  });
+
+  await prisma.$executeRaw(Prisma.sql`
+    UPDATE card_sets
+    SET
+      metadata = jsonb_set(
+        COALESCE(metadata, '{}'::jsonb),
+        '{tcgcsvCardPricingAttempts}',
+        COALESCE(metadata->'tcgcsvCardPricingAttempts', '{}'::jsonb) ||
+          jsonb_build_object(${source}, ${record}::jsonb),
+        true
+      ),
+      updated_at = CURRENT_TIMESTAMP
+    WHERE id = ${setId}::uuid
+  `);
 }
 
 async function loadExistingTcgcsvVariantIdentities({ cardPrintingIds, prisma, source, subTypeNames }) {
@@ -984,18 +1028,17 @@ function cardPriceSnapshotCount(card) {
   return Number(card._count?.priceSnapshots ?? 0);
 }
 
-export function compareCardGroupRefreshPriority(left, right, {
-  prioritizeUnpriced = false,
-} = {}) {
+export function compareCardGroupRefreshPriority(left, right, { source } = {}) {
   const leftUnpriced = unpricedCardCount(left);
   const rightUnpriced = unpricedCardCount(right);
-
-  if (prioritizeUnpriced && leftUnpriced !== rightUnpriced) {
-    return rightUnpriced - leftUnpriced;
-  }
-
-  const leftLatest = latestCardPriceSnapshotTime(left);
-  const rightLatest = latestCardPriceSnapshotTime(right);
+  const leftLatest = Math.max(
+    latestCardPriceSnapshotTime(left),
+    latestTcgcsvCardPricingAttemptTime(left, source),
+  );
+  const rightLatest = Math.max(
+    latestCardPriceSnapshotTime(right),
+    latestTcgcsvCardPricingAttemptTime(right, source),
+  );
 
   if (leftLatest !== rightLatest) {
     return leftLatest - rightLatest;
@@ -1013,6 +1056,19 @@ export function compareCardGroupRefreshPriority(left, right, {
   }
 
   return String(left.name ?? "").localeCompare(String(right.name ?? ""));
+}
+
+function latestTcgcsvCardPricingAttemptTime(set, source) {
+  if (!source || !isObject(set?.metadata)) {
+    return 0;
+  }
+
+  const attempts = isObject(set.metadata.tcgcsvCardPricingAttempts)
+    ? set.metadata.tcgcsvCardPricingAttempts
+    : {};
+  const attempt = isObject(attempts[source]) ? attempts[source] : {};
+
+  return dateTime(attempt.attemptedAt);
 }
 
 function latestCardPriceSnapshotTime(set) {
