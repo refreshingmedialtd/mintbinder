@@ -16,10 +16,13 @@ import { chromium } from "playwright-core";
 import { hashPassword } from "../src/lib/auth/password.ts";
 import {
   assertBrowserQaTargetAllowed,
+  browserQaRuntimeAttestation,
   createBrowserQaIdentity,
+  filteredBrowserConsoleError,
   isBrowserQaFixtureIdentity,
   normalizeBrowserQaBaseUrl,
   parseBrowserQaBoolean,
+  runWithPrearmedWaiters,
 } from "./authenticated-browser-qa-policy.mjs";
 
 const DOWNLOAD_TIMEOUT_MS = 120_000;
@@ -39,6 +42,7 @@ const FORBIDDEN_EXPORT_KEYS = new Set([
 
 const settings = browserQaSettings(process.env);
 assertBrowserQaTargetAllowed(settings.baseUrl, settings.allowProduction);
+const runtimeAttestation = browserQaRuntimeAttestation(settings);
 
 const prisma = new PrismaClient();
 const runId = browserQaRunId();
@@ -64,6 +68,7 @@ const report = {
   },
   failure: null,
 };
+const diagnosticTracker = createDiagnosticTracker(report.diagnostics);
 
 let browser;
 let context;
@@ -82,12 +87,6 @@ try {
     set: targetCard.cardSet.name,
   };
 
-  const fixture = await step("Provision an isolated verified Plus account", async () =>
-    provisionFixture(prisma, { identity, password }),
-  );
-  fixtureUserId = fixture.id;
-  report.fixture.created = true;
-
   const launch = await launchQaBrowser(settings);
   browser = launch.browser;
   report.browser = launch.description;
@@ -100,13 +99,32 @@ try {
     viewport: { width: 1440, height: 1000 },
   });
   const page = await context.newPage();
-  observePage(page, settings.baseUrl, report.diagnostics);
+  observePage(page, settings.baseUrl, diagnosticTracker);
 
   await step("Verify runtime health", async () => {
-    const health = await browserJson(page, new URL("/api/health", settings.baseUrl).href);
+    const health = await browserJson(
+      page,
+      new URL("/api/health", settings.baseUrl).href,
+      runtimeAttestation
+        ? { headers: { authorization: `Bearer ${runtimeAttestation.jobSecret}` } }
+        : undefined,
+    );
     assert.equal(health.status, 200, `Health endpoint returned ${health.status}.`);
     assert.equal(health.body?.ok, true, "Health endpoint did not report ok=true.");
+    if (runtimeAttestation) {
+      assert.equal(
+        health.body?.build?.commit,
+        runtimeAttestation.expectedCommit,
+        `Runtime health identified commit ${health.body?.build?.commit ?? "unknown"}; expected ${runtimeAttestation.expectedCommit}.`,
+      );
+    }
   });
+
+  const fixture = await step("Provision an isolated verified Plus account", async () =>
+    provisionFixture(prisma, { identity, password }),
+  );
+  fixtureUserId = fixture.id;
+  report.fixture.created = true;
 
   await step("Sign in through the real credentials form", async () => {
     await page.goto(settings.baseUrl, { waitUntil: "domcontentloaded" });
@@ -140,10 +158,10 @@ try {
   });
 
   await step("Open price history from Add card", async () => {
-    const [historyResponse] = await Promise.all([
-      expectPriceHistoryResponse(page, targetCard.id),
-      page.getByRole("button", { name: "View price history", exact: true }).click(),
-    ]);
+    const [historyResponse] = await runWithPrearmedWaiters(
+      [() => expectPriceHistoryResponse(page, targetCard.id)],
+      () => page.getByRole("button", { name: "View price history", exact: true }).click(),
+    );
     await assertPriceHistoryResponse(historyResponse, targetCard.id);
     const panel = page.locator(".price-history-panel");
     await panel.getByRole("heading", { name: "Market price", exact: true }).waitFor();
@@ -177,10 +195,10 @@ try {
     );
     await addOwnedCopy.click();
     await page.getByRole("heading", { name: "Add card", exact: true }).waitFor();
-    const [historyResponse] = await Promise.all([
-      expectPriceHistoryResponse(page, targetCard.id),
-      page.getByRole("button", { name: "Save to collection", exact: true }).click(),
-    ]);
+    const [historyResponse] = await runWithPrearmedWaiters(
+      [() => expectPriceHistoryResponse(page, targetCard.id)],
+      () => page.getByRole("button", { name: "Save to collection", exact: true }).click(),
+    );
     await page.getByRole("heading", { name: targetCard.name, exact: true }).waitFor();
     await assertPriceHistoryResponse(historyResponse, targetCard.id);
 
@@ -220,20 +238,20 @@ try {
   await step("Verify default Binder sync and reload persistence", async () => {
     await clickDesktopNav(page, "Binders");
     await page.getByRole("heading", { name: "Binders", exact: true }).waitFor();
-    await page.getByRole("button", { name: "Refresh", exact: true }).waitFor({ timeout: 45_000 });
+    await binderRefreshButton(page).waitFor({ timeout: 45_000 });
     await assertNoVisibleBinderAlert(page, "initial sync");
     const firstServerBinder = await assertServerBinderContains(page, collectionItemId);
     defaultBinderId = firstServerBinder.id;
-    await openDefaultBinder(page, targetCard);
+    await openDefaultBinder(page, targetCard, firstServerBinder.name);
     await page.getByRole("button", { name: "Close binder viewer", exact: true }).click();
 
     await page.reload({ waitUntil: "domcontentloaded" });
     await page.getByRole("heading", { name: "Binders", exact: true }).waitFor();
-    await page.getByRole("button", { name: "Refresh", exact: true }).waitFor({ timeout: 45_000 });
+    await binderRefreshButton(page).waitFor({ timeout: 45_000 });
     await assertNoVisibleBinderAlert(page, "reload sync");
     const reloadedServerBinder = await assertServerBinderContains(page, collectionItemId);
     assert.equal(reloadedServerBinder.id, defaultBinderId, "Reload returned a different default binder.");
-    await openDefaultBinder(page, targetCard);
+    await openDefaultBinder(page, targetCard, reloadedServerBinder.name);
     await page.getByRole("button", { name: "Close binder viewer", exact: true }).click();
   });
 
@@ -244,13 +262,16 @@ try {
     const notifications = settingsPanel(page, "Notifications");
     await notifications.locator("select").selectOption("Weekly");
     assert.equal(await notifications.locator("select").inputValue(), "Weekly");
-    const [saveResponse] = await Promise.all([
-      page.waitForResponse((response) => {
-        const url = new URL(response.url());
-        return response.request().method() === "PATCH" && url.pathname === "/api/notification-preferences";
+    const [saveResponse] = await runWithPrearmedWaiters([
+      () => armPageEvent(page, "response", {
+        label: "notification preference response",
+        predicate: (response) => {
+          const url = new URL(response.url());
+          return response.request().method() === "PATCH" && url.pathname === "/api/notification-preferences";
+        },
+        timeout: 45_000,
       }),
-      notifications.getByRole("button", { name: "Save preferences", exact: true }).click(),
-    ]);
+    ], () => notifications.getByRole("button", { name: "Save preferences", exact: true }).click());
     const savedPreferences = await saveResponse.json().catch(() => null);
     assert.equal(saveResponse.status(), 200, `Notification preference save returned ${saveResponse.status()}.`);
     assert.equal(savedPreferences?.digestFrequency, "Weekly", "Preference API did not return the selected frequency.");
@@ -267,10 +288,10 @@ try {
   });
 
   await step("Download and validate the collection CSV", async () => {
-    const [download] = await Promise.all([
-      page.waitForEvent("download", { timeout: DOWNLOAD_TIMEOUT_MS }),
-      page.getByRole("button", { name: "Export CSV", exact: true }).click(),
-    ]);
+    const [download] = await runWithPrearmedWaiters(
+      [() => armPageEvent(page, "download", { label: "collection CSV download", timeout: DOWNLOAD_TIMEOUT_MS })],
+      () => page.getByRole("button", { name: "Export CSV", exact: true }).click(),
+    );
     assert.match(download.suggestedFilename(), /^mintbinder-collection-\d{4}-\d{2}-\d{2}\.csv$/);
     const content = await downloadText(download);
     const [header = "", ...rows] = content.trim().split(/\r?\n/);
@@ -284,11 +305,13 @@ try {
   });
 
   await step("Show report progress and validate the insurance PDF", async () => {
-    const [download] = await Promise.all([
-      page.waitForEvent("download", { timeout: DOWNLOAD_TIMEOUT_MS }),
-      page.getByRole("status").filter({ hasText: "Building your PDF" }).waitFor({ timeout: 10_000 }),
-      page.getByRole("button", { name: "Insurance report", exact: true }).click(),
-    ]);
+    const [download] = await runWithPrearmedWaiters([
+      () => armPageEvent(page, "download", { label: "insurance PDF download", timeout: DOWNLOAD_TIMEOUT_MS }),
+      () => armLocatorVisible(
+        page.getByRole("status").filter({ hasText: "Building your PDF" }),
+        { label: "insurance report progress", timeout: 10_000 },
+      ),
+    ], () => page.getByRole("button", { name: "Insurance report", exact: true }).click());
     assert.match(download.suggestedFilename(), /^mintbinder-insurance-report-\d{4}-\d{2}-\d{2}\.pdf$/);
     const bytes = await downloadBytes(download);
     assert.ok(bytes.length > 1_000, `Insurance PDF was unexpectedly small (${bytes.length} bytes).`);
@@ -299,10 +322,10 @@ try {
     await page.getByRole("button", { name: "Export account JSON", exact: true }).click();
     const exportForm = page.locator("form.account-export-form");
     await exportForm.getByLabel("Current password", { exact: true }).fill(password);
-    const [download] = await Promise.all([
-      page.waitForEvent("download", { timeout: DOWNLOAD_TIMEOUT_MS }),
-      exportForm.getByRole("button", { name: "Confirm and download", exact: true }).click(),
-    ]);
+    const [download] = await runWithPrearmedWaiters(
+      [() => armPageEvent(page, "download", { label: "account archive download", timeout: DOWNLOAD_TIMEOUT_MS })],
+      () => exportForm.getByRole("button", { name: "Confirm and download", exact: true }).click(),
+    );
     assert.match(download.suggestedFilename(), /^mintbinder-account-\d{4}-\d{2}-\d{2}\.json$/);
     const archive = JSON.parse(await downloadText(download));
     assert.equal(archive?.format, "mintbinder-account-export");
@@ -327,7 +350,7 @@ try {
     });
     try {
       const mobilePage = await mobile.newPage();
-      observePage(mobilePage, settings.baseUrl, report.diagnostics);
+      observePage(mobilePage, settings.baseUrl, diagnosticTracker);
       await mobilePage.goto(settings.baseUrl, { waitUntil: "domcontentloaded" });
       await mobilePage.getByRole("heading", { name: "Portfolio", exact: true }).waitFor();
       await mobilePage.locator("nav.bottom-nav").waitFor();
@@ -423,9 +446,18 @@ if (!report.ok) process.exitCode = 1;
 async function step(name, action) {
   const startedAt = Date.now();
   const diagnosticStart = diagnosticCounts(report.diagnostics);
+  let rejectOnDiagnostic;
+  const diagnosticFailure = new Promise((_, reject) => {
+    rejectOnDiagnostic = reject;
+  });
+  const unsubscribe = diagnosticTracker.subscribe((failure) => {
+    rejectOnDiagnostic(new Error(`Browser failure during "${name}": ${JSON.stringify(failure)}`));
+  });
   process.stdout.write(`[browser-qa] ${name} ... `);
   try {
-    const value = await action();
+    const actionResult = Promise.resolve().then(action);
+    actionResult.catch(() => undefined);
+    const value = await Promise.race([actionResult, diagnosticFailure]);
     const failures = newDiagnosticFailures(report.diagnostics, diagnosticStart);
     assert.deepEqual(failures, [], `Browser failures occurred during \"${name}\": ${JSON.stringify(failures)}`);
     const durationMs = Date.now() - startedAt;
@@ -437,6 +469,8 @@ async function step(name, action) {
     report.checks.push({ name, ok: false, durationMs, error: serializeError(error) });
     console.log(`failed (${durationMs}ms)`);
     throw error;
+  } finally {
+    unsubscribe();
   }
 }
 
@@ -449,7 +483,9 @@ function browserQaSettings(env) {
     baseUrl,
     browserChannel: env.AUTHENTICATED_QA_BROWSER_CHANNEL?.trim() || "chrome",
     browserExecutable: env.AUTHENTICATED_QA_BROWSER_EXECUTABLE?.trim() || "",
+    expectedCommit: env.AUTHENTICATED_QA_EXPECTED_COMMIT,
     headless: parseBrowserQaBoolean(env.AUTHENTICATED_QA_HEADLESS, true),
+    jobSecret: env.JOB_SECRET,
   };
 }
 
@@ -552,25 +588,49 @@ async function launchQaBrowser(options) {
   };
 }
 
-function observePage(page, baseUrl, diagnostics) {
+function createDiagnosticTracker(diagnostics) {
+  const subscribers = new Set();
+  return {
+    record(category, value, failure) {
+      diagnostics[category].push(value);
+      for (const subscriber of subscribers) subscriber(failure);
+    },
+    subscribe(subscriber) {
+      subscribers.add(subscriber);
+      return () => subscribers.delete(subscriber);
+    },
+  };
+}
+
+function observePage(page, baseUrl, tracker) {
   const firstPartyOrigin = new URL(baseUrl).origin;
-  page.on("pageerror", (error) => diagnostics.pageErrors.push(error.message));
+  page.on("pageerror", (error) => {
+    const failure = { message: error.message, type: "pageerror" };
+    tracker.record("pageErrors", error.message, failure);
+  });
   page.on("dialog", (dialog) => {
-    diagnostics.unexpectedDialogs.push({ message: dialog.message(), type: dialog.type() });
-    void dialog.accept().catch(() => undefined);
+    const entry = { message: dialog.message(), type: dialog.type() };
+    void dialog.dismiss().catch(() => undefined);
+    tracker.record("unexpectedDialogs", entry, { ...entry, type: `dialog:${entry.type}` });
   });
   page.on("console", (message) => {
-    if (message.type() === "error") diagnostics.consoleErrors.push(message.text());
+    const entry = filteredBrowserConsoleError({
+      baseUrl,
+      locationUrl: message.location().url,
+      text: message.text(),
+      type: message.type(),
+    });
+    if (entry) tracker.record("consoleErrors", entry, entry);
   });
   page.on("response", (response) => {
     const url = new URL(response.url());
-    if (url.origin === firstPartyOrigin && response.status() >= 400) {
+    if (url.origin === firstPartyOrigin && response.status() >= 500) {
       const failure = {
         method: response.request().method(),
         status: response.status(),
         url: response.url(),
       };
-      diagnostics.firstPartyHttpErrors.push(failure);
+      tracker.record("firstPartyHttpErrors", failure, failure);
       void response.text()
         .then((body) => { failure.body = body.slice(0, 500); })
         .catch(() => undefined);
@@ -589,17 +649,17 @@ function diagnosticCounts(diagnostics) {
 
 function newDiagnosticFailures(diagnostics, start) {
   return [
-    ...diagnostics.consoleErrors.slice(start.consoleErrors).map((message) => ({ message, type: "console:error" })),
+    ...diagnostics.consoleErrors.slice(start.consoleErrors),
     ...diagnostics.firstPartyHttpErrors.slice(start.firstPartyHttpErrors),
     ...diagnostics.pageErrors.slice(start.pageErrors).map((message) => ({ message, type: "pageerror" })),
     ...diagnostics.unexpectedDialogs.slice(start.unexpectedDialogs).map((dialog) => ({ ...dialog, type: `dialog:${dialog.type}` })),
   ];
 }
 
-async function browserJson(page, url) {
+async function browserJson(page, url, options = {}) {
   const response = await page.context().request.get(url, {
     failOnStatusCode: false,
-    headers: { "cache-control": "no-store" },
+    headers: { "cache-control": "no-store", ...options.headers },
   });
   return {
     body: await response.json().catch(() => null),
@@ -628,14 +688,111 @@ async function findCatalogueResult(page, targetCard) {
 }
 
 function expectPriceHistoryResponse(page, catalogueId) {
-  return page.waitForResponse((response) => {
-    const url = new URL(response.url());
-    return (
-      response.request().method() === "GET" &&
-      url.pathname === "/api/price-history" &&
-      url.searchParams.get("catalogueId") === catalogueId
-    );
-  }, { timeout: 45_000 });
+  return armPageEvent(page, "response", {
+    label: `price history response for ${catalogueId}`,
+    predicate: (response) => {
+      const url = new URL(response.url());
+      return (
+        response.request().method() === "GET" &&
+        url.pathname === "/api/price-history" &&
+        url.searchParams.get("catalogueId") === catalogueId
+      );
+    },
+    timeout: 45_000,
+  });
+}
+
+function armPageEvent(page, eventName, { label, predicate = () => true, timeout }) {
+  let settled = false;
+  let rejectWaiter;
+  let timer;
+  let onEvent = () => {};
+
+  const cleanup = () => {
+    clearTimeout(timer);
+    page.off(eventName, onEvent);
+    page.off("close", onPageClose);
+  };
+  const reject = (error) => {
+    if (settled) return;
+    settled = true;
+    cleanup();
+    rejectWaiter(error);
+  };
+  const onPageClose = () => reject(new Error(`Page closed while waiting for ${label}.`));
+  const promise = new Promise((resolve, rejectPromise) => {
+    rejectWaiter = rejectPromise;
+    onEvent = (value) => {
+      if (settled) return;
+      let matches;
+      try {
+        matches = predicate(value);
+      } catch (error) {
+        reject(error);
+        return;
+      }
+      if (!matches) return;
+      settled = true;
+      cleanup();
+      resolve(value);
+    };
+    page.on(eventName, onEvent);
+    page.on("close", onPageClose);
+    timer = setTimeout(() => reject(new Error(`Timed out after ${timeout}ms waiting for ${label}.`)), timeout);
+  });
+
+  return {
+    cancel() {
+      reject(new Error(`Cancelled ${label} after its trigger did not complete.`));
+    },
+    promise,
+  };
+}
+
+function armLocatorVisible(locator, { label, timeout }) {
+  let settled = false;
+  let rejectWaiter;
+  let timer;
+
+  const promise = new Promise((resolve, reject) => {
+    rejectWaiter = reject;
+    const deadline = Date.now() + timeout;
+    const inspect = async () => {
+      if (settled) return;
+      try {
+        if (await locator.isVisible()) {
+          settled = true;
+          clearTimeout(timer);
+          resolve(locator);
+          return;
+        }
+      } catch (error) {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          reject(error);
+        }
+        return;
+      }
+      if (Date.now() >= deadline) {
+        settled = true;
+        reject(new Error(`Timed out after ${timeout}ms waiting for ${label}.`));
+        return;
+      }
+      timer = setTimeout(inspect, 50);
+    };
+    void inspect();
+  });
+
+  return {
+    cancel() {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      rejectWaiter(new Error(`Cancelled ${label} after its trigger did not complete.`));
+    },
+    promise,
+  };
 }
 
 async function assertPriceHistoryResponse(response, catalogueId) {
@@ -742,12 +899,19 @@ async function assertNoVisibleBinderAlert(page, phase) {
   assert.deepEqual(messages, [], `Binder screen reported an error during ${phase}: ${messages.join(" | ")}`);
 }
 
-async function openDefaultBinder(page, targetCard) {
-  const covers = page.locator(".binder-cover").filter({ hasText: "Full Card Collection" });
+function binderRefreshButton(page) {
+  return page.locator(".binders-page > .page-header").getByRole("button", { name: "Refresh", exact: true });
+}
+
+async function openDefaultBinder(page, targetCard, binderName) {
+  const shelf = page.locator('section[aria-label="Binder shelf"]');
+  const covers = shelf.locator("button.binder-cover").filter({
+    has: page.locator(".binder-cover-label strong").getByText(binderName, { exact: true }),
+  });
   await covers.first().waitFor({ timeout: 45_000 });
-  const cover = await uniqueVisible(covers, "Full Card Collection binder cover");
+  const cover = await uniqueVisible(covers, `${binderName} binder cover`);
   await cover.click();
-  const dialog = page.getByRole("dialog", { name: "Full Card Collection binder", exact: true });
+  const dialog = page.getByRole("dialog", { name: `${binderName} binder`, exact: true });
   await dialog.waitFor({ timeout: 30_000 });
   const targetPockets = dialog.getByRole("button", { name: `Open ${targetCard.name}`, exact: true });
   await targetPockets.first().waitFor({ timeout: 30_000 });

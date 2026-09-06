@@ -1,12 +1,16 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   assertBrowserQaTargetAllowed,
+  browserQaRuntimeAttestation,
   createBrowserQaIdentity,
+  filteredBrowserConsoleError,
   isBrowserQaFixtureIdentity,
   isLoopbackBrowserQaUrl,
   normalizeBrowserQaBaseUrl,
   parseBrowserQaBoolean,
+  runWithPrearmedWaiters,
 } from "../scripts/authenticated-browser-qa-policy.mjs";
 
 test("normalizes absolute HTTP base URLs without widening their target", () => {
@@ -55,6 +59,142 @@ test("non-loopback QA requires an explicit production opt-in", () => {
     assertBrowserQaTargetAllowed("https://mintbinder.example/", true),
     "https://mintbinder.example",
   );
+});
+
+test("remote QA requires authenticated attestation of an exact deployment commit", () => {
+  const commit = "A".repeat(40);
+  assert.deepEqual(
+    browserQaRuntimeAttestation({
+      baseUrl: "https://mintbinder.example",
+      expectedCommit: commit,
+      jobSecret: " job-secret ",
+    }),
+    { expectedCommit: commit.toLowerCase(), jobSecret: "job-secret" },
+  );
+  assert.throws(
+    () => browserQaRuntimeAttestation({ baseUrl: "https://mintbinder.example", jobSecret: "secret" }),
+    /AUTHENTICATED_QA_EXPECTED_COMMIT/,
+  );
+  assert.throws(
+    () => browserQaRuntimeAttestation({ baseUrl: "https://mintbinder.example", expectedCommit: "a".repeat(40) }),
+    /JOB_SECRET/,
+  );
+  assert.throws(
+    () => browserQaRuntimeAttestation({
+      baseUrl: "https://mintbinder.example",
+      expectedCommit: "main",
+      jobSecret: "secret",
+    }),
+    /40-character Git commit SHA/,
+  );
+});
+
+test("loopback QA permits no attestation and rejects a commit without its secret", () => {
+  assert.equal(
+    browserQaRuntimeAttestation({ baseUrl: "http://127.0.0.1:3000" }),
+    null,
+  );
+  assert.equal(
+    browserQaRuntimeAttestation({ baseUrl: "http://localhost:3000", jobSecret: "secret" }),
+    null,
+  );
+  assert.throws(
+    () => browserQaRuntimeAttestation({
+      baseUrl: "http://localhost:3000",
+      expectedCommit: "b".repeat(40),
+    }),
+    /JOB_SECRET/,
+  );
+});
+
+test("browser console diagnostics retain first-party and source-less errors only", () => {
+  const baseUrl = "https://mintbinder.example";
+  assert.deepEqual(
+    filteredBrowserConsoleError({
+      baseUrl,
+      locationUrl: "https://mintbinder.example/_next/static/chunks/app.js",
+      text: " App render failed ",
+      type: "error",
+    }),
+    {
+      message: "App render failed",
+      source: "https://mintbinder.example/_next/static/chunks/app.js",
+      type: "console:error",
+    },
+  );
+  assert.deepEqual(
+    filteredBrowserConsoleError({ baseUrl, locationUrl: "", text: "Unhandled client error", type: "error" }),
+    { message: "Unhandled client error", type: "console:error" },
+  );
+  assert.equal(
+    filteredBrowserConsoleError({
+      baseUrl,
+      locationUrl: "https://images.example/card.jpg",
+      text: "Failed to load resource",
+      type: "error",
+    }),
+    null,
+  );
+  assert.equal(
+    filteredBrowserConsoleError({ baseUrl, locationUrl: "", text: "FYI", type: "warning" }),
+    null,
+  );
+});
+
+test("pre-armed waiters are cancelled and settled when their trigger fails", async () => {
+  const cancellations = [];
+  const waiter = (name) => () => {
+    let rejectWaiter;
+    let settled = false;
+    const promise = new Promise((_, reject) => {
+      rejectWaiter = reject;
+    });
+    return {
+      cancel() {
+        if (settled) return;
+        settled = true;
+        cancellations.push(name);
+        rejectWaiter(new Error(`${name} cancelled`));
+      },
+      promise,
+    };
+  };
+
+  await assert.rejects(
+    runWithPrearmedWaiters([waiter("response"), waiter("download")], async () => {
+      throw new Error("button detached");
+    }),
+    /button detached/,
+  );
+  assert.deepEqual(cancellations, ["response", "download"]);
+});
+
+test("pre-armed waiters return every result after the trigger succeeds", async () => {
+  const completedWaiter = (value) => () => ({ cancel() {}, promise: Promise.resolve(value) });
+  assert.deepEqual(
+    await runWithPrearmedWaiters([completedWaiter("response"), completedWaiter("download")], () => "clicked"),
+    ["response", "download"],
+  );
+});
+
+test("the browser journey fails fast on server faults and safely exercises a 360px viewport", async () => {
+  const source = await readFile(new URL("../scripts/authenticated-browser-qa.mjs", import.meta.url), "utf8");
+
+  assert.match(source, /response\.status\(\) >= 500/);
+  assert.doesNotMatch(source, /response\.status\(\) >= 400/);
+  assert.match(source, /Promise\.race\(\[actionResult, diagnosticFailure\]\)/);
+  assert.match(source, /dialog\.dismiss\(\)/);
+  assert.doesNotMatch(source, /dialog\.accept\(\)/);
+  assert.match(source, /viewport: \{ width: 360, height: 800 \}/);
+});
+
+test("the browser journey authenticates health attestation and uses cancellable event waiters", async () => {
+  const source = await readFile(new URL("../scripts/authenticated-browser-qa.mjs", import.meta.url), "utf8");
+
+  assert.match(source, /authorization: `Bearer \$\{runtimeAttestation\.jobSecret\}`/);
+  assert.match(source, /health\.body\?\.build\?\.commit/);
+  assert.match(source, /runWithPrearmedWaiters/);
+  assert.doesNotMatch(source, /page\.waitFor(?:Event|Response)\(/);
 });
 
 test("boolean parsing is explicit and rejects truthy configuration typos", () => {

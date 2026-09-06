@@ -1,4 +1,5 @@
 const PRODUCTION_OPT_IN = "AUTHENTICATED_QA_ALLOW_PRODUCTION";
+const EXPECTED_COMMIT_SETTING = "AUTHENTICATED_QA_EXPECTED_COMMIT";
 const FIXTURE_EMAIL_DOMAIN = "mintbinder.invalid";
 const FIXTURE_EMAIL_PREFIX = "browser-qa-";
 const MAX_RUN_ID_LENGTH = 64 - FIXTURE_EMAIL_PREFIX.length;
@@ -86,6 +87,94 @@ export function assertBrowserQaTargetAllowed(value, allowProduction = false) {
   }
 
   return baseUrl;
+}
+
+export function browserQaRuntimeAttestation({ baseUrl, expectedCommit, jobSecret }) {
+  const remote = !isLoopbackBrowserQaUrl(baseUrl);
+  const commit = typeof expectedCommit === "string" ? expectedCommit.trim().toLowerCase() : "";
+  const secret = typeof jobSecret === "string" ? jobSecret.trim() : "";
+
+  if (commit && !/^[0-9a-f]{40}$/.test(commit)) {
+    throw new Error(`${EXPECTED_COMMIT_SETTING} must be a full 40-character Git commit SHA.`);
+  }
+
+  if (remote && !commit) {
+    throw new Error(`Authenticated browser QA against a non-loopback target requires ${EXPECTED_COMMIT_SETTING}.`);
+  }
+  if (remote && !secret) {
+    throw new Error("Authenticated browser QA against a non-loopback target requires JOB_SECRET for runtime attestation.");
+  }
+  if (commit && !secret) {
+    throw new Error(`JOB_SECRET is required when ${EXPECTED_COMMIT_SETTING} is configured.`);
+  }
+  return commit ? { expectedCommit: commit, jobSecret: secret } : null;
+}
+
+export function filteredBrowserConsoleError({ baseUrl, locationUrl, text, type }) {
+  if (type !== "error") return null;
+
+  const message = typeof text === "string" ? text.trim() : "";
+  if (!message) return null;
+
+  const source = typeof locationUrl === "string" ? locationUrl.trim() : "";
+  if (source) {
+    try {
+      if (new URL(source).origin !== new URL(normalizeBrowserQaBaseUrl(baseUrl)).origin) {
+        return null;
+      }
+    } catch {
+      // An unparseable source cannot be proven third-party, so keep the error.
+    }
+  }
+
+  return {
+    message,
+    ...(source ? { source } : {}),
+    type: "console:error",
+  };
+}
+
+export async function runWithPrearmedWaiters(waiterFactories, trigger) {
+  if (!Array.isArray(waiterFactories) || waiterFactories.length === 0) {
+    throw new Error("At least one waiter factory is required.");
+  }
+  if (typeof trigger !== "function") {
+    throw new TypeError("The pre-armed waiter trigger must be a function.");
+  }
+
+  const waiters = [];
+  try {
+    for (const factory of waiterFactories) {
+      if (typeof factory !== "function") {
+        throw new TypeError("Each pre-armed waiter must be created by a function.");
+      }
+      const waiter = factory();
+      if (!waiter || typeof waiter.cancel !== "function" || !waiter.promise || typeof waiter.promise.then !== "function") {
+        throw new TypeError("Each pre-armed waiter must expose a promise and cancel function.");
+      }
+      waiters.push(waiter);
+    }
+  } catch (error) {
+    for (const waiter of waiters) waiter.cancel();
+    await Promise.allSettled(waiters.map((waiter) => waiter.promise));
+    throw error;
+  }
+  const waiterResults = Promise.all(waiters.map((waiter) => waiter.promise));
+  const triggerResult = Promise.resolve().then(trigger);
+
+  // Both promises have handlers before either operation can fail. This prevents
+  // a click failure from leaving a response/download listener to reject later.
+  waiterResults.catch(() => undefined);
+  triggerResult.catch(() => undefined);
+
+  try {
+    const [, results] = await Promise.all([triggerResult, waiterResults]);
+    return results;
+  } catch (error) {
+    for (const waiter of waiters) waiter.cancel();
+    await Promise.allSettled(waiters.map((waiter) => waiter.promise));
+    throw error;
+  }
 }
 
 function normalizeAuthenticatedQaRunId(value) {

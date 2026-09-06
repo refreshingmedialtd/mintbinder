@@ -265,10 +265,11 @@ Run the production smoke from the development computer, not the memory-constrain
 ```powershell
 $env:AUTHENTICATED_QA_BASE_URL = "https://mintbinder.co.uk"
 $env:AUTHENTICATED_QA_ALLOW_PRODUCTION = "true"
+$env:AUTHENTICATED_QA_EXPECTED_COMMIT = (git rev-parse HEAD).Trim()
 npm run qa:authenticated-browser
 ```
 
-`DATABASE_URL` must address the database used by that deployment, and the browser target must already be running. A loopback target does not require the production opt-in. Set `AUTHENTICATED_QA_BROWSER_EXECUTABLE` only when Chrome is not in a standard location, and set `AUTHENTICATED_QA_HEADLESS=false` when watching a local run. Passwords and authenticated browser state are generated in memory and are never printed or written to the repository. Deployment identity is checked separately because the public health response intentionally omits private build metadata.
+`DATABASE_URL` and `JOB_SECRET` must address the database and authenticated health endpoint used by that deployment, and the browser target must already be running. A non-loopback run refuses to start without HTTPS, the explicit production opt-in, a full expected commit, and `JOB_SECRET`; its first check authenticates the detailed health response and proves that exact commit is serving before creating browser data. A loopback target does not require the production opt-in or runtime attestation. Set `AUTHENTICATED_QA_BROWSER_EXECUTABLE` only when Chrome is not in a standard location, and set `AUTHENTICATED_QA_HEADLESS=false` when watching a local run. Passwords, secrets, and authenticated browser state are never printed or written to the repository.
 
 The suite intentionally excludes real billing checkout/cancellation, email delivery, Operations jobs, and service-worker/offline behaviour. Exercise Square separately in sandbox with `npm run qa:square-activation`.
 
