@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { prisma } from "../db/prisma";
 import {
   buildSealedImageRepairPlan,
@@ -63,7 +64,10 @@ export async function repairMissingTcgcsvSealedImages({
     await prisma.$transaction(
       plan.map((item) =>
         prisma.sealedProduct.update({
-          data: { imageUrl: item.imageUrl },
+          data: {
+            imageUrl: item.imageUrl,
+            ...(item.metadata ? { metadata: item.metadata as Prisma.InputJsonValue } : {}),
+          },
           where: { id: item.id },
         }),
       ),

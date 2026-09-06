@@ -10,7 +10,9 @@ import {
 import {
   sealedImportOptionsFromEnv,
   syncTcgcsvSealedProducts,
+  upsertSealedProduct,
 } from "../scripts/tcgcsv-sealed-importer.mjs";
+import { sealedImageMetadataWithQuarantine } from "../src/lib/catalogue/sealed-image-quarantine.mjs";
 
 test("detects sealed products while excluding cards and code cards", () => {
   assert.equal(isSealedProduct({
@@ -111,6 +113,48 @@ test("selects the strongest usable TCGCSV sealed price", () => {
       usd: 12,
     },
   );
+});
+
+test("sealed TCGCSV upsert does not restore an exactly quarantined provider image", async () => {
+  const updates = [];
+  const metadata = sealedImageMetadataWithQuarantine({
+    checkedAt: "2026-09-07T10:00:00.000Z",
+    metadata: { existing: true },
+    status: 403,
+    url: "https://images.example/product_in_1000x1000.jpg",
+  });
+  const prisma = {
+    sealedProduct: {
+      findFirst: async () => ({
+        id: "existing-id",
+        imageUrl: null,
+        metadata,
+        providerIds: { tcgcsv: "100" },
+      }),
+      upsert: async (request) => {
+        updates.push(request);
+        return request.update;
+      },
+    },
+  };
+
+  await upsertSealedProduct({
+    group: { groupId: 3170, name: "SWSH12: Silver Tempest" },
+    prisma,
+    product: {
+      extendedData: [],
+      imageUrl: "https://images.example/product_200w.jpg",
+      modifiedOn: "2026-09-07T09:00:00.000Z",
+      name: "Silver Tempest Booster Box",
+      productId: 100,
+      url: "https://example.test/product/100",
+    },
+    set: { id: "set-1" },
+  });
+
+  assert.equal(updates[0].where.id, "existing-id");
+  assert.equal(updates[0].update.imageUrl, null);
+  assert.deepEqual(updates[0].update.metadata.imageQuarantine, metadata.imageQuarantine);
 });
 
 test("imports sealed products and GBP price snapshots from TCGCSV payloads", async () => {

@@ -1,3 +1,22 @@
+import {
+  importedTcgcsvSealedImageState,
+  isPermanentSealedImageFailureStatus,
+  sealedImageMetadataWithQuarantine,
+  sealedImageQuarantine,
+  sealedImageUrlIsQuarantined,
+  upgradedTcgcsvSealedImageUrl,
+} from "./sealed-image-quarantine.mjs";
+
+export {
+  importedTcgcsvSealedImageState,
+  isPermanentSealedImageFailureStatus,
+  sealedImageMetadataWithQuarantine,
+  sealedImageQuarantine,
+  sealedImageUrlIsQuarantined,
+  upgradedTcgcsvSealedImageUrl,
+};
+export type { SealedImageQuarantine } from "./sealed-image-quarantine.mjs";
+
 export type SealedImageRepairCandidate = {
   id: string;
   imageUrl?: string | null;
@@ -19,6 +38,7 @@ export type SealedImageRepairTarget = {
 
 export type SealedImageRepairPlanItem = SealedImageRepairTarget & {
   imageUrl: string;
+  metadata?: Record<string, unknown>;
 };
 
 export function sealedImageRepairTargets(products: SealedImageRepairCandidate[]): SealedImageRepairTarget[] {
@@ -44,6 +64,7 @@ export function buildSealedImageRepairPlan(
   products: TcgcsvProductImage[],
 ): SealedImageRepairPlanItem[] {
   const imageByProduct = new Map<string, string>();
+  const candidateById = new Map(candidates.map((candidate) => [candidate.id, candidate]));
 
   for (const product of products) {
     const groupId = stringValue(product.groupId);
@@ -59,33 +80,42 @@ export function buildSealedImageRepairPlan(
     .map((target) => {
       const imageUrl = imageByProduct.get(targetKey(target.groupId, target.productId));
 
-      return imageUrl ? { ...target, imageUrl } : null;
+      if (!imageUrl) {
+        return null;
+      }
+
+      const candidate = candidateById.get(target.id);
+      const imageState = importedTcgcsvSealedImageState(candidate?.metadata, imageUrl, candidate?.imageUrl);
+
+      if (imageState.imageUrl !== imageUrl) {
+        return null;
+      }
+
+      const metadata = sealedImageQuarantine(candidate?.metadata) ? imageState.metadata : undefined;
+
+      return metadata ? { ...target, imageUrl, metadata } : { ...target, imageUrl };
     })
     .filter((item): item is SealedImageRepairPlanItem => Boolean(item));
 }
 
-export function upgradedTcgcsvSealedImageUrl(value: unknown) {
-  const imageUrl = typeof value === "string" ? value.trim() : "";
-
-  return imageUrl ? imageUrl.replace("_200w.", "_in_1000x1000.") : undefined;
-}
-
 function tcgcsvGroupId(metadata: unknown) {
-  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
-    return undefined;
-  }
-
-  return stringValue((metadata as Record<string, unknown>).groupId);
+  return stringValue(objectValue(metadata)?.groupId);
 }
 
 function tcgcsvProductId(providerIds: unknown) {
-  if (!providerIds || typeof providerIds !== "object" || Array.isArray(providerIds)) {
+  const source = objectValue(providerIds);
+
+  if (!source) {
     return undefined;
   }
 
-  const source = providerIds as Record<string, unknown>;
-
   return stringValue(source.tcgcsv) ?? stringValue(source.tcgplayer);
+}
+
+function objectValue(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
 }
 
 function stringValue(value: unknown) {

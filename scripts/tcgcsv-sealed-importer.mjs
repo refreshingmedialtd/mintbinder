@@ -6,6 +6,7 @@ import {
 } from "@prisma/client";
 import { booleanSetting, positiveInteger } from "./catalogue-batch-options.mjs";
 import { fetchJsonWithRetry } from "./provider-fetch.mjs";
+import { importedTcgcsvSealedImageState } from "../src/lib/catalogue/sealed-image-quarantine.mjs";
 import {
   bestTcgcsvPrice,
   deterministicUuid,
@@ -14,7 +15,6 @@ import {
   matchTcgcsvGroupsToSets,
   sealedProductType,
   tcgcsvPokemonCategoryId,
-  upgradedImageUrl,
 } from "./tcgcsv-sealed-products.mjs";
 
 export function sealedImportOptionsFromEnv(env = process.env) {
@@ -336,11 +336,12 @@ async function updateCardSetMetadata(prisma, set, patch) {
   set.metadata = metadata;
 }
 
-async function upsertSealedProduct({ group, product, prisma, set }) {
+export async function upsertSealedProduct({ group, product, prisma, set }) {
   const id = deterministicUuid(`tcgcsv-sealed-product:${product.productId}`);
   const existing = await prisma.sealedProduct.findFirst({
     select: {
       id: true,
+      imageUrl: true,
       metadata: true,
       providerIds: true,
     },
@@ -357,6 +358,7 @@ async function upsertSealedProduct({ group, product, prisma, set }) {
     },
   });
   const sealedProductId = existing?.id ?? id;
+  const imageState = importedTcgcsvSealedImageState(existing?.metadata, product.imageUrl, existing?.imageUrl);
   const providerIds = {
     ...(isObject(existing?.providerIds) ? existing.providerIds : {}),
     tcgcsv: String(product.productId),
@@ -364,9 +366,9 @@ async function upsertSealedProduct({ group, product, prisma, set }) {
   };
   const data = {
     createdByUserId: null,
-    imageUrl: upgradedImageUrl(product.imageUrl),
+    imageUrl: imageState.imageUrl,
     metadata: {
-      ...(isObject(existing?.metadata) ? existing.metadata : {}),
+      ...imageState.metadata,
       groupId: group.groupId,
       groupName: group.name,
       provider: "tcgcsv",
