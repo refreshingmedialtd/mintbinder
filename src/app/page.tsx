@@ -1071,9 +1071,6 @@ export default function Home() {
         if (binderSyncControllerRef.current === syncController) {
           binderSyncControllerRef.current = null;
         }
-        if (!cancelled) {
-          setIsLoadingBinders(false);
-        }
       }
     }
 
@@ -1082,6 +1079,7 @@ export default function Home() {
     void syncTask.finally(() => {
       if (binderSyncTaskRef.current === syncTask) {
         binderSyncTaskRef.current = null;
+        setIsLoadingBinders(false);
       }
     });
     return () => {
@@ -1093,7 +1091,6 @@ export default function Home() {
       if (binderLoadKeyRef.current === loadKey) {
         binderLoadKeyRef.current = "";
       }
-      setIsLoadingBinders(false);
     };
   }, [activeCardLotSignature, binderRetryNonce, isLoadingData, showToast, status, viewer.email]);
 

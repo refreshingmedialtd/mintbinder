@@ -135,6 +135,20 @@ test("binder reads have a bounded loading state and render the local collection 
   assert.match(source, /const previousSyncTask = binderSyncTaskRef\.current/);
   assert.match(source, /async function loadAndMigrateBinders\(\) \{\s*setIsLoadingBinders\(true\);[\s\S]*?if \(previousSyncTask\)/);
   assert.match(source, /await previousSyncTask\.catch\(\(\) => undefined\)/);
+  const binderSyncEffect = source.slice(
+    source.indexOf("const previousSyncTask = binderSyncTaskRef.current"),
+    source.indexOf("const applyAppData = useCallback"),
+  );
+  const binderSyncCleanup = binderSyncEffect.slice(binderSyncEffect.indexOf("return () => {"));
+  assert.match(
+    binderSyncEffect,
+    /if \(binderSyncTaskRef\.current === syncTask\) \{\s*binderSyncTaskRef\.current = null;\s*setIsLoadingBinders\(false\);/,
+  );
+  assert.doesNotMatch(
+    binderSyncCleanup,
+    /setIsLoadingBinders\(false\)/,
+    "an obsolete sync cleanup must not unlock a queued replacement sync",
+  );
   assert.match(source, /\[activeCardLotSignature, binderRetryNonce, isLoadingData/);
   assert.doesNotMatch(source, /\[binderRetryNonce, catalogueById, collection, isLoadingData/);
   assert.match(source, /\$\{item\.id}:\$\{item\.quantity}/);
