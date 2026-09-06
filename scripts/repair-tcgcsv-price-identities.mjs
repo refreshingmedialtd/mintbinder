@@ -3,6 +3,9 @@ import { PrismaClient } from "@prisma/client";
 import { pathToFileURL } from "node:url";
 import { resolveTcgcsvVariantIdentities } from "./tcgcsv-card-pricing.mjs";
 
+const SERIALIZABLE_TRANSACTION_MAX_WAIT_MS = 10_000;
+const SERIALIZABLE_TRANSACTION_TIMEOUT_MS = 60_000;
+
 export function buildTcgcsvPriceIdentityRepairPlan(rows) {
   const byStream = new Map();
 
@@ -202,7 +205,11 @@ async function runSerializableRepair(prisma, operation) {
 
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
-      return await prisma.$transaction(operation, { isolationLevel: "Serializable" });
+      return await prisma.$transaction(operation, {
+        isolationLevel: "Serializable",
+        maxWait: SERIALIZABLE_TRANSACTION_MAX_WAIT_MS,
+        timeout: SERIALIZABLE_TRANSACTION_TIMEOUT_MS,
+      });
     } catch (error) {
       if (error?.code !== "P2034" || attempt === 3) {
         throw error;

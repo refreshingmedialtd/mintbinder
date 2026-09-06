@@ -168,7 +168,11 @@ test("explicit repair reports and gates active, archived, and wishlisted affecte
     runTcgcsvPriceIdentityRepair({ confirm: true, prisma }),
     /6 user variant reference\(s\).*1 active collection.*2 archived collection.*3 wishlist.*--allow-ambiguous-user-variants/s,
   );
-  assert.deepEqual(transactionOptions, { isolationLevel: "Serializable" });
+  assert.deepEqual(transactionOptions, {
+    isolationLevel: "Serializable",
+    maxWait: 10_000,
+    timeout: 60_000,
+  });
   assert.equal(updateCalls, 0);
 });
 
@@ -202,7 +206,11 @@ test("explicit repair mutates historical rows only after the comprehensive refer
   });
 
   assert.equal(result.snapshotsRelabelled, 2);
-  assert.deepEqual(transactionOptions, { isolationLevel: "Serializable" });
+  assert.deepEqual(transactionOptions, {
+    isolationLevel: "Serializable",
+    maxWait: 10_000,
+    timeout: 60_000,
+  });
   assert.equal(updates.length, 2);
   assert.deepEqual(updates.map(({ data, where }) => ({
     metadata: where.metadata,
@@ -225,7 +233,11 @@ test("explicit repair rolls every relabel back when a later operation fails", as
   const prisma = {
     $transaction: async (operation, options) => {
       transactionCalls += 1;
-      assert.deepEqual(options, { isolationLevel: "Serializable" });
+      assert.deepEqual(options, {
+        isolationLevel: "Serializable",
+        maxWait: 10_000,
+        timeout: 60_000,
+      });
       let stagedUpdates = 0;
       const transaction = {
         $queryRawUnsafe: async () => collapsedMasterBallRows(),
