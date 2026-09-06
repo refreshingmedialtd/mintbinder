@@ -6,7 +6,9 @@ import {
   browserQaRuntimeAttestation,
   createBrowserQaIdentity,
   filteredBrowserConsoleError,
+  firstPartyRequestFailure,
   isBrowserQaFixtureIdentity,
+  isExpectedBrowserRequestCancellation,
   isLoopbackBrowserQaUrl,
   normalizeBrowserQaBaseUrl,
   parseBrowserQaBoolean,
@@ -141,6 +143,47 @@ test("browser console diagnostics retain first-party and source-less errors only
   );
 });
 
+test("request-failure diagnostics retain first-party transport errors only", () => {
+  const baseUrl = "https://mintbinder.example";
+  assert.deepEqual(
+    firstPartyRequestFailure({
+      baseUrl,
+      errorText: " net::ERR_CONNECTION_RESET ",
+      method: "get",
+      resourceType: "fetch",
+      url: "https://mintbinder.example/api/app-data",
+    }),
+    {
+      error: "net::ERR_CONNECTION_RESET",
+      method: "GET",
+      resourceType: "fetch",
+      type: "requestfailed",
+      url: "https://mintbinder.example/api/app-data",
+    },
+  );
+  assert.equal(
+    firstPartyRequestFailure({
+      baseUrl,
+      errorText: "net::ERR_ABORTED",
+      method: "GET",
+      resourceType: "image",
+      url: "https://images.example/card.jpg",
+    }),
+    null,
+  );
+  assert.equal(
+    firstPartyRequestFailure({ baseUrl, url: "not a URL" }),
+    null,
+  );
+});
+
+test("only idempotent browser-cancelled requests are non-actionable transport diagnostics", () => {
+  assert.equal(isExpectedBrowserRequestCancellation({ error: "net::ERR_ABORTED", method: "GET" }), true);
+  assert.equal(isExpectedBrowserRequestCancellation({ error: "net::ERR_ABORTED", method: "HEAD" }), true);
+  assert.equal(isExpectedBrowserRequestCancellation({ error: "net::ERR_ABORTED", method: "POST" }), false);
+  assert.equal(isExpectedBrowserRequestCancellation({ error: "net::ERR_CONNECTION_RESET", method: "GET" }), false);
+});
+
 test("pre-armed waiters are cancelled and settled when their trigger fails", async () => {
   const cancellations = [];
   const waiter = (name) => () => {
@@ -181,6 +224,8 @@ test("the browser journey fails fast on server faults and safely exercises a 360
   const source = await readFile(new URL("../scripts/authenticated-browser-qa.mjs", import.meta.url), "utf8");
 
   assert.match(source, /response\.status\(\) >= 500/);
+  assert.match(source, /page\.on\("requestfailed"/);
+  assert.match(source, /firstPartyRequestFailures/);
   assert.doesNotMatch(source, /response\.status\(\) >= 400/);
   assert.match(source, /Promise\.race\(\[actionResult, diagnosticFailure\]\)/);
   assert.match(source, /dialog\.dismiss\(\)/);
@@ -195,6 +240,29 @@ test("the browser journey authenticates health attestation and uses cancellable 
   assert.match(source, /health\.body\?\.build\?\.commit/);
   assert.match(source, /runWithPrearmedWaiters/);
   assert.doesNotMatch(source, /page\.waitFor(?:Event|Response)\(/);
+});
+
+test("the browser journey adds independent card and sealed fixtures after one-row exports", async () => {
+  const source = await readFile(new URL("../scripts/authenticated-browser-qa.mjs", import.meta.url), "utf8");
+  const csvAt = source.indexOf('step("Download and validate the collection CSV"');
+  const archiveAt = source.indexOf('step("Download and inspect the secure account archive"');
+  const directAddAt = source.indexOf('step("Add a second card directly without Wishlist conversion"');
+  const sealedAddAt = source.indexOf('step("Add a priced sealed product and verify API persistence"');
+
+  assert.ok(csvAt >= 0 && archiveAt > csvAt);
+  assert.ok(directAddAt > archiveAt, "direct card mutation must not invalidate one-row export assertions");
+  assert.ok(sealedAddAt > directAddAt, "sealed mutation must remain independent of the direct card add");
+  assert.match(source, /visibility: CatalogueVisibility\.GLOBAL/);
+  assert.match(source, /condition, "Sealed"/);
+  assert.match(source, /variant, "Factory sealed"/);
+});
+
+test("the browser journey verifies a manual custom-binder move through the server", async () => {
+  const source = await readFile(new URL("../scripts/authenticated-browser-qa.mjs", import.meta.url), "utf8");
+
+  assert.match(source, /Place lifted card into slot 2/);
+  assert.match(source, /assertBinderItemAtSlot\(await serverBinderByName\(page, binderName\), collectionItemId, 1\)/);
+  assert.match(source, /The custom binder did not retain its intentionally blank first pocket/);
 });
 
 test("boolean parsing is explicit and rejects truthy configuration typos", () => {

@@ -134,6 +134,42 @@ export function filteredBrowserConsoleError({ baseUrl, locationUrl, text, type }
   };
 }
 
+export function firstPartyRequestFailure({
+  baseUrl,
+  errorText,
+  method,
+  resourceType,
+  url,
+}) {
+  let requestUrl;
+  try {
+    requestUrl = new URL(url);
+  } catch {
+    return null;
+  }
+
+  if (requestUrl.origin !== new URL(normalizeBrowserQaBaseUrl(baseUrl)).origin) {
+    return null;
+  }
+
+  return {
+    error: typeof errorText === "string" && errorText.trim()
+      ? errorText.trim()
+      : "Unknown transport failure",
+    method: typeof method === "string" && method.trim() ? method.trim().toUpperCase() : "UNKNOWN",
+    resourceType: typeof resourceType === "string" && resourceType.trim()
+      ? resourceType.trim()
+      : "unknown",
+    type: "requestfailed",
+    url: requestUrl.href,
+  };
+}
+
+export function isExpectedBrowserRequestCancellation(failure) {
+  return failure?.error === "net::ERR_ABORTED" &&
+    (failure?.method === "GET" || failure?.method === "HEAD");
+}
+
 export async function runWithPrearmedWaiters(waiterFactories, trigger) {
   if (!Array.isArray(waiterFactories) || waiterFactories.length === 0) {
     throw new Error("At least one waiter factory is required.");

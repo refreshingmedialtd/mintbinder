@@ -7,6 +7,7 @@ import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import {
+  CatalogueVisibility,
   NotificationDigestFrequency,
   PrismaClient,
   SubscriptionPlan,
@@ -19,7 +20,9 @@ import {
   browserQaRuntimeAttestation,
   createBrowserQaIdentity,
   filteredBrowserConsoleError,
+  firstPartyRequestFailure,
   isBrowserQaFixtureIdentity,
+  isExpectedBrowserRequestCancellation,
   normalizeBrowserQaBaseUrl,
   parseBrowserQaBoolean,
   runWithPrearmedWaiters,
@@ -59,10 +62,15 @@ const report = {
     cleanup: "not-needed",
   },
   card: null,
+  customBinder: null,
+  directCard: null,
+  sealedProduct: null,
   checks: [],
   diagnostics: {
     consoleErrors: [],
     firstPartyHttpErrors: [],
+    firstPartyRequestCancellations: [],
+    firstPartyRequestFailures: [],
     pageErrors: [],
     unexpectedDialogs: [],
   },
@@ -75,6 +83,8 @@ let context;
 let fixtureUserId;
 let collectionItemId;
 let defaultBinderId;
+let directCollectionItemId;
+let sealedCollectionItemId;
 let deletedThroughUi = false;
 let primaryError;
 
@@ -85,6 +95,24 @@ try {
     name: targetCard.name,
     number: targetCard.number,
     set: targetCard.cardSet.name,
+  };
+  const { directCard, sealedProduct } = await step(
+    "Select independent priced card and sealed fixtures",
+    async () => ({
+      directCard: await selectDirectAddCard(prisma, targetCard),
+      sealedProduct: await selectTargetSealedProduct(prisma),
+    }),
+  );
+  report.directCard = {
+    id: directCard.id,
+    name: directCard.name,
+    number: directCard.number,
+    set: directCard.cardSet.name,
+  };
+  report.sealedProduct = {
+    id: sealedProduct.id,
+    name: sealedProduct.name,
+    set: sealedProduct.cardSet.name,
   };
 
   const launch = await launchQaBrowser(settings);
@@ -242,7 +270,7 @@ try {
     await assertNoVisibleBinderAlert(page, "initial sync");
     const firstServerBinder = await assertServerBinderContains(page, collectionItemId);
     defaultBinderId = firstServerBinder.id;
-    await openDefaultBinder(page, targetCard, firstServerBinder.name);
+    await openBinderAndAssertCard(page, targetCard, firstServerBinder.name);
     await page.getByRole("button", { name: "Close binder viewer", exact: true }).click();
 
     await page.reload({ waitUntil: "domcontentloaded" });
@@ -251,7 +279,7 @@ try {
     await assertNoVisibleBinderAlert(page, "reload sync");
     const reloadedServerBinder = await assertServerBinderContains(page, collectionItemId);
     assert.equal(reloadedServerBinder.id, defaultBinderId, "Reload returned a different default binder.");
-    await openDefaultBinder(page, targetCard, reloadedServerBinder.name);
+    await openBinderAndAssertCard(page, targetCard, reloadedServerBinder.name);
     await page.getByRole("button", { name: "Close binder viewer", exact: true }).click();
   });
 
@@ -338,6 +366,153 @@ try {
     assert.deepEqual(forbidden, [], `Account archive exposed forbidden keys: ${forbidden.join(", ")}`);
   });
 
+  await step("Create, rearrange, and reload a custom Binder", async () => {
+    const binderName = `QA Binder ${runId}`;
+    await clickDesktopNav(page, "Binders");
+    await page.getByRole("heading", { name: "Binders", exact: true }).waitFor();
+    await binderRefreshButton(page).waitFor({ timeout: 45_000 });
+    await page.getByRole("button", { name: "New binder", exact: true }).click();
+
+    const builder = page.locator(".binder-builder-panel");
+    await builder.getByRole("heading", { name: "Create custom binder", exact: true }).waitFor();
+    await builder.getByLabel("Binder name", { exact: true }).fill(binderName);
+    await builder.getByRole("button", { name: `Add one copy of ${targetCard.name}`, exact: true }).click();
+
+    const [createResponse, initialLayoutResponse] = await runWithPrearmedWaiters([
+      () => expectFirstPartyResponse(page, {
+        label: "custom binder creation",
+        method: "POST",
+        pathname: "/api/binders",
+      }),
+      () => expectFirstPartyResponse(page, {
+        label: "initial custom binder layout",
+        method: "PUT",
+        pathnamePattern: /^\/api\/binders\/[0-9a-f-]+\/layout$/i,
+      }),
+    ], () => builder.getByRole("button", { name: "Create binder", exact: true }).click());
+    assert.equal(createResponse.status(), 201, `Custom binder creation returned ${createResponse.status()}.`);
+    assert.equal(initialLayoutResponse.status(), 200, `Initial custom binder layout returned ${initialLayoutResponse.status()}.`);
+    const initialLayoutBody = await initialLayoutResponse.json().catch(() => null);
+    const binderId = initialLayoutBody?.binder?.id;
+    assert.match(binderId ?? "", /^[0-9a-f-]{36}$/i, "Custom binder response did not identify a UUID.");
+    report.customBinder = { id: binderId, name: binderName };
+
+    const dialog = page.getByRole("dialog", { name: `${binderName} binder`, exact: true });
+    await dialog.waitFor({ timeout: 30_000 });
+    await binderRefreshButton(page).waitFor({ timeout: 45_000 });
+    assertBinderItemAtSlot(await serverBinderByName(page, binderName), collectionItemId, 0);
+
+    await dialog.getByRole("button", { name: "Arrange cards", exact: true }).click();
+    await dialog.getByRole("button", { name: `Move ${targetCard.name}`, exact: true }).click();
+    await dialog.getByRole("button", { name: "Place lifted card into slot 2", exact: true }).click();
+    await dialog.getByRole("status").filter({ hasText: "Unsaved layout changes" }).waitFor();
+
+    const [savedLayoutResponse, refreshedBindersResponse] = await runWithPrearmedWaiters([
+      () => expectFirstPartyResponse(page, {
+        label: "manual custom binder layout save",
+        method: "PUT",
+        pathname: `/api/binders/${binderId}/layout`,
+      }),
+      () => expectFirstPartyResponse(page, {
+        label: "binder refresh after manual layout save",
+        method: "GET",
+        pathname: "/api/binders",
+      }),
+    ], () => dialog.getByRole("button", { name: "Save layout", exact: true }).click());
+    assert.equal(savedLayoutResponse.status(), 200, `Manual binder layout save returned ${savedLayoutResponse.status()}.`);
+    assert.equal(refreshedBindersResponse.status(), 200, `Post-save binder refresh returned ${refreshedBindersResponse.status()}.`);
+    await dialog.getByRole("status").filter({ hasText: "Saved across devices" }).waitFor();
+    assertBinderItemAtSlot(await serverBinderByName(page, binderName), collectionItemId, 1);
+
+    await page.getByRole("button", { name: "Close binder viewer", exact: true }).click();
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.getByRole("heading", { name: "Binders", exact: true }).waitFor();
+    await binderRefreshButton(page).waitFor({ timeout: 45_000 });
+    assertBinderItemAtSlot(await serverBinderByName(page, binderName), collectionItemId, 1);
+    await openBinderAndAssertCard(page, targetCard, binderName);
+    const reloadedDialog = page.getByRole("dialog", { name: `${binderName} binder`, exact: true });
+    assert.equal(
+      await reloadedDialog.locator(".binder-page.primary .binder-pocket").nth(0).getAttribute("aria-label"),
+      "Empty binder sleeve 1",
+      "The custom binder did not retain its intentionally blank first pocket.",
+    );
+    assert.equal(
+      await reloadedDialog.locator(".binder-page.primary .binder-pocket").nth(1).getAttribute("aria-label"),
+      `Open ${targetCard.name}`,
+      "The custom binder did not retain the card in its second pocket.",
+    );
+    await page.getByRole("button", { name: "Close binder viewer", exact: true }).click();
+  });
+
+  await step("Add a second card directly without Wishlist conversion", async () => {
+    await clickDesktopNav(page, "Add");
+    await page.getByRole("heading", { name: "Add card", exact: true }).waitFor();
+    await page.locator(".add-type-tabs").getByRole("button", { name: "Cards", exact: true }).click();
+    await page.locator(".catalogue-controls").getByLabel("Set", { exact: true })
+      .selectOption(directCard.cardSet.name);
+    await page.getByPlaceholder("Search cards, sets, or collector numbers", { exact: true })
+      .fill(directCard.name);
+    const result = await findCatalogueResult(page, directCard);
+    assert.match((await result.locator(".item-value").innerText()).trim(), /^\u00a3\d/);
+    await assertLoadedImage(result.locator("img").first(), `${directCard.name} direct-add result`);
+    await result.locator(".catalogue-result-main").click();
+
+    const [createResponse] = await runWithPrearmedWaiters([
+      () => expectFirstPartyResponse(page, {
+        label: "direct card collection write",
+        method: "POST",
+        pathname: "/api/collection-items",
+      }),
+    ], () => page.getByRole("button", { name: "Save to collection", exact: true }).click());
+    assert.equal(createResponse.status(), 200, `Direct card add returned ${createResponse.status()}.`);
+    const createBody = await createResponse.json().catch(() => null);
+    assert.equal(createBody?.item?.catalogueId, directCard.id, "Direct card API response identified the wrong printing.");
+    await page.getByRole("heading", { name: directCard.name, exact: true }).waitFor();
+
+    const appData = await browserJson(page, new URL("/api/app-data", settings.baseUrl).href);
+    assert.equal(appData.status, 200, `Direct card verification returned ${appData.status}.`);
+    const matches = appData.body?.collection?.filter((item) => item?.catalogueId === directCard.id) ?? [];
+    assert.equal(matches.length, 1, `Expected one direct-add ${directCard.name} lot, found ${matches.length}.`);
+    assert.equal(appData.body?.wishlist?.some((item) => item?.catalogueId === directCard.id), false);
+    directCollectionItemId = matches[0]?.id;
+    assert.match(directCollectionItemId ?? "", /^[0-9a-f-]{36}$/i, "Direct-add collection item did not have a UUID.");
+  });
+
+  await step("Add a priced sealed product and verify API persistence", async () => {
+    await clickDesktopNav(page, "Add");
+    await page.getByRole("heading", { name: "Add card", exact: true }).waitFor();
+    await page.locator(".add-type-tabs").getByRole("button", { name: "Sealed", exact: true }).click();
+    await page.getByRole("heading", { name: "Add sealed product", exact: true }).waitFor();
+    await page.locator(".catalogue-controls").getByLabel("Set", { exact: true })
+      .selectOption(sealedProduct.cardSet.name);
+    await page.getByPlaceholder("Search sealed products or sets", { exact: true }).fill(sealedProduct.name);
+    const result = await findCatalogueResult(page, sealedProduct);
+    assert.match((await result.locator(".item-value").innerText()).trim(), /^\u00a3\d/);
+    await assertLoadedImage(result.locator("img").first(), `${sealedProduct.name} sealed result`);
+    await result.locator(".catalogue-result-main").click();
+
+    const [createResponse] = await runWithPrearmedWaiters([
+      () => expectFirstPartyResponse(page, {
+        label: "sealed product collection write",
+        method: "POST",
+        pathname: "/api/collection-items",
+      }),
+    ], () => page.getByRole("button", { name: "Save to collection", exact: true }).click());
+    assert.equal(createResponse.status(), 200, `Sealed product add returned ${createResponse.status()}.`);
+    const createBody = await createResponse.json().catch(() => null);
+    assert.equal(createBody?.item?.catalogueId, sealedProduct.id, "Sealed add API response identified the wrong product.");
+    await page.getByRole("heading", { name: sealedProduct.name, exact: true }).waitFor();
+
+    const appData = await browserJson(page, new URL("/api/app-data", settings.baseUrl).href);
+    assert.equal(appData.status, 200, `Sealed persistence verification returned ${appData.status}.`);
+    const matches = appData.body?.collection?.filter((item) => item?.catalogueId === sealedProduct.id) ?? [];
+    assert.equal(matches.length, 1, `Expected one owned ${sealedProduct.name} lot, found ${matches.length}.`);
+    assert.equal(matches[0]?.condition, "Sealed");
+    assert.equal(matches[0]?.variant, "Factory sealed");
+    sealedCollectionItemId = matches[0]?.id;
+    assert.match(sealedCollectionItemId ?? "", /^[0-9a-f-]{36}$/i, "Sealed collection item did not have a UUID.");
+  });
+
   await step("Verify the authenticated mobile navigation", async () => {
     const storageState = await context.storageState();
     const mobile = await browser.newContext({
@@ -395,6 +570,7 @@ try {
     assert.deepEqual(report.diagnostics.consoleErrors, []);
     assert.deepEqual(report.diagnostics.pageErrors, []);
     assert.deepEqual(report.diagnostics.firstPartyHttpErrors, []);
+    assert.deepEqual(report.diagnostics.firstPartyRequestFailures, []);
     assert.deepEqual(report.diagnostics.unexpectedDialogs, []);
   });
 } catch (error) {
@@ -568,6 +744,77 @@ async function selectTargetCard(client) {
   return fallback;
 }
 
+async function selectDirectAddCard(client, excludedCard) {
+  const priceWhere = {
+    gradedCompany: null,
+    priceMinor: { gt: 0 },
+    source: { notIn: RESTRICTED_PRICE_SOURCES },
+  };
+  const card = await client.cardPrinting.findFirst({
+    orderBy: [{ name: "asc" }, { number: "asc" }, { id: "asc" }],
+    where: {
+      id: { not: excludedCard.id },
+      imageSmallUrl: { not: null },
+      language: "en",
+      name: { not: excludedCard.name },
+      priceSnapshots: { some: priceWhere },
+    },
+    select: {
+      cardSet: { select: { id: true, name: true } },
+      id: true,
+      imageLargeUrl: true,
+      imageSmallUrl: true,
+      name: true,
+      number: true,
+      priceSnapshots: {
+        orderBy: [{ observedAt: "desc" }, { createdAt: "desc" }],
+        select: { observedAt: true, priceMinor: true, source: true, variantLabel: true },
+        take: 8,
+        where: priceWhere,
+      },
+    },
+  });
+  assert.ok(card, "No independent English card with a working image and customer-visible price was available.");
+  assert.ok(card.priceSnapshots.length, "Selected direct-add QA card had no usable price snapshots.");
+  return card;
+}
+
+async function selectTargetSealedProduct(client) {
+  const priceWhere = {
+    gradedCompany: null,
+    priceMinor: { gt: 0 },
+    source: { notIn: RESTRICTED_PRICE_SOURCES },
+  };
+  const product = await client.sealedProduct.findFirst({
+    orderBy: [{ name: "asc" }, { id: "asc" }],
+    where: {
+      imageUrl: { not: null },
+      relatedCardSetId: { not: null },
+      visibility: CatalogueVisibility.GLOBAL,
+      priceSnapshots: { some: priceWhere },
+    },
+    select: {
+      id: true,
+      imageUrl: true,
+      name: true,
+      priceSnapshots: {
+        orderBy: [{ observedAt: "desc" }, { createdAt: "desc" }],
+        select: { observedAt: true, priceMinor: true, source: true, variantLabel: true },
+        take: 8,
+        where: priceWhere,
+      },
+      relatedCardSet: { select: { id: true, name: true } },
+    },
+  });
+  assert.ok(product?.relatedCardSet, "No global sealed product with a set, working image, and visible price was available.");
+  assert.ok(product.priceSnapshots.length, "Selected sealed QA fixture had no usable price snapshots.");
+  return {
+    ...product,
+    cardSet: product.relatedCardSet,
+    number: "Sealed",
+  };
+}
+
 async function launchQaBrowser(options) {
   const candidates = [
     options.browserExecutable,
@@ -593,7 +840,9 @@ function createDiagnosticTracker(diagnostics) {
   return {
     record(category, value, failure) {
       diagnostics[category].push(value);
-      for (const subscriber of subscribers) subscriber(failure);
+      if (failure) {
+        for (const subscriber of subscribers) subscriber(failure);
+      }
     },
     subscribe(subscriber) {
       subscribers.add(subscriber);
@@ -622,6 +871,20 @@ function observePage(page, baseUrl, tracker) {
     });
     if (entry) tracker.record("consoleErrors", entry, entry);
   });
+  page.on("requestfailed", (request) => {
+    const entry = firstPartyRequestFailure({
+      baseUrl,
+      errorText: request.failure()?.errorText,
+      method: request.method(),
+      resourceType: request.resourceType(),
+      url: request.url(),
+    });
+    if (entry && isExpectedBrowserRequestCancellation(entry)) {
+      tracker.record("firstPartyRequestCancellations", entry);
+    } else if (entry) {
+      tracker.record("firstPartyRequestFailures", entry, entry);
+    }
+  });
   page.on("response", (response) => {
     const url = new URL(response.url());
     if (url.origin === firstPartyOrigin && response.status() >= 500) {
@@ -642,6 +905,7 @@ function diagnosticCounts(diagnostics) {
   return {
     consoleErrors: diagnostics.consoleErrors.length,
     firstPartyHttpErrors: diagnostics.firstPartyHttpErrors.length,
+    firstPartyRequestFailures: diagnostics.firstPartyRequestFailures.length,
     pageErrors: diagnostics.pageErrors.length,
     unexpectedDialogs: diagnostics.unexpectedDialogs.length,
   };
@@ -651,6 +915,7 @@ function newDiagnosticFailures(diagnostics, start) {
   return [
     ...diagnostics.consoleErrors.slice(start.consoleErrors),
     ...diagnostics.firstPartyHttpErrors.slice(start.firstPartyHttpErrors),
+    ...diagnostics.firstPartyRequestFailures.slice(start.firstPartyRequestFailures),
     ...diagnostics.pageErrors.slice(start.pageErrors).map((message) => ({ message, type: "pageerror" })),
     ...diagnostics.unexpectedDialogs.slice(start.unexpectedDialogs).map((dialog) => ({ ...dialog, type: `dialog:${dialog.type}` })),
   ];
@@ -667,24 +932,46 @@ async function browserJson(page, url, options = {}) {
   };
 }
 
-async function findCatalogueResult(page, targetCard) {
-  await page.locator(".catalogue-result-card").first().waitFor({ timeout: 45_000 });
-  const results = page.locator(".catalogue-result-card");
-  const count = await results.count();
-  for (let index = 0; index < count; index += 1) {
-    const result = results.nth(index);
-    const title = (await result.locator("h3").innerText()).trim();
-    const identityText = (await result.locator("p.muted").innerText()).trim();
-    const identityParts = identityText.split("|").map((part) => part.trim());
-    if (
-      title === targetCard.name &&
-      identityParts[0] === targetCard.cardSet.name &&
-      identityParts.at(-1) === targetCard.number
-    ) {
-      return result;
+async function findCatalogueResult(page, targetCard, timeoutMs = 45_000) {
+  const deadline = Date.now() + timeoutMs;
+  do {
+    const results = page.locator(".catalogue-result-card");
+    const count = await results.count();
+    for (let index = 0; index < count; index += 1) {
+      const result = results.nth(index);
+      const title = (await result.locator("h3").innerText()).trim();
+      const identityText = (await result.locator("p.muted").innerText()).trim();
+      const identityParts = identityText.split("|").map((part) => part.trim());
+      if (
+        title === targetCard.name &&
+        identityParts[0] === targetCard.cardSet.name &&
+        identityParts.at(-1) === targetCard.number
+      ) {
+        return result;
+      }
     }
-  }
+    await page.waitForTimeout(100);
+  } while (Date.now() < deadline);
   throw new Error(`Could not find ${targetCard.name} (${targetCard.cardSet.name} ${targetCard.number}) in Add-card results.`);
+}
+
+function expectFirstPartyResponse(page, {
+  label,
+  method,
+  pathname,
+  pathnamePattern,
+  timeout = 45_000,
+}) {
+  return armPageEvent(page, "response", {
+    label,
+    predicate: (response) => {
+      const url = new URL(response.url());
+      return url.origin === new URL(settings.baseUrl).origin &&
+        response.request().method() === method &&
+        (pathname ? url.pathname === pathname : pathnamePattern?.test(url.pathname));
+    },
+    timeout,
+  });
 }
 
 function expectPriceHistoryResponse(page, catalogueId) {
@@ -903,7 +1190,7 @@ function binderRefreshButton(page) {
   return page.locator(".binders-page > .page-header").getByRole("button", { name: "Refresh", exact: true });
 }
 
-async function openDefaultBinder(page, targetCard, binderName) {
+async function openBinderAndAssertCard(page, targetCard, binderName) {
   const shelf = page.locator('section[aria-label="Binder shelf"]');
   const covers = shelf.locator("button.binder-cover").filter({
     has: page.locator(".binder-cover-label strong").getByText(binderName, { exact: true }),
@@ -918,6 +1205,32 @@ async function openDefaultBinder(page, targetCard, binderName) {
   await uniqueVisible(targetPockets, `${targetCard.name} binder pocket`);
   assert.match(await dialog.innerText(), /Filled pockets\s+1/);
   assert.match(await dialog.innerText(), /Cards\s+1/);
+}
+
+async function serverBinderByName(page, binderName) {
+  const response = await browserJson(page, new URL("/api/binders", settings.baseUrl).href);
+  assert.equal(response.status, 200, `Binder API returned ${response.status}.`);
+  const matches = Array.isArray(response.body?.binders)
+    ? response.body.binders.filter((binder) => binder?.name === binderName)
+    : [];
+  assert.equal(matches.length, 1, `Expected one server binder named ${binderName}, found ${matches.length}.`);
+  return matches[0];
+}
+
+function assertBinderItemAtSlot(binder, expectedCollectionItemId, expectedAbsoluteSlot) {
+  const matches = (Array.isArray(binder?.pages) ? binder.pages : []).flatMap((pageData) =>
+    (Array.isArray(pageData?.slots) ? pageData.slots : [])
+      .filter((slot) => slot?.collectionItemId === expectedCollectionItemId)
+      .map((slot) => ({
+        absoluteSlot: Number(pageData.position) * 9 + Number(slot.position),
+        copyIndex: slot.copyIndex,
+      })),
+  );
+  assert.deepEqual(
+    matches,
+    [{ absoluteSlot: expectedAbsoluteSlot, copyIndex: 1 }],
+    `Binder ${binder?.name ?? "unknown"} did not persist copy 1 at absolute slot ${expectedAbsoluteSlot}.`,
+  );
 }
 
 async function downloadText(download) {
