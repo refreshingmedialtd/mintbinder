@@ -448,8 +448,7 @@ try {
     await clickDesktopNav(page, "Add");
     await page.getByRole("heading", { name: "Add card", exact: true }).waitFor();
     await page.locator(".add-type-tabs").getByRole("button", { name: "Cards", exact: true }).click();
-    await page.locator(".catalogue-controls").getByLabel("Set", { exact: true })
-      .selectOption(directCard.cardSet.name);
+    await (await addCatalogueSetFilter(page)).selectOption(directCard.cardSet.name);
     await page.getByPlaceholder("Search cards, sets, or collector numbers", { exact: true })
       .fill(directCard.name);
     const result = await findCatalogueResult(page, directCard);
@@ -483,8 +482,7 @@ try {
     await page.getByRole("heading", { name: "Add card", exact: true }).waitFor();
     await page.locator(".add-type-tabs").getByRole("button", { name: "Sealed", exact: true }).click();
     await page.getByRole("heading", { name: "Add sealed product", exact: true }).waitFor();
-    await page.locator(".catalogue-controls").getByLabel("Set", { exact: true })
-      .selectOption(sealedProduct.cardSet.name);
+    await (await addCatalogueSetFilter(page)).selectOption(sealedProduct.cardSet.name);
     await page.getByPlaceholder("Search sealed products or sets", { exact: true }).fill(sealedProduct.name);
     const result = await findCatalogueResult(page, sealedProduct);
     assert.match((await result.locator(".item-value").innerText()).trim(), /^\u00a3\d/);
@@ -1129,6 +1127,15 @@ async function waitForRemoteHistory(panel) {
 async function clickDesktopNav(page, name) {
   const nav = page.locator("aside.sidebar");
   await nav.getByRole("button", { name, exact: name !== "Alerts" }).click();
+}
+
+async function addCatalogueSetFilter(page) {
+  const setFilters = page
+    .locator(".catalogue-controls > label.sort-control")
+    .filter({ hasText: /^\s*Set\b/ })
+    .locator("select");
+  await setFilters.first().waitFor({ timeout: 30_000 });
+  return uniqueVisible(setFilters, "Add catalogue set filter");
 }
 
 function settingsPanel(page, heading) {

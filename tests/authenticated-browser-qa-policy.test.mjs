@@ -252,6 +252,8 @@ test("the browser journey adds independent card and sealed fixtures after one-ro
   assert.ok(csvAt >= 0 && archiveAt > csvAt);
   assert.ok(directAddAt > archiveAt, "direct card mutation must not invalidate one-row export assertions");
   assert.ok(sealedAddAt > directAddAt, "sealed mutation must remain independent of the direct card add");
+  assert.match(source, /addCatalogueSetFilter\(page\)/);
+  assert.doesNotMatch(source, /getByLabel\("Set", \{ exact: true \}\)/);
   assert.match(source, /visibility: CatalogueVisibility\.GLOBAL/);
   assert.match(source, /condition, "Sealed"/);
   assert.match(source, /variant, "Factory sealed"/);
