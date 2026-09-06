@@ -6,16 +6,80 @@ import {
   exhaustedPokemonTcgRequestError,
   isRetryablePokemonTcgStatus,
   isSkippablePokemonTcgSetPricingError,
+  pokemonTcgApiAttemptTimeoutMs,
+  pokemonTcgApiRetryAttempts,
+  pokemonTcgApiRetryWaitMs,
   PokemonTcgApiRequestError,
   pokemonTcgApiTimeoutMs,
+  pokemonTcgMaxRetryAttempts,
+  pokemonTcgMaxRequestBudgetMs,
   pokemonTcgMaxRetryWaitMs,
+  pokemonTcgMaxTimeoutMs,
+  pokemonTcgRetryTimeoutMs,
+  pokemonTcgSetRetryAfter,
+  pokemonTcgSetRetryBaseMs,
+  pokemonTcgSetRetryMaxMs,
 } from "../src/lib/pricing/pokemon-tcg-request-policy.ts";
 
-test("Pokemon TCG requests allow observed production response latency", () => {
-  assert.equal(pokemonTcgApiTimeoutMs({}), 15_000);
-  assert.equal(pokemonTcgApiTimeoutMs({ POKEMON_TCG_API_TIMEOUT_MS: "22000" }), 22_000);
-  assert.equal(pokemonTcgApiTimeoutMs({ POKEMON_TCG_API_TIMEOUT_MS: "invalid" }), 15_000);
-  assert.equal(3 * pokemonTcgApiTimeoutMs({}) + 2 * pokemonTcgMaxRetryWaitMs, 55_000);
+test("Pokemon TCG requests leave enough gateway time to persist failures and cooldowns", () => {
+  assert.equal(pokemonTcgApiTimeoutMs({}), 22_000);
+  assert.equal(pokemonTcgApiTimeoutMs({ POKEMON_TCG_API_TIMEOUT_MS: "22000" }), pokemonTcgMaxTimeoutMs);
+  assert.equal(pokemonTcgApiTimeoutMs({ POKEMON_TCG_API_TIMEOUT_MS: "invalid" }), 22_000);
+  assert.equal(pokemonTcgApiAttemptTimeoutMs(1, { POKEMON_TCG_API_TIMEOUT_MS: "22000" }), 22_000);
+  assert.equal(
+    pokemonTcgApiAttemptTimeoutMs(2, { POKEMON_TCG_API_TIMEOUT_MS: "22000" }),
+    pokemonTcgRetryTimeoutMs,
+  );
+  assert.equal(pokemonTcgApiAttemptTimeoutMs(2, { POKEMON_TCG_API_TIMEOUT_MS: "1500" }), 1_500);
+  assert.equal(pokemonTcgApiRetryAttempts({}), 2);
+  assert.equal(
+    pokemonTcgApiRetryAttempts({ POKEMON_TCG_API_RETRY_ATTEMPTS: "99" }),
+    pokemonTcgMaxRetryAttempts,
+  );
+  assert.equal(pokemonTcgApiRetryWaitMs({ POKEMON_TCG_API_RETRY_WAIT_MS: "99999" }), 2_000);
+  assert.equal(
+    pokemonTcgMaxTimeoutMs +
+      (pokemonTcgMaxRetryAttempts - 1) * pokemonTcgRetryTimeoutMs +
+      (pokemonTcgMaxRetryAttempts - 1) * pokemonTcgMaxRetryWaitMs,
+    pokemonTcgMaxRequestBudgetMs,
+  );
+  assert.equal(pokemonTcgMaxRequestBudgetMs, 26_000);
+  assert.ok(pokemonTcgMaxRequestBudgetMs < 30_000);
+});
+
+test("set rotation applies bounded exponential cooldowns after exhausted transient requests", () => {
+  const attemptedAt = "2026-09-06T12:00:00.000Z";
+
+  assert.equal(
+    pokemonTcgSetRetryAfter({ attemptedAt, consecutiveFailures: 1, status: 500 }),
+    "2026-09-06T12:30:00.000Z",
+  );
+  assert.equal(
+    pokemonTcgSetRetryAfter({ attemptedAt, consecutiveFailures: 2, status: 0 }),
+    "2026-09-06T13:00:00.000Z",
+  );
+  assert.equal(
+    pokemonTcgSetRetryAfter({ attemptedAt, consecutiveFailures: 99, status: 503 }),
+    new Date(Date.parse(attemptedAt) + pokemonTcgSetRetryMaxMs).toISOString(),
+  );
+  assert.equal(pokemonTcgSetRetryBaseMs, 30 * 60 * 1_000);
+  assert.equal(
+    pokemonTcgSetRetryAfter({
+      attemptedAt,
+      consecutiveFailures: 1,
+      retryAfterMs: 2 * 60 * 60 * 1_000,
+      status: 429,
+    }),
+    "2026-09-06T14:00:00.000Z",
+  );
+  assert.equal(
+    pokemonTcgSetRetryAfter({ attemptedAt, consecutiveFailures: 1, status: 404 }),
+    "2026-09-13T12:00:00.000Z",
+  );
+  assert.equal(
+    pokemonTcgSetRetryAfter({ attemptedAt, consecutiveFailures: 1, status: 401 }),
+    null,
+  );
 });
 
 test("exhausted transport retries report the total attempts and deepest cause", () => {

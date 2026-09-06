@@ -62,6 +62,7 @@
     "ops:ensure-admin": "node scripts/ensure-production-admin.mjs",
     "ops:repair-stale-jobs": "node scripts/repair-stale-job-runs.mjs",
     "ops:repair-tcgcsv-price-identities": "node scripts/repair-tcgcsv-price-identities.mjs",
+    "ops:quarantine-cardtrader-outliers": "node scripts/quarantine-cardtrader-sealed-outliers.mjs",
     "ops:repair-pokemon-provider-timestamps": "node scripts/repair-pokemon-provider-timestamps.mjs",
     "ops:price-snapshot-retention": "node scripts/price-snapshot-retention.mjs",
     "ops:operational-retention": "node scripts/operational-data-retention.mjs",

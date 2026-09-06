@@ -29,6 +29,8 @@ export type ResolvedPokemonPricingRates = {
 type ResolveExchangeRatesOptions = {
   env?: Record<string, string | undefined>;
   fetchImpl?: typeof fetch;
+  retryAttempts?: number;
+  timeoutMs?: number;
 };
 
 const defaultExchangeRateEndpoint = "https://api.frankfurter.app/latest";
@@ -36,6 +38,8 @@ const defaultExchangeRateEndpoint = "https://api.frankfurter.app/latest";
 export async function resolvePokemonPricingRates({
   env = process.env,
   fetchImpl = fetch,
+  retryAttempts,
+  timeoutMs,
 }: ResolveExchangeRatesOptions = {}): Promise<ResolvedPokemonPricingRates> {
   const rates = await resolveGbpRates({
     env,
@@ -46,6 +50,8 @@ export async function resolvePokemonPricingRates({
     fetchImpl,
     optionalCurrencies: ["EUR"],
     requiredCurrencies: ["USD"],
+    retryAttempts,
+    timeoutMs,
   });
   const usd = rates.USD;
 
@@ -69,6 +75,8 @@ export async function resolveGbpRates({
   fetchImpl = fetch,
   optionalCurrencies = [],
   requiredCurrencies,
+  retryAttempts,
+  timeoutMs,
 }: ResolveExchangeRatesOptions & {
   fallbackEnvKeys: Record<CurrencyCode, string>;
   optionalCurrencies?: CurrencyCode[];
@@ -89,7 +97,14 @@ export async function resolveGbpRates({
   }
 
   try {
-    const liveRates = await frankfurterGbpRates({ currencies, env, fetchImpl, observedAt });
+    const liveRates = await frankfurterGbpRates({
+      currencies,
+      env,
+      fetchImpl,
+      observedAt,
+      retryAttempts,
+      timeoutMs,
+    });
     const mergedRates = { ...manualRates, ...liveRates };
 
     assertRequiredRates({ rates: mergedRates, requiredCurrencies });
@@ -115,11 +130,15 @@ async function frankfurterGbpRates({
   env,
   fetchImpl,
   observedAt,
+  retryAttempts,
+  timeoutMs,
 }: {
   currencies: CurrencyCode[];
   env: Record<string, string | undefined>;
   fetchImpl: typeof fetch;
   observedAt: string;
+  retryAttempts?: number;
+  timeoutMs?: number;
 }) {
   const endpoint = setting(env.EXCHANGE_RATES_API_URL) || defaultExchangeRateEndpoint;
   const url = new URL(endpoint);
@@ -135,8 +154,8 @@ async function frankfurterGbpRates({
     fetchImpl,
     maxResponseBytes: 1_000_000,
     provider: "Frankfurter exchange rates",
-    retryAttempts: 1,
-    timeoutMs: boundedTimeout(env.EXCHANGE_RATES_TIMEOUT_MS, 10_000),
+    retryAttempts: boundedRetryAttempts(retryAttempts, 1),
+    timeoutMs: boundedTimeout(timeoutMs ?? env.EXCHANGE_RATES_TIMEOUT_MS, 10_000),
   });
   const data = (await response.json().catch(() => ({}))) as {
     date?: unknown;
@@ -263,5 +282,13 @@ function boundedTimeout(value: unknown, fallback: number) {
   const milliseconds = Number(value);
   return Number.isFinite(milliseconds)
     ? Math.max(100, Math.min(30_000, Math.floor(milliseconds)))
+    : fallback;
+}
+
+function boundedRetryAttempts(value: unknown, fallback: number) {
+  const attempts = Number(value);
+
+  return Number.isFinite(attempts)
+    ? Math.max(0, Math.min(4, Math.floor(attempts)))
     : fallback;
 }

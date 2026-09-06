@@ -10,7 +10,8 @@ import {
   type PricingBySeriesGap,
   type SealedPricingByProductTypeGap,
 } from "@/lib/jobs/catalogue-status-summary";
-import { priceChartingLicenceConfirmed } from "@/lib/pricing/provider-permissions.mjs";
+import { restrictedCustomerPriceSources } from "@/lib/pricing/provider-permissions.mjs";
+import { runSerialTasks } from "@/lib/db/serial-tasks";
 
 type CountRow = {
   count: number;
@@ -61,11 +62,11 @@ type SealedPricingByProductTypeRow = {
 };
 
 export async function catalogueStatus() {
-  const [counts, catalogueRuns, pricingRuns, sealedPricingRuns] = await Promise.all([
-    catalogueCounts(),
-    recentJobRuns({ limit: 25, type: "catalogue_refresh" }),
-    recentJobRuns({ limit: 25, type: "pricing_refresh" }),
-    recentJobRuns({ limit: 25, type: "sealed_pricing_refresh" }),
+  const [counts, catalogueRuns, pricingRuns, sealedPricingRuns] = await runSerialTasks([
+    () => catalogueCounts(),
+    () => recentJobRuns({ limit: 25, type: "catalogue_refresh" }),
+    () => recentJobRuns({ limit: 25, type: "pricing_refresh" }),
+    () => recentJobRuns({ limit: 25, type: "sealed_pricing_refresh" }),
   ]);
   const latestCatalogueRun = latestUsefulCatalogueRun(catalogueRuns, "");
   const latestPricingRun = latestSucceeded(pricingRuns);
@@ -85,9 +86,9 @@ export async function catalogueStatus() {
 }
 
 async function catalogueCounts() {
-  const customerPriceSourceFilter = priceChartingLicenceConfirmed()
-    ? Prisma.empty
-    : Prisma.sql`AND ps.source NOT IN ('pricecharting-graded-card', 'pricecharting-sealed')`;
+  const customerPriceSourceFilter = Prisma.sql`AND ps.source NOT IN (${Prisma.join(
+    restrictedCustomerPriceSources(process.env).map((source) => Prisma.sql`${source}`),
+  )})`;
   const [
     cardRows,
     duplicateRows,
@@ -101,13 +102,13 @@ async function catalogueCounts() {
     priceSnapshotCount,
     sealedProductCount,
     setCount,
-  ] = await Promise.all([
-    prisma.$queryRaw<CountRow[]>`
+  ] = await runSerialTasks([
+    () => prisma.$queryRaw<CountRow[]>`
       SELECT COUNT(*)::int AS count
       FROM card_printings
       WHERE provider_ids ? 'pokemon_tcg_api'
     `,
-    prisma.$queryRaw<CountRow[]>`
+    () => prisma.$queryRaw<CountRow[]>`
       SELECT COUNT(*)::int AS count
       FROM (
         SELECT provider_ids->>'pokemon_tcg_api' AS provider_id
@@ -117,7 +118,7 @@ async function catalogueCounts() {
         HAVING COUNT(*) > 1
       ) duplicates
     `,
-    prisma.$queryRaw<MediaCoverageRow[]>`
+    () => prisma.$queryRaw<MediaCoverageRow[]>`
       SELECT
         (
           SELECT COUNT(*)::int
@@ -156,7 +157,7 @@ async function catalogueCounts() {
             AND NULLIF(BTRIM(COALESCE(image_url, '')), '') IS NOT NULL
         ) AS "sealedImageCount"
     `,
-    prisma.$queryRaw<PricingCoverageRow[]>`
+    () => prisma.$queryRaw<PricingCoverageRow[]>`
       SELECT COUNT(DISTINCT ps.card_printing_id)::int AS "pricedCardCount"
       FROM price_snapshots ps
       JOIN card_printings cp ON cp.id = ps.card_printing_id
@@ -167,7 +168,7 @@ async function catalogueCounts() {
         AND cp.language = 'en'
         ${customerPriceSourceFilter}
     `,
-    prisma.$queryRaw<PricingByLanguageRow[]>`
+    () => prisma.$queryRaw<PricingByLanguageRow[]>`
       SELECT
         cp.language,
         cp.region,
@@ -216,7 +217,7 @@ async function catalogueCounts() {
         cp.language,
         cp.region
     `,
-    prisma.$queryRaw<PricingBySeriesRow[]>`
+    () => prisma.$queryRaw<PricingBySeriesRow[]>`
       SELECT
         COALESCE(cs.series, 'Other') AS series,
         COUNT(DISTINCT cp.id)::int AS "cardCount",
@@ -233,7 +234,7 @@ async function catalogueCounts() {
       GROUP BY COALESCE(cs.series, 'Other')
       ORDER BY (COUNT(DISTINCT cp.id) - COUNT(DISTINCT ps.card_printing_id)) DESC, COALESCE(cs.series, 'Other')
     `,
-    prisma.$queryRaw<PricingBySourceRow[]>`
+    () => prisma.$queryRaw<PricingBySourceRow[]>`
       SELECT
         source,
         item_type AS "itemType",
@@ -243,7 +244,7 @@ async function catalogueCounts() {
       GROUP BY source, item_type
       ORDER BY "priceSnapshotCount" DESC, source
     `,
-    prisma.$queryRaw<SealedPricingByProductTypeRow[]>`
+    () => prisma.$queryRaw<SealedPricingByProductTypeRow[]>`
       SELECT
         sp.product_type AS "productType",
         COUNT(DISTINCT sp.id)::int AS "sealedProductCount",
@@ -259,7 +260,7 @@ async function catalogueCounts() {
       GROUP BY sp.product_type
       ORDER BY (COUNT(DISTINCT sp.id) - COUNT(DISTINCT ps.sealed_product_id)) DESC, sp.product_type
     `,
-    prisma.$queryRaw<SealedPricingCoverageRow[]>`
+    () => prisma.$queryRaw<SealedPricingCoverageRow[]>`
       SELECT
         COUNT(DISTINCT sealed_product_id)::int AS "pricedSealedProductCount",
         COUNT(id)::int AS "sealedPriceSnapshotCount"
@@ -271,9 +272,9 @@ async function catalogueCounts() {
         AND sp.visibility = 'global'::catalogue_visibility
         ${customerPriceSourceFilter}
     `,
-    prisma.priceSnapshot.count(),
-    prisma.sealedProduct.count({ where: { visibility: "GLOBAL" } }),
-    prisma.cardSet.count(),
+    () => prisma.priceSnapshot.count(),
+    () => prisma.sealedProduct.count({ where: { visibility: "GLOBAL" } }),
+    () => prisma.cardSet.count(),
   ]);
 
   return {

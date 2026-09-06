@@ -1,7 +1,8 @@
 import "dotenv/config";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { pathToFileURL } from "node:url";
-import { priceChartingLicenceConfirmed } from "../src/lib/pricing/provider-permissions.mjs";
+import { restrictedCustomerPriceSources } from "../src/lib/pricing/provider-permissions.mjs";
+import { runSerialTasks } from "./serial-tasks.mjs";
 
 const defaultAdminEmail = process.env.ADMIN_QA_EMAIL?.trim() || "liam@refreshing.media";
 const requiredEnv = [
@@ -48,8 +49,8 @@ export async function runAdminQaSmoke({
       recentFailedJobRunReport,
       latestJobRun,
       latestJobRunsByType,
-    ] = await Promise.all([
-      prisma.user.findUnique({
+    ] = await runSerialTasks([
+      () => prisma.user.findUnique({
         where: { email: adminEmail },
         include: {
           _count: {
@@ -67,15 +68,15 @@ export async function runAdminQaSmoke({
           },
         },
       }),
-      catalogueHealthReport(prisma),
-      databaseCounts(prisma),
-      duplicateProviderGroupCount(prisma),
-      recentFailedJobRuns(prisma, now),
-      prisma.jobRun.findFirst({
+      () => catalogueHealthReport(prisma),
+      () => databaseCounts(prisma),
+      () => duplicateProviderGroupCount(prisma),
+      () => recentFailedJobRuns(prisma, now),
+      () => prisma.jobRun.findFirst({
         orderBy: { startedAt: "desc" },
         select: jobRunSelect(),
       }),
-      latestJobRuns(prisma),
+      () => latestJobRuns(prisma),
     ]);
     const failures = [
       ...env.filter((entry) => !entry.present).map((entry) => `${entry.key} is not configured.`),
@@ -287,20 +288,20 @@ async function databaseCounts(prisma) {
     subscriptions,
     users,
     wishlistItems,
-  ] = await Promise.all([
-    prisma.user.count({ where: { role: "ADMIN" } }),
-    prisma.cardPrinting.count(),
-    prisma.cardSet.count(),
-    prisma.collectionEvent.count(),
-    prisma.collectionItem.count(),
-    prisma.jobRun.count(),
-    prisma.notificationPreference.count(),
-    prisma.priceSnapshot.count(),
-    prisma.sealedProduct.count({ where: { visibility: "GLOBAL" } }),
-    prisma.storageLocation.count(),
-    prisma.subscription.count(),
-    prisma.user.count(),
-    prisma.wishlistItem.count(),
+  ] = await runSerialTasks([
+    () => prisma.user.count({ where: { role: "ADMIN" } }),
+    () => prisma.cardPrinting.count(),
+    () => prisma.cardSet.count(),
+    () => prisma.collectionEvent.count(),
+    () => prisma.collectionItem.count(),
+    () => prisma.jobRun.count(),
+    () => prisma.notificationPreference.count(),
+    () => prisma.priceSnapshot.count(),
+    () => prisma.sealedProduct.count({ where: { visibility: "GLOBAL" } }),
+    () => prisma.storageLocation.count(),
+    () => prisma.subscription.count(),
+    () => prisma.user.count(),
+    () => prisma.wishlistItem.count(),
   ]);
 
   return {
@@ -321,9 +322,9 @@ async function databaseCounts(prisma) {
 }
 
 async function catalogueHealthReport(prisma) {
-  const customerPriceSourceFilter = priceChartingLicenceConfirmed()
-    ? Prisma.empty
-    : Prisma.sql`AND snapshot.source NOT IN ('pricecharting-graded-card', 'pricecharting-sealed')`;
+  const customerPriceSourceFilter = Prisma.sql`AND snapshot.source NOT IN (${Prisma.join(
+    restrictedCustomerPriceSources(process.env).map((source) => Prisma.sql`${source}`),
+  )})`;
   const [
     cardImageRows,
     cardVariantRows,
@@ -331,8 +332,8 @@ async function catalogueHealthReport(prisma) {
     sealedImageRows,
     sealedPricingRows,
     priceSourceRows,
-  ] = await Promise.all([
-    prisma.$queryRaw`
+  ] = await runSerialTasks([
+    () => prisma.$queryRaw`
       SELECT
         COUNT(*)::int AS "total",
         COUNT(*) FILTER (
@@ -355,7 +356,7 @@ async function catalogueHealthReport(prisma) {
         )::int AS "covered"
       FROM card_printings
     `,
-    prisma.$queryRaw`
+    () => prisma.$queryRaw`
       SELECT
         COUNT(*)::int AS "total",
         COUNT(*) FILTER (
@@ -364,7 +365,7 @@ async function catalogueHealthReport(prisma) {
         )::int AS "covered"
       FROM card_printings
     `,
-    prisma.$queryRaw`
+    () => prisma.$queryRaw`
       SELECT
         (SELECT COUNT(*)::int FROM card_printings) AS "total",
         COUNT(DISTINCT card_printing_id)::int AS "covered"
@@ -375,14 +376,14 @@ async function catalogueHealthReport(prisma) {
         AND snapshot.graded_company IS NULL
         ${customerPriceSourceFilter}
     `,
-    prisma.$queryRaw`
+    () => prisma.$queryRaw`
       SELECT
         COUNT(*)::int AS "total",
         COUNT(*) FILTER (WHERE image_url IS NOT NULL)::int AS "covered"
       FROM sealed_products
       WHERE visibility = 'global'::catalogue_visibility
     `,
-    prisma.$queryRaw`
+    () => prisma.$queryRaw`
       SELECT
         (SELECT COUNT(*)::int FROM sealed_products WHERE visibility = 'global'::catalogue_visibility) AS "total",
         COUNT(DISTINCT snapshot.sealed_product_id)::int AS "covered"
@@ -395,7 +396,7 @@ async function catalogueHealthReport(prisma) {
         AND snapshot.currency = 'GBP'
         ${customerPriceSourceFilter}
     `,
-    prisma.$queryRaw`
+    () => prisma.$queryRaw`
       SELECT source, COUNT(*)::int AS snapshots
       FROM price_snapshots
       GROUP BY source
@@ -447,9 +448,9 @@ async function recentFailedJobRuns(prisma, now) {
     },
     status: "FAILED",
   };
-  const [total, runs] = await Promise.all([
-    prisma.jobRun.count({ where }),
-    prisma.jobRun.findMany({
+  const [total, runs] = await runSerialTasks([
+    () => prisma.jobRun.count({ where }),
+    () => prisma.jobRun.findMany({
       orderBy: { startedAt: "desc" },
       select: jobRunSelect(),
       take: recentFailedJobRunDetailLimit,
@@ -506,8 +507,8 @@ function isOlderThanHours(value, now, hours) {
 }
 
 async function latestJobRuns(prisma) {
-  const entries = await Promise.all(
-    jobRunTypes.map(async (type) => {
+  const entries = await runSerialTasks(
+    jobRunTypes.map((type) => async () => {
       const run = await prisma.jobRun.findFirst({
         orderBy: { startedAt: "desc" },
         select: jobRunSelect(),

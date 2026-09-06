@@ -1,16 +1,40 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { scheduledSetPricingInputFromSources } from "../src/lib/jobs/scheduled-set-pricing-input.ts";
+import {
+  scheduledSetPricingInputFromSources,
+  scheduledSetPricingNextPage,
+} from "../src/lib/jobs/scheduled-set-pricing-input.ts";
 
 test("scheduled set pricing uses safe set-rotation defaults", () => {
   assert.deepEqual(scheduledSetPricingInputFromSources({ env: {} }), {
     excludeProviderIds: [],
-    limit: 8,
+    limit: 1,
     maxPagesPerSet: 1,
-    pageSize: 250,
+    pageSize: 25,
     priceOnlyUnpriced: false,
     waitMs: 0,
   });
+});
+
+test("scheduled pricing resets legacy cursors when the page size changes", () => {
+  assert.equal(scheduledSetPricingNextPage({
+    currentPageSize: 25,
+    expectedPages: 20,
+    storedPage: 2,
+    storedPageSize: 250,
+  }), 1);
+  assert.equal(scheduledSetPricingNextPage({
+    currentPageSize: 25,
+    expectedPages: 20,
+    storedPage: 4,
+    storedPageSize: 25,
+  }), 4);
+  assert.equal(scheduledSetPricingNextPage({
+    currentPageSize: 25,
+    expectedPages: 3,
+    storedPage: 99,
+    storedPageSize: 25,
+  }), 3);
 });
 
 test("scheduled set pricing accepts env and body overrides", () => {
@@ -31,9 +55,9 @@ test("scheduled set pricing accepts env and body overrides", () => {
     }),
     {
       excludeProviderIds: ["base1", "base2"],
-      limit: 3,
-      maxPagesPerSet: 6,
-      pageSize: 200,
+      limit: 1,
+      maxPagesPerSet: 1,
+      pageSize: 25,
       priceOnlyUnpriced: false,
       waitMs: 250,
     },

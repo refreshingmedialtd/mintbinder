@@ -12,6 +12,7 @@ const hourMs = 60 * 60 * 1_000;
 const pokemonGameId = 5;
 const maxTargetedProductIds = 20;
 const sourceName = "cardtrader-sealed";
+const referenceSourceNames = ["tcgcsv"];
 
 export function cardTraderSealedOptionsFromEnv(env = process.env) {
   const token = stringSetting(env.CARDTRADER_API_TOKEN ?? env.CARDTRADER_TOKEN);
@@ -25,7 +26,15 @@ export function cardTraderSealedOptionsFromEnv(env = process.env) {
       conversionRate(env.POKEMON_TCG_EUR_TO_GBP_RATE),
     limit: positiveInteger(env.CARDTRADER_SEALED_PRODUCT_LIMIT, 5),
     manualAliases: stringSetting(env.CARDTRADER_SEALED_ALIASES_JSON),
+    maxOfferPriceRatio: positiveNumber(env.CARDTRADER_SEALED_MAX_OFFER_PRICE_RATIO, 4),
+    maxReferencePriceRatio: positiveNumber(env.CARDTRADER_SEALED_MAX_REFERENCE_PRICE_RATIO, 4),
+    minOfferCount: positiveInteger(env.CARDTRADER_SEALED_MIN_OFFERS, 3),
+    minReferenceDifferenceMinor: positiveInteger(
+      env.CARDTRADER_SEALED_MIN_REFERENCE_DIFFERENCE_MINOR,
+      5_000,
+    ),
     priceOnlyUnpriced: booleanSetting(env.CARDTRADER_SEALED_PRICE_ONLY_UNPRICED, false),
+    referenceMaxAgeDays: positiveInteger(env.CARDTRADER_SEALED_REFERENCE_MAX_AGE_DAYS, 14),
     refreshEveryHours: positiveInteger(env.CARDTRADER_SEALED_REFRESH_EVERY_HOURS, 4),
     setLimit: positiveInteger(env.CARDTRADER_SEALED_SET_LIMIT, 1),
     token,
@@ -58,7 +67,14 @@ export async function syncCardTraderSealedPrices(options = {}) {
   const apiRetryWaitMs = nonNegativeInteger(options.apiRetryWaitMs, 500);
   const apiTimeoutMs = positiveInteger(options.apiTimeoutMs, 10_000);
   const manualAliases = normalizeManualAliases(options.manualAliases);
+  const guardrailOptions = {
+    maxOfferPriceRatio: positiveNumber(options.maxOfferPriceRatio, 4),
+    maxReferencePriceRatio: positiveNumber(options.maxReferencePriceRatio, 4),
+    minOfferCount: positiveInteger(options.minOfferCount, 3),
+    minReferenceDifferenceMinor: positiveInteger(options.minReferenceDifferenceMinor, 5_000),
+  };
   const productIds = normalizeCardTraderProductIds(options.productIds);
+  const referenceMaxAgeDays = positiveInteger(options.referenceMaxAgeDays, 14);
   const summary = {
     ambiguousMatches: 0,
     apiAttempts: 0,
@@ -83,16 +99,24 @@ export async function syncCardTraderSealedPrices(options = {}) {
     marketplaceMatches: 0,
     outcome: "pending",
     priceOnlyUnpriced,
+    pricingObservationsAccepted: 0,
+    pricingObservationsQuarantined: 0,
     pricingSnapshotsCreated: 0,
     pricingSnapshotsUpdated: 0,
     provider: sourceName,
     refreshEveryHours,
     sampleUnmatchedProducts: [],
+    sampleQuarantinedPrices: [],
     selectionMode: productIds.length ? "targeted" : "discovery",
     setsChecked: 0,
     setsUnmatched: 0,
     status: "succeeded",
     targetedProductCount: productIds.length,
+    quarantineReasons: {
+      extremeSpread: 0,
+      referenceDivergence: 0,
+      sparseListings: 0,
+    },
     writePrices,
   };
 
@@ -141,6 +165,10 @@ export async function syncCardTraderSealedPrices(options = {}) {
       targeted: productIds.length > 0,
     });
     const selectedCandidates = selection.candidates;
+    const referencePrices = await latestCardTraderReferencePrices(prisma, selectedCandidates, {
+      maxAgeDays: referenceMaxAgeDays,
+      now,
+    });
 
     summary.candidatesAvailable = candidates.length;
     summary.selectionMode = selection.mode;
@@ -266,6 +294,19 @@ export async function syncCardTraderSealedPrices(options = {}) {
 
         summary.marketplaceMatches += 1;
         summary.listingOffersUsed += marketPrice.offerCount;
+        const priceAssessment = assessCardTraderMarketPrice(marketPrice, {
+          ...guardrailOptions,
+          referencePrice: referencePrices.get(product.id),
+        });
+
+        if (!priceAssessment.trusted) {
+          summary.pricingObservationsQuarantined += 1;
+          summary.quarantineReasons[priceAssessment.reasonKey] += 1;
+          addQuarantinedPriceSample(summary, product, marketPrice, priceAssessment);
+        } else {
+          summary.pricingObservationsAccepted += 1;
+        }
+
         await recordCardTraderAttempt(prisma, product, {
           attemptedAt: now,
           blueprint,
@@ -273,9 +314,10 @@ export async function syncCardTraderSealedPrices(options = {}) {
           listingCount: marketPrice.listingCount,
           mappingMethod: mapping.method,
           matched: true,
+          priceAssessment,
         });
 
-        if (!writePrices) {
+        if (!writePrices || !priceAssessment.trusted) {
           continue;
         }
 
@@ -293,6 +335,10 @@ export async function syncCardTraderSealedPrices(options = {}) {
             listingCount: marketPrice.listingCount,
             offerCountUsed: marketPrice.offerCount,
             originalCurrencies: marketPrice.currencies,
+            priceGuardrailStatus: priceAssessment.status,
+            referenceObservedAt: priceAssessment.referenceObservedAt,
+            referencePriceMinor: priceAssessment.referencePriceMinor,
+            referenceSource: priceAssessment.referenceSource,
             priceSource: "CardTrader European marketplace listings",
             mappingMethod: mapping.method,
             tcgplayerProductId: tcgplayerId,
@@ -411,6 +457,88 @@ export function cardTraderMarketplacePrice(response, rates = {}) {
     offerCount: sample.length,
     priceMinor: median(sample.map((offer) => offer.priceMinor)),
     samplePricesMinor: sample.map((offer) => offer.priceMinor),
+  };
+}
+
+export function assessCardTraderMarketPrice(marketPrice, {
+  maxOfferPriceRatio = 4,
+  maxReferencePriceRatio = 4,
+  minOfferCount = 3,
+  minReferenceDifferenceMinor = 5_000,
+  referencePrice,
+} = {}) {
+  const normalizedMinOfferCount = positiveInteger(minOfferCount, 3);
+  const normalizedMaxOfferPriceRatio = positiveNumber(maxOfferPriceRatio, 4);
+  const normalizedMaxReferencePriceRatio = positiveNumber(maxReferencePriceRatio, 4);
+  const normalizedMinReferenceDifferenceMinor = positiveInteger(minReferenceDifferenceMinor, 5_000);
+  const samplePrices = asArray(marketPrice?.samplePricesMinor)
+    .map(Number)
+    .filter((price) => Number.isFinite(price) && price > 0);
+  const observedPriceMinor = Number(marketPrice?.priceMinor);
+  const offerCount = positiveInteger(marketPrice?.offerCount, samplePrices.length);
+  const coherentOfferCount = largestCoherentOfferClusterSize(
+    samplePrices,
+    normalizedMaxOfferPriceRatio,
+  );
+  const normalizedReference = normalizeReferencePrice(referencePrice);
+  const base = {
+    coherentOfferCount,
+    maxOfferPriceRatio: normalizedMaxOfferPriceRatio,
+    maxReferencePriceRatio: normalizedMaxReferencePriceRatio,
+    minOfferCount: normalizedMinOfferCount,
+    minReferenceDifferenceMinor: normalizedMinReferenceDifferenceMinor,
+    observedPriceMinor,
+    offerCount,
+    referenceObservedAt: normalizedReference?.observedAt ?? null,
+    referencePriceMinor: normalizedReference?.priceMinor ?? null,
+    referenceSource: normalizedReference?.source ?? null,
+    samplePriceRatio: samplePriceRatio(samplePrices),
+  };
+
+  if (offerCount < normalizedMinOfferCount) {
+    return {
+      ...base,
+      reason: `Only ${offerCount} eligible CardTrader offer${offerCount === 1 ? " was" : "s were"} available; at least ${normalizedMinOfferCount} are required.`,
+      reasonKey: "sparseListings",
+      status: "quarantined_sparse_listings",
+      trusted: false,
+    };
+  }
+
+  if (coherentOfferCount < normalizedMinOfferCount) {
+    return {
+      ...base,
+      reason: `Only ${coherentOfferCount} of ${offerCount} sampled offers formed a coherent price cluster.`,
+      reasonKey: "extremeSpread",
+      status: "quarantined_extreme_spread",
+      trusted: false,
+    };
+  }
+
+  if (
+    normalizedReference &&
+    pricesMateriallyDiverge(
+      observedPriceMinor,
+      normalizedReference.priceMinor,
+      normalizedMaxReferencePriceRatio,
+      normalizedMinReferenceDifferenceMinor,
+    )
+  ) {
+    return {
+      ...base,
+      reason: `CardTrader ask evidence diverged materially from the recent ${normalizedReference.source} reference.`,
+      reasonKey: "referenceDivergence",
+      status: "quarantined_reference_divergence",
+      trusted: false,
+    };
+  }
+
+  return {
+    ...base,
+    reason: null,
+    reasonKey: null,
+    status: "trusted",
+    trusted: true,
   };
 }
 
@@ -647,6 +775,9 @@ function cardTraderOutcome(summary) {
   const snapshotsWritten = summary.pricingSnapshotsCreated + summary.pricingSnapshotsUpdated;
 
   if (snapshotsWritten > 0) return "priced";
+  if (summary.pricingObservationsQuarantined > 0 && summary.pricingObservationsAccepted === 0) {
+    return "quarantined";
+  }
   if (summary.marketplaceMatches > 0 && summary.writePrices === false) return "dry_run";
   if (summary.blueprintsMatched === 0) return "no_blueprint_match";
   if (summary.marketplaceMatches === 0) return "no_eligible_listing";
@@ -701,6 +832,7 @@ async function recordCardTraderAttempt(prisma, product, {
   listingCount = 0,
   mappingMethod,
   matched = false,
+  priceAssessment,
 }) {
   const attemptedAtIso = (validDate(attemptedAt) ?? new Date()).toISOString();
   const metadata = {
@@ -718,6 +850,30 @@ async function recordCardTraderAttempt(prisma, product, {
       ? attemptedAtIso
       : product.metadata?.cardTraderLastMatchedAt ?? null,
     cardTraderMappingMethod: mappingMethod ?? product.metadata?.cardTraderMappingMethod ?? null,
+    cardTraderLastObservedPriceMinor: priceAssessment
+      ? priceAssessment.observedPriceMinor
+      : product.metadata?.cardTraderLastObservedPriceMinor ?? null,
+    cardTraderLastOfferCountUsed: priceAssessment
+      ? priceAssessment.offerCount
+      : product.metadata?.cardTraderLastOfferCountUsed ?? 0,
+    cardTraderLastPriceReason: priceAssessment
+      ? priceAssessment.reason
+      : product.metadata?.cardTraderLastPriceReason ?? null,
+    cardTraderLastPriceStatus: priceAssessment
+      ? priceAssessment.status
+      : product.metadata?.cardTraderLastPriceStatus ?? null,
+    cardTraderLastReferenceObservedAt: priceAssessment
+      ? priceAssessment.referenceObservedAt
+      : product.metadata?.cardTraderLastReferenceObservedAt ?? null,
+    cardTraderLastReferencePriceMinor: priceAssessment
+      ? priceAssessment.referencePriceMinor
+      : product.metadata?.cardTraderLastReferencePriceMinor ?? null,
+    cardTraderLastReferenceSource: priceAssessment
+      ? priceAssessment.referenceSource
+      : product.metadata?.cardTraderLastReferenceSource ?? null,
+    cardTraderLastTrustedPriceAt: priceAssessment?.trusted
+      ? attemptedAtIso
+      : product.metadata?.cardTraderLastTrustedPriceAt ?? null,
   };
   const providerIds = {
     ...(isObject(product.providerIds) ? product.providerIds : {}),
@@ -730,6 +886,53 @@ async function recordCardTraderAttempt(prisma, product, {
   });
   product.metadata = metadata;
   product.providerIds = providerIds;
+}
+
+async function latestCardTraderReferencePrices(prisma, products, {
+  maxAgeDays = 14,
+  now = new Date(),
+} = {}) {
+  if (!products.length || typeof prisma.priceSnapshot?.findMany !== "function") {
+    return new Map();
+  }
+
+  const normalizedNow = validDate(now) ?? new Date();
+  const observedAfter = new Date(
+    normalizedNow.getTime() - positiveInteger(maxAgeDays, 14) * 24 * 60 * 60 * 1_000,
+  );
+  const rows = await prisma.priceSnapshot.findMany({
+    orderBy: [
+      { observedAt: "desc" },
+      { createdAt: "desc" },
+    ],
+    select: {
+      observedAt: true,
+      priceMinor: true,
+      sealedProductId: true,
+      source: true,
+    },
+    where: {
+      itemType: ItemType.SEALED_PRODUCT,
+      observedAt: { gte: observedAfter },
+      sealedProductId: { in: products.map((product) => product.id) },
+      source: { in: referenceSourceNames },
+    },
+  });
+  const byProductId = new Map();
+
+  for (const row of rows) {
+    if (!row.sealedProductId || byProductId.has(row.sealedProductId)) {
+      continue;
+    }
+
+    const normalized = normalizeReferencePrice(row);
+
+    if (normalized) {
+      byProductId.set(row.sealedProductId, normalized);
+    }
+  }
+
+  return byProductId;
 }
 
 async function writeDailySnapshot(prisma, data) {
@@ -1078,6 +1281,57 @@ function median(values) {
     : Math.round((ordered[middle - 1] + ordered[middle]) / 2);
 }
 
+function normalizeReferencePrice(referencePrice) {
+  const priceMinor = Number(referencePrice?.priceMinor);
+
+  if (!Number.isFinite(priceMinor) || priceMinor <= 0) {
+    return null;
+  }
+
+  const observedAt = validDate(referencePrice.observedAt);
+
+  return {
+    observedAt: observedAt?.toISOString() ?? null,
+    priceMinor: Math.round(priceMinor),
+    source: stringSetting(referencePrice.source) ?? "sealed reference",
+  };
+}
+
+function pricesMateriallyDiverge(left, right, maxRatio, minDifferenceMinor) {
+  return Math.abs(left - right) >= minDifferenceMinor && priceRatio(left, right) > maxRatio;
+}
+
+function largestCoherentOfferClusterSize(prices, maxRatio) {
+  const ordered = [...prices].sort((left, right) => left - right);
+  let largest = 0;
+  let left = 0;
+
+  for (let right = 0; right < ordered.length; right += 1) {
+    while (left < right && priceRatio(ordered[left], ordered[right]) > maxRatio) {
+      left += 1;
+    }
+
+    largest = Math.max(largest, right - left + 1);
+  }
+
+  return largest;
+}
+
+function priceRatio(left, right) {
+  const low = Math.min(left, right);
+  const high = Math.max(left, right);
+
+  return low > 0 ? high / low : Number.POSITIVE_INFINITY;
+}
+
+function samplePriceRatio(prices) {
+  if (!prices.length) {
+    return null;
+  }
+
+  return Math.round(priceRatio(Math.min(...prices), Math.max(...prices)) * 100) / 100;
+}
+
 function addUnmatchedSample(summary, product, stage, reason) {
   summary.sampleUnmatchedProducts.push({
     id: product.id,
@@ -1104,6 +1358,21 @@ function addMappingReview(summary, product, mapping) {
     tcgplayerProductId: tcgplayerProductId(product),
   });
   summary.mappingReview = summary.mappingReview.slice(0, 25);
+}
+
+function addQuarantinedPriceSample(summary, product, marketPrice, assessment) {
+  summary.sampleQuarantinedPrices.push({
+    id: product.id,
+    name: product.name,
+    observedPriceMinor: marketPrice.priceMinor,
+    offerCount: marketPrice.offerCount,
+    reason: assessment.reason,
+    referencePriceMinor: assessment.referencePriceMinor,
+    referenceSource: assessment.referenceSource,
+    samplePricesMinor: marketPrice.samplePricesMinor,
+    status: assessment.status,
+  });
+  summary.sampleQuarantinedPrices = summary.sampleQuarantinedPrices.slice(0, 10);
 }
 
 function groupBy(values, keyForValue) {
@@ -1221,6 +1490,12 @@ function conversionRate(value) {
   const rate = Number(value);
 
   return Number.isFinite(rate) && rate > 0 ? rate : undefined;
+}
+
+function positiveNumber(value, fallback) {
+  const number = Number(value);
+
+  return Number.isFinite(number) && number > 0 ? number : fallback;
 }
 
 function validDate(value) {

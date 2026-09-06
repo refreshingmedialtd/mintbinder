@@ -7,11 +7,16 @@ import {
 import {
   isSkippablePokemonTcgSetPricingError,
   PokemonTcgApiRequestError,
+  pokemonTcgSetRetryAfter,
 } from "@/lib/pricing/pokemon-tcg-request-policy";
-import type { ScheduledSetPricingInput } from "@/lib/jobs/scheduled-set-pricing-input";
+import {
+  scheduledSetPricingNextPage,
+  type ScheduledSetPricingInput,
+} from "@/lib/jobs/scheduled-set-pricing-input";
 
 type DbSetPricingTarget = {
   cardCount: number;
+  consecutiveFailures: number;
   id: string;
   latestAttemptAt: Date | null;
   latestSnapshotAt: Date | null;
@@ -21,12 +26,14 @@ type DbSetPricingTarget = {
   providerId: string | null;
   releaseDate: Date | null;
   scheduledPricingNextPage: number | null;
+  scheduledPricingPageSize: number | null;
   scheduledPricingRetryAfter: Date | null;
   total: number | null;
 };
 
 type SetPricingTarget = {
   cardCount: number;
+  consecutiveFailures: number;
   expectedPages: number;
   expectedTotal: number;
   id: string;
@@ -34,6 +41,7 @@ type SetPricingTarget = {
   latestSnapshotAt: string | null;
   name: string;
   nextPage: number;
+  pageSize: number;
   pricedCardCount: number;
   providerId: string;
   releaseDate: string | null;
@@ -89,12 +97,13 @@ export async function runScheduledSetPricing(input: ScheduledSetPricingInput) {
       if (error instanceof PokemonTcgPartialSyncError) {
         const result = error.resultPayload;
 
-        await recordSetPricingProgress(target, result);
+        const failure = await recordSetPricingPartialProgress(target, result, error.originalError);
 
         setResults.push({
           cardsFetched: result.cardsFetched,
           cardsUpserted: result.cardsUpserted,
           complete: false,
+          consecutiveFailures: failure.consecutiveFailures,
           error: result.error,
           expectedPages: target.expectedPages,
           failedPage: result.failedPage,
@@ -107,7 +116,9 @@ export async function runScheduledSetPricing(input: ScheduledSetPricingInput) {
           pricingSnapshotsCreated: result.pricingSnapshotsCreated,
           providerId: target.providerId,
           query: result.query,
+          retryAfter: failure.retryAfter,
           status: "partial",
+          statusCode: failure.status,
           totalCount: result.totalCount,
         });
       } else {
@@ -116,12 +127,13 @@ export async function runScheduledSetPricing(input: ScheduledSetPricingInput) {
         }
 
         const message = error instanceof Error ? error.message : "Set pricing refresh failed.";
-        await recordSetPricingAttempt(target, error, message);
+        const failure = await recordSetPricingAttempt(target, error, message);
 
         setResults.push({
           cardsFetched: 0,
           cardsUpserted: 0,
           complete: false,
+          consecutiveFailures: failure.consecutiveFailures,
           error: message,
           expectedPages: target.expectedPages,
           maxPages,
@@ -133,7 +145,9 @@ export async function runScheduledSetPricing(input: ScheduledSetPricingInput) {
           pricingSnapshotsCreated: 0,
           providerId: target.providerId,
           query: `set.id:${target.providerId}`,
+          retryAfter: failure.retryAfter,
           status: "failed",
+          statusCode: failure.status,
           totalCount: target.expectedTotal,
         });
       }
@@ -163,6 +177,7 @@ export async function runScheduledSetPricing(input: ScheduledSetPricingInput) {
     scheduled: true,
     selectedSets: targets.map((target) => ({
       cardCount: target.cardCount,
+      consecutiveFailures: target.consecutiveFailures,
       expectedPages: target.expectedPages,
       latestAttemptAt: target.latestAttemptAt,
       latestSnapshotAt: target.latestSnapshotAt,
@@ -209,10 +224,20 @@ export async function nextPokemonTcgSetPricingTargets(
         ELSE NULL
       END AS "scheduledPricingNextPage",
       CASE
+        WHEN cs.metadata->>'scheduledPricingPageSize' ~ '^[0-9]+$'
+        THEN (cs.metadata->>'scheduledPricingPageSize')::int
+        ELSE NULL
+      END AS "scheduledPricingPageSize",
+      CASE
         WHEN NULLIF(cs.metadata->>'scheduledPricingRetryAfter', '') IS NOT NULL
         THEN (cs.metadata->>'scheduledPricingRetryAfter')::timestamptz
         ELSE NULL
       END AS "scheduledPricingRetryAfter",
+      CASE
+        WHEN cs.metadata->>'scheduledPricingConsecutiveFailures' ~ '^[0-9]+$'
+        THEN (cs.metadata->>'scheduledPricingConsecutiveFailures')::int
+        ELSE 0
+      END AS "consecutiveFailures",
       CASE
         WHEN (
           CASE
@@ -276,10 +301,16 @@ export async function nextPokemonTcgSetPricingTargets(
     .map((row): SetPricingTarget => {
       const expectedTotal = Math.max(row.total ?? 0, row.printedTotal ?? 0, row.cardCount ?? 0, 1);
       const expectedPages = Math.max(1, Math.ceil(expectedTotal / input.pageSize));
-      const nextPage = scheduledNextPage(row.scheduledPricingNextPage, expectedPages);
+      const nextPage = scheduledSetPricingNextPage({
+        currentPageSize: input.pageSize,
+        expectedPages,
+        storedPage: row.scheduledPricingNextPage,
+        storedPageSize: row.scheduledPricingPageSize,
+      });
 
       return {
         cardCount: row.cardCount,
+        consecutiveFailures: row.consecutiveFailures,
         expectedPages,
         expectedTotal,
         id: row.id,
@@ -287,6 +318,7 @@ export async function nextPokemonTcgSetPricingTargets(
         latestSnapshotAt: toIso(row.latestSnapshotAt),
         name: row.name,
         nextPage,
+        pageSize: input.pageSize,
         pricedCardCount: row.pricedCardCount,
         providerId: row.providerId as string,
         releaseDate: toIso(row.releaseDate),
@@ -301,15 +333,18 @@ async function recordSetPricingProgress(target: SetPricingTarget, result: SetPri
     ? 1
     : optionalPositiveInteger(result.nextPage) ?? target.nextPage;
   const metadata = JSON.stringify({
+    scheduledPricingConsecutiveFailures: 0,
     scheduledPricingLastAttemptAt: attemptedAt,
     scheduledPricingLastError: null,
     scheduledPricingLastErrorStatus: null,
+    scheduledPricingLastFailedAt: null,
     scheduledPricingLastPage: result.page,
     scheduledPricingLastPagesProcessed: result.pagesProcessed,
     scheduledPricingLastSnapshotCount: result.pricingSnapshotsCreated,
     scheduledPricingLastSucceededAt: attemptedAt,
     scheduledPricingLastTotalCount: result.totalCount,
     scheduledPricingNextPage: nextPage,
+    scheduledPricingPageSize: result.pageSize ?? target.pageSize,
     scheduledPricingRetryAfter: null,
   });
 
@@ -322,15 +357,33 @@ async function recordSetPricingProgress(target: SetPricingTarget, result: SetPri
   `;
 }
 
-async function recordSetPricingAttempt(target: SetPricingTarget, error: unknown, message: string) {
+async function recordSetPricingPartialProgress(
+  target: SetPricingTarget,
+  result: PokemonTcgPartialSyncError["resultPayload"],
+  error: unknown,
+) {
   const attemptedAt = new Date().toISOString();
-  const status = providerErrorStatus(error, message);
+  const status = providerErrorStatus(error, result.error);
+  const consecutiveFailures = target.consecutiveFailures + 1;
+  const retryAfter = pokemonTcgSetRetryAfter({
+    attemptedAt,
+    consecutiveFailures,
+    retryAfterMs: error instanceof PokemonTcgApiRequestError ? error.retryAfterMs : undefined,
+    status,
+  });
   const metadata = JSON.stringify({
+    scheduledPricingConsecutiveFailures: consecutiveFailures,
     scheduledPricingLastAttemptAt: attemptedAt,
-    scheduledPricingLastError: message,
+    scheduledPricingLastError: result.error,
     scheduledPricingLastErrorStatus: status,
-    scheduledPricingNextPage: target.nextPage,
-    scheduledPricingRetryAfter: retryAfterForProviderError(error, status, attemptedAt),
+    scheduledPricingLastFailedAt: attemptedAt,
+    scheduledPricingLastPage: result.page,
+    scheduledPricingLastPagesProcessed: result.pagesProcessed,
+    scheduledPricingLastSnapshotCount: result.pricingSnapshotsCreated,
+    scheduledPricingLastTotalCount: result.totalCount,
+    scheduledPricingNextPage: optionalPositiveInteger(result.nextPage) ?? target.nextPage,
+    scheduledPricingPageSize: result.pageSize ?? target.pageSize,
+    scheduledPricingRetryAfter: retryAfter,
   });
 
   await prisma.$executeRaw`
@@ -340,12 +393,40 @@ async function recordSetPricingAttempt(target: SetPricingTarget, error: unknown,
       updated_at = NOW()
     WHERE id = ${target.id}::uuid
   `;
+
+  return { consecutiveFailures, retryAfter, status };
 }
 
-function scheduledNextPage(value: unknown, expectedPages: number) {
-  const page = optionalPositiveInteger(value) ?? 1;
+async function recordSetPricingAttempt(target: SetPricingTarget, error: unknown, message: string) {
+  const attemptedAt = new Date().toISOString();
+  const status = providerErrorStatus(error, message);
+  const consecutiveFailures = target.consecutiveFailures + 1;
+  const retryAfter = pokemonTcgSetRetryAfter({
+    attemptedAt,
+    consecutiveFailures,
+    retryAfterMs: error instanceof PokemonTcgApiRequestError ? error.retryAfterMs : undefined,
+    status,
+  });
+  const metadata = JSON.stringify({
+    scheduledPricingConsecutiveFailures: consecutiveFailures,
+    scheduledPricingLastAttemptAt: attemptedAt,
+    scheduledPricingLastError: message,
+    scheduledPricingLastErrorStatus: status,
+    scheduledPricingLastFailedAt: attemptedAt,
+    scheduledPricingNextPage: target.nextPage,
+    scheduledPricingPageSize: target.pageSize,
+    scheduledPricingRetryAfter: retryAfter,
+  });
 
-  return Math.min(expectedPages, Math.max(1, page));
+  await prisma.$executeRaw`
+    UPDATE card_sets
+    SET
+      metadata = COALESCE(metadata, '{}'::jsonb) || ${metadata}::jsonb,
+      updated_at = NOW()
+    WHERE id = ${target.id}::uuid
+  `;
+
+  return { consecutiveFailures, retryAfter, status };
 }
 
 function providerErrorStatus(error: unknown, message: string) {
@@ -356,22 +437,6 @@ function providerErrorStatus(error: unknown, message: string) {
   const match = message.match(/\b(4\d\d|5\d\d)\b/);
 
   return match ? Number(match[1]) : null;
-}
-
-function retryAfterForProviderError(error: unknown, status: number | null, attemptedAt: string) {
-  if (
-    error instanceof PokemonTcgApiRequestError &&
-    Number.isFinite(error.retryAfterMs) &&
-    Number(error.retryAfterMs) > 0
-  ) {
-    return new Date(Date.parse(attemptedAt) + Number(error.retryAfterMs)).toISOString();
-  }
-
-  if (status !== 404) {
-    return null;
-  }
-
-  return new Date(Date.parse(attemptedAt) + 7 * 24 * 60 * 60 * 1000).toISOString();
 }
 
 function sumResults(results: Array<Record<string, unknown>>, key: string) {

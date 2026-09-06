@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildPricingHealthReport } from "../scripts/report-pricing-health.mjs";
+import {
+  buildPricingHealthReport,
+  loadPricingHealthMetrics,
+} from "../scripts/report-pricing-health.mjs";
 
 test("reports healthy regular card and sealed pricing rotation", () => {
   const report = buildPricingHealthReport({
@@ -51,6 +54,48 @@ test("flags stale sealed prices, broken rotation, and provider identity collisio
   assert.match(report.problems[2], /Sealed pricing freshness/);
   assert.match(report.problems[3], /visited 43 of 136 sets/);
   assert.match(report.problems[4], /3 TCGCSV card price stream/);
+});
+
+test("flags raw subtype collisions hidden under one TCGCSV product identity", () => {
+  const report = buildPricingHealthReport({
+    cardLanguages: [],
+    collisionStreams: 0,
+    generatedAt: new Date("2026-09-06T10:00:00.000Z"),
+    rawSubtypeCollisionStreams: 2,
+    sealed: { fresh: 0, priced: 0, total: 0 },
+    sealedRotation: { availableSets: 0, jobs: 0, uniqueSets: 0, zeroOutputJobs: 0 },
+    sealedSources: [],
+  });
+
+  assert.equal(report.ok, false);
+  assert.equal(report.rawSubtypeCollisionStreams, 2);
+  assert.match(report.problems.join(" "), /multiple raw subtypes under one provider product ID/);
+});
+
+test("loads same-sourceRef raw subtype collisions into pricing health metrics", async () => {
+  const queries = [];
+  const prisma = {
+    $queryRaw: async (strings) => {
+      const sql = strings.join("?");
+
+      queries.push(sql);
+
+      if (sql.includes("raw_subtype_collisions")) {
+        return [{ count: 0, rawSubtypeCount: 2 }];
+      }
+
+      return [];
+    },
+  };
+  const metrics = await loadPricingHealthMetrics({
+    now: new Date("2026-09-06T10:00:00.000Z"),
+    prisma,
+  });
+  const collisionQuery = queries.find((query) => query.includes("raw_subtype_collisions"));
+
+  assert.equal(metrics.rawSubtypeCollisionStreams, 2);
+  assert.match(collisionQuery, /GROUP BY card_printing_id, source, source_ref, variant_label/);
+  assert.match(collisionQuery, /metadata->>'subTypeName'/);
 });
 
 test("degrades when configured CardTrader has no output and snapshot growth exceeds limits", () => {

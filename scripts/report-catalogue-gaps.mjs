@@ -1,7 +1,12 @@
 import "dotenv/config";
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
+import { restrictedCustomerPriceSources } from "../src/lib/pricing/provider-permissions.mjs";
 
 const prisma = new PrismaClient();
+const restrictedSources = restrictedCustomerPriceSources(process.env);
+const customerPriceSourceFilter = restrictedSources.length
+  ? Prisma.sql`AND ps.source NOT IN (${Prisma.join(restrictedSources)})`
+  : Prisma.empty;
 
 try {
   const [
@@ -21,7 +26,7 @@ try {
     variantMetadataBySeries,
     missingSealedImages,
     pricingBySet,
-  ] = await Promise.all([
+  ] = await serialPrismaQueries([
     prisma.cardPrinting.count(),
     prisma.cardSet.count(),
     prisma.priceSnapshot.count(),
@@ -35,6 +40,7 @@ try {
       LEFT JOIN price_snapshots ps
         ON ps.sealed_product_id = sp.id
         AND ps.item_type = 'sealed_product'
+        ${customerPriceSourceFilter}
       WHERE sp.visibility = 'global'::catalogue_visibility
     `,
     prisma.$queryRaw`
@@ -53,7 +59,9 @@ try {
         COUNT(ps.id)::int AS "priceSnapshotCount"
       FROM card_printings cp
       JOIN card_sets cs ON cs.id = cp.card_set_id
-      LEFT JOIN price_snapshots ps ON ps.card_printing_id = cp.id
+      LEFT JOIN price_snapshots ps
+        ON ps.card_printing_id = cp.id
+        ${customerPriceSourceFilter}
       GROUP BY COALESCE(cs.series, 'Unknown')
       ORDER BY "cardCount" DESC, series
     `,
@@ -77,6 +85,7 @@ try {
       LEFT JOIN price_snapshots ps
         ON ps.sealed_product_id = sp.id
         AND ps.item_type = 'sealed_product'
+        ${customerPriceSourceFilter}
       WHERE sp.visibility = 'global'::catalogue_visibility
       GROUP BY sp.product_type
       ORDER BY "sealedProductCount" DESC, sp.product_type
@@ -101,7 +110,9 @@ try {
         COUNT(DISTINCT ps.card_printing_id)::int AS "pricedCards",
         COUNT(DISTINCT cp.id)::int AS "totalCards"
       FROM card_printings cp
-      LEFT JOIN price_snapshots ps ON ps.card_printing_id = cp.id
+      LEFT JOIN price_snapshots ps
+        ON ps.card_printing_id = cp.id
+        ${customerPriceSourceFilter}
     `,
     prisma.$queryRaw`
       SELECT
@@ -160,7 +171,9 @@ try {
         (COUNT(DISTINCT cp.id) - COUNT(DISTINCT ps.card_printing_id))::int AS "unpricedCardCount"
       FROM card_sets cs
       JOIN card_printings cp ON cp.card_set_id = cs.id
-      LEFT JOIN price_snapshots ps ON ps.card_printing_id = cp.id
+      LEFT JOIN price_snapshots ps
+        ON ps.card_printing_id = cp.id
+        ${customerPriceSourceFilter}
       GROUP BY cs.id
       HAVING COUNT(DISTINCT cp.id) > COUNT(DISTINCT ps.card_printing_id)
       ORDER BY "unpricedCardCount" DESC, cs.release_date DESC NULLS LAST, cs.name
@@ -241,4 +254,17 @@ function percent(part, total) {
   }
 
   return Math.round((Number(part) / Number(total)) * 1000) / 10;
+}
+
+async function serialPrismaQueries(queries) {
+  const results = [];
+
+  // Prisma promises are lazy. Awaiting them one at a time keeps this large
+  // diagnostic report inside the deliberately small production connection
+  // pool instead of queueing every aggregate at once and timing out.
+  for (const query of queries) {
+    results.push(await query);
+  }
+
+  return results;
 }

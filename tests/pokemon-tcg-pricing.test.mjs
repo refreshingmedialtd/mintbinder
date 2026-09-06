@@ -201,4 +201,7 @@ test("Pokemon TCG ingestion persists the selected provider timestamp", async () 
     importer,
     /observedAt:\s*pokemonProviderObservedAt\(price\.providerUpdatedAt, importedAt\)/,
   );
+  assert.match(importer, /let cardsUpserted = 0/);
+  assert.match(importer, /cardsUpserted \+= 1/);
+  assert.match(importer, /cardsUpserted,\s*page:/);
 });

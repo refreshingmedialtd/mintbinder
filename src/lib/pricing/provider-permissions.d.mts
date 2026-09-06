@@ -1,5 +1,6 @@
 export function priceChartingLicenceConfirmed(env?: NodeJS.ProcessEnv): boolean;
 export function customerVisiblePriceSource(source: unknown, env?: NodeJS.ProcessEnv): boolean;
+export function restrictedCustomerPriceSources(env?: NodeJS.ProcessEnv): string[];
 export function assertPriceChartingWriteAllowed(options: {
   licenceConfirmed?: boolean;
   writePrices?: boolean;

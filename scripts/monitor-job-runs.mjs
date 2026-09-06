@@ -4,6 +4,8 @@ import { smtpSecurityOptions } from "./smtp-policy.mjs";
 import { PrismaClient } from "@prisma/client";
 import { pathToFileURL } from "node:url";
 import { priceAlertScheduleSettings } from "./price-alert-schedule.mjs";
+import { providerSetFailureSummary } from "./run-live-scheduled-job.mjs";
+import { runSerialTasks } from "./serial-tasks.mjs";
 import {
   buildPricingHealthReport,
   loadPricingHealthMetrics,
@@ -90,9 +92,9 @@ export async function runJobMonitor({
 } = {}) {
   try {
     const pricingThresholds = pricingHealthThresholdsFromEnv(env);
-    const [runs, pricingMetrics] = await Promise.all([
-      loadProblemJobRuns({ detailLimit, env, lookbackMinutes, now, prisma, staleMinutes }),
-      loadPricingHealthMetrics({ now, prisma, thresholds: pricingThresholds }),
+    const [runs, pricingMetrics] = await runSerialTasks([
+      () => loadProblemJobRuns({ detailLimit, env, lookbackMinutes, now, prisma, staleMinutes }),
+      () => loadPricingHealthMetrics({ now, prisma, thresholds: pricingThresholds }),
     ]);
     const pricingHealth = buildPricingHealthReport(pricingMetrics, pricingThresholds);
     const priceAlertSettings = priceAlertScheduleSettings(env);
@@ -350,8 +352,8 @@ async function loadProblemJobRuns({ detailLimit, env, lookbackMinutes, now, pris
     unresolvedNotificationDeliveryOldest,
     passwordResetOutboxProblemCount,
     passwordResetOutboxOldest,
-  ] = await Promise.all([
-    prisma.jobRun.findMany({
+  ] = await runSerialTasks([
+    () => prisma.jobRun.findMany({
       orderBy: { startedAt: "desc" },
       select: jobRunSelect(),
       take: detailLimit,
@@ -360,7 +362,7 @@ async function loadProblemJobRuns({ detailLimit, env, lookbackMinutes, now, pris
         status: "FAILED",
       },
     }),
-    prisma.$queryRaw`
+    () => prisma.$queryRaw`
       SELECT
         id,
         job_type AS "jobType",
@@ -385,7 +387,7 @@ async function loadProblemJobRuns({ detailLimit, env, lookbackMinutes, now, pris
       ORDER BY started_at ASC
       LIMIT ${detailLimit}
     `,
-    prisma.jobRun.findMany({
+    () => prisma.jobRun.findMany({
       orderBy: { startedAt: "desc" },
       select: jobRunSelect(),
       take: 250,
@@ -394,7 +396,7 @@ async function loadProblemJobRuns({ detailLimit, env, lookbackMinutes, now, pris
         status: "SUCCEEDED",
       },
     }),
-    prisma.jobRun.findFirst({
+    () => prisma.jobRun.findFirst({
       orderBy: { startedAt: "desc" },
       select: jobRunSelect(),
       where: {
@@ -402,7 +404,7 @@ async function loadProblemJobRuns({ detailLimit, env, lookbackMinutes, now, pris
         requestPayload: { path: ["scheduled"], equals: true },
       },
     }),
-    prisma.jobRun.findFirst({
+    () => prisma.jobRun.findFirst({
       orderBy: { startedAt: "desc" },
       select: jobRunSelect(),
       where: {
@@ -411,8 +413,8 @@ async function loadProblemJobRuns({ detailLimit, env, lookbackMinutes, now, pris
         status: "SUCCEEDED",
       },
     }),
-    loadLatestScheduledRuns({ env, now, prisma }),
-    prisma.billingWebhookEvent.findMany({
+    () => loadLatestScheduledRuns({ env, now, prisma }),
+    () => prisma.billingWebhookEvent.findMany({
       orderBy: { updatedAt: "desc" },
       select: billingWebhookEventSelect(),
       take: detailLimit,
@@ -423,7 +425,7 @@ async function loadProblemJobRuns({ detailLimit, env, lookbackMinutes, now, pris
         ],
       },
     }),
-    prisma.billingWebhookEvent.count({
+    () => prisma.billingWebhookEvent.count({
       where: {
         OR: [
           { status: "FAILED", updatedAt: { gte: failedSince } },
@@ -431,7 +433,7 @@ async function loadProblemJobRuns({ detailLimit, env, lookbackMinutes, now, pris
         ],
       },
     }),
-    prisma.notificationDelivery.count({
+    () => prisma.notificationDelivery.count({
       where: {
         OR: [
           { status: "AMBIGUOUS" },
@@ -439,7 +441,7 @@ async function loadProblemJobRuns({ detailLimit, env, lookbackMinutes, now, pris
         ],
       },
     }),
-    prisma.notificationDelivery.findFirst({
+    () => prisma.notificationDelivery.findFirst({
       orderBy: { updatedAt: "asc" },
       select: { updatedAt: true },
       where: {
@@ -449,13 +451,13 @@ async function loadProblemJobRuns({ detailLimit, env, lookbackMinutes, now, pris
         ],
       },
     }),
-    prisma.passwordResetOutbox.count({
+    () => prisma.passwordResetOutbox.count({
       where: passwordResetOutboxProblemWhere({
         claimStaleBefore: passwordResetOutboxClaimStaleBefore,
         queueStaleBefore: passwordResetOutboxQueueStaleBefore,
       }),
     }),
-    prisma.passwordResetOutbox.findFirst({
+    () => prisma.passwordResetOutbox.findFirst({
       orderBy: { createdAt: "asc" },
       select: { createdAt: true },
       where: passwordResetOutboxProblemWhere({
@@ -623,12 +625,16 @@ async function sendMonitorEmail({ html, subject, text, to }) {
 }
 
 function normalizeJobRun(run) {
+  const lane = scheduledJobLane(run);
+
   return {
     durationMs: numberOrNull(run.durationMs),
     errorMessage: run.errorMessage ?? null,
     degradation: run.degradation ?? null,
     finishedAt: dateStringOrNull(run.finishedAt),
     jobType: jobTypeLabel(run.jobType),
+    label: scheduledJobLaneLabel(lane) ?? jobTypeLabel(run.jobType),
+    lane,
     startedAt: dateStringOrNull(run.startedAt),
     status: jobStatusLabel(run.status),
   };
@@ -640,6 +646,7 @@ function jobRunSelect() {
     errorMessage: true,
     finishedAt: true,
     jobType: true,
+    requestPayload: true,
     resultPayload: true,
     startedAt: true,
     status: true,
@@ -676,7 +683,7 @@ function jobRunTable(rows) {
 
 function jobRunTableRow(run) {
   return `<tr>
-    <td style="border-bottom:1px solid #e5e7eb;padding:8px;">${escapeHtml(run.jobType)}</td>
+    <td style="border-bottom:1px solid #e5e7eb;padding:8px;">${escapeHtml(run.label ?? run.jobType)}</td>
     <td style="border-bottom:1px solid #e5e7eb;padding:8px;">${escapeHtml(run.status)}</td>
     <td style="border-bottom:1px solid #e5e7eb;padding:8px;">${escapeHtml(run.startedAt ?? "-")}</td>
     <td style="border-bottom:1px solid #e5e7eb;padding:8px;">${escapeHtml(run.errorMessage ?? run.degradation ?? "-")}</td>
@@ -715,7 +722,7 @@ function jobRunTextSection(title, runs) {
     title,
     ...runs.map(
       (run) =>
-        `- ${run.jobType} ${run.status} started ${run.startedAt ?? "unknown"}${run.errorMessage || run.degradation ? `: ${run.errorMessage ?? run.degradation}` : ""}`,
+        `- ${run.label ?? run.jobType} ${run.status} started ${run.startedAt ?? "unknown"}${run.errorMessage || run.degradation ? `: ${run.errorMessage ?? run.degradation}` : ""}`,
     ),
     "",
   ];
@@ -751,6 +758,39 @@ function normalizeBillingWebhookEvent(event) {
 
 function jobTypeLabel(value) {
   return String(value).toLowerCase();
+}
+
+export function scheduledJobLane(run) {
+  const jobType = jobTypeLabel(run?.jobType);
+  const request = isObject(run?.requestPayload) ? run.requestPayload : {};
+  const scheduled = booleanJsonValue(request.scheduled);
+
+  if (!scheduled) return null;
+
+  if (jobType === "catalogue_refresh" && booleanJsonValue(request.setsOnly)) {
+    return "catalogue_discovery";
+  }
+
+  if (
+    jobType === "pricing_refresh" &&
+    request.scheduler === "scheduled-set-pricing" &&
+    booleanJsonValue(request.writePrices)
+  ) {
+    return "card_pricing";
+  }
+
+  return null;
+}
+
+function booleanJsonValue(value) {
+  return value === true || String(value).toLowerCase() === "true";
+}
+
+function scheduledJobLaneLabel(lane) {
+  if (lane === "catalogue_discovery") return "catalogue discovery";
+  if (lane === "card_pricing") return "Pokemon TCG set pricing";
+
+  return null;
 }
 
 function jobStatusLabel(value) {
@@ -796,6 +836,10 @@ export function successfulJobDegradation(run) {
   if (ambiguousCheckouts) reasons.push(`${ambiguousCheckouts} billing checkout retirement(s) need reconciliation.`);
   if (checkoutErrors) reasons.push(`${checkoutErrors} billing checkout retirement provider operation(s) failed.`);
 
+  const affectedSets = providerSetFailureSummary(result);
+
+  if (affectedSets) reasons.push(affectedSets);
+
   const secondSource = isObject(result.secondSource) ? result.secondSource : null;
 
   if (secondSource) {
@@ -824,11 +868,15 @@ function isExpectedCardTraderDiscoveryMiss(result, provider) {
   const outcome = optionalEnvValue(result.outcome);
   const selectionMode = optionalEnvValue(result.selectionMode);
   const apiRequests = positiveCount(result.apiRequests);
+  const quarantined = positiveCount(result.pricingObservationsQuarantined);
 
   return provider === "cardtrader-sealed" &&
-    selectionMode === "discovery" &&
-    ["no_blueprint_match", "no_eligible_listing"].includes(outcome) &&
-    apiRequests > 0;
+    apiRequests > 0 &&
+    (
+      (selectionMode === "discovery" &&
+        ["no_blueprint_match", "no_eligible_listing"].includes(outcome)) ||
+      (outcome === "quarantined" && quarantined > 0)
+    );
 }
 
 export function scheduledJobCadenceHealth({ env = {}, latestRuns = [], now }) {

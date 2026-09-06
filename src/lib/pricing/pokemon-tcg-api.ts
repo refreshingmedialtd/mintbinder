@@ -16,11 +16,14 @@ import {
   pokemonProviderObservedAt,
   type PokemonPricingRates,
 } from "@/lib/pricing/pokemon-tcg-card-prices";
+import { pokemonCardRecordMatches } from "@/lib/pricing/pokemon-tcg-card-record";
 import {
   exhaustedPokemonTcgRequestError,
   isRetryablePokemonTcgStatus,
+  pokemonTcgApiAttemptTimeoutMs,
+  pokemonTcgApiRetryAttempts,
+  pokemonTcgApiRetryWaitMs,
   PokemonTcgApiRequestError,
-  pokemonTcgApiTimeoutMs,
   pokemonTcgMaxRetryWaitMs,
 } from "@/lib/pricing/pokemon-tcg-request-policy";
 import { retryAfterMilliseconds, retryDelayMilliseconds } from "../../../scripts/provider-fetch.mjs";
@@ -352,12 +355,35 @@ export async function syncPokemonTcgCards({
   });
   const resolvedPricingRates = writePrices ? pricingRates ?? await pokemonPricingRates() : null;
   const cards = response.data;
+  const existingCards = await prisma.cardPrinting.findMany({
+    select: {
+      artist: true,
+      cardSetId: true,
+      id: true,
+      imageLargeUrl: true,
+      imageSmallUrl: true,
+      language: true,
+      legalities: true,
+      name: true,
+      number: true,
+      providerIds: true,
+      rarity: true,
+      region: true,
+      searchText: true,
+      subtypes: true,
+      supertype: true,
+      variantMetadata: true,
+    },
+    where: { id: { in: cards.map((card) => cardPrintingId(card.id)) } },
+  });
+  const existingCardsById = new Map(existingCards.map((card) => [card.id, card]));
   const setIds = new Set<string>();
   const pricedCardIds = writePrices && priceOnlyUnpriced
     ? await existingPriceSnapshotCardIds(cards.map((card) => cardPrintingId(card.id)))
     : new Set<string>();
   const priceSnapshots: Prisma.PriceSnapshotCreateManyInput[] = [];
   const importedAt = new Date();
+  let cardsUpserted = 0;
   let snapshotsCreated = 0;
 
   for (const card of uniqueCardsBySet(cards)) {
@@ -392,47 +418,21 @@ export async function syncPokemonTcgCards({
   for (const card of cards) {
     const setId = cardSetId(card.set.id);
     const cardId = cardPrintingId(card.id);
+    const cardData = pokemonCardPrintingData(card, setId);
 
     setIds.add(setId);
 
-    await prisma.cardPrinting.upsert({
-      where: { id: cardId },
-      update: {
-        artist: card.artist,
-        cardSetId: setId,
-        imageLargeUrl: card.images?.large,
-        imageSmallUrl: card.images?.small,
-        legalities: card.legalities ?? {},
-        language: "en",
-        name: card.name,
-        number: card.number ?? "",
-        providerIds: { pokemon_tcg_api: card.id },
-        rarity: card.rarity,
-        region: "international",
-        searchText: searchText(card),
-        subtypes: card.subtypes ?? [],
-        supertype: card.supertype,
-        variantMetadata: variantMetadata(card),
-      },
-      create: {
-        id: cardId,
-        artist: card.artist,
-        cardSetId: setId,
-        imageLargeUrl: card.images?.large,
-        imageSmallUrl: card.images?.small,
-        legalities: card.legalities ?? {},
-        language: "en",
-        name: card.name,
-        number: card.number ?? "",
-        providerIds: { pokemon_tcg_api: card.id },
-        rarity: card.rarity,
-        region: "international",
-        searchText: searchText(card),
-        subtypes: card.subtypes ?? [],
-        supertype: card.supertype,
-        variantMetadata: variantMetadata(card),
-      },
-    });
+    if (!pokemonCardRecordMatches(existingCardsById.get(cardId), cardData, card.id)) {
+      await prisma.cardPrinting.upsert({
+        where: { id: cardId },
+        update: cardData,
+        create: {
+          id: cardId,
+          ...cardData,
+        },
+      });
+      cardsUpserted += 1;
+    }
 
     if (writePrices && resolvedPricingRates && (!priceOnlyUnpriced || !pricedCardIds.has(cardId))) {
       const price = bestPokemonTcgCardPrice(card, resolvedPricingRates);
@@ -474,7 +474,7 @@ export async function syncPokemonTcgCards({
 
   return {
     cardsFetched: response.count,
-    cardsUpserted: cards.length,
+    cardsUpserted,
     page: response.page,
     pageSize: response.pageSize,
     pricingSnapshotsCreated: snapshotsCreated,
@@ -495,13 +495,13 @@ async function fetchPokemonCards({
   pageSize: number;
   q: string;
 }) {
-  const retryAttempts = optionalPositiveInteger(process.env.POKEMON_TCG_API_RETRY_ATTEMPTS) ?? 3;
-  const retryWaitMs = optionalNonNegativeInteger(process.env.POKEMON_TCG_API_RETRY_WAIT_MS) ?? 1500;
+  const retryAttempts = pokemonTcgApiRetryAttempts();
+  const retryWaitMs = pokemonTcgApiRetryWaitMs();
   let lastError: unknown;
 
   for (let attempt = 1; attempt <= retryAttempts; attempt += 1) {
     try {
-      return await fetchPokemonCardsOnce({ page, pageSize, q });
+      return await fetchPokemonCardsOnce({ attempt, page, pageSize, q });
     } catch (error) {
       lastError = error;
 
@@ -526,8 +526,8 @@ async function fetchPokemonCards({
 }
 
 async function fetchPokemonSets({ page, pageSize }: { page: number; pageSize: number }) {
-  const retryAttempts = optionalPositiveInteger(process.env.POKEMON_TCG_API_RETRY_ATTEMPTS) ?? 3;
-  const retryWaitMs = optionalNonNegativeInteger(process.env.POKEMON_TCG_API_RETRY_WAIT_MS) ?? 1500;
+  const retryAttempts = pokemonTcgApiRetryAttempts();
+  const retryWaitMs = pokemonTcgApiRetryWaitMs();
   let lastError: unknown;
 
   for (let attempt = 1; attempt <= retryAttempts; attempt += 1) {
@@ -546,12 +546,12 @@ async function fetchPokemonSets({ page, pageSize }: { page: number; pageSize: nu
 
       const response = await fetchWithPolicy(
         url,
-        { headers, signal: pokemonTcgFetchSignal() },
+        { headers, signal: pokemonTcgFetchSignal(attempt) },
         {
           maxResponseBytes: 16 * 1024 * 1024,
           provider: "Pokemon TCG sets",
           retryAttempts: 0,
-          timeoutMs: pokemonTcgApiTimeoutMs(),
+          timeoutMs: pokemonTcgApiAttemptTimeoutMs(attempt),
         },
       );
       const data = (await response.json().catch(() => ({}))) as Partial<PokemonTcgSetSearchResponse> & {
@@ -591,10 +591,12 @@ async function fetchPokemonSets({ page, pageSize }: { page: number; pageSize: nu
 }
 
 async function fetchPokemonCardsOnce({
+  attempt,
   page,
   pageSize,
   q,
 }: {
+  attempt: number;
   page: number;
   pageSize: number;
   q: string;
@@ -620,12 +622,12 @@ async function fetchPokemonCardsOnce({
 
   const response = await fetchWithPolicy(
     url,
-    { headers, signal: pokemonTcgFetchSignal() },
+    { headers, signal: pokemonTcgFetchSignal(attempt) },
     {
       maxResponseBytes: 32 * 1024 * 1024,
       provider: "Pokemon TCG cards",
       retryAttempts: 0,
-      timeoutMs: pokemonTcgApiTimeoutMs(),
+      timeoutMs: pokemonTcgApiAttemptTimeoutMs(attempt),
     },
   );
   const data = (await response.json().catch(() => ({}))) as Partial<PokemonTcgSearchResponse> & {
@@ -660,28 +662,8 @@ function isFetchNetworkError(error: unknown) {
   return error instanceof TypeError && /fetch|network|socket|timeout/i.test(error.message);
 }
 
-function pokemonTcgFetchSignal() {
-  return AbortSignal.timeout(pokemonTcgApiTimeoutMs());
-}
-
-function optionalPositiveInteger(value: unknown) {
-  const number = Number(value);
-
-  if (!Number.isFinite(number) || number <= 0) {
-    return undefined;
-  }
-
-  return Math.floor(number);
-}
-
-function optionalNonNegativeInteger(value: unknown) {
-  const number = Number(value);
-
-  if (!Number.isFinite(number) || number < 0) {
-    return undefined;
-  }
-
-  return Math.floor(number);
+function pokemonTcgFetchSignal(attempt: number) {
+  return AbortSignal.timeout(pokemonTcgApiAttemptTimeoutMs(attempt));
 }
 
 async function wait(ms: number) {
@@ -696,7 +678,10 @@ async function wait(ms: number) {
 
 async function pokemonPricingRates(): Promise<PokemonPricingRates> {
   try {
-    return await resolvePokemonPricingRates();
+    return await resolvePokemonPricingRates({
+      retryAttempts: 0,
+      timeoutMs: 2_000,
+    });
   } catch (error) {
     if (error instanceof ExchangeRateConfigError) {
       throw new PricingProviderConfigError(error.message);
@@ -705,6 +690,27 @@ async function pokemonPricingRates(): Promise<PokemonPricingRates> {
     throw error;
   }
 }
+
+function pokemonCardPrintingData(card: PokemonTcgCard, setId: string) {
+  return {
+    artist: card.artist,
+    cardSetId: setId,
+    imageLargeUrl: card.images?.large,
+    imageSmallUrl: card.images?.small,
+    legalities: card.legalities ?? {},
+    language: "en",
+    name: card.name,
+    number: card.number ?? "",
+    providerIds: { pokemon_tcg_api: card.id },
+    rarity: card.rarity,
+    region: "international",
+    searchText: searchText(card),
+    subtypes: card.subtypes ?? [],
+    supertype: card.supertype,
+    variantMetadata: variantMetadata(card),
+  } satisfies Prisma.CardPrintingUncheckedCreateInput;
+}
+
 
 async function existingPriceSnapshotCardIds(cardIds: string[]) {
   if (!cardIds.length) {

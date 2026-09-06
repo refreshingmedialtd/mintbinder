@@ -23,7 +23,11 @@ import {
 } from "./authenticated-browser-qa-policy.mjs";
 
 const DOWNLOAD_TIMEOUT_MS = 120_000;
-const RESTRICTED_PRICE_SOURCES = ["pricecharting-graded-card", "pricecharting-sealed"];
+const RESTRICTED_PRICE_SOURCES = [
+  "cardtrader-sealed-quarantined",
+  "pricecharting-graded-card",
+  "pricecharting-sealed",
+];
 const FORBIDDEN_EXPORT_KEYS = new Set([
   "passwordHash",
   "tokenHash",

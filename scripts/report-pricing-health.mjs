@@ -1,7 +1,8 @@
 import "dotenv/config";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { pathToFileURL } from "node:url";
-import { priceChartingLicenceConfirmed } from "../src/lib/pricing/provider-permissions.mjs";
+import { restrictedCustomerPriceSources } from "../src/lib/pricing/provider-permissions.mjs";
+import { runSerialTasks } from "./serial-tasks.mjs";
 
 const dayMs = 24 * 60 * 60 * 1000;
 
@@ -13,6 +14,7 @@ export function buildPricingHealthReport({
   generatedAt = new Date(),
   gradedPriceCharting = {},
   priceChartingGradedConfigured = false,
+  rawSubtypeCollisionStreams = 0,
   sealed,
   sealedRotation,
   sealedSources = [],
@@ -183,6 +185,14 @@ export function buildPricingHealthReport({
     problems.push(`${normalizedCollisions} TCGCSV card price stream(s) still combine multiple provider product IDs.`);
   }
 
+  const normalizedRawSubtypeCollisions = numberValue(rawSubtypeCollisionStreams);
+
+  if (normalizedRawSubtypeCollisions > 0) {
+    problems.push(
+      `${normalizedRawSubtypeCollisions} TCGCSV card price stream(s) still combine multiple raw subtypes under one provider product ID and variant label.`,
+    );
+  }
+
   const tcgcsvSource = normalizedSources.find((row) => row.source === "tcgcsv");
 
   if (normalizedSealed.total > 0 && (!tcgcsvSource || tcgcsvSource.pricedItems === 0)) {
@@ -282,6 +292,7 @@ export function buildPricingHealthReport({
     limitations,
     ok: problems.length === 0,
     problems,
+    rawSubtypeCollisionStreams: normalizedRawSubtypeCollisions,
     sealed: normalizedSealed,
     sealedFreshDays: settings.sealedFreshDays,
     sealedRotation7d: normalizedRotation,
@@ -302,9 +313,10 @@ export async function loadPricingHealthMetrics({ now = new Date(), prisma, thres
   const gradedFreshSince = new Date(
     now.getTime() - positiveNumber(thresholds.maxPriceChartingGradedAgeHours, 720) * 60 * 60 * 1_000,
   );
-  const customerPriceSourceFilter = priceChartingLicenceConfirmed()
-    ? Prisma.empty
-    : Prisma.sql`AND ps.source NOT IN ('pricecharting-graded-card', 'pricecharting-sealed')`;
+  const restrictedSources = restrictedCustomerPriceSources(process.env);
+  const customerPriceSourceFilter = restrictedSources.length
+    ? Prisma.sql`AND ps.source NOT IN (${Prisma.join(restrictedSources)})`
+    : Prisma.empty;
   const [
     cardLanguages,
     cardVariantStreamRows,
@@ -316,8 +328,8 @@ export async function loadPricingHealthMetrics({ now = new Date(), prisma, thres
     cardTraderConfigurationRows,
     gradedPriceChartingRows,
     priceChartingGradedConfigurationRows,
-  ] = await Promise.all([
-    prisma.$queryRaw`
+  ] = await runSerialTasks([
+    () => prisma.$queryRaw`
       WITH latest AS (
         SELECT card_printing_id, MAX(observed_at) AS observed_at
         FROM price_snapshots ps
@@ -337,7 +349,7 @@ export async function loadPricingHealthMetrics({ now = new Date(), prisma, thres
       GROUP BY cp.language
       ORDER BY cp.language
     `,
-    prisma.$queryRaw`
+    () => prisma.$queryRaw`
       WITH available AS (
         SELECT DISTINCT
           cp.id AS card_printing_id,
@@ -380,7 +392,7 @@ export async function loadPricingHealthMetrics({ now = new Date(), prisma, thres
       GROUP BY available.language
       ORDER BY available.language
     `,
-    prisma.$queryRaw`
+    () => prisma.$queryRaw`
       WITH latest AS (
         SELECT sealed_product_id, MAX(observed_at) AS observed_at
         FROM price_snapshots ps
@@ -397,7 +409,7 @@ export async function loadPricingHealthMetrics({ now = new Date(), prisma, thres
       LEFT JOIN latest ON latest.sealed_product_id = sp.id
       WHERE sp.visibility = 'global'::catalogue_visibility
     `,
-    prisma.$queryRaw`
+    () => prisma.$queryRaw`
       WITH recent_jobs AS (
         SELECT result_payload
         FROM job_runs
@@ -433,19 +445,34 @@ export async function loadPricingHealthMetrics({ now = new Date(), prisma, thres
               + COALESCE((result_payload->>'pricingSnapshotsUpdated')::int, 0) = 0
         ) AS "zeroOutputJobs"
     `,
-    prisma.$queryRaw`
-      SELECT COUNT(*)::int AS count
-      FROM (
-        SELECT card_printing_id, source, variant_label
-        FROM price_snapshots
-        WHERE item_type = 'card'::item_type
-          AND source IN ('tcgcsv-card', 'tcgcsv-japan-card')
-          AND source_ref IS NOT NULL
-        GROUP BY card_printing_id, source, variant_label
-        HAVING COUNT(DISTINCT source_ref) > 1
-      ) collisions
+    () => prisma.$queryRaw`
+      SELECT
+        (
+          SELECT COUNT(*)::int
+          FROM (
+            SELECT card_printing_id, source, variant_label
+            FROM price_snapshots
+            WHERE item_type = 'card'::item_type
+              AND source IN ('tcgcsv-card', 'tcgcsv-japan-card')
+              AND source_ref IS NOT NULL
+            GROUP BY card_printing_id, source, variant_label
+            HAVING COUNT(DISTINCT source_ref) > 1
+          ) provider_ref_collisions
+        ) AS count,
+        (
+          SELECT COUNT(*)::int
+          FROM (
+            SELECT card_printing_id, source, source_ref, variant_label
+            FROM price_snapshots
+            WHERE item_type = 'card'::item_type
+              AND source IN ('tcgcsv-card', 'tcgcsv-japan-card')
+              AND source_ref IS NOT NULL
+            GROUP BY card_printing_id, source, source_ref, variant_label
+            HAVING COUNT(DISTINCT NULLIF(BTRIM(metadata->>'subTypeName'), '')) > 1
+          ) raw_subtype_collisions
+        ) AS "rawSubtypeCount"
     `,
-    prisma.$queryRaw`
+    () => prisma.$queryRaw`
       SELECT
         source,
         COUNT(*)::int AS snapshots,
@@ -460,7 +487,7 @@ export async function loadPricingHealthMetrics({ now = new Date(), prisma, thres
       GROUP BY source
       ORDER BY source
     `,
-    prisma.$queryRaw`
+    () => prisma.$queryRaw`
       SELECT
         COUNT(*)::int AS total,
         COUNT(*) FILTER (WHERE created_at >= ${rotationSince})::int AS "created7d",
@@ -469,7 +496,7 @@ export async function loadPricingHealthMetrics({ now = new Date(), prisma, thres
         pg_total_relation_size('price_snapshots'::regclass)::bigint AS "storageBytes"
       FROM price_snapshots
     `,
-    prisma.$queryRaw`
+    () => prisma.$queryRaw`
       SELECT COALESCE(
         (request_payload->'secondSource'->>'enabled')::boolean,
         false
@@ -479,7 +506,7 @@ export async function loadPricingHealthMetrics({ now = new Date(), prisma, thres
       ORDER BY started_at DESC
       LIMIT 1
     `,
-    prisma.$queryRaw`
+    () => prisma.$queryRaw`
       WITH targets AS (
         SELECT DISTINCT
           ci.card_printing_id,
@@ -534,7 +561,7 @@ export async function loadPricingHealthMetrics({ now = new Date(), prisma, thres
         AND latest.graded_score = supported.graded_score
         AND latest.variant_label = supported.variant_label
     `,
-    prisma.$queryRaw`
+    () => prisma.$queryRaw`
       SELECT true AS configured
       FROM job_runs
       WHERE request_payload->>'provider' = 'pricecharting-graded-card'
@@ -552,6 +579,7 @@ export async function loadPricingHealthMetrics({ now = new Date(), prisma, thres
     generatedAt: now,
     gradedPriceCharting: gradedPriceChartingRows[0] ?? {},
     priceChartingGradedConfigured: Boolean(priceChartingGradedConfigurationRows[0]?.configured),
+    rawSubtypeCollisionStreams: collisionRows[0]?.rawSubtypeCount ?? 0,
     sealed: sealedRows[0] ?? {},
     sealedRotation: rotationRows[0] ?? {},
     sealedSources: sealedSourceRows,

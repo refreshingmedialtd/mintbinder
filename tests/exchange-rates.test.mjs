@@ -61,6 +61,25 @@ test("falls back to env rates when the live provider is unavailable", async () =
   assert.equal(rates.USD?.metadata.provider, "env");
 });
 
+test("a caller can reserve its route deadline by disabling live-rate retries", async () => {
+  let attempts = 0;
+  const rates = await resolvePokemonPricingRates({
+    env: {
+      POKEMON_TCG_USD_TO_GBP_RATE: "0.75",
+    },
+    fetchImpl: async () => {
+      attempts += 1;
+      return jsonResponse({ error: "offline" }, 503);
+    },
+    retryAttempts: 0,
+    timeoutMs: 100,
+  });
+
+  assert.equal(attempts, 1);
+  assert.equal(rates.usdToGbp, 0.75);
+  assert.equal(rates.metadata.USD?.provider, "env");
+});
+
 test("falls back when exchange-rate response headers arrive but the body stalls", async () => {
   const started = Date.now();
   const rates = await resolvePokemonPricingRates({

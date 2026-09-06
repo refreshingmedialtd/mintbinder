@@ -69,7 +69,7 @@ import {
 } from "../pricing/market-context.ts";
 import {
   customerVisiblePriceSource,
-  priceChartingLicenceConfirmed,
+  restrictedCustomerPriceSources,
 } from "../pricing/provider-permissions.mjs";
 import {
   collectionItemValueMinor as exactCollectionItemValueMinor,
@@ -188,24 +188,17 @@ type ReferencedPriceSnapshot = PriceLike & {
 };
 
 const PRICE_HISTORY_LIMIT = 8;
-const restrictedPriceChartingSources = [
-  "pricecharting-graded-card",
-  "pricecharting-sealed",
-];
-
 function customerVisiblePriceSnapshotWhere({ rawCard = false } = {}): Prisma.PriceSnapshotWhereInput {
   return {
     ...(rawCard ? { gradedCompany: null } : {}),
-    ...(!priceChartingLicenceConfirmed()
-      ? { source: { notIn: restrictedPriceChartingSources } }
-      : {}),
+    source: { notIn: restrictedCustomerPriceSources(process.env) },
   };
 }
 
 function customerVisiblePriceSnapshotSql() {
-  return priceChartingLicenceConfirmed()
-    ? Prisma.empty
-    : Prisma.sql`AND ps.source NOT IN ('pricecharting-graded-card', 'pricecharting-sealed')`;
+  return Prisma.sql`AND ps.source NOT IN (${Prisma.join(
+    restrictedCustomerPriceSources(process.env).map((source) => Prisma.sql`${source}`),
+  )})`;
 }
 
 const catalogueSearchPriceSelect = {
@@ -946,9 +939,10 @@ async function hydrateReferencedPriceSnapshotsByIdentity(records: CatalogueRefer
     )})`);
   }
 
-  const priceChartingFilter = priceChartingLicenceConfirmed()
-    ? Prisma.empty
-    : Prisma.sql`AND "source" NOT IN ('pricecharting-sealed', 'pricecharting-graded-card')`;
+  const restrictedSources = restrictedCustomerPriceSources(process.env);
+  const providerVisibilityFilter = Prisma.sql`AND "source" NOT IN (${Prisma.join(
+    restrictedSources.map((source) => Prisma.sql`${source}`),
+  )})`;
   const rows = await prisma.$queryRaw<ReferencedPriceSnapshot[]>(Prisma.sql`
     WITH "ranked_prices" AS (
       SELECT
@@ -989,7 +983,7 @@ async function hydrateReferencedPriceSnapshotsByIdentity(records: CatalogueRefer
             AND ("condition" IS NULL OR "condition"::text = 'sealed')
           )
         )
-        ${priceChartingFilter}
+        ${providerVisibilityFilter}
     )
     SELECT
       "cardPrintingId",

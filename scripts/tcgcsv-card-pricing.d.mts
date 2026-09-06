@@ -14,17 +14,23 @@ export type TcgcsvCardPricingOptions = {
   source?: string;
   usdToGbpRate?: number;
   waitMs?: number;
+  writeImages?: boolean;
   writePrices?: boolean;
 };
 
 export type TcgcsvCardPricingSummary = {
+  cardImagesUpdated: number;
   cardProductsMatched: number;
   cardProductsSkipped: number;
   cardProductsUnmatched: number;
+  catalogueCardsAvailable: number;
+  catalogueCardsExpected: number;
+  catalogueIncompleteGroups: number;
   categoryId: number;
   groupsAvailable: number;
   groupsMatched: number;
   groupsProcessed: number;
+  identitySnapshotsRelabelled: number;
   language: string;
   minUnpricedCards: number;
   onlyUnpricedGroups: boolean;
@@ -32,6 +38,7 @@ export type TcgcsvCardPricingSummary = {
   pricingSnapshotsCreated: number;
   productsFetched: number;
   sampleUnmatchedProducts: Array<Record<string, unknown>>;
+  sampleIncompleteGroups: Array<Record<string, unknown>>;
   source: string;
   writePrices: boolean;
 };

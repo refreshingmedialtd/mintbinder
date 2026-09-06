@@ -6,6 +6,7 @@ import {
   buildJobMonitorReport,
   priceAlertScheduleHealth,
   scheduledJobCadenceHealth,
+  scheduledJobLane,
   shouldSendJobMonitorAlert,
   successfulJobDegradation,
 } from "../scripts/monitor-job-runs.mjs";
@@ -196,8 +197,22 @@ test("surfaces stale or unresolved password-reset outbox work", () => {
 
 test("surfaces partial provider failures hidden inside successful jobs", () => {
   const degradation = successfulJobDegradation({
+    requestPayload: {
+      scheduled: true,
+      scheduler: "scheduled-set-pricing",
+      writePrices: true,
+    },
     resultPayload: {
       failedSets: 2,
+      setResults: [
+        {
+          error: "Pokemon TCG API request failed with 500 after 3 attempts.",
+          name: "Neo Genesis",
+          providerId: "neo1",
+          status: "failed",
+          statusCode: 500,
+        },
+      ],
       secondSource: {
         apiRequests: 3,
         candidatesChecked: 5,
@@ -212,7 +227,49 @@ test("surfaces partial provider failures hidden inside successful jobs", () => {
   });
 
   assert.match(degradation, /2 provider set refresh/);
+  assert.match(degradation, /Neo Genesis \(neo1\).*HTTP 500/);
   assert.doesNotMatch(degradation, /cardtrader-sealed/);
+});
+
+test("labels catalogue discovery separately from Pokemon TCG set pricing", () => {
+  assert.equal(scheduledJobLane({
+    jobType: "CATALOGUE_REFRESH",
+    requestPayload: { scheduled: true, setsOnly: true },
+  }), "catalogue_discovery");
+  assert.equal(scheduledJobLane({
+    jobType: "PRICING_REFRESH",
+    requestPayload: {
+      scheduled: true,
+      scheduler: "scheduled-set-pricing",
+      writePrices: true,
+    },
+  }), "card_pricing");
+  assert.equal(scheduledJobLane({
+    jobType: "CATALOGUE_REFRESH",
+    requestPayload: { scheduled: false, setsOnly: true },
+  }), null);
+
+  const report = buildJobMonitorReport({
+    alertTo: "liam@example.com",
+    detailLimit: 10,
+    dryRun: false,
+    failedRuns: [{
+      errorMessage: "Pokemon TCG sets request failed with 500.",
+      jobType: "CATALOGUE_REFRESH",
+      requestPayload: { scheduled: true, setsOnly: true },
+      startedAt: now,
+      status: "FAILED",
+    }],
+    lookbackMinutes: 90,
+    now,
+    staleMinutes: 45,
+    staleRuns: [],
+  });
+  const email = buildJobMonitorEmail(report);
+
+  assert.equal(report.recentFailed.runs[0].lane, "catalogue_discovery");
+  assert.equal(report.recentFailed.runs[0].label, "catalogue discovery");
+  assert.match(email.text, /catalogue discovery failed/);
 });
 
 test("keeps API-healthy CardTrader discovery misses out of operational alerts", () => {
@@ -226,6 +283,24 @@ test("keeps API-healthy CardTrader discovery misses out of operational alerts", 
         pricingSnapshotsUpdated: 0,
         provider: "cardtrader-sealed",
         selectionMode: "discovery",
+        status: "succeeded",
+      },
+    },
+  }), null);
+});
+
+test("keeps explicitly quarantined CardTrader observations out of provider-failure alerts", () => {
+  assert.equal(successfulJobDegradation({
+    resultPayload: {
+      secondSource: {
+        apiRequests: 4,
+        candidatesChecked: 1,
+        outcome: "quarantined",
+        pricingObservationsQuarantined: 1,
+        pricingSnapshotsCreated: 0,
+        pricingSnapshotsUpdated: 0,
+        provider: "cardtrader-sealed",
+        selectionMode: "refresh",
         status: "succeeded",
       },
     },

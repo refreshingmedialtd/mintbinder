@@ -123,11 +123,11 @@ test("price-history range controls remain available when the selected stream has
   assert.doesNotMatch(chart, /Price history timeframe/);
 });
 
-test("price-history hides unlicensed PriceCharting streams", async () => {
+test("price-history hides unlicensed and quarantined streams", async () => {
   const route = await readFile(new URL("../src/app/api/price-history/route.ts", import.meta.url), "utf8");
 
   assert.match(route, /customerVisiblePriceSource\(source\)/);
-  assert.match(route, /priceChartingLicenceConfirmed\(\)/);
+  assert.match(route, /restrictedCustomerPriceSources\(process\.env\)/);
   assert.match(route, /providerPermissionFilter/);
 });
 

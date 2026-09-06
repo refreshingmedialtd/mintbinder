@@ -90,6 +90,39 @@ test("does not use a name fallback when TCGCSV supplies a mismatched collector n
   }, cards), cards[0]);
 });
 
+test("matches reviewed unnumbered Sun and Moon energies by their qualified names", () => {
+  const cards = [
+    { id: "energy-grass", name: "Grass Energy", number: "164" },
+    { id: "energy-fire", name: "Fire Energy", number: "165" },
+  ];
+
+  assert.deepEqual(matchTcgcsvCardProduct({
+    extendedData: [{ name: "Rarity", value: "Common" }],
+    name: "Grass Energy (2017 Unnumbered)",
+    productId: 127381,
+  }, cards), cards[0]);
+});
+
+test("maps only the reviewed Aquapolis Porygon artwork products to collector number 103", () => {
+  const cards = [{ id: "aquapolis-porygon", name: "Porygon", number: "103" }];
+
+  assert.deepEqual(matchTcgcsvCardProduct({
+    extendedData: [{ name: "Number", value: "103a/147" }],
+    name: "Porygon (103a)",
+    productId: 88306,
+  }, cards), cards[0]);
+  assert.deepEqual(matchTcgcsvCardProduct({
+    extendedData: [{ name: "Number", value: "103b/147" }],
+    name: "Porygon (103b)",
+    productId: 88307,
+  }, cards), cards[0]);
+  assert.equal(matchTcgcsvCardProduct({
+    extendedData: [{ name: "Number", value: "103a/147" }],
+    name: "Porygon (103a)",
+    productId: 99999,
+  }, cards), null);
+});
+
 test("uses printing details and deterministic provider suffixes for parallel variants", () => {
   assert.equal(tcgcsvCardVariantLabel({
     name: "Giovanni's Charisma (Poke Ball Pattern)",
@@ -97,6 +130,10 @@ test("uses printing details and deterministic provider suffixes for parallel var
   assert.equal(tcgcsvCardVariantLabel({
     name: "Giovanni's Charisma (Master Ball Pattern)",
   }, "Holofoil"), "Master Ball Reverse Holofoil");
+  assert.equal(tcgcsvCardVariantLabel({
+    name: "Giovanni's Charisma",
+    url: "https://example.test/giovannis-charisma-poke-ball-pattern",
+  }, "Holofoil"), "Poke Ball Reverse Holofoil");
 
   const resolved = resolveTcgcsvVariantIdentities([
     {
@@ -114,6 +151,132 @@ test("uses printing details and deterministic provider suffixes for parallel var
   assert.deepEqual(resolved.map((entry) => entry.variantLabel), [
     "Holofoil",
     "Holofoil · TCGplayer #205",
+  ]);
+});
+
+test("preserves raw subtypes for cards actually named Poke Ball or Master Ball", () => {
+  assert.equal(tcgcsvCardVariantLabel({
+    name: "Master Ball - 153/165",
+    url: "https://example.test/master-ball-153-165",
+  }, "Normal"), "Normal");
+  assert.equal(tcgcsvCardVariantLabel({
+    name: "Master Ball - 153/165",
+    url: "https://example.test/master-ball-153-165",
+  }, "Reverse Holofoil"), "Reverse Holofoil");
+  assert.equal(tcgcsvCardVariantLabel({
+    name: "Poké Ball - 185/198",
+    url: "https://example.test/poke-ball-185-198",
+  }, "1st Edition Normal"), "1st Edition Normal");
+
+  const resolved = resolveTcgcsvVariantIdentities([
+    {
+      cardPrintingId: "card-master-ball",
+      product: { name: "Master Ball", productId: 153 },
+      subTypeName: "Normal",
+    },
+    {
+      cardPrintingId: "card-master-ball",
+      product: { name: "Master Ball", productId: 153 },
+      subTypeName: "Reverse Holofoil",
+    },
+  ]);
+
+  assert.deepEqual(resolved.map((entry) => entry.variantLabel), [
+    "Normal",
+    "Reverse Holofoil",
+  ]);
+});
+
+test("scheduled imports never relabel historical TCGCSV snapshots", async () => {
+  const createdSnapshots = [];
+  let historicalUpdateCalls = 0;
+  const prisma = {
+    cardPrinting: {
+      findMany: async () => [{
+        id: "card-master-ball",
+        imageLargeUrl: "https://example.test/master-ball-large.jpg",
+        imageSmallUrl: "https://example.test/master-ball-small.jpg",
+        name: "Master Ball",
+        number: "153",
+      }],
+    },
+    cardSet: {
+      findMany: async () => [{
+        cardPrintings: [{ priceSnapshots: [] }],
+        id: "set-test",
+        language: "en",
+        name: "Test Set",
+        providerIds: { pokemon_tcg_api: "tst" },
+        total: 1,
+      }],
+    },
+    priceSnapshot: {
+      create: async ({ data }) => {
+        createdSnapshots.push(data);
+        return { id: `snapshot-${createdSnapshots.length}`, ...data };
+      },
+      findMany: async ({ where }) => [{
+        cardPrintingId: "card-master-ball",
+        metadata: {
+          baseVariantLabel: "Master Ball Reverse Holofoil",
+          subTypeName: where.metadata.equals,
+          tcgplayerUrl: "https://example.test/master-ball-153-165",
+        },
+        sourceRef: "555153",
+        variantLabel: "Master Ball Reverse Holofoil",
+      }],
+      updateMany: async () => {
+        historicalUpdateCalls += 1;
+        return { count: 1 };
+      },
+    },
+  };
+  const fetchImpl = async (url) => ({
+    ok: true,
+    json: async () => {
+      if (url.endsWith("/groups")) {
+        return {
+          success: true,
+          results: [{ abbreviation: "TST", groupId: 999, name: "Test Set" }],
+        };
+      }
+
+      if (url.endsWith("/products")) {
+        return {
+          success: true,
+          results: [{
+            extendedData: [{ name: "Number", value: "153/165" }],
+            name: "Master Ball - 153/165",
+            productId: 555153,
+            url: "https://example.test/master-ball-153-165",
+          }],
+        };
+      }
+
+      return {
+        success: true,
+        results: [
+          { marketPrice: 1, productId: 555153, subTypeName: "Normal" },
+          { marketPrice: 2, productId: 555153, subTypeName: "Reverse Holofoil" },
+        ],
+      };
+    },
+  });
+
+  const summary = await syncTcgcsvCardPrices({
+    fetchImpl,
+    priceOnlyUnpriced: false,
+    prisma,
+    usdToGbpRate: 0.8,
+    waitMs: 0,
+    writeImages: false,
+  });
+
+  assert.equal(historicalUpdateCalls, 0);
+  assert.equal(summary.identitySnapshotsRelabelled, 0);
+  assert.deepEqual(createdSnapshots.map((snapshot) => snapshot.variantLabel), [
+    "Normal",
+    "Reverse Holofoil",
   ]);
 });
 
@@ -252,6 +415,28 @@ test("keeps a reviewed set target reserved when its provider group is absent or 
   );
 });
 
+test("maps reviewed Radiant Collection groups alongside their parent set groups", () => {
+  const generations = { id: "set-g1", name: "Generations", providerId: "g1" };
+  const legendaryTreasures = {
+    id: "set-bw11",
+    name: "Legendary Treasures",
+    providerId: "bw11",
+  };
+  const groups = [
+    { abbreviation: "GEN", groupId: 1728, name: "Generations" },
+    { abbreviation: "GEN", groupId: 1729, name: "Generations: Radiant Collection" },
+    { abbreviation: "LTR", groupId: 1409, name: "Legendary Treasures" },
+    { abbreviation: "LTR", groupId: 1465, name: "Legendary Treasures: Radiant Collection" },
+  ];
+
+  assert.deepEqual(matchTcgcsvCardGroupsToSets(groups, [generations, legendaryTreasures]), [
+    { group: groups[0], set: generations },
+    { group: groups[2], set: legendaryTreasures },
+    { group: groups[1], set: generations },
+    { group: groups[3], set: legendaryTreasures },
+  ]);
+});
+
 test("matches Pokemon Japan TCGCSV groups to TCGdex-backed Japanese sets", () => {
   const sets = [
     {
@@ -309,6 +494,7 @@ test("imports Japanese card price snapshots from the Pokemon Japan category", as
           language: "ja",
           name: "MEGA Dream ex",
           providerIds: { tcgdex_ja: "m2a" },
+          total: 193,
         }];
       },
     },
@@ -376,6 +562,16 @@ test("imports Japanese card price snapshots from the Pokemon Japan category", as
   assert.equal(summary.groupsMatched, 1);
   assert.equal(summary.cardProductsMatched, 1);
   assert.equal(summary.cardImagesUpdated, 1);
+  assert.equal(summary.catalogueCardsAvailable, 1);
+  assert.equal(summary.catalogueCardsExpected, 193);
+  assert.equal(summary.catalogueIncompleteGroups, 1);
+  assert.deepEqual(summary.sampleIncompleteGroups, [{
+    cardsAvailable: 1,
+    cardsExpected: 193,
+    groupId: 24499,
+    setId: "set-m2a",
+    setName: "MEGA Dream ex",
+  }]);
   assert.equal(summary.pricingSnapshotsCreated, 1);
   assert.deepEqual(cardSetFinds[0].where, { language: "ja" });
   assert.equal(requestedUrls[0], "https://tcgcsv.com/tcgplayer/85/groups");

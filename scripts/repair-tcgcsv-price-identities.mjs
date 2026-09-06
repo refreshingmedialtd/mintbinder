@@ -14,17 +14,25 @@ export function buildTcgcsvPriceIdentityRepairPlan(rows) {
     }
 
     const variantLabel = String(row.variantLabel ?? "Normal").trim() || "Normal";
+    const metadata = isObject(row.metadata) ? row.metadata : {};
+    const rawSubtypeName = optionalString(metadata.subTypeName);
     const key = `${row.cardPrintingId}\u0000${row.source}\u0000${variantLabel}`;
     const stream = byStream.get(key) ?? {
       cardPrintingId: row.cardPrintingId,
       source: row.source,
       variantLabel,
-      rowsByRef: new Map(),
+      rowsByIdentity: new Map(),
     };
-    const sourceRows = stream.rowsByRef.get(sourceRef) ?? [];
+    const identityKey = `${sourceRef}\u0000${rawSubtypeName ?? ""}`;
+    const identity = stream.rowsByIdentity.get(identityKey) ?? {
+      metadata,
+      rawSubtypeName,
+      rows: [],
+      sourceRef,
+    };
 
-    sourceRows.push(row);
-    stream.rowsByRef.set(sourceRef, sourceRows);
+    identity.rows.push(row);
+    stream.rowsByIdentity.set(identityKey, identity);
     byStream.set(key, stream);
   }
 
@@ -32,38 +40,58 @@ export function buildTcgcsvPriceIdentityRepairPlan(rows) {
   let collisionStreams = 0;
 
   for (const stream of byStream.values()) {
-    if (stream.rowsByRef.size <= 1) {
+    const identities = [...stream.rowsByIdentity.values()];
+    const distinctRefs = new Set(identities.map((identity) => identity.sourceRef));
+    const rawSubtypesByRef = new Map();
+
+    for (const identity of identities) {
+      if (!identity.rawSubtypeName) {
+        continue;
+      }
+
+      const subtypes = rawSubtypesByRef.get(identity.sourceRef) ?? new Set();
+
+      subtypes.add(identity.rawSubtypeName);
+      rawSubtypesByRef.set(identity.sourceRef, subtypes);
+    }
+
+    const hasRawSubtypeCollision = [...rawSubtypesByRef.values()].some((subtypes) => subtypes.size > 1);
+
+    if (distinctRefs.size <= 1 && !hasRawSubtypeCollision) {
       continue;
     }
 
     collisionStreams += 1;
-    const identities = resolveTcgcsvVariantIdentities(
-      [...stream.rowsByRef.entries()].map(([sourceRef, sourceRows]) => {
-        const metadata = sourceRows.find((row) => isObject(row.metadata))?.metadata ?? {};
-        const tcgplayerUrl = optionalString(metadata.tcgplayerUrl);
+    const resolvedIdentities = resolveTcgcsvVariantIdentities(
+      identities.map((identity) => {
+        const tcgplayerUrl = optionalString(identity.metadata.tcgplayerUrl);
 
         return {
           cardPrintingId: stream.cardPrintingId,
           product: {
             name: tcgplayerUrl,
-            productId: sourceRef,
+            productId: identity.sourceRef,
             url: tcgplayerUrl,
           },
-          sourceRef,
-          subTypeName: stream.variantLabel,
+          rawSubtypeName: identity.rawSubtypeName,
+          sourceRef: identity.sourceRef,
+          subTypeName: identity.rawSubtypeName ?? stream.variantLabel,
         };
       }),
     );
 
-    for (const identity of identities) {
+    for (const identity of resolvedIdentities) {
       if (identity.variantLabel === stream.variantLabel) {
         continue;
       }
 
+      const identityKey = `${identity.sourceRef}\u0000${identity.rawSubtypeName ?? ""}`;
+
       operations.push({
         cardPrintingId: stream.cardPrintingId,
         fromVariantLabel: stream.variantLabel,
-        snapshotCount: stream.rowsByRef.get(identity.sourceRef)?.length ?? 0,
+        rawSubtypeName: identity.rawSubtypeName ?? null,
+        snapshotCount: stream.rowsByIdentity.get(identityKey)?.rows.length ?? 0,
         source: stream.source,
         sourceRef: identity.sourceRef,
         toVariantLabel: identity.variantLabel,
@@ -78,64 +106,116 @@ export function buildTcgcsvPriceIdentityRepairPlan(rows) {
   };
 }
 
-export async function runTcgcsvPriceIdentityRepair({
-  confirm = process.argv.includes("--confirm"),
-  prisma = new PrismaClient(),
-} = {}) {
+export async function runTcgcsvPriceIdentityRepair(options = {}) {
+  const confirm = options.confirm ?? process.argv.includes("--confirm");
+  const allowAmbiguousUserVariants = options.allowAmbiguousUserVariants ??
+    process.argv.includes("--allow-ambiguous-user-variants");
+  const prisma = options.prisma ?? new PrismaClient();
+  const shouldDisconnect = !options.prisma;
+
   try {
-    const rows = await loadTcgcsvCollisionSnapshots(prisma);
-    const plan = buildTcgcsvPriceIdentityRepairPlan(rows);
-    const affectedCollectionItems = plan.operations.length
-      ? await countPotentiallyAffectedCollectionItems(prisma, plan.operations)
-      : 0;
-    const report = {
-      affectedCollectionItems,
-      collisionStreams: plan.collisionStreams,
-      dryRun: !confirm,
-      operationCount: plan.operations.length,
-      sampleOperations: plan.operations.slice(0, 25),
-      snapshotsToRelabel: plan.snapshotsToRelabel,
-    };
-
     if (!confirm) {
-      return report;
+      return inspectTcgcsvPriceIdentityRepair(prisma, { dryRun: true });
     }
 
-    if (affectedCollectionItems > 0 && !process.argv.includes("--allow-ambiguous-collection-variants")) {
-      throw new Error(
-        `${affectedCollectionItems} collection item(s) use affected generic variants. Review them before rerunning with --allow-ambiguous-collection-variants.`,
-      );
-    }
+    return runSerializableRepair(prisma, async (transaction) => {
+      const { affectedReferences, affectedUserVariantReferences, plan, report } =
+        await inspectTcgcsvPriceIdentityRepair(transaction, { dryRun: false, includeInternals: true });
 
-    let snapshotsRelabelled = 0;
+      if (affectedUserVariantReferences > 0 && !allowAmbiguousUserVariants) {
+        throw new Error(
+          `${affectedUserVariantReferences} user variant reference(s) use affected generic labels ` +
+          `(${affectedReferences.activeCollectionItems} active collection, ` +
+          `${affectedReferences.archivedCollectionItems} archived collection, ` +
+          `${affectedReferences.wishlistItems} wishlist). Review or migrate them before rerunning with ` +
+          `--allow-ambiguous-user-variants.`,
+        );
+      }
 
-    for (const operation of plan.operations) {
-      const result = await prisma.priceSnapshot.updateMany({
-        data: { variantLabel: operation.toVariantLabel },
-        where: {
-          cardPrintingId: operation.cardPrintingId,
-          itemType: "CARD",
-          source: operation.source,
-          sourceRef: operation.sourceRef,
-          variantLabel: operation.fromVariantLabel,
-        },
-      });
+      let snapshotsRelabelled = 0;
 
-      snapshotsRelabelled += result.count;
-    }
+      for (const operation of plan.operations) {
+        const rawSubtypeName = optionalString(operation.rawSubtypeName);
+        const result = await transaction.priceSnapshot.updateMany({
+          data: { variantLabel: operation.toVariantLabel },
+          where: {
+            cardPrintingId: operation.cardPrintingId,
+            itemType: "CARD",
+            ...(rawSubtypeName
+              ? { metadata: { equals: rawSubtypeName, path: ["subTypeName"] } }
+              : {}),
+            source: operation.source,
+            sourceRef: operation.sourceRef,
+            variantLabel: operation.fromVariantLabel,
+          },
+        });
 
-    return {
-      ...report,
-      snapshotsRelabelled,
-    };
+        snapshotsRelabelled += result.count;
+      }
+
+      return {
+        ...report,
+        snapshotsRelabelled,
+      };
+    });
   } finally {
-    await prisma.$disconnect();
+    if (shouldDisconnect) {
+      await prisma.$disconnect();
+    }
   }
+}
+
+async function inspectTcgcsvPriceIdentityRepair(prisma, {
+  dryRun,
+  includeInternals = false,
+}) {
+  const rows = await loadTcgcsvCollisionSnapshots(prisma);
+  const plan = buildTcgcsvPriceIdentityRepairPlan(rows);
+  const affectedReferences = plan.operations.length
+    ? await countPotentiallyAffectedUserVariantReferences(prisma, plan.operations)
+    : emptyAffectedReferences();
+  const affectedCollectionItems =
+    affectedReferences.activeCollectionItems + affectedReferences.archivedCollectionItems;
+  const affectedUserVariantReferences = affectedCollectionItems + affectedReferences.wishlistItems;
+  const report = {
+    affectedActiveCollectionItems: affectedReferences.activeCollectionItems,
+    affectedArchivedCollectionItems: affectedReferences.archivedCollectionItems,
+    affectedCollectionItems,
+    affectedUserVariantReferences,
+    affectedWishlistItems: affectedReferences.wishlistItems,
+    collisionStreams: plan.collisionStreams,
+    dryRun,
+    operationCount: plan.operations.length,
+    sampleOperations: plan.operations.slice(0, 25),
+    snapshotsToRelabel: plan.snapshotsToRelabel,
+  };
+
+  return includeInternals
+    ? { affectedReferences, affectedUserVariantReferences, plan, report }
+    : report;
+}
+
+async function runSerializableRepair(prisma, operation) {
+  if (typeof prisma.$transaction !== "function") {
+    throw new Error("TCGCSV identity repair requires transaction support.");
+  }
+
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      return await prisma.$transaction(operation, { isolationLevel: "Serializable" });
+    } catch (error) {
+      if (error?.code !== "P2034" || attempt === 3) {
+        throw error;
+      }
+    }
+  }
+
+  throw new Error("TCGCSV identity repair could not acquire a stable serializable transaction.");
 }
 
 async function loadTcgcsvCollisionSnapshots(prisma) {
   return prisma.$queryRawUnsafe(`
-    WITH collision_streams AS (
+    WITH provider_ref_collision_streams AS (
       SELECT card_printing_id, source, variant_label
       FROM price_snapshots
       WHERE item_type = 'card'::item_type
@@ -143,6 +223,20 @@ async function loadTcgcsvCollisionSnapshots(prisma) {
         AND source_ref IS NOT NULL
       GROUP BY card_printing_id, source, variant_label
       HAVING COUNT(DISTINCT source_ref) > 1
+    ), raw_subtype_collision_streams AS (
+      SELECT card_printing_id, source, variant_label
+      FROM price_snapshots
+      WHERE item_type = 'card'::item_type
+        AND source IN ('tcgcsv-card', 'tcgcsv-japan-card')
+        AND source_ref IS NOT NULL
+      GROUP BY card_printing_id, source, source_ref, variant_label
+      HAVING COUNT(DISTINCT NULLIF(BTRIM(metadata->>'subTypeName'), '')) > 1
+    ), collision_streams AS (
+      SELECT card_printing_id, source, variant_label
+      FROM provider_ref_collision_streams
+      UNION
+      SELECT card_printing_id, source, variant_label
+      FROM raw_subtype_collision_streams
     )
     SELECT
       ps.card_printing_id AS "cardPrintingId",
@@ -160,7 +254,7 @@ async function loadTcgcsvCollisionSnapshots(prisma) {
   `);
 }
 
-async function countPotentiallyAffectedCollectionItems(prisma, operations) {
+async function countPotentiallyAffectedUserVariantReferences(prisma, operations) {
   const affectedStreams = [...new Map(operations.map((operation) => [
     `${operation.cardPrintingId}\u0000${operation.fromVariantLabel}`,
     {
@@ -169,12 +263,37 @@ async function countPotentiallyAffectedCollectionItems(prisma, operations) {
     },
   ])).values()];
 
-  return prisma.collectionItem.count({
+  const activeCollectionItems = await prisma.collectionItem.count({
     where: {
       archivedAt: null,
       OR: affectedStreams,
     },
   });
+  const archivedCollectionItems = await prisma.collectionItem.count({
+    where: {
+      archivedAt: { not: null },
+      OR: affectedStreams,
+    },
+  });
+  const wishlistItems = await prisma.wishlistItem.count({
+    where: {
+      OR: affectedStreams,
+    },
+  });
+
+  return {
+    activeCollectionItems,
+    archivedCollectionItems,
+    wishlistItems,
+  };
+}
+
+function emptyAffectedReferences() {
+  return {
+    activeCollectionItems: 0,
+    archivedCollectionItems: 0,
+    wishlistItems: 0,
+  };
 }
 
 function optionalString(value) {

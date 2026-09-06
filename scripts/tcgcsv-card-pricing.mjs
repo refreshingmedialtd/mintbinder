@@ -55,6 +55,25 @@ const reviewedCardGroupProviderAliases = new Map([
   ["22873:sv01scarletvioletbaseset", ["sv1"]],
   ["23237:svscarletviolet151", ["sv3pt5"]],
 ]);
+
+// TCGplayer splits a small number of set subsets into separate groups while
+// the source catalogue models them under their parent set. These reviewed
+// identities are intentionally supplemental: unlike the exclusive aliases
+// above, they must not prevent the parent group from continuing to feed the
+// same local set.
+const supplementalReviewedCardGroupProviderAliases = new Map([
+  ["1465:legendarytreasuresradiantcollection", ["bw11"]],
+  ["1729:generationsradiantcollection", ["g1"]],
+]);
+
+// TCGplayer models both Aquapolis Porygon artworks as separate products while
+// the source catalogue exposes a single collector-number 103 printing. Keep
+// this exception tied to immutable provider product IDs rather than stripping
+// an a/b suffix from every collector number.
+const reviewedCardProductNumberAliases = new Map([
+  ["88306", "103"],
+  ["88307", "103"],
+]);
 const {
   ambiguousProviderCodes: ambiguousReviewedProviderCodes,
   ownerByProviderCode: reviewedOwnerByProviderCode,
@@ -162,6 +181,7 @@ export async function syncTcgcsvCardPrices(options = {}) {
             },
           },
           releaseDate: true,
+          total: true,
         },
         where: language === "all" ? undefined : { language },
       }),
@@ -175,6 +195,9 @@ export async function syncTcgcsvCardPrices(options = {}) {
       cardProductsMatched: 0,
       cardProductsSkipped: 0,
       cardProductsUnmatched: 0,
+      catalogueCardsAvailable: 0,
+      catalogueCardsExpected: 0,
+      catalogueIncompleteGroups: 0,
       categoryId,
       groupsAvailable: availableMatches.length,
       groupsMatched: matches.length,
@@ -187,6 +210,7 @@ export async function syncTcgcsvCardPrices(options = {}) {
       pricingSnapshotsCreated: 0,
       productsFetched: 0,
       sampleUnmatchedProducts: [],
+      sampleIncompleteGroups: [],
       source,
       cardImagesUpdated: 0,
       writePrices,
@@ -211,12 +235,25 @@ export async function syncTcgcsvCardPrices(options = {}) {
       summary.cardProductsMatched += groupSummary.cardProductsMatched;
       summary.cardProductsSkipped += groupSummary.cardProductsSkipped;
       summary.cardProductsUnmatched += groupSummary.cardProductsUnmatched;
+      summary.catalogueCardsAvailable += groupSummary.catalogueCardsAvailable;
+      summary.catalogueCardsExpected += groupSummary.catalogueCardsExpected;
+      summary.catalogueIncompleteGroups += groupSummary.catalogueIncomplete ? 1 : 0;
       summary.groupsProcessed += 1;
       summary.identitySnapshotsRelabelled += groupSummary.identitySnapshotsRelabelled;
       summary.pricingSnapshotsCreated += groupSummary.pricingSnapshotsCreated;
       summary.productsFetched += groupSummary.productsFetched;
       summary.sampleUnmatchedProducts.push(...groupSummary.sampleUnmatchedProducts);
       summary.sampleUnmatchedProducts = summary.sampleUnmatchedProducts.slice(0, 10);
+      if (groupSummary.catalogueIncomplete) {
+        summary.sampleIncompleteGroups.push({
+          cardsAvailable: groupSummary.catalogueCardsAvailable,
+          cardsExpected: groupSummary.catalogueCardsExpected,
+          groupId: match.group.groupId,
+          setId: match.set.id,
+          setName: match.set.name,
+        });
+        summary.sampleIncompleteGroups = summary.sampleIncompleteGroups.slice(0, 10);
+      }
 
       if (waitMs > 0) {
         await wait(waitMs);
@@ -256,14 +293,19 @@ export function matchTcgcsvCardGroupsToSets(groups, sets) {
   // those groups from the generic pass so a coincidentally similar local name
   // cannot make one provider group feed two different sets.
   const matches = matchTcgcsvGroupsToSets(groups, sets)
-    .filter(({ group }) => reviewedCardGroupProviderCodes(group).length === 0);
+    .filter(({ group }) =>
+      reviewedCardGroupProviderCodes(group).length === 0 &&
+      supplementalReviewedCardGroupProviderCodes(group).length === 0);
   const seen = new Set(matches.map(matchKey));
 
   for (const group of groups) {
     const reviewedProviderCodes = reviewedCardGroupProviderCodes(group);
+    const supplementalProviderCodes = supplementalReviewedCardGroupProviderCodes(group);
     const providerCodes = reviewedProviderCodes.length
       ? reviewedProviderCodes
-      : cardGroupProviderCodes(group);
+      : supplementalProviderCodes.length
+        ? supplementalProviderCodes
+        : cardGroupProviderCodes(group);
 
     for (const providerCode of providerCodes) {
       const set = setByProviderCode.get(providerCode);
@@ -298,7 +340,10 @@ export function matchTcgcsvCardGroupsToSets(groups, sets) {
 }
 
 export function matchTcgcsvCardProduct(product, cards) {
-  const productNumber = normalizedCardNumber(extendedDataValue(product, "Number"));
+  const providerProductId = String(product?.productId ?? "").trim();
+  const productNumber = normalizedCardNumber(
+    reviewedCardProductNumberAliases.get(providerProductId) ?? extendedDataValue(product, "Number"),
+  );
   const productName = normalizedCardName(product.name);
   const byNumberAndName = cards.filter((card) =>
     normalizedCardNumber(card.number) === productNumber &&
@@ -329,15 +374,20 @@ export function matchTcgcsvCardProduct(product, cards) {
 export function tcgcsvCardVariantLabel(product, subTypeName) {
   const baseLabel = optionalString(subTypeName) ?? "Normal";
   const identityText = `${product?.name ?? ""} ${product?.url ?? ""}`
+    .normalize("NFKD")
+    .replace(/\p{M}/gu, "")
     .toLowerCase()
     .replace(/%20/g, " ")
     .replace(/[-_]+/g, " ");
 
-  if (/master\s*ball(?:\s*pattern)?/.test(identityText)) {
+  // "Master Ball" and "Poke Ball" are also real card names. Only promote a
+  // product to a patterned reverse-holo identity when TCGplayer explicitly
+  // describes it as a pattern; otherwise preserve the provider's raw subtype.
+  if (/\bmaster\s*ball\s+pattern\b/.test(identityText)) {
     return "Master Ball Reverse Holofoil";
   }
 
-  if (/poke\s*ball(?:\s*pattern)?/.test(identityText)) {
+  if (/\bpoke\s*ball\s+pattern\b/.test(identityText)) {
     return "Poke Ball Reverse Holofoil";
   }
 
@@ -447,11 +497,15 @@ async function importCardGroup({
     cardProductsSkipped: 0,
     cardProductsUnmatched: 0,
     cardImagesUpdated: 0,
+    catalogueCardsAvailable: cards.length,
+    catalogueCardsExpected: positiveInteger(set.total) ?? cards.length,
+    catalogueIncomplete: false,
     identitySnapshotsRelabelled: 0,
     pricingSnapshotsCreated: 0,
     productsFetched: productsResponse.results?.length ?? 0,
     sampleUnmatchedProducts: [],
   };
+  summary.catalogueIncomplete = summary.catalogueCardsAvailable < summary.catalogueCardsExpected;
 
   for (const price of pricesResponse.results ?? []) {
     const productPrices = pricesByProductId.get(price.productId) ?? [];
@@ -499,17 +553,17 @@ async function importCardGroup({
   const existingVariantIdentities = await loadExistingTcgcsvVariantIdentities({
     cardPrintingIds: [...new Set(matchedProducts.map(({ card }) => card.id))],
     prisma,
+    subTypeNames: incomingVariantIdentities.map((identity) => identity.subTypeName),
     source,
   });
   const variantIdentities = resolveTcgcsvVariantIdentities([
     ...existingVariantIdentities,
     ...incomingVariantIdentities,
   ]);
-  summary.identitySnapshotsRelabelled = await reconcileExistingTcgcsvVariantIdentities({
-    identities: variantIdentities.filter((identity) => identity.existingVariantLabel),
-    prisma,
-    source,
-  });
+  // Historical snapshots are audit evidence and must never be rewritten as a
+  // side effect of an hourly pricing run. Existing identities are read only to
+  // keep newly written labels stable; any historical cleanup is deliberately
+  // gated behind scripts/repair-tcgcsv-price-identities.mjs.
   const variantLabelByKey = new Map(variantIdentities.map((identity) => [
     tcgcsvVariantIdentityKey(identity.cardPrintingId, identity.sourceRef, identity.subTypeName),
     identity.variantLabel,
@@ -575,26 +629,37 @@ async function importCardGroup({
   return summary;
 }
 
-async function loadExistingTcgcsvVariantIdentities({ cardPrintingIds, prisma, source }) {
+async function loadExistingTcgcsvVariantIdentities({ cardPrintingIds, prisma, source, subTypeNames }) {
   if (!cardPrintingIds.length || typeof prisma.priceSnapshot.findMany !== "function") {
     return [];
   }
 
-  const snapshots = await prisma.priceSnapshot.findMany({
-    distinct: ["cardPrintingId", "sourceRef", "variantLabel"],
-    select: {
-      cardPrintingId: true,
-      metadata: true,
-      sourceRef: true,
-      variantLabel: true,
-    },
-    where: {
-      cardPrintingId: { in: cardPrintingIds },
-      itemType: ItemType.CARD,
-      source,
-      sourceRef: { not: null },
-    },
-  });
+  // Query each raw subtype separately. A provider product may expose several
+  // subtype prices under one sourceRef, and collapsing the query across the
+  // JSON subtype would make a subsequent repair rewrite every subtype at once.
+  const rawSubtypes = [...new Set(subTypeNames.map(optionalString).filter(Boolean))];
+  const snapshots = [];
+
+  // Neon production currently has a three-connection pool. Keep these narrow
+  // subtype lookups serial so one import cannot consume the pool by itself.
+  for (const subTypeName of rawSubtypes) {
+    snapshots.push(...await prisma.priceSnapshot.findMany({
+      distinct: ["cardPrintingId", "sourceRef", "variantLabel"],
+      select: {
+        cardPrintingId: true,
+        metadata: true,
+        sourceRef: true,
+        variantLabel: true,
+      },
+      where: {
+        cardPrintingId: { in: cardPrintingIds },
+        itemType: ItemType.CARD,
+        metadata: { equals: subTypeName, path: ["subTypeName"] },
+        source,
+        sourceRef: { not: null },
+      },
+    }));
+  }
 
   return snapshots.map((snapshot) => {
     const metadata = isObject(snapshot.metadata) ? snapshot.metadata : {};
@@ -614,37 +679,6 @@ async function loadExistingTcgcsvVariantIdentities({ cardPrintingIds, prisma, so
       subTypeName: optionalString(metadata.subTypeName) ?? baseVariantLabel,
     };
   });
-}
-
-async function reconcileExistingTcgcsvVariantIdentities({ identities, prisma, source }) {
-  if (typeof prisma.priceSnapshot.updateMany !== "function") {
-    return 0;
-  }
-
-  const operations = [...new Map(identities
-    .filter((identity) => identity.existingVariantLabel !== identity.variantLabel)
-    .map((identity) => [
-      `${identity.cardPrintingId}\u0000${identity.sourceRef}\u0000${identity.existingVariantLabel}`,
-      identity,
-    ])).values()];
-  let updated = 0;
-
-  for (const operation of operations) {
-    const result = await prisma.priceSnapshot.updateMany({
-      data: { variantLabel: operation.variantLabel },
-      where: {
-        cardPrintingId: operation.cardPrintingId,
-        itemType: ItemType.CARD,
-        source,
-        sourceRef: operation.sourceRef,
-        variantLabel: operation.existingVariantLabel,
-      },
-    });
-
-    updated += result.count;
-  }
-
-  return updated;
 }
 
 function stripTcgplayerIdentitySuffix(value) {
@@ -832,6 +866,7 @@ function normalizedCardName(value) {
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\(\s*\d{4}\s+unnumbered\s*\)/g, " ")
     .replace(/\b(?:1st edition|first edition|shadowless|unlimited|holofoil|reverse holofoil|reverse holo|prerelease|pre release|stamped promo|stamped)\b/g, " ")
     .replace(/[^a-z0-9]+/g, " ")
     .trim()
@@ -853,6 +888,12 @@ function cardGroupProviderCodes(group) {
 
 function reviewedCardGroupProviderCodes(group) {
   return (reviewedCardGroupProviderAliases.get(reviewedCardGroupIdentity(group)) ?? [])
+    .map(normalizedProviderCode)
+    .filter(Boolean);
+}
+
+function supplementalReviewedCardGroupProviderCodes(group) {
+  return (supplementalReviewedCardGroupProviderAliases.get(reviewedCardGroupIdentity(group)) ?? [])
     .map(normalizedProviderCode)
     .filter(Boolean);
 }

@@ -11,7 +11,7 @@ import {
 } from "@/lib/pricing/price-history-response";
 import {
   customerVisiblePriceSource,
-  priceChartingLicenceConfirmed,
+  restrictedCustomerPriceSources,
 } from "@/lib/pricing/provider-permissions.mjs";
 
 export const dynamic = "force-dynamic";
@@ -53,9 +53,9 @@ export async function GET(request: Request) {
 
     const { bucket, from } = rangeConfig(range);
     const sourceFilter = source ? Prisma.sql`AND "source" = ${source}` : Prisma.empty;
-    const providerPermissionFilter = priceChartingLicenceConfirmed()
-      ? Prisma.empty
-      : Prisma.sql`AND "source" NOT IN ('pricecharting-graded-card', 'pricecharting-sealed')`;
+    const providerPermissionFilter = Prisma.sql`AND "source" NOT IN (${Prisma.join(
+      restrictedCustomerPriceSources(process.env).map((restrictedSource) => Prisma.sql`${restrictedSource}`),
+    )})`;
     const fromFilter = from ? Prisma.sql`AND "observed_at" >= ${from}` : Prisma.empty;
     const itemFilter = itemType === "card"
       ? Prisma.sql`"card_printing_id" = ${catalogueId}::uuid`

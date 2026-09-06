@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  assessCardTraderMarketPrice,
   buildCardTraderBlueprintIndex,
   cardTraderMarketplacePrice,
   cardTraderSealedOptionsFromEnv,
@@ -20,6 +21,11 @@ test("reads CardTrader sealed pricing options and enables them when a token exis
       CARDTRADER_EUR_TO_GBP_RATE: "0.84",
       CARDTRADER_SEALED_PRICE_ONLY_UNPRICED: "true",
       CARDTRADER_SEALED_PRODUCT_LIMIT: "7",
+      CARDTRADER_SEALED_MAX_OFFER_PRICE_RATIO: "3",
+      CARDTRADER_SEALED_MAX_REFERENCE_PRICE_RATIO: "5",
+      CARDTRADER_SEALED_MIN_OFFERS: "4",
+      CARDTRADER_SEALED_MIN_REFERENCE_DIFFERENCE_MINOR: "7500",
+      CARDTRADER_SEALED_REFERENCE_MAX_AGE_DAYS: "10",
       CARDTRADER_SEALED_SET_LIMIT: "2",
       CARDTRADER_SEALED_WAIT_MS: "250",
       CARDTRADER_SEALED_WRITE_PRICES: "false",
@@ -33,7 +39,12 @@ test("reads CardTrader sealed pricing options and enables them when a token exis
       eurToGbpRate: 0.84,
       limit: 7,
       manualAliases: undefined,
+      maxOfferPriceRatio: 3,
+      maxReferencePriceRatio: 5,
+      minOfferCount: 4,
+      minReferenceDifferenceMinor: 7_500,
       priceOnlyUnpriced: true,
+      referenceMaxAgeDays: 10,
       refreshEveryHours: 4,
       setLimit: 2,
       token: "token",
@@ -605,6 +616,95 @@ test("uses a conservative median of the five lowest eligible CardTrader listings
   });
 });
 
+test("quarantines a one-off marketplace ask instead of treating it as a valuation", () => {
+  const marketPrice = cardTraderMarketplacePrice({ 20: [listing(942_981, "GBP")] }, { GBP: 1 });
+  const assessment = assessCardTraderMarketPrice(marketPrice);
+
+  assert.equal(assessment.trusted, false);
+  assert.equal(assessment.status, "quarantined_sparse_listings");
+  assert.equal(assessment.reasonKey, "sparseListings");
+  assert.equal(assessment.offerCount, 1);
+});
+
+test("quarantines an extreme listing spread without discarding its audit evidence", () => {
+  const marketPrice = cardTraderMarketplacePrice({
+    20: [
+      listing(8_000, "GBP"),
+      listing(900_000, "GBP"),
+      listing(950_000, "GBP"),
+    ],
+  }, { GBP: 1 });
+  const assessment = assessCardTraderMarketPrice(marketPrice);
+
+  assert.equal(assessment.trusted, false);
+  assert.equal(assessment.status, "quarantined_extreme_spread");
+  assert.equal(assessment.reasonKey, "extremeSpread");
+  assert.equal(assessment.coherentOfferCount, 2);
+  assert.deepEqual(marketPrice.samplePricesMinor, [8_000, 900_000, 950_000]);
+});
+
+test("requires one genuinely coherent offer cluster instead of chaining material differences", () => {
+  const marketPrice = cardTraderMarketplacePrice({
+    20: [
+      listing(100, "GBP"),
+      listing(4_900, "GBP"),
+      listing(19_000, "GBP"),
+    ],
+  }, { GBP: 1 });
+  const assessment = assessCardTraderMarketPrice(marketPrice);
+
+  assert.equal(assessment.trusted, false);
+  assert.equal(assessment.status, "quarantined_extreme_spread");
+  assert.equal(assessment.coherentOfferCount, 2);
+  assert.equal(assessment.samplePriceRatio, 190);
+});
+
+test("quarantines a coherent CardTrader cluster that materially diverges from TCGCSV", () => {
+  const marketPrice = cardTraderMarketplacePrice({
+    20: [
+      listing(900_000, "GBP"),
+      listing(942_981, "GBP"),
+      listing(980_000, "GBP"),
+    ],
+  }, { GBP: 1 });
+  const assessment = assessCardTraderMarketPrice(marketPrice, {
+    referencePrice: {
+      observedAt: "2026-09-06T10:00:00.000Z",
+      priceMinor: 7_880,
+      source: "tcgcsv",
+    },
+  });
+
+  assert.equal(assessment.trusted, false);
+  assert.equal(assessment.status, "quarantined_reference_divergence");
+  assert.equal(assessment.reasonKey, "referenceDivergence");
+  assert.equal(assessment.referencePriceMinor, 7_880);
+});
+
+test("accepts a normal coherent CardTrader market that agrees with its recent reference", () => {
+  const marketPrice = cardTraderMarketplacePrice({
+    20: [
+      listing(10_000, "GBP"),
+      listing(11_000, "GBP"),
+      listing(12_000, "GBP"),
+      listing(13_000, "GBP"),
+      listing(14_000, "GBP"),
+    ],
+  }, { GBP: 1 });
+  const assessment = assessCardTraderMarketPrice(marketPrice, {
+    referencePrice: {
+      observedAt: "2026-09-06T10:00:00.000Z",
+      priceMinor: 11_500,
+      source: "tcgcsv",
+    },
+  });
+
+  assert.equal(assessment.trusted, true);
+  assert.equal(assessment.status, "trusted");
+  assert.equal(assessment.reason, null);
+  assert.equal(assessment.coherentOfferCount, 5);
+});
+
 test("matches EX-era CardTrader expansions to local vintage set names", () => {
   assert.deepEqual(
     matchCardTraderExpansion(
@@ -704,6 +804,77 @@ test("imports a CardTrader sealed marketplace snapshot by direct TCGplayer ident
   assert.equal(requestedUrls.length, 4);
 });
 
+test("retains a reference-divergent CardTrader observation in audit metadata without a snapshot", async () => {
+  const productUpdates = [];
+  const prisma = {
+    priceSnapshot: {
+      create: async () => {
+        throw new Error("quarantined evidence must not create a trusted snapshot");
+      },
+      findMany: async () => [{
+        createdAt: new Date("2026-09-06T10:00:00.000Z"),
+        observedAt: new Date("2026-09-06T10:00:00.000Z"),
+        priceMinor: 7_880,
+        sealedProductId: "sealed-1",
+        source: "tcgcsv",
+      }],
+    },
+    sealedProduct: {
+      findMany: async () => [{
+        id: "sealed-1",
+        metadata: { groupName: "SWSH12: Silver Tempest" },
+        name: "Silver Tempest Booster Box",
+        priceSnapshots: [],
+        productType: "BOOSTER_BOX",
+        providerIds: { tcgplayer: "100" },
+        relatedCardSet: { id: "set-1", name: "Silver Tempest" },
+      }],
+      update: async ({ data, where }) => {
+        productUpdates.push({ data, where });
+        return { id: where.id, ...data };
+      },
+    },
+  };
+  const fetchImpl = async (url) => {
+    if (url.pathname.endsWith("/games")) {
+      return jsonResponse({ data: [{ id: 15, display_name: "Pokémon" }] });
+    }
+    if (url.pathname.endsWith("/expansions")) {
+      return jsonResponse({ expansions: [{ game_id: 15, id: 10, name: "Silver Tempest" }] });
+    }
+    if (url.pathname.endsWith("/blueprints/export")) {
+      return jsonResponse({ results: [{ id: 20, name: "Silver Tempest Booster Box", tcg_player_id: "100" }] });
+    }
+
+    return jsonResponse({
+      20: [
+        listing(900_000, "GBP"),
+        listing(942_981, "GBP"),
+        listing(980_000, "GBP"),
+      ],
+    });
+  };
+  const summary = await syncCardTraderSealedPrices({
+    fetchImpl,
+    now: "2026-09-06T12:00:00.000Z",
+    prisma,
+    token: "token",
+    waitMs: 0,
+  });
+
+  assert.equal(summary.status, "succeeded");
+  assert.equal(summary.outcome, "quarantined");
+  assert.equal(summary.pricingObservationsAccepted, 0);
+  assert.equal(summary.pricingObservationsQuarantined, 1);
+  assert.equal(summary.quarantineReasons.referenceDivergence, 1);
+  assert.equal(summary.pricingSnapshotsCreated, 0);
+  assert.equal(summary.pricingSnapshotsUpdated, 0);
+  assert.equal(productUpdates[0].data.metadata.cardTraderLastPriceStatus, "quarantined_reference_divergence");
+  assert.equal(productUpdates[0].data.metadata.cardTraderLastObservedPriceMinor, 942_981);
+  assert.equal(productUpdates[0].data.metadata.cardTraderLastReferencePriceMinor, 7_880);
+  assert.equal(summary.sampleQuarantinedPrices[0].referenceSource, "tcgcsv");
+});
+
 test("a same-day CardTrader refresh updates the daily snapshot instead of growing rows", async () => {
   const snapshotUpdates = [];
   const observedAt = new Date("2026-09-05T12:50:00.000Z");
@@ -737,7 +908,13 @@ test("a same-day CardTrader refresh updates the daily snapshot instead of growin
       return jsonResponse({ results: [{ id: 20, name: "sealed-1", product_type: "BOOSTER_PACK" }] });
     }
 
-    return jsonResponse({ 20: [listing(10_000, "GBP")] });
+    return jsonResponse({
+      20: [
+        listing(10_000, "GBP"),
+        listing(11_000, "GBP"),
+        listing(12_000, "GBP"),
+      ],
+    });
   };
   const summary = await syncCardTraderSealedPrices({
     fetchImpl,

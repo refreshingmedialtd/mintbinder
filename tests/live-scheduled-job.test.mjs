@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   appBaseUrl,
+  providerSetFailureSummary,
   protectedJobRequest,
   runLiveScheduledJob,
   scheduledResponseDegradation,
@@ -101,7 +102,7 @@ test("live pricing defaults to set rotation and splits set batches", async () =>
         jobRun: {
           id: `set-run-${runNumber}`,
         },
-        maxPagesPerSet: 4,
+        maxPagesPerSet: 1,
         pageSize: 250,
         pagesProcessed: 1,
         priceOnlyUnpriced: false,
@@ -175,6 +176,63 @@ test("marks HTTP-successful provider partial failures as degraded", async () => 
   assert.match(result.degradation, /1 failed set/);
 });
 
+test("aggregates timeout-safe set batches with actionable per-set degradation", async () => {
+  let call = 0;
+  const result = await runLiveScheduledJob({
+    env: {
+      JOB_SECRET: "secret",
+      POKEMON_TCG_PRICING_BATCH_WAIT_MS: "0",
+      POKEMON_TCG_SET_PRICING_LIMIT: "2",
+      POKEMON_TCG_SET_PRICING_REQUEST_LIMIT: "1",
+      SCHEDULED_JOB_APP_URL: "https://mintbinder.co.uk",
+    },
+    fetchImpl: async () => {
+      call += 1;
+      const failed = call === 1;
+
+      return jsonResponse({
+        failedSets: failed ? 1 : 0,
+        partialSets: failed ? 0 : 1,
+        selectedSets: [{ name: failed ? "Neo Genesis" : "Holon Phantoms", providerId: failed ? "neo1" : "ex13" }],
+        setResults: [{
+          error: failed ? "Pokemon TCG API request failed with 500." : "Provider request timed out.",
+          name: failed ? "Neo Genesis" : "Holon Phantoms",
+          providerId: failed ? "neo1" : "ex13",
+          status: failed ? "failed" : "partial",
+          statusCode: failed ? 500 : 0,
+        }],
+        setsProcessed: 1,
+        succeededSets: 0,
+      });
+    },
+    job: "pricing",
+  });
+
+  assert.equal(call, 2);
+  assert.equal(result.ok, false);
+  assert.equal(result.response.failedSets, 1);
+  assert.equal(result.response.partialSets, 1);
+  assert.match(result.degradation, /Neo Genesis \(neo1\).*HTTP 500/);
+  assert.match(result.degradation, /Holon Phantoms \(ex13\).*partial/);
+});
+
+test("bounds provider set failure summaries", () => {
+  const summary = providerSetFailureSummary({
+    setResults: Array.from({ length: 7 }, (_, index) => ({
+      error: "Provider failed",
+      name: `Set ${index + 1}`,
+      providerId: `set${index + 1}`,
+      status: "failed",
+      statusCode: 503,
+    })),
+  }, { limit: 2 });
+
+  assert.match(summary, /Set 1 \(set1\).*HTTP 503/);
+  assert.match(summary, /Set 2 \(set2\)/);
+  assert.match(summary, /\+5 more/);
+  assert.doesNotMatch(summary, /Set 3/);
+});
+
 test("does not mark an API-healthy zero-output discovery as degraded", () => {
   const reason = scheduledResponseDegradation({
     secondSource: {
@@ -185,6 +243,24 @@ test("does not mark an API-healthy zero-output discovery as degraded", () => {
       pricingSnapshotsUpdated: 0,
       provider: "cardtrader-sealed",
       selectionMode: "discovery",
+      status: "succeeded",
+    },
+  });
+
+  assert.equal(reason, null);
+});
+
+test("does not mark an explicitly quarantined CardTrader observation as provider degradation", () => {
+  const reason = scheduledResponseDegradation({
+    secondSource: {
+      apiRequests: 4,
+      candidatesChecked: 1,
+      outcome: "quarantined",
+      pricingObservationsQuarantined: 1,
+      pricingSnapshotsCreated: 0,
+      pricingSnapshotsUpdated: 0,
+      provider: "cardtrader-sealed",
+      selectionMode: "refresh",
       status: "succeeded",
     },
   });

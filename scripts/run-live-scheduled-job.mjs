@@ -278,10 +278,12 @@ async function runSetPricingJobBatches({ env, fetchImpl, headers, request, url }
     batches,
     requestedBody: request.body,
   });
+  const degradation = scheduledResponseDegradation(response);
 
   return {
     body: request.body,
-    ok: batches.every((batch) => batch.ok),
+    degradation,
+    ok: batches.every((batch) => batch.ok) && !degradation,
     response,
     status: batches.at(-1)?.status ?? 200,
     url: url.toString(),
@@ -292,6 +294,8 @@ function combinedSetPricingBatchResponse({ batches, requestedBody }) {
   const responses = batches.map((batch) => batch.response ?? {});
   const selectedSets = responses.flatMap((response) => response.selectedSets ?? []);
   const setResults = responses.flatMap((response) => response.setResults ?? []);
+  const failedSets = sumResponses(responses, "failedSets");
+  const partialSets = sumResponses(responses, "partialSets");
 
   return {
     batched: true,
@@ -299,10 +303,11 @@ function combinedSetPricingBatchResponse({ batches, requestedBody }) {
     cardsFetched: sumResponses(responses, "cardsFetched"),
     cardsUpserted: sumResponses(responses, "cardsUpserted"),
     complete: responses.at(-1)?.complete === true,
-    failedSets: sumResponses(responses, "failedSets"),
+    failedSets,
     maxPagesPerSet: responses.at(-1)?.maxPagesPerSet ?? requestedBody.maxPagesPerSet,
     pageSize: responses.at(-1)?.pageSize ?? requestedBody.pageSize,
     pagesProcessed: sumResponses(responses, "pagesProcessed"),
+    partialSets,
     priceOnlyUnpriced: responses.at(-1)?.priceOnlyUnpriced ?? requestedBody.priceOnlyUnpriced,
     pricingSnapshotsCreated: sumResponses(responses, "pricingSnapshotsCreated"),
     query: "set-rotation",
@@ -314,6 +319,9 @@ function combinedSetPricingBatchResponse({ batches, requestedBody }) {
     strategy: "set-rotation",
     succeededSets: sumResponses(responses, "succeededSets"),
     totalCount: sumResponses(responses, "totalCount"),
+    warning: failedSets || partialSets
+      ? `Set pricing completed with ${failedSets} failed set(s) and ${partialSets} partial set(s).`
+      : null,
   };
 }
 
@@ -683,6 +691,10 @@ export function scheduledResponseDegradation(payload) {
     if (count) reasons.push(`${count} ${label}.`);
   }
 
+  const affectedSets = providerSetFailureSummary(payload);
+
+  if (affectedSets) reasons.push(affectedSets);
+
   const secondSource = payload.secondSource;
 
   if (secondSource && typeof secondSource === "object") {
@@ -707,15 +719,48 @@ export function scheduledResponseDegradation(payload) {
   return [...new Set(reasons)].join(" ") || null;
 }
 
+export function providerSetFailureSummary(payload, { limit = 5 } = {}) {
+  const setResults = Array.isArray(payload?.setResults) ? payload.setResults : [];
+  const failed = setResults.filter((result) => {
+    const status = optionalString(result?.status)?.toLowerCase();
+
+    return status === "failed" || status === "partial";
+  });
+
+  if (!failed.length) return null;
+
+  const safeLimit = Math.max(1, Math.min(10, Math.floor(Number(limit) || 5)));
+  const details = failed.slice(0, safeLimit).map((result) => {
+    const name = optionalString(result?.name);
+    const providerId = optionalString(result?.providerId);
+    const status = optionalString(result?.status)?.toLowerCase() ?? "degraded";
+    const statusCode = optionalPositiveInteger(result?.statusCode);
+    const identity = name && providerId && name !== providerId
+      ? `${name} (${providerId})`
+      : name ?? providerId ?? "unknown set";
+    const attributes = [status, statusCode ? `HTTP ${statusCode}` : null].filter(Boolean).join(", ");
+    const error = truncateDetail(optionalString(result?.error), 160);
+
+    return `${identity} [${attributes}]${error ? `: ${error}` : ""}`;
+  });
+  const remaining = failed.length - details.length;
+
+  return `Affected sets: ${details.join("; ")}${remaining > 0 ? `; +${remaining} more` : ""}.`;
+}
+
 function isExpectedCardTraderDiscoveryMiss(result, provider) {
   const outcome = optionalString(result.outcome);
   const selectionMode = optionalString(result.selectionMode);
   const apiRequests = optionalPositiveInteger(result.apiRequests) ?? 0;
+  const quarantined = optionalPositiveInteger(result.pricingObservationsQuarantined) ?? 0;
 
   return provider === "cardtrader-sealed" &&
-    selectionMode === "discovery" &&
-    ["no_blueprint_match", "no_eligible_listing"].includes(outcome) &&
-    apiRequests > 0;
+    apiRequests > 0 &&
+    (
+      (selectionMode === "discovery" &&
+        ["no_blueprint_match", "no_eligible_listing"].includes(outcome)) ||
+      (outcome === "quarantined" && quarantined > 0)
+    );
 }
 
 function normalizeJob(value) {
@@ -742,6 +787,12 @@ function optionalString(value) {
   const trimmed = String(value ?? "").trim();
 
   return trimmed || undefined;
+}
+
+function truncateDetail(value, maxLength) {
+  if (!value) return undefined;
+
+  return value.length > maxLength ? `${value.slice(0, maxLength - 1)}…` : value;
 }
 
 function optionalPositiveInteger(value) {

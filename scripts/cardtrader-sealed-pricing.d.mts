@@ -10,11 +10,16 @@ export type CardTraderSealedPricingOptions = {
     blueprintId: string;
     localKey: string;
   }>;
+  maxOfferPriceRatio?: number;
+  maxReferencePriceRatio?: number;
+  minOfferCount?: number;
+  minReferenceDifferenceMinor?: number;
   now?: Date | number | string;
   priceOnlyUnpriced?: boolean;
   prisma?: unknown;
   productIds?: string[] | string;
   refreshEveryHours?: number;
+  referenceMaxAgeDays?: number;
   setLimit?: number;
   token?: string;
   usdToGbpRate?: number;
@@ -48,18 +53,27 @@ export type CardTraderSealedPricingSummary = {
     | "no_candidates"
     | "no_eligible_listing"
     | "pending"
-    | "priced";
+    | "priced"
+    | "quarantined";
   priceOnlyUnpriced: boolean;
+  pricingObservationsAccepted: number;
+  pricingObservationsQuarantined: number;
   pricingSnapshotsCreated: number;
   pricingSnapshotsUpdated: number;
   provider: "cardtrader-sealed";
   refreshEveryHours: number;
   sampleUnmatchedProducts: Array<Record<string, unknown>>;
+  sampleQuarantinedPrices: Array<Record<string, unknown>>;
   selectionMode: "discovery" | "refresh" | "targeted";
   setsChecked: number;
   setsUnmatched: number;
   status: "degraded" | "succeeded";
   targetedProductCount: number;
+  quarantineReasons: {
+    extremeSpread: number;
+    referenceDivergence: number;
+    sparseListings: number;
+  };
   writePrices: boolean;
 };
 
@@ -72,6 +86,16 @@ export function syncCardTraderSealedPrices(
 ): Promise<CardTraderSealedPricingSummary>;
 
 export function buildCardTraderBlueprintIndex(blueprints: Array<Record<string, unknown>>): unknown;
+export function assessCardTraderMarketPrice(
+  marketPrice: Record<string, unknown>,
+  options?: {
+    maxOfferPriceRatio?: number;
+    maxReferencePriceRatio?: number;
+    minOfferCount?: number;
+    minReferenceDifferenceMinor?: number;
+    referencePrice?: Record<string, unknown>;
+  },
+): Record<string, unknown>;
 export function normalizeCardTraderProductIds(value: unknown): string[];
 export function normalizeManualAliases(value: unknown): Map<string, string>;
 export function selectCardTraderCandidates(

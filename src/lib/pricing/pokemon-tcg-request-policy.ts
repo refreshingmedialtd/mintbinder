@@ -10,7 +10,17 @@ export class PokemonTcgApiRequestError extends Error {
   }
 }
 
-export const pokemonTcgMaxRetryWaitMs = 5_000;
+export const pokemonTcgDefaultRetryAttempts = 2;
+export const pokemonTcgMaxRetryAttempts = 2;
+export const pokemonTcgMaxRetryWaitMs = 2_000;
+export const pokemonTcgMaxTimeoutMs = 22_000;
+export const pokemonTcgRetryTimeoutMs = 2_000;
+export const pokemonTcgMaxRequestBudgetMs =
+  pokemonTcgMaxTimeoutMs +
+  (pokemonTcgMaxRetryAttempts - 1) * pokemonTcgRetryTimeoutMs +
+  (pokemonTcgMaxRetryAttempts - 1) * pokemonTcgMaxRetryWaitMs;
+export const pokemonTcgSetRetryBaseMs = 30 * 60 * 1_000;
+export const pokemonTcgSetRetryMaxMs = 6 * 60 * 60 * 1_000;
 
 export function exhaustedPokemonTcgRequestError(
   error: unknown,
@@ -57,8 +67,73 @@ export function isRetryablePokemonTcgStatus(status: number) {
   return status === 408 || status === 425 || status === 429 || status >= 500;
 }
 
+export function pokemonTcgApiRetryAttempts(env: Record<string, string | undefined> = process.env) {
+  return Math.min(
+    pokemonTcgMaxRetryAttempts,
+    optionalPositiveInteger(env.POKEMON_TCG_API_RETRY_ATTEMPTS) ?? pokemonTcgDefaultRetryAttempts,
+  );
+}
+
+export function pokemonTcgApiRetryWaitMs(env: Record<string, string | undefined> = process.env) {
+  return Math.min(
+    pokemonTcgMaxRetryWaitMs,
+    optionalNonNegativeInteger(env.POKEMON_TCG_API_RETRY_WAIT_MS) ?? 1_500,
+  );
+}
+
 export function pokemonTcgApiTimeoutMs(env: Record<string, string | undefined> = process.env) {
-  return optionalPositiveInteger(env.POKEMON_TCG_API_TIMEOUT_MS) ?? 15_000;
+  return Math.min(
+    pokemonTcgMaxTimeoutMs,
+    optionalPositiveInteger(env.POKEMON_TCG_API_TIMEOUT_MS) ?? pokemonTcgMaxTimeoutMs,
+  );
+}
+
+export function pokemonTcgApiAttemptTimeoutMs(
+  attempt: number,
+  env: Record<string, string | undefined> = process.env,
+) {
+  const primaryTimeoutMs = pokemonTcgApiTimeoutMs(env);
+
+  return Math.max(1, Math.floor(attempt) || 1) === 1
+    ? primaryTimeoutMs
+    : Math.min(primaryTimeoutMs, pokemonTcgRetryTimeoutMs);
+}
+
+export function pokemonTcgSetRetryAfter({
+  attemptedAt,
+  consecutiveFailures,
+  retryAfterMs,
+  status,
+}: {
+  attemptedAt: string;
+  consecutiveFailures: number;
+  retryAfterMs?: number;
+  status: number | null;
+}) {
+  const attemptedAtMs = Date.parse(attemptedAt);
+
+  if (!Number.isFinite(attemptedAtMs)) {
+    return null;
+  }
+
+  if (status === 404) {
+    return new Date(attemptedAtMs + 7 * 24 * 60 * 60 * 1_000).toISOString();
+  }
+
+  if (status !== null && status !== 0 && !isRetryablePokemonTcgStatus(status)) {
+    return null;
+  }
+
+  const failureCount = Math.max(1, Math.min(10, Math.floor(consecutiveFailures) || 1));
+  const exponentialDelay = Math.min(
+    pokemonTcgSetRetryMaxMs,
+    pokemonTcgSetRetryBaseMs * (2 ** (failureCount - 1)),
+  );
+  const providerDelay = Number.isFinite(retryAfterMs) && Number(retryAfterMs) > 0
+    ? Math.min(24 * 60 * 60 * 1_000, Math.floor(Number(retryAfterMs)))
+    : 0;
+
+  return new Date(attemptedAtMs + Math.max(exponentialDelay, providerDelay)).toISOString();
 }
 
 function deepestErrorMessage(error: unknown) {
@@ -80,6 +155,16 @@ function optionalPositiveInteger(value: unknown) {
   const number = Number(value);
 
   if (!Number.isFinite(number) || number <= 0) {
+    return undefined;
+  }
+
+  return Math.floor(number);
+}
+
+function optionalNonNegativeInteger(value: unknown) {
+  const number = Number(value);
+
+  if (!Number.isFinite(number) || number < 0) {
     return undefined;
   }
 
