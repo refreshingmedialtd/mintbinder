@@ -17,13 +17,19 @@ test("binder consistency locks are scoped to the owning user and active items", 
   await lockCollectionItemsForBinderConsistency(
     transaction,
     "11111111-1111-4111-8111-111111111111",
-    ["22222222-2222-4222-8222-222222222222"],
+    [
+      "33333333-3333-4333-8333-333333333333",
+      "22222222-2222-4222-8222-222222222222",
+    ],
   );
 
   const sql = query.strings.join("?");
+  assert.match(sql, /"id" IN \(\?::uuid,\?::uuid\)/);
   assert.match(sql, /"user_id" = \?::uuid/);
   assert.match(sql, /"archived_at" IS NULL/);
   assert.equal(query.values.includes("11111111-1111-4111-8111-111111111111"), true);
+  assert.equal(query.values.includes("22222222-2222-4222-8222-222222222222"), true);
+  assert.equal(query.values.includes("33333333-3333-4333-8333-333333333333"), true);
 });
 
 test("quantity reduction clears binder copies above the remaining quantity", async () => {

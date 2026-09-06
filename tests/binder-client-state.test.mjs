@@ -130,7 +130,13 @@ test("binder reads have a bounded loading state and render the local collection 
   assert.match(source, /signal:\s*controller\.signal/);
   assert.match(retrySource, /setBinderRetryNonce\(\(current\) => current \+ 1\)/);
   assert.doesNotMatch(retrySource, /fetchServerBinders\(/);
-  assert.match(source, /\[binderRetryNonce, catalogueById, collection, isLoadingData/);
+  assert.match(source, /const binderCardCollection = useMemo/);
+  assert.match(source, /const activeCardLotSignature = useMemo/);
+  assert.match(source, /const previousSyncTask = binderSyncTaskRef\.current/);
+  assert.match(source, /async function loadAndMigrateBinders\(\) \{\s*setIsLoadingBinders\(true\);[\s\S]*?if \(previousSyncTask\)/);
+  assert.match(source, /await previousSyncTask\.catch\(\(\) => undefined\)/);
+  assert.match(source, /\[activeCardLotSignature, binderRetryNonce, isLoadingData/);
+  assert.doesNotMatch(source, /\[binderRetryNonce, catalogueById, collection, isLoadingData/);
   assert.match(source, /\$\{item\.id}:\$\{item\.quantity}/);
   assert.match(source, /createServerBinder[\s\S]*?fetchBinderRequest\([\s\S]*?method: "POST"/);
   assert.match(source, /replaceServerBinderLayout[\s\S]*?fetchBinderRequest\([\s\S]*?method: "PUT"/);
@@ -142,7 +148,7 @@ test("binder reads have a bounded loading state and render the local collection 
   assert.match(source, /pendingDefaultNeedsCompletion \|\|/);
   assert.match(source, /legacyBinders: migrationPending \|\| pendingDefaultNeedsCompletion \? legacyBinders : \[\]/);
   assert.match(source, /shouldCompleteMigratedDefaultBinder\(\[pendingDefault\], cardItems\.length\)/);
-  assert.match(source, /binders = await syncManagedDefaultBinder\(binders, cardCollection, syncController\.signal\)/);
+  assert.match(source, /binders = await syncManagedDefaultBinder\(binders, cardCollection\)/);
   assert.equal((source.match(/completeLegacyDefaultMigration: true/g) ?? []).length, 1);
   assert.match(
     source,
@@ -150,6 +156,17 @@ test("binder reads have a bounded loading state and render the local collection 
   );
   assert.match(source, /if \(binderSyncControllerRef\.current === syncController\) \{\s*binderSyncControllerRef\.current = null;/);
   assert.match(source, /if \(binderLoadKeyRef\.current === loadKey\) \{\s*binderLoadKeyRef\.current = "";/);
+
+  const createHelper = source.slice(
+    source.indexOf("async function createServerBinder"),
+    source.indexOf("async function replaceServerBinderLayout"),
+  );
+  const layoutHelper = source.slice(
+    source.indexOf("async function replaceServerBinderLayout"),
+    source.indexOf("async function patchServerBinder"),
+  );
+  assert.doesNotMatch(createHelper, /\bsignal\b/, "dispatched binder creation must not be aborted");
+  assert.doesNotMatch(layoutHelper, /\bsignal\b/, "dispatched binder layout writes must not be aborted");
 });
 
 test("only the hidden managed default appends globally unassigned new card lots", async () => {

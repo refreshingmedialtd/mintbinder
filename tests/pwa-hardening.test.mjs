@@ -137,6 +137,20 @@ test("waiting application updates surface an accessible, draft-protected reload 
   assert.match(styles, /bottom: calc\(78px \+ env\(safe-area-inset-bottom/);
 });
 
+test("the authenticated mobile header bounds long account names", async () => {
+  const [page, styles] = await Promise.all([
+    readFile(new URL("../src/app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(page, /className="user-pill-name">\{userName\}<\/span>/);
+  assert.match(page, /aria-label=\{`Open settings for \$\{userName\}`\}/);
+  assert.match(page, /aria-label="Sign out"/);
+  assert.match(styles, /@media \(max-width: 759px\)[\s\S]*\.topbar-actions[\s\S]*flex-wrap: nowrap/);
+  assert.match(styles, /\.topbar-action-label,[\s\S]*\.user-pill-name[\s\S]*display: none/);
+  assert.match(styles, /\.topbar-actions > \.user-pill,[\s\S]*flex: 0 0 40px/);
+});
+
 test("offline fallback makes the private-data boundary explicit", async () => {
   const offline = await readFile(new URL("../public/offline.html", import.meta.url), "utf8");
 

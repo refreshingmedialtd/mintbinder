@@ -1,13 +1,13 @@
 import { randomBytes } from "node:crypto";
 import { BinderVisibility, Prisma } from "@prisma/client";
-import { prisma } from "@/lib/db/prisma";
+import { prisma } from "./prisma.ts";
 import {
   BinderInputError,
   MAX_STANDARD_BINDER_PAGES,
   normalizeBinderLayout,
   type BinderLayoutInput,
-} from "@/lib/binders/layout";
-import { lockCollectionItemsForBinderConsistency } from "@/lib/binders/slot-reconciliation";
+} from "../binders/layout.ts";
+import { lockCollectionItemsForBinderConsistency } from "../binders/slot-reconciliation.ts";
 import {
   consumeLegacyCustomBinderMarker,
   consumeLegacyDefaultBinderMarker,
@@ -17,13 +17,13 @@ import {
   visibleBinderDescription,
   withLegacyCustomBinderMarker,
   withLegacyDefaultBinderMarker,
-} from "@/lib/binders/migration-state";
+} from "../binders/migration-state.ts";
 import {
   assertUserResourceQuota,
   lockUserResourceQuota,
-} from "@/lib/db/user-quotas";
+} from "./user-quotas.ts";
 
-export { BinderInputError, normalizeBinderLayout, type BinderLayoutInput } from "@/lib/binders/layout";
+export { BinderInputError, normalizeBinderLayout, type BinderLayoutInput } from "../binders/layout.ts";
 
 const DEFAULT_PAGE_COUNT = 2;
 const SLOTS_PER_PAGE = 9;
@@ -130,6 +130,7 @@ export async function createBinder(
     managedDefaultBootstrap?: unknown;
     name?: unknown;
   },
+  database: Pick<typeof prisma, "$transaction"> = prisma,
 ) {
   const name = requiredText(input.name, "Binder name", 80);
   const visibleDescription = visibleBinderDescription(optionalText(input.description, 500));
@@ -141,16 +142,25 @@ export async function createBinder(
     throw new BinderInputError("A binder cannot use two migration sources.");
   }
 
-  return prisma.$transaction(async (transaction) => {
+  return database.$transaction(async (transaction) => {
     await lockUserResourceQuota(transaction, userId, "binders");
     const binderCount = await transaction.binder.count({ where: { userId } });
     assertUserResourceQuota(binderCount, "binders");
     const currentDefaults = await transaction.binder.findMany({
       where: { isDefault: true, userId },
-      select: { id: true, updatedAt: true },
+      select: { description: true, id: true, updatedAt: true },
     });
 
     if (managedDefaultBootstrap && currentDefaults.length) {
+      const existingManagedDefault = currentDefaults.find((binder) =>
+        hasLegacyDefaultBinderMarker(binder.description) || hasManagedDefaultBinderMarker(binder.description)
+      );
+      if (existingManagedDefault) {
+        return transaction.binder.findUniqueOrThrow({
+          where: { id: existingManagedDefault.id },
+          include: binderInclude,
+        });
+      }
       throw new BinderInputError("The full-collection binder has already been initialized.");
     }
     if (!managedDefaultBootstrap && !currentDefaults.length) {

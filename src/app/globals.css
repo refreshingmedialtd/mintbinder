@@ -8085,8 +8085,39 @@ h3 {
 
 @media (max-width: 759px) {
   .topbar {
+    min-width: 0;
+    gap: 8px;
     padding-right: max(12px, env(safe-area-inset-right, 0px));
     padding-left: max(12px, env(safe-area-inset-left, 0px));
+  }
+
+  .brand {
+    min-width: 0;
+  }
+
+  .topbar-actions {
+    min-width: 0;
+    flex: 0 0 auto;
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+    gap: 4px;
+  }
+
+  .topbar-actions .plan-preview-control,
+  .topbar-action-label,
+  .user-pill-name {
+    display: none;
+  }
+
+  .topbar-actions > .plan-pill,
+  .topbar-actions > .user-pill,
+  .topbar-actions > .button.small {
+    width: 40px;
+    min-width: 40px;
+    min-height: 40px;
+    flex: 0 0 40px;
+    justify-content: center;
+    padding: 0;
   }
 
   .main {

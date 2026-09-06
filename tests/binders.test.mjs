@@ -8,6 +8,8 @@ import {
   MAX_STANDARD_BINDER_PAGES,
   normalizeBinderLayout,
 } from "../src/lib/binders/layout.ts";
+import { withLegacyDefaultBinderMarker } from "../src/lib/binders/migration-state.ts";
+import { createBinder } from "../src/lib/db/binders.ts";
 
 function blankPage(position = 0) {
   return {
@@ -202,10 +204,68 @@ test("reserved migration markers can only be created by the bounded bootstrap pa
   assert.match(createSource, /visibleBinderDescription\(optionalText\(input\.description/);
   assert.match(createSource, /managedDefaultBootstrap = input\.managedDefaultBootstrap === true/);
   assert.match(createSource, /managedDefaultBootstrap && currentDefaults\.length/);
+  assert.match(createSource, /hasLegacyDefaultBinderMarker\(binder\.description\) \|\| hasManagedDefaultBinderMarker\(binder\.description\)/);
+  assert.match(createSource, /existingManagedDefault[\s\S]*?transaction\.binder\.findUniqueOrThrow/);
   assert.match(createSource, /!managedDefaultBootstrap && !currentDefaults\.length/);
   assert.match(createSource, /withLegacyDefaultBinderMarker\(visibleDescription\)/);
   assert.match(createSource, /withLegacyCustomBinderMarker\(visibleDescription, legacySource\)/);
   assert.match(database, /preserveBinderDescriptionMarker\(existing\.description, description\)/);
+});
+
+test("managed default bootstrap is transactionally idempotent but rejects an unrelated default", async () => {
+  const existing = {
+    description: withLegacyDefaultBinderMarker("Every active card lot."),
+    id: "11111111-1111-4111-8111-111111111111",
+    isDefault: true,
+    pages: [],
+    updatedAt: new Date("2026-09-06T12:00:00.000Z"),
+  };
+  let createCalls = 0;
+
+  function databaseWithDefaults(defaults) {
+    const transaction = {
+      async $executeRaw() {
+        return 1;
+      },
+      binder: {
+        async count() {
+          return defaults.length;
+        },
+        async create() {
+          createCalls += 1;
+          throw new Error("A duplicate default binder must not be created.");
+        },
+        async findMany() {
+          return defaults;
+        },
+        async findUniqueOrThrow({ where }) {
+          assert.equal(where.id, existing.id);
+          return existing;
+        },
+      },
+    };
+    return {
+      async $transaction(callback) {
+        return callback(transaction);
+      },
+    };
+  }
+
+  const database = databaseWithDefaults([existing]);
+  const input = { managedDefaultBootstrap: true, name: "Full Card Collection" };
+  assert.equal((await createBinder("user-1", input, database)).id, existing.id);
+  assert.equal((await createBinder("user-1", input, database)).id, existing.id);
+  assert.equal(createCalls, 0);
+
+  await assert.rejects(
+    createBinder(
+      "user-1",
+      input,
+      databaseWithDefaults([{ ...existing, description: "An ordinary default binder." }]),
+    ),
+    /already been initialized/,
+  );
+  assert.equal(createCalls, 0);
 });
 
 test("every implicit default transition advances the affected binder version", async () => {

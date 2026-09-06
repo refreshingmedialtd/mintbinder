@@ -50,6 +50,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "qa:admin": "node scripts/admin-qa-smoke.mjs",
+    "qa:authenticated-browser": "node --experimental-strip-types scripts/authenticated-browser-qa.mjs",
     "qa:beta": "node scripts/beta-qa-smoke.mjs",
     "qa:operations": "node scripts/operations-qa-smoke.mjs",
     "qa:production-env": "node scripts/validate-production-env.mjs",
@@ -148,6 +149,7 @@
     "@types/react-dom": "^19.0.0",
     "eslint": "^9.16.0",
     "eslint-config-next": "15.5.21",
+    "playwright-core": "^1.63.0",
     "pm2": "^7.0.4",
     "prisma": "6.19.3",
     "typescript": "^5.7.0"

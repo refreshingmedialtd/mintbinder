@@ -712,6 +712,7 @@ export default function Home() {
   const binderLoadKeyRef = useRef("");
   const binderReloadFeedbackRef = useRef<"quiet" | "visible" | null>(null);
   const binderSyncControllerRef = useRef<AbortController | null>(null);
+  const binderSyncTaskRef = useRef<Promise<void> | null>(null);
   const canLeaveBinderWorkspaceRef = useRef<(reason?: "navigation" | "app-update") => boolean>(() => true);
   const isInitialAppRouteSyncRef = useRef(true);
   const previousAppRouteStateRef = useRef<AppRouteState | null>(null);
@@ -862,6 +863,16 @@ export default function Home() {
   const catalogueById = useMemo(() => {
     return new Map(catalogueItems.map((item) => [item.id, item]));
   }, [catalogueItems]);
+  const binderCardCollection = useMemo(
+    () => collection.filter((item) => catalogueById.get(item.catalogueId)?.type === "card"),
+    [catalogueById, collection],
+  );
+  const activeCardLotSignature = useMemo(
+    () => binderCardCollection.map((item) => `${item.id}:${item.quantity}`).sort().join("|"),
+    [binderCardCollection],
+  );
+  const binderCardCollectionRef = useRef(binderCardCollection);
+  binderCardCollectionRef.current = binderCardCollection;
 
   const viewer: Viewer = {
     name: session?.user?.name || "Collector",
@@ -963,11 +974,7 @@ export default function Home() {
       return;
     }
 
-    const cardCollection = collection.filter((item) => catalogueById.get(item.catalogueId)?.type === "card");
-    const activeCardLotSignature = cardCollection
-      .map((item) => `${item.id}:${item.quantity}`)
-      .sort()
-      .join("|");
+    const cardCollection = binderCardCollectionRef.current;
     const hasCardCollection = cardCollection.length > 0;
     const loadKey = `${viewer.email.trim().toLowerCase()}:${activeCardLotSignature || "empty"}`;
 
@@ -986,10 +993,16 @@ export default function Home() {
     let cancelled = false;
     const syncController = new AbortController();
     binderSyncControllerRef.current = syncController;
+    const previousSyncTask = binderSyncTaskRef.current;
 
     async function loadAndMigrateBinders() {
       setIsLoadingBinders(true);
       setBinderNotice("");
+
+      if (previousSyncTask) {
+        await previousSyncTask.catch(() => undefined);
+      }
+      if (cancelled) return;
 
       try {
         const legacyBinders = readStoredBinders(binderStorageKey(viewer.email));
@@ -1024,7 +1037,7 @@ export default function Home() {
           }
         }
 
-        binders = await syncManagedDefaultBinder(binders, cardCollection, syncController.signal);
+        binders = await syncManagedDefaultBinder(binders, cardCollection);
 
         if (!cancelled && !binderDraftProtectionRef.current) {
           setCustomBinders(binders);
@@ -1064,7 +1077,13 @@ export default function Home() {
       }
     }
 
-    void loadAndMigrateBinders();
+    const syncTask = loadAndMigrateBinders();
+    binderSyncTaskRef.current = syncTask;
+    void syncTask.finally(() => {
+      if (binderSyncTaskRef.current === syncTask) {
+        binderSyncTaskRef.current = null;
+      }
+    });
     return () => {
       cancelled = true;
       syncController.abort();
@@ -1076,7 +1095,7 @@ export default function Home() {
       }
       setIsLoadingBinders(false);
     };
-  }, [binderRetryNonce, catalogueById, collection, isLoadingData, showToast, status, viewer.email]);
+  }, [activeCardLotSignature, binderRetryNonce, isLoadingData, showToast, status, viewer.email]);
 
   const applyAppData = useCallback((data: AppData) => {
     setCatalogueItems((current) =>
@@ -3014,9 +3033,13 @@ function Header({
         <span className="brand-text">Mint Binder</span>
       </button>
       <div className="topbar-actions">
-        <button className="plan-pill" onClick={() => onNavigate(plus ? "analytics" : "settings")}>
+        <button
+          aria-label={plus ? "Open Plus insights" : "Open upgrade settings"}
+          className="plan-pill"
+          onClick={() => onNavigate(plus ? "analytics" : "settings")}
+        >
           {plus ? <Sparkles size={17} /> : <Lock size={17} />}
-          {plus ? "Plus" : "Upgrade"}
+          <span className="topbar-action-label">{plus ? "Plus" : "Upgrade"}</span>
         </button>
         {canPreviewPlan ? (
           <div className="plan-preview-control" aria-label="Temporary tester-only plan preview">
@@ -3046,13 +3069,18 @@ function Header({
           <Bell size={17} />
           {alertCount}
         </button>
-        <button className="user-pill" onClick={() => onNavigate("settings")} title={userEmail}>
+        <button
+          aria-label={`Open settings for ${userName}`}
+          className="user-pill"
+          onClick={() => onNavigate("settings")}
+          title={userEmail}
+        >
           <UserRound size={17} />
-          {userName}
+          <span className="user-pill-name">{userName}</span>
         </button>
-        <button className="button small" onClick={onSignOut}>
+        <button aria-label="Sign out" className="button small" onClick={onSignOut}>
           <LogOut size={17} />
-          Sign out
+          <span className="topbar-action-label">Sign out</span>
         </button>
       </div>
     </header>
@@ -11835,13 +11863,12 @@ async function createServerBinder(input: {
   legacySource?: string;
   managedDefaultBootstrap?: boolean;
   name: string;
-}, signal?: AbortSignal) {
+}) {
   const response = await fetchBinderRequest(
     "/api/binders",
     {
       method: "POST",
       headers: { "content-type": "application/json" },
-      signal,
       body: JSON.stringify({
         coverStyle: serverCoverStyleFromArtwork(input.artworkId),
         description: input.description ?? "",
@@ -11873,7 +11900,6 @@ async function replaceServerBinderLayout(
     expectedUpdatedAt: string;
     releaseConflictsFromDefaultBinderId?: string;
     releaseConflictsFromDefaultUpdatedAt?: string;
-    signal?: AbortSignal;
   },
 ) {
   const response = await fetchBinderRequest(
@@ -11881,7 +11907,6 @@ async function replaceServerBinderLayout(
     {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      signal: options.signal,
       body: JSON.stringify({
         completeLegacyCustomMigration: options.completeLegacyCustomMigration === true,
         completeLegacyDefaultMigration: options.completeLegacyDefaultMigration === true,
@@ -11983,7 +12008,7 @@ async function migrateLegacyBinders({
       isDefault: true,
       managedDefaultBootstrap: true,
       name: uniqueBinderName("Full Card Collection", nextBinders),
-    }, signal);
+    });
     pendingDefault = created;
     nextBinders = [created, ...nextBinders.map((binder) => ({ ...binder, isDefault: false }))];
     migratedCount += 1;
@@ -12000,7 +12025,7 @@ async function migrateLegacyBinders({
       description: "Migrated from this device. The original local copy remains available as a safety backup.",
       legacySource,
       name: uniqueBinderName(legacy.name.slice(0, 70), nextBinders),
-    }, signal);
+    });
     const existingHasAssignments = Boolean(existingMigration?.pages.some((page) =>
       page.slots.some((slot) => slot.collectionItemId),
     ));
@@ -12008,7 +12033,6 @@ async function migrateLegacyBinders({
       const completed = await replaceServerBinderLayout(existingMigration.id, existingMigration.pages, {
         completeLegacyCustomMigration: true,
         expectedUpdatedAt: existingMigration.updatedAt,
-        signal,
       });
       nextBinders = nextBinders.map((binder) => (binder.id === completed.id ? completed : binder));
       continue;
@@ -12030,7 +12054,6 @@ async function migrateLegacyBinders({
       expectedUpdatedAt: created.updatedAt,
       releaseConflictsFromDefaultBinderId: releasePendingDefault?.id,
       releaseConflictsFromDefaultUpdatedAt: releasePendingDefault?.updatedAt,
-      signal,
     });
     nextBinders = releasePendingDefault
       ? await fetchServerBinders(signal)
@@ -12068,7 +12091,6 @@ async function migrateLegacyBinders({
       {
         completeLegacyDefaultMigration: true,
         expectedUpdatedAt: pendingDefault.updatedAt,
-        signal,
       },
     );
     nextBinders = nextBinders.map((binder) => (binder.id === saved.id ? saved : binder));
@@ -12080,7 +12102,6 @@ async function migrateLegacyBinders({
 async function syncManagedDefaultBinder(
   binders: CustomBinder[],
   collection: CollectionItem[],
-  signal?: AbortSignal,
 ) {
   const managedDefault = binders.find((binder) => binder.isDefault && binder.managedDefault);
   if (!managedDefault || !collection.length) return binders;
@@ -12111,7 +12132,6 @@ async function syncManagedDefaultBinder(
 
   const saved = await replaceServerBinderLayout(managedDefault.id, appended.pages, {
     expectedUpdatedAt: managedDefault.updatedAt,
-    signal,
   });
   return binders.map((binder) => (binder.id === saved.id ? saved : binder));
 }

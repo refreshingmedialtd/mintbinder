@@ -22,10 +22,12 @@ export async function lockCollectionItemsForBinderConsistency(
 
   if (!ids.length) return;
 
+  const uuidIds = Prisma.join(ids.map((id) => Prisma.sql`${id}::uuid`));
+
   await transaction.$queryRaw(Prisma.sql`
     SELECT "id"
     FROM "collection_items"
-    WHERE "id" IN (${Prisma.join(ids)})
+    WHERE "id" IN (${uuidIds})
       AND "user_id" = ${userId}::uuid
       AND "archived_at" IS NULL
     ORDER BY "id"

@@ -62,6 +62,7 @@ npm run test:price-history
 npm run test:pricecharting-sealed
 npm run test:tcgcsv-card-pricing
 npm run build
+npm run qa:authenticated-browser
 npm run qa:beta
 npm run qa:admin
 npm run qa:operations
@@ -245,6 +246,24 @@ Run `npm run build` before `npm run qa:beta`. The beta smoke starts the producti
 The local sign-in flow uses Auth.js credentials with scrypt-hashed passwords. Login fields are intentionally empty and no shared demo password is stored in the client or documentation.
 
 Creating an account from the sign-in screen creates a new collector profile with an empty collection against the same global catalogue.
+
+## Authenticated browser QA
+
+`npm run qa:authenticated-browser` runs the critical signed-in journey in an installed Chrome-family browser. It covers sign-in, Portfolio catalogue search, card images and price history, Wishlist-to-Collection conversion, owned valuation, default-binder sync and reload persistence, notification preference persistence, CSV export, insurance PDF progress/download, account JSON export, mobile navigation, and permanent account deletion.
+
+The runner creates one uniquely marked, verified local-Plus account directly in the database configured by `DATABASE_URL`. It disables every email preference, never creates Square customer data, and deletes the complete disposable account through the product UI. If a browser check fails first, a guarded exact-ID fallback removes only an account whose email and display-name marker both match that run. It never uses or changes a real collector account.
+
+Run the production smoke from the development computer, not the memory-constrained 20i deploy shell:
+
+```powershell
+$env:AUTHENTICATED_QA_BASE_URL = "https://mintbinder.co.uk"
+$env:AUTHENTICATED_QA_ALLOW_PRODUCTION = "true"
+npm run qa:authenticated-browser
+```
+
+`DATABASE_URL` must address the database used by that deployment, and the browser target must already be running. A loopback target does not require the production opt-in. Set `AUTHENTICATED_QA_BROWSER_EXECUTABLE` only when Chrome is not in a standard location, and set `AUTHENTICATED_QA_HEADLESS=false` when watching a local run. Passwords and authenticated browser state are generated in memory and are never printed or written to the repository. Deployment identity is checked separately because the public health response intentionally omits private build metadata.
+
+The suite intentionally excludes real billing checkout/cancellation, email delivery, Operations jobs, and service-worker/offline behaviour. Exercise Square separately in sandbox with `npm run qa:square-activation`.
 
 ## API Routes
 
