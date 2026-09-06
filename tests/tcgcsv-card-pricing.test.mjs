@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   cardPricingOptionsFromEnv,
+  compareCardGroupRefreshPriority,
   isCardProduct,
   japanCardPricingOptionsFromEnv,
   matchTcgcsvCardGroupsToSets,
@@ -10,6 +11,29 @@ import {
   syncTcgcsvCardPrices,
   tcgcsvCardVariantLabel,
 } from "../scripts/tcgcsv-card-pricing.mjs";
+
+test("prioritizes the largest missing-price gap during unpriced backfills", () => {
+  const zeroOutputOldest = {
+    cardPrintings: [
+      { priceSnapshots: [] },
+    ],
+    name: "Old zero-output group",
+  };
+  const productiveRecent = {
+    cardPrintings: [
+      { priceSnapshots: [{ observedAt: new Date("2026-09-06T12:00:00.000Z") }] },
+      ...Array.from({ length: 5 }, () => ({ priceSnapshots: [] })),
+    ],
+    name: "Large unpriced group",
+  };
+
+  assert.ok(compareCardGroupRefreshPriority(zeroOutputOldest, productiveRecent) < 0);
+  assert.ok(compareCardGroupRefreshPriority(
+    productiveRecent,
+    zeroOutputOldest,
+    { prioritizeUnpriced: true },
+  ) < 0);
+});
 
 test("detects card products while excluding sealed products", () => {
   assert.equal(isCardProduct({

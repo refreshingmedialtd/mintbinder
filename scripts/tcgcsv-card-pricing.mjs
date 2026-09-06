@@ -189,7 +189,9 @@ export async function syncTcgcsvCardPrices(options = {}) {
     const availableMatches = matchTcgcsvCardGroupsToSets(groups.results ?? [], sets)
       .filter(({ group }) => groupIds.size === 0 || groupIds.has(String(group.groupId)))
       .filter(({ set }) => !onlyUnpricedGroups || unpricedCardCount(set) >= minUnpricedCards)
-      .sort((a, b) => compareCardGroupRefreshPriority(a.set, b.set));
+      .sort((a, b) => compareCardGroupRefreshPriority(a.set, b.set, {
+        prioritizeUnpriced: onlyUnpricedGroups,
+      }));
     const matches = availableMatches.slice(0, groupLimit);
     const summary = {
       cardProductsMatched: 0,
@@ -982,16 +984,22 @@ function cardPriceSnapshotCount(card) {
   return Number(card._count?.priceSnapshots ?? 0);
 }
 
-function compareCardGroupRefreshPriority(left, right) {
+export function compareCardGroupRefreshPriority(left, right, {
+  prioritizeUnpriced = false,
+} = {}) {
+  const leftUnpriced = unpricedCardCount(left);
+  const rightUnpriced = unpricedCardCount(right);
+
+  if (prioritizeUnpriced && leftUnpriced !== rightUnpriced) {
+    return rightUnpriced - leftUnpriced;
+  }
+
   const leftLatest = latestCardPriceSnapshotTime(left);
   const rightLatest = latestCardPriceSnapshotTime(right);
 
   if (leftLatest !== rightLatest) {
     return leftLatest - rightLatest;
   }
-
-  const leftUnpriced = unpricedCardCount(left);
-  const rightUnpriced = unpricedCardCount(right);
 
   if (leftUnpriced !== rightUnpriced) {
     return rightUnpriced - leftUnpriced;

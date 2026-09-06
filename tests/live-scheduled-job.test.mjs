@@ -250,6 +250,17 @@ test("does not mark an API-healthy zero-output discovery as degraded", () => {
   assert.equal(reason, null);
 });
 
+test("does not mark the public health response status as degraded", () => {
+  const reason = scheduledResponseDegradation({
+    checkedAt: "2026-09-06T17:16:53.252Z",
+    ok: true,
+    service: "mintbinder",
+    status: "ok",
+  });
+
+  assert.equal(reason, null);
+});
+
 test("does not mark an explicitly quarantined CardTrader observation as provider degradation", () => {
   const reason = scheduledResponseDegradation({
     secondSource: {

@@ -677,7 +677,7 @@ export function scheduledResponseDegradation(payload) {
   const topLevelStatus = optionalString(payload.status);
   const provider = optionalString(payload.provider) ?? "scheduled provider";
 
-  if (topLevelStatus && !["succeeded", "healthy", "not_configured"].includes(topLevelStatus)) {
+  if (topLevelStatus && !["succeeded", "healthy", "ok", "not_configured"].includes(topLevelStatus)) {
     reasons.push(`${provider} reported ${topLevelStatus}.`);
   }
 
