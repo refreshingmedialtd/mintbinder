@@ -4,6 +4,10 @@ import { BillingConfigError, billingErrorStatus } from "@/lib/billing/errors";
 import { fulfillSquareWebhookEvent, fulfillStripeWebhookEvent } from "@/lib/billing/subscriptions";
 import { processBillingWebhookEvent } from "@/lib/billing/webhook-events";
 import {
+  billingWebhookResourceIdFromSquareEvent,
+  billingWebhookResourceIdFromStripeEvent,
+} from "@/lib/billing/webhook-resource";
+import {
   squareWebhookOccurredAt,
   stripeWebhookOccurredAt,
   type SquareWebhookEvent,
@@ -48,6 +52,7 @@ export async function handleSquareBillingWebhook(request: Request) {
       eventId: event.event_id ?? "",
       eventType: event.type,
       occurredAt: squareWebhookOccurredAt(event),
+      resourceId: billingWebhookResourceIdFromSquareEvent(event),
       fulfill: () => fulfillSquareWebhookEvent(event),
     });
 
@@ -93,6 +98,7 @@ export async function handleStripeBillingWebhook(request: Request) {
       eventId: event.id,
       eventType: event.type,
       occurredAt: stripeWebhookOccurredAt(event),
+      resourceId: billingWebhookResourceIdFromStripeEvent(event),
       fulfill: () => fulfillStripeWebhookEvent(event),
     });
 

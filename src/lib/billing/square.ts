@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { BillingConfigError } from "@/lib/billing/errors";
-import { fetchWithPolicy } from "@/lib/http/fetch-with-policy";
-import { createSquareCheckoutCorrelation } from "@/lib/billing/square-checkout-correlation";
+import { BillingConfigError } from "./errors.ts";
+import { fetchWithPolicy } from "../http/fetch-with-policy.ts";
+import { createSquareCheckoutCorrelation } from "./square-checkout-correlation.ts";
 
 type SquarePlan = "monthly" | "yearly";
 
@@ -30,17 +30,35 @@ type SquarePaymentLinkResponse = {
   };
 };
 
+type SquarePaymentLinkDeleteResponse = {
+  cancelled_order_id?: string;
+  errors?: SquareApiError[];
+  id?: string;
+};
+
 type SquareOrderResponse = {
   errors?: SquareApiError[];
   order?: {
     id?: string | null;
     state?: string | null;
+    tenders?: Array<{ id?: string | null }> | null;
   };
 };
 
 type SquarePaymentResponse = {
   errors?: SquareApiError[];
   payment?: SquarePaymentRecord;
+};
+
+type SquarePaymentListResponse = {
+  cursor?: string;
+  errors?: SquareApiError[];
+  payments?: SquarePaymentRecord[];
+};
+
+type SquareRefundResponse = {
+  errors?: SquareApiError[];
+  refund?: SquareRefundRecord;
 };
 
 type SquareRequestOptions = {
@@ -90,20 +108,31 @@ export type SquarePaymentRecord = {
   status?: string | null;
 };
 
+export type SquareRefundRecord = {
+  amount_money?: { amount?: number | null; currency?: string | null } | null;
+  id?: string | null;
+  payment_id?: string | null;
+  status?: string | null;
+};
+
 export async function createSquareCustomer({
   email,
   idempotencyKey,
   name,
+  note = "Mint Binder subscription customer",
+  phoneNumber,
   userId,
 }: {
   email?: string | null;
   idempotencyKey?: string;
   name?: string | null;
+  note?: string;
+  phoneNumber?: string | null;
   userId: string;
 }) {
   const body: Record<string, unknown> = {
     idempotency_key: idempotencyKey ?? randomUUID(),
-    note: "Mint Binder subscription customer",
+    note,
     reference_id: userId,
   };
 
@@ -113,6 +142,10 @@ export async function createSquareCustomer({
 
   if (name) {
     body.given_name = name;
+  }
+
+  if (phoneNumber) {
+    body.phone_number = phoneNumber;
   }
 
   const response = await squareRequest<SquareCustomerResponse>("/v2/customers", body);
@@ -130,10 +163,16 @@ export async function createSquareCustomer({
 }
 
 export async function retrieveSquareCustomer(customerId: string) {
+  const normalizedCustomerId = customerId.trim();
+  if (!normalizedCustomerId) {
+    throw new Error("Square customer retrieval requires an exact customer ID.");
+  }
   let response: SquareCustomerResponse;
 
   try {
-    response = await squareRequest<SquareCustomerResponse>(`/v2/customers/${customerId}`);
+    response = await squareRequest<SquareCustomerResponse>(
+      `/v2/customers/${encodeURIComponent(normalizedCustomerId)}`,
+    );
   } catch (error) {
     if (isSquareNotFoundError(error)) {
       return null;
@@ -144,8 +183,8 @@ export async function retrieveSquareCustomer(customerId: string) {
 
   const customer = response.customer;
 
-  if (!customer?.id) {
-    return null;
+  if (customer?.id !== normalizedCustomerId) {
+    throw new Error("Square did not return the exact requested customer.");
   }
 
   return {
@@ -156,8 +195,12 @@ export async function retrieveSquareCustomer(customerId: string) {
 }
 
 export async function deleteSquareCustomer(customerId: string) {
+  const normalizedCustomerId = customerId.trim();
+  if (!normalizedCustomerId) {
+    throw new Error("Square customer deletion requires an exact customer ID.");
+  }
   try {
-    await squareRequest(`/v2/customers/${encodeURIComponent(customerId)}`, { method: "DELETE" });
+    await squareRequest(`/v2/customers/${encodeURIComponent(normalizedCustomerId)}`, { method: "DELETE" });
   } catch (error) {
     if (!isSquareNotFoundError(error)) {
       throw error;
@@ -166,29 +209,124 @@ export async function deleteSquareCustomer(customerId: string) {
 }
 
 export async function retrieveSquareSubscription(subscriptionId: string) {
+  const normalizedSubscriptionId = subscriptionId.trim();
+  if (!normalizedSubscriptionId) {
+    throw new Error("Square subscription retrieval requires an exact subscription ID.");
+  }
   let response: SquareSubscriptionResponse;
   try {
-    response = await squareRequest<SquareSubscriptionResponse>(`/v2/subscriptions/${subscriptionId}`);
+    response = await squareRequest<SquareSubscriptionResponse>(
+      `/v2/subscriptions/${encodeURIComponent(normalizedSubscriptionId)}`,
+    );
   } catch (error) {
     if (isSquareNotFoundError(error)) return null;
     throw error;
   }
 
-  return response.subscription ?? null;
+  const subscription = response.subscription ?? null;
+  if (subscription?.id !== normalizedSubscriptionId) {
+    throw new Error("Square did not return the exact requested subscription.");
+  }
+  return subscription;
 }
 
 export async function retrieveSquarePayment(paymentId: string) {
-  const response = await squareRequest<SquarePaymentResponse>(`/v2/payments/${encodeURIComponent(paymentId)}`);
-  return response.payment ?? null;
+  const normalizedPaymentId = paymentId.trim();
+  if (!normalizedPaymentId) {
+    throw new Error("Square payment retrieval requires an exact payment ID.");
+  }
+  const response = await squareRequest<SquarePaymentResponse>(
+    `/v2/payments/${encodeURIComponent(normalizedPaymentId)}`,
+  );
+  const payment = response.payment ?? null;
+  if (payment?.id !== normalizedPaymentId) {
+    throw new Error("Square did not return the exact requested payment.");
+  }
+  return payment;
 }
 
-export async function cancelSquareSubscription(subscriptionId: string) {
-  const response = await squareRequest<SquareSubscriptionResponse>(`/v2/subscriptions/${subscriptionId}/cancel`, {
+export async function searchSquarePaymentsByOrder({
+  beginTime,
+  orderId,
+}: {
+  beginTime: Date;
+  orderId: string;
+}) {
+  const normalizedOrderId = orderId.trim();
+  if (!normalizedOrderId) throw new Error("Square payment search requires an exact order ID.");
+  if (Number.isNaN(beginTime.getTime())) throw new Error("Square payment search requires a valid start time.");
+
+  const matches: SquarePaymentRecord[] = [];
+  let cursor: string | undefined;
+
+  for (let page = 0; page < 20; page += 1) {
+    const query = new URLSearchParams({
+      begin_time: beginTime.toISOString(),
+      limit: "100",
+      sort_order: "ASC",
+    });
+    if (cursor) query.set("cursor", cursor);
+    const response = await squareRequest<SquarePaymentListResponse>(`/v2/payments?${query}`);
+    matches.push(...(response.payments ?? []).filter((payment) => payment.order_id === normalizedOrderId));
+    cursor = response.cursor?.trim() || undefined;
+    if (!cursor) return matches;
+  }
+
+  throw new Error("Square payment search exceeded its safe pagination limit.");
+}
+
+export async function refundSquarePayment({
+  amountMinor,
+  currency,
+  idempotencyKey,
+  paymentId,
+}: {
+  amountMinor: number;
+  currency: string;
+  idempotencyKey?: string;
+  paymentId: string;
+}) {
+  const response = await squareRequest<SquareRefundResponse>("/v2/refunds", {
+    body: {
+      amount_money: { amount: amountMinor, currency },
+      idempotency_key: idempotencyKey ?? randomUUID(),
+      payment_id: paymentId,
+      reason: "Mint Binder hosted-correlation sandbox QA cleanup",
+    },
     method: "POST",
   });
 
-  if (!response.subscription?.id) {
-    throw new Error("Square did not return the cancelled subscription.");
+  if (!response.refund?.id) throw new Error("Square did not return the sandbox refund.");
+  return response.refund;
+}
+
+export async function retrieveSquareRefund(refundId: string) {
+  const normalizedRefundId = refundId.trim();
+  if (!normalizedRefundId) {
+    throw new Error("Square refund retrieval requires an exact refund ID.");
+  }
+  const response = await squareRequest<SquareRefundResponse>(
+    `/v2/refunds/${encodeURIComponent(normalizedRefundId)}`,
+  );
+  const refund = response.refund ?? null;
+  if (refund?.id !== normalizedRefundId) {
+    throw new Error("Square did not return the exact requested refund.");
+  }
+  return refund;
+}
+
+export async function cancelSquareSubscription(subscriptionId: string) {
+  const normalizedSubscriptionId = subscriptionId.trim();
+  if (!normalizedSubscriptionId) {
+    throw new Error("Square subscription cancellation requires an exact subscription ID.");
+  }
+  const response = await squareRequest<SquareSubscriptionResponse>(
+    `/v2/subscriptions/${encodeURIComponent(normalizedSubscriptionId)}/cancel`,
+    { method: "POST" },
+  );
+
+  if (response.subscription?.id !== normalizedSubscriptionId) {
+    throw new Error("Square did not return the exact cancelled subscription.");
   }
 
   return response.subscription;
@@ -229,12 +367,14 @@ export async function createSquareSubscriptionCheckout({
   idempotencyKey,
   origin,
   plan,
+  phoneNumber,
 }: {
   email?: string | null;
   expectation: SquareCheckoutExpectation;
   idempotencyKey?: string;
   origin: string;
   plan: SquarePlan;
+  phoneNumber?: string | null;
 }) {
   const requestKey = idempotencyKey ?? randomUUID();
   const body = {
@@ -249,6 +389,7 @@ export async function createSquareSubscriptionCheckout({
     payment_note: createSquareCheckoutCorrelation(requestKey),
     pre_populated_data: {
       buyer_email: email ?? undefined,
+      buyer_phone_number: phoneNumber ?? undefined,
     },
     quick_pay: {
       location_id: squareLocationId(),
@@ -284,21 +425,38 @@ export function squareCheckoutExpectation(plan: SquarePlan): SquareCheckoutExpec
 }
 
 export async function deleteSquarePaymentLink(paymentLinkId: string) {
-  try {
-    await squareRequest(`/v2/online-checkout/payment-links/${encodeURIComponent(paymentLinkId)}`, {
-      method: "DELETE",
-    });
-  } catch (error) {
-    if (!isSquareNotFoundError(error)) throw error;
+  const normalizedPaymentLinkId = paymentLinkId.trim();
+  if (!normalizedPaymentLinkId) {
+    throw new Error("Square payment-link deletion requires an exact link ID.");
   }
+  const response = await squareRequest<SquarePaymentLinkDeleteResponse>(
+    `/v2/online-checkout/payment-links/${encodeURIComponent(normalizedPaymentLinkId)}`,
+    { method: "DELETE" },
+  );
+  const deletedLinkId = response.id;
+  const cancelledOrderId = response.cancelled_order_id;
+
+  if (deletedLinkId !== normalizedPaymentLinkId) {
+    throw new Error("Square did not confirm deletion of the exact payment link.");
+  }
+
+  return { cancelledOrderId: cancelledOrderId || null, id: deletedLinkId };
 }
 
 export async function retrieveSquarePaymentLink(paymentLinkId: string) {
+  const normalizedPaymentLinkId = paymentLinkId.trim();
+  if (!normalizedPaymentLinkId) {
+    throw new Error("Square payment-link retrieval requires an exact link ID.");
+  }
   try {
     const response = await squareRequest<SquarePaymentLinkResponse>(
-      `/v2/online-checkout/payment-links/${encodeURIComponent(paymentLinkId)}`,
+      `/v2/online-checkout/payment-links/${encodeURIComponent(normalizedPaymentLinkId)}`,
     );
-    return response.payment_link ?? null;
+    const paymentLink = response.payment_link ?? null;
+    if (paymentLink?.id !== normalizedPaymentLinkId) {
+      throw new Error("Square did not return the exact requested payment link.");
+    }
+    return paymentLink;
   } catch (error) {
     if (isSquareNotFoundError(error)) return null;
     throw error;
@@ -306,8 +464,18 @@ export async function retrieveSquarePaymentLink(paymentLinkId: string) {
 }
 
 export async function retrieveSquareOrder(orderId: string) {
-  const response = await squareRequest<SquareOrderResponse>(`/v2/orders/${encodeURIComponent(orderId)}`);
-  return response.order ?? null;
+  const normalizedOrderId = orderId.trim();
+  if (!normalizedOrderId) {
+    throw new Error("Square order retrieval requires an exact order ID.");
+  }
+  const response = await squareRequest<SquareOrderResponse>(
+    `/v2/orders/${encodeURIComponent(normalizedOrderId)}`,
+  );
+  const order = response.order ?? null;
+  if (order?.id !== normalizedOrderId) {
+    throw new Error("Square did not return the exact requested order.");
+  }
+  return order;
 }
 
 function squarePlanConfig(plan: SquarePlan) {

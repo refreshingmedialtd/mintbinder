@@ -19,6 +19,7 @@ import {
   fenceBillingForAccountDeletion,
   retireBillingCheckoutIntentsForAccount,
 } from "@/lib/billing/checkout-intents";
+import { squareSubscriptionNeedsExactCancellationIdForDeletion } from "@/lib/billing/subscription-safety";
 
 export const dynamic = "force-dynamic";
 
@@ -74,10 +75,9 @@ export async function DELETE(request: Request) {
     const subscriptionsNeedingCancellation = user.subscriptions.filter(subscriptionNeedsCancellation);
     const unsupportedSubscriptions = subscriptionsNeedingCancellation.filter((subscription) =>
       subscription.provider !== "square" && subscription.provider !== "local");
-    const incompleteSquareSubscriptions = subscriptionsNeedingCancellation.filter((subscription) =>
+    const incompleteSquareSubscriptions = user.subscriptions.filter((subscription) =>
       subscription.provider === "square" &&
-      !subscription.providerSubscriptionId &&
-      !subscription.providerCustomerId);
+      squareSubscriptionNeedsExactCancellationIdForDeletion(subscription));
 
     if (unsupportedSubscriptions.length || incompleteSquareSubscriptions.length) {
       return NextResponse.json(

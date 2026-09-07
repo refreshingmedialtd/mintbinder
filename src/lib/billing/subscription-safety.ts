@@ -20,11 +20,20 @@ export function squareSubscriptionBlocksCheckout(subscription: {
     status !== "DEACTIVATED";
 }
 
+export function squareSubscriptionNeedsExactCancellationIdForDeletion(subscription: {
+  providerSubscriptionId?: string | null;
+  status: string;
+}) {
+  return subscription.status !== "CANCELED" &&
+    subscription.status !== "INCOMPLETE_EXPIRED" &&
+    !subscription.providerSubscriptionId?.trim();
+}
+
 export function squareCustomerHasUnrelatedActiveAgreements(
   subscriptions: Array<{ canceled_date?: string | null; id?: string | null; status?: string | null }>,
   mintBinderSubscriptionIds: ReadonlySet<string>,
 ) {
   return subscriptions.some((subscription) =>
-    squareSubscriptionNeedsCancellation(subscription) &&
+    squareSubscriptionBlocksCheckout(subscription) &&
     (!subscription.id || !mintBinderSubscriptionIds.has(subscription.id)));
 }

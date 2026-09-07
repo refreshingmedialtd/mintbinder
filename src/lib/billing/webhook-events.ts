@@ -1,7 +1,9 @@
 import { BillingWebhookStatus, Prisma } from "@prisma/client";
-import { prisma } from "@/lib/db/prisma";
+import { prisma } from "../db/prisma.ts";
+import { boundedBillingWebhookResourceId } from "./webhook-resource.ts";
 
 const PROCESSING_LEASE_MS = 10 * 60 * 1000;
+type BillingWebhookEventClient = Pick<typeof prisma, "billingWebhookEvent">;
 
 export async function processBillingWebhookEvent<T>({
   eventId,
@@ -9,13 +11,15 @@ export async function processBillingWebhookEvent<T>({
   fulfill,
   occurredAt,
   provider,
+  resourceId,
 }: {
   eventId: string;
   eventType: string;
   fulfill: () => Promise<T>;
   occurredAt?: Date;
   provider: string;
-}): Promise<{ duplicate: boolean; inProgress?: boolean; result?: T }> {
+  resourceId?: string | null;
+}, client: BillingWebhookEventClient = prisma): Promise<{ duplicate: boolean; inProgress?: boolean; result?: T }> {
   const normalizedEventId = eventId.trim();
 
   if (!normalizedEventId || normalizedEventId.length > 255) {
@@ -27,7 +31,8 @@ export async function processBillingWebhookEvent<T>({
     eventType,
     occurredAt,
     provider,
-  });
+    resourceId,
+  }, client);
 
   if (claim !== "claimed") {
     return { duplicate: true, inProgress: claim === "processing" };
@@ -36,7 +41,7 @@ export async function processBillingWebhookEvent<T>({
   try {
     const result = await fulfill();
 
-    await prisma.billingWebhookEvent.update({
+    await client.billingWebhookEvent.update({
       where: { provider_providerEventId: { provider, providerEventId: normalizedEventId } },
       data: {
         status: BillingWebhookStatus.SUCCEEDED,
@@ -47,7 +52,7 @@ export async function processBillingWebhookEvent<T>({
 
     return { duplicate: false, result };
   } catch (error) {
-    await prisma.billingWebhookEvent.update({
+    await client.billingWebhookEvent.update({
       where: { provider_providerEventId: { provider, providerEventId: normalizedEventId } },
       data: {
         status: BillingWebhookStatus.FAILED,
@@ -67,22 +72,39 @@ async function claimWebhookEvent({
   eventType,
   occurredAt,
   provider,
+  resourceId,
 }: {
   eventId: string;
   eventType: string;
   occurredAt?: Date;
   provider: string;
-}) {
-  const existing = await prisma.billingWebhookEvent.findUnique({
+  resourceId?: string | null;
+}, client: BillingWebhookEventClient) {
+  const normalizedResourceId = boundedBillingWebhookResourceId(resourceId);
+  const existing = await client.billingWebhookEvent.findUnique({
     where: { provider_providerEventId: { provider, providerEventId: eventId } },
   });
 
   if (existing) {
+    if (
+      existing.resourceId &&
+      normalizedResourceId &&
+      existing.resourceId !== normalizedResourceId
+    ) {
+      throw new Error("Billing webhook event resource ID does not match its original claim.");
+    }
+
     const processingIsFresh =
       existing.status === BillingWebhookStatus.PROCESSING &&
       Date.now() - existing.updatedAt.getTime() < PROCESSING_LEASE_MS;
 
     if (existing.status === BillingWebhookStatus.SUCCEEDED) {
+      if (!existing.resourceId && normalizedResourceId) {
+        await client.billingWebhookEvent.updateMany({
+          where: { id: existing.id, resourceId: null },
+          data: { resourceId: normalizedResourceId },
+        });
+      }
       return "succeeded" as const;
     }
 
@@ -93,7 +115,7 @@ async function claimWebhookEvent({
     // Claim retries atomically. A read-then-update here allows two concurrent
     // deliveries of the same failed (or lease-expired) event to both run the
     // fulfilment side effect.
-    const reclaimed = await prisma.billingWebhookEvent.updateMany({
+    const reclaimed = await client.billingWebhookEvent.updateMany({
       where: {
         id: existing.id,
         OR: [
@@ -108,6 +130,7 @@ async function claimWebhookEvent({
         status: BillingWebhookStatus.PROCESSING,
         eventType: boundedEventType(eventType),
         occurredAt,
+        ...(normalizedResourceId ? { resourceId: normalizedResourceId } : {}),
         processedAt: null,
         errorMessage: null,
       },
@@ -116,10 +139,11 @@ async function claimWebhookEvent({
   }
 
   try {
-    await prisma.billingWebhookEvent.create({
+    await client.billingWebhookEvent.create({
       data: {
         provider,
         providerEventId: eventId,
+        resourceId: normalizedResourceId,
         eventType: boundedEventType(eventType),
         occurredAt,
       },

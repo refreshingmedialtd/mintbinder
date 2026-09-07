@@ -115,7 +115,7 @@ Expected results:
 - `cron-live-international-catalogue.sh` refreshes one bounded 100-card TCGdex page. It chooses the least-recently visited configured language, advances that language's durable job-history cursor, and wraps only after reaching the provider total.
 - `cron-password-reset-delivery.sh` processes a bounded outbox batch. Unknown-recipient decoys are discarded without email; once a real delivery crosses the attempt boundary, any error or crash leaves it unresolved and suppresses automatic resend.
 - `monitor:jobs` prints a report. It can return a non-zero exit code when recent job failures exist, which is useful for alerting.
-- `cron-billing-checkout-retirement.sh` checks provider truth and retires expired hosted checkout links in a bounded batch; completed or ambiguous attempts remain available for webhook reconciliation.
+- `cron-billing-checkout-retirement.sh` checks provider truth and retires expired hosted checkout links in a bounded batch. Square retirement uses two passes separated by the stale interval: DELETE must identify the exact link and canceled order, or crash recovery must prove the exact stored link absent and exact stored order `CANCELED`; exact-order Payments and tenders must remain empty before `retired_payment_free`. `OPEN`, `DRAFT`, mismatched proof, completed, ambiguous, and settling attempts remain available for reconciliation or the next check.
 - `cron-operational-retention.sh` prints a structured retention report with per-table cutoffs and candidate counts. With both retention confirmation flags left at their defaults, it cannot delete rows.
 
 ## Recommended Initial Schedule

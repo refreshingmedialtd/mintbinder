@@ -1,8 +1,13 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { BillingCustomerProvenance, SubscriptionPlan, SubscriptionStatus } from "@prisma/client";
 import { BillingAccountDeletionError } from "../src/lib/billing/checkout-lock.ts";
-import { checkoutPreparationCanBeReclaimed } from "../src/lib/billing/checkout-intent-state.ts";
+import {
+  checkoutIntentMustAwaitProviderReconciliation,
+  checkoutPreparationCanBeReclaimed,
+  squareMissingCheckoutMustRemainWorkerOwned,
+} from "../src/lib/billing/checkout-intent-state.ts";
 import {
   BillingCustomerOwnershipError,
   claimBillingCustomerOwnership,
@@ -22,6 +27,58 @@ import {
   stripeCheckoutReplayIsSafe,
   stripeCheckoutSessionMatchesIntent,
 } from "../src/lib/billing/stripe-checkout-recovery.ts";
+
+test("account deletion re-reads and fences checkout settlement before claiming retirement", async () => {
+  const source = await readFile(
+    new URL("../src/lib/billing/checkout-intents.ts", import.meta.url),
+    "utf8",
+  );
+  const claim = source.slice(source.indexOf("async function claimBillingCheckoutIntentForAccountRetirement"));
+  const lockAt = claim.indexOf("await lockBillingCheckout(transaction, userId)");
+  const rowLockAt = claim.indexOf('FROM "billing_checkout_intents"');
+  const rereadAt = claim.indexOf("billingCheckoutIntent.findFirst");
+  const paidCheckAt = claim.indexOf("checkoutIntentMustAwaitProviderReconciliation(intent)");
+  const claimWriteAt = claim.indexOf("billingCheckoutIntent.updateMany");
+
+  assert.equal([lockAt, rowLockAt, rereadAt, paidCheckAt, claimWriteAt].every((index) => index >= 0), true);
+  assert.equal(lockAt < rowLockAt, true);
+  assert.equal(rowLockAt < rereadAt, true);
+  assert.equal(rereadAt < paidCheckAt, true);
+  assert.equal(paidCheckAt < claimWriteAt, true);
+  assert.match(claim, /providerPaymentId:\s*null,[\s\S]*status:\s*intent\.status/);
+  assert.doesNotMatch(
+    claim.slice(claimWriteAt, claim.indexOf("if (claimed.count", claimWriteAt)),
+    /paid_pending_subscription/,
+  );
+});
+
+test("account deletion fences legacy retired and failed Square provider state", async () => {
+  const source = await readFile(
+    new URL("../src/lib/billing/checkout-intents.ts", import.meta.url),
+    "utf8",
+  );
+  const retirement = source.slice(
+    source.indexOf("async function retireBillingCheckoutIntents("),
+    source.indexOf("async function recoverStripeCheckoutSession"),
+  );
+
+  assert.match(retirement, /provider:\s*"square",\s*status:\s*"retired"/);
+  for (const field of ["checkoutUrl", "providerCheckoutId", "providerOrderId", "providerPaymentId"]) {
+    assert.match(retirement, new RegExp(`${field}: \\{ not: null \\}`));
+  }
+  assert.match(
+    retirement,
+    /provider:\s*"square",\s*status:\s*"failed",[\s\S]*?providerCustomerId:\s*\{ not: null \}/,
+  );
+  const failedFenceAt = retirement.indexOf("const failedSquareProviderState");
+  const failedWriteAt = retirement.indexOf("billingCheckoutIntent.updateMany", failedFenceAt);
+  assert.equal(failedFenceAt >= 0 && failedWriteAt > failedFenceAt, true);
+  assert.match(
+    retirement.slice(failedFenceAt, failedWriteAt),
+    /requires manual reconciliation before account deletion/,
+  );
+  assert.match(retirement, /return \{ \.\.\.intent, status: "retiring" \}/);
+});
 
 test("an existing provider customer can only be claimed by its Mint Binder owner", async () => {
   const client = customerClient({
@@ -185,6 +242,49 @@ test("a paid checkout awaiting its subscription is never lease-reclaimed", () =>
   }), true);
 });
 
+test("account deletion never recreates a Square checkout owned by settlement or payment reconciliation", () => {
+  assert.equal(checkoutIntentMustAwaitProviderReconciliation({
+    providerPaymentId: null,
+    status: "paid_pending_subscription",
+  }), true);
+  assert.equal(checkoutIntentMustAwaitProviderReconciliation({
+    providerPaymentId: "payment-1",
+    status: "retiring",
+  }), true);
+  assert.equal(checkoutIntentMustAwaitProviderReconciliation({
+    providerPaymentId: null,
+    status: "ready",
+  }), false);
+  assert.equal(squareMissingCheckoutMustRemainWorkerOwned({
+    checkoutUrl: null,
+    providerCheckoutId: null,
+    providerOrderId: "order-settling",
+    providerPaymentId: null,
+    status: "retiring",
+  }), true);
+  assert.equal(squareMissingCheckoutMustRemainWorkerOwned({
+    checkoutUrl: null,
+    providerCheckoutId: null,
+    providerOrderId: "order-paid",
+    providerPaymentId: "payment-1",
+    status: "paid_pending_subscription",
+  }), true);
+  assert.equal(squareMissingCheckoutMustRemainWorkerOwned({
+    checkoutUrl: null,
+    providerCheckoutId: null,
+    providerOrderId: "order-paid",
+    providerPaymentId: null,
+    status: "paid_pending_subscription",
+  }), true);
+  assert.equal(squareMissingCheckoutMustRemainWorkerOwned({
+    checkoutUrl: "https://square.example/link",
+    providerCheckoutId: null,
+    providerOrderId: null,
+    providerPaymentId: null,
+    status: "recoverable",
+  }), false);
+});
+
 test("delayed concurrent checkout completions share one provider object without retiring it", async () => {
   const remoteByKey = new Map();
   let remoteCreates = 0;
@@ -325,7 +425,7 @@ test("an account-deletion retry recovers and expires one Stripe session after re
   assert.equal(expirations, 1);
 });
 
-test("subscription-before-payment reuses the exact effective row and cancellation prefers its provider ID", () => {
+test("a Square payment uses only a provisional row while cancellation prefers an exact provider ID", () => {
   const now = new Date("2026-08-24T12:00:00.000Z");
   const rowFromSubscriptionEvent = subscriptionCandidate({
     id: "subscription-row",
@@ -338,12 +438,10 @@ test("subscription-before-payment reuses the exact effective row and cancellatio
   });
 
   const activation = selectSquarePaymentActivationTarget(
-    [rowFromSubscriptionEvent],
-    SubscriptionPlan.PLUS_MONTHLY,
-    now,
+    [rowFromSubscriptionEvent, stalePaymentPlaceholder],
   );
-  assert.equal(activation?.id, "subscription-row");
-  assert.equal(activation?.providerSubscriptionId, "square-subscription-1");
+  assert.equal(activation?.id, "payment-placeholder");
+  assert.equal(activation?.providerSubscriptionId, null);
 
   const cancellation = selectSquareCancellationTarget(
     [stalePaymentPlaceholder, rowFromSubscriptionEvent],
@@ -363,7 +461,7 @@ test("a new Square payment never reactivates a canceled provider subscription ID
   });
 
   assert.equal(
-    selectSquarePaymentActivationTarget([oldCanceled], SubscriptionPlan.PLUS_MONTHLY, now),
+    selectSquarePaymentActivationTarget([oldCanceled]),
     null,
   );
   assert.deepEqual(

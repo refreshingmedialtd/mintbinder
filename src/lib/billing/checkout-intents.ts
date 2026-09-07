@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { SubscriptionPlan, SubscriptionStatus } from "@prisma/client";
+import { SubscriptionPlan } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import {
   createSquareSubscriptionCheckout,
-  deleteSquarePaymentLink,
   retrieveSquareOrder,
   retrieveSquarePaymentLink,
+  searchSquarePaymentsByOrder,
 } from "@/lib/billing/square";
 import {
   createStripeCheckoutSession,
@@ -13,22 +13,27 @@ import {
   findStripeCheckoutSessionByIntent,
   retrieveStripeCheckoutSession,
 } from "@/lib/billing/stripe";
-import { effectivePlusAccessWhere } from "@/lib/billing/effective-access";
 import {
   BillingAccountDeletionError,
   assertBillingAccountAvailable,
+  externalPaidAgreementBlocksCheckoutWhere,
   lockBillingCheckout,
 } from "@/lib/billing/checkout-lock";
 import { decideCheckoutCompletion } from "@/lib/billing/checkout-completion";
 import { recoverStripeCheckoutAfterResponseLoss } from "@/lib/billing/stripe-checkout-recovery";
+import {
+  checkoutIntentMustAwaitProviderReconciliation,
+  squareMissingCheckoutMustRemainWorkerOwned,
+} from "@/lib/billing/checkout-intent-state";
+import {
+  inspectImmediateSquareRetirement,
+  type ImmediateSquareRetirementOperations,
+} from "@/lib/billing/square-retirement-precheck";
 
 const INTENT_TTL_MS = 30 * 60 * 1000;
 export const INTENT_LEASE_MS = 5 * 60 * 1000;
 const STRIPE_IDEMPOTENCY_RECOVERY_MS = 23 * 60 * 60 * 1000;
-const TERMINAL_STATUSES = [
-  SubscriptionStatus.CANCELED,
-  SubscriptionStatus.INCOMPLETE_EXPIRED,
-];
+const ACCOUNT_RETIRABLE_INTENT_STATUSES = ["creating", "recoverable", "ready", "retiring"];
 
 type CheckoutPricingSnapshot = {
   expectedAmountMinor: number | null;
@@ -38,6 +43,7 @@ type CheckoutPricingSnapshot = {
 
 type CheckoutIntentReference = CheckoutPricingSnapshot & {
   checkoutOrigin: string;
+  createdAt: Date;
   id: string;
   idempotencyKey: string;
   provider: string;
@@ -84,7 +90,7 @@ export async function claimBillingCheckoutIntent({
   const requestedPricing = checkoutPricingSnapshot(provider, expectation);
   const requestedOrigin = normalizeCheckoutOrigin(origin);
   return prisma.$transaction(async (transaction) => {
-    await lockBillingCheckout(transaction, userId, provider);
+    await lockBillingCheckout(transaction, userId);
     try {
       await assertBillingAccountAvailable(transaction, userId, provider);
     } catch (error) {
@@ -97,19 +103,7 @@ export async function claimBillingCheckoutIntent({
     const blockingSubscription = await transaction.subscription.findFirst({
       where: {
         userId,
-        provider: { not: "local" },
-        AND: [
-          {
-            OR: [
-              effectivePlusAccessWhere(now),
-              {
-                status: { notIn: TERMINAL_STATUSES },
-                providerSubscriptionId: { not: null },
-                cancelAtPeriodEnd: false,
-              },
-            ],
-          },
-        ],
+        ...externalPaidAgreementBlocksCheckoutWhere(now),
       },
       select: { id: true },
     });
@@ -117,6 +111,21 @@ export async function claimBillingCheckoutIntent({
     if (blockingSubscription) {
       throw new BillingCheckoutConflictError(
         "A paid or pending subscription already exists. Use Billing to manage it before starting another checkout.",
+      );
+    }
+
+    const otherProviderIntent = await transaction.billingCheckoutIntent.findFirst({
+      where: {
+        userId,
+        provider: { not: provider },
+        status: { in: ["creating", "recoverable", "ready", "retiring", "paid_pending_subscription"] },
+      },
+      select: { id: true },
+    });
+    if (otherProviderIntent) {
+      throw new BillingCheckoutConflictError(
+        "Another payment provider still has an unresolved checkout for this account. " +
+        "Retire it before starting a replacement checkout.",
       );
     }
 
@@ -143,6 +152,7 @@ export async function claimBillingCheckoutIntent({
         }
         return {
           kind: "reuse" as const,
+          createdAt: existing.createdAt,
           id: existing.id,
           idempotencyKey: existing.idempotencyKey,
           checkoutOrigin: existing.checkoutOrigin,
@@ -170,6 +180,7 @@ export async function claimBillingCheckoutIntent({
         });
         return {
           kind: "retire" as const,
+          createdAt: existing.createdAt,
           id: existing.id,
           idempotencyKey: existing.idempotencyKey,
           checkoutOrigin: existing.checkoutOrigin,
@@ -197,6 +208,7 @@ export async function claimBillingCheckoutIntent({
         });
         return {
           kind: "retire" as const,
+          createdAt: existing.createdAt,
           id: existing.id,
           idempotencyKey: existing.idempotencyKey,
           checkoutOrigin: existing.checkoutOrigin,
@@ -226,6 +238,7 @@ export async function claimBillingCheckoutIntent({
       });
       return {
         checkoutOrigin: existing.checkoutOrigin,
+        createdAt: existing.createdAt,
         kind: "claimed" as const,
         id: existing.id,
         idempotencyKey: existing.idempotencyKey,
@@ -251,11 +264,12 @@ export async function claimBillingCheckoutIntent({
         ...requestedPricing,
         expiresAt: new Date(now.getTime() + INTENT_TTL_MS),
       },
-      select: { id: true },
+      select: { createdAt: true, id: true },
     });
 
     return {
       checkoutOrigin: requestedOrigin,
+      createdAt: created.createdAt,
       kind: "claimed" as const,
       id: created.id,
       idempotencyKey,
@@ -271,6 +285,8 @@ export async function retireProviderCheckout(
   provider: string,
   providerCheckoutId: string,
   providerOrderId?: string | null,
+  checkoutCreatedAt?: Date,
+  square = defaultImmediateSquareRetirementOperations,
 ) {
   if (provider === "stripe") {
     const session = await retrieveStripeCheckoutSession(providerCheckoutId);
@@ -301,52 +317,26 @@ export async function retireProviderCheckout(
   }
 
   if (provider === "square") {
-    const paymentLink = await retrieveSquarePaymentLink(providerCheckoutId);
-    const linkedOrderId = paymentLink?.order_id?.trim();
-    const storedOrderId = providerOrderId?.trim();
-    if (linkedOrderId && storedOrderId && linkedOrderId !== storedOrderId) {
-      throw new BillingCheckoutConflictError(
-        "Square returned a different order for the recorded payment link. Contact support before trying again.",
-      );
-    }
-    const orderId = linkedOrderId || storedOrderId;
-
-    if (!orderId) {
-      throw new BillingCheckoutConflictError(
-        "The Square checkout order reference is missing. Contact support before trying again.",
-      );
-    }
-    const before = normalizeSquareOrderState((await retrieveSquareOrder(orderId))?.state);
-
-    if (before === "COMPLETED") {
+    const inspection = await inspectImmediateSquareRetirement({
+      checkoutCreatedAt,
+      providerCheckoutId,
+      providerOrderId,
+      square,
+    });
+    if (inspection.kind === "completed") {
       throw new BillingCheckoutConflictError(
         "The previous Square checkout completed and is still being reconciled. Wait a moment before trying again.",
       );
     }
-    if (!isKnownNonCompletedSquareOrderState(before)) {
-      throw new BillingCheckoutConflictError(
-        "The previous Square checkout order state could not be verified safely. Contact support before trying again.",
-      );
+    if (inspection.kind === "invalid") {
+      throw new BillingCheckoutConflictError(inspection.message);
     }
-    if (!paymentLink) {
-      if (before === "CANCELED") return;
-      throw new BillingCheckoutConflictError(
-        `The Square payment link is missing while its order remains ${before}. Contact support before trying again.`,
-      );
-    }
-    await deleteSquarePaymentLink(providerCheckoutId);
-    const after = normalizeSquareOrderState((await retrieveSquareOrder(orderId))?.state);
-    if (after === "COMPLETED") {
-      throw new BillingCheckoutConflictError(
-        "The Square payment completed while checkout retirement was in progress. It will be reconciled before another checkout is allowed.",
-      );
-    }
-    if (!isKnownNonCompletedSquareOrderState(after)) {
-      throw new BillingCheckoutConflictError(
-        "The Square order state could not be confirmed after payment-link deletion.",
-      );
-    }
-    return;
+    // Leave the intent in `retiring`. The scheduled worker owns payment-link
+    // deletion and both settlement evidence passes; the request path cannot
+    // make a Square checkout terminal.
+    throw new BillingCheckoutConflictError(
+      "The previous Square checkout is queued for safe retirement and its final payment-free settlement check. Please try again shortly.",
+    );
   }
 
   throw new BillingCheckoutConflictError("The previous checkout provider could not be retired safely.");
@@ -413,9 +403,7 @@ export async function beginBillingCheckoutRetirement(id: string, idempotencyKey:
 
 export async function fenceBillingForAccountDeletion(userId: string) {
   await prisma.$transaction(async (transaction) => {
-    for (const provider of ["square", "stripe"]) {
-      await lockBillingCheckout(transaction, userId, provider);
-    }
+    await lockBillingCheckout(transaction, userId);
     await transaction.user.update({
       where: { id: userId },
       data: { deletionRequestedAt: new Date() },
@@ -425,9 +413,7 @@ export async function fenceBillingForAccountDeletion(userId: string) {
 
 export async function clearBillingAccountDeletionFence(userId: string) {
   await prisma.$transaction(async (transaction) => {
-    for (const provider of ["square", "stripe"]) {
-      await lockBillingCheckout(transaction, userId, provider);
-    }
+    await lockBillingCheckout(transaction, userId);
     await transaction.user.updateMany({
       where: { id: userId },
       data: { deletionRequestedAt: null },
@@ -456,30 +442,56 @@ async function retireBillingCheckoutIntents(
       userId,
       ...(options.excludeId ? { id: { not: options.excludeId } } : {}),
       ...(options.provider ? { provider: options.provider } : {}),
-      status: { in: ["creating", "recoverable", "ready", "retiring", "paid_pending_subscription"] },
+      OR: [
+        {
+          status: {
+            in: [...ACCOUNT_RETIRABLE_INTENT_STATUSES, "paid_pending_subscription"],
+          },
+        },
+        {
+          provider: "square",
+          status: "retired",
+          OR: [
+            { checkoutUrl: { not: null } },
+            { providerCheckoutId: { not: null } },
+            { providerOrderId: { not: null } },
+            { providerPaymentId: { not: null } },
+          ],
+        },
+        {
+          provider: "square",
+          status: "failed",
+          OR: [
+            { checkoutUrl: { not: null } },
+            { providerCheckoutId: { not: null } },
+            { providerCustomerId: { not: null } },
+            { providerOrderId: { not: null } },
+            { providerPaymentId: { not: null } },
+          ],
+        },
+      ],
     },
-    include: { user: { select: { email: true } } },
     orderBy: { createdAt: "asc" },
+    select: { id: true },
   });
 
-  for (const intent of intents) {
-    const claimed = await prisma.billingCheckoutIntent.updateMany({
-      where: {
-        id: intent.id,
-        status: { in: ["creating", "recoverable", "ready", "retiring", "paid_pending_subscription"] },
-      },
-      data: {
-        leaseExpiresAt: new Date(Date.now() + INTENT_LEASE_MS),
-        status: "retiring",
-      },
-    });
-    if (claimed.count !== 1) continue;
+  let claimedCount = 0;
+  for (const candidate of intents) {
+    const intent = await claimBillingCheckoutIntentForAccountRetirement(userId, candidate.id);
+    if (!intent) continue;
+    claimedCount += 1;
 
     let providerCheckoutId = intent.providerCheckoutId;
     let providerOrderId = intent.providerOrderId;
 
     if (!providerCheckoutId) {
       if (intent.provider === "square") {
+        if (squareMissingCheckoutMustRemainWorkerOwned(intent)) {
+          throw new BillingCheckoutConflictError(
+            "The Square checkout is awaiting worker-owned payment settlement or subscription reconciliation. " +
+            "It cannot be recreated while account deletion is in progress.",
+          );
+        }
         const checkout = await createSquareSubscriptionCheckout({
           email: intent.user.email,
           expectation: squareExpectationFromIntent(intent),
@@ -508,11 +520,83 @@ async function retireBillingCheckoutIntents(
       );
     }
 
-    await retireProviderCheckout(intent.provider, providerCheckoutId, providerOrderId);
+    await retireProviderCheckout(
+      intent.provider,
+      providerCheckoutId,
+      providerOrderId,
+      intent.createdAt,
+    );
     await completeBillingCheckoutRetirement(intent.id, intent.idempotencyKey);
   }
 
-  return { retired: intents.length };
+  return { retired: claimedCount };
+}
+
+async function claimBillingCheckoutIntentForAccountRetirement(userId: string, intentId: string) {
+  return prisma.$transaction(async (transaction) => {
+    await lockBillingCheckout(transaction, userId);
+    await transaction.$queryRaw`
+      SELECT "id"
+      FROM "billing_checkout_intents"
+      WHERE "id" = ${intentId}::uuid
+        AND "user_id" = ${userId}::uuid
+      FOR UPDATE
+    `;
+    const intent = await transaction.billingCheckoutIntent.findFirst({
+      where: { id: intentId, userId },
+      include: { user: { select: { email: true } } },
+    });
+    if (!intent) return null;
+
+    const failedSquareProviderState = intent.provider === "square" &&
+      intent.status === "failed" &&
+      Boolean(
+        intent.checkoutUrl ||
+        intent.providerCheckoutId ||
+        intent.providerCustomerId ||
+        intent.providerOrderId ||
+        intent.providerPaymentId,
+      );
+    if (failedSquareProviderState) {
+      throw new BillingCheckoutConflictError(
+        "A failed Square checkout still retains provider state and requires manual reconciliation before account deletion.",
+      );
+    }
+
+    if (checkoutIntentMustAwaitProviderReconciliation(intent)) {
+      throw new BillingCheckoutConflictError(
+        "A completed provider payment is still awaiting subscription reconciliation. " +
+        "Wait for provider truth before deleting the account.",
+      );
+    }
+
+    const legacySquareProviderObject = intent.provider === "square" &&
+      intent.status === "retired" &&
+      Boolean(
+        intent.checkoutUrl ||
+        intent.providerCheckoutId ||
+        intent.providerOrderId ||
+        intent.providerPaymentId,
+      );
+    if (!ACCOUNT_RETIRABLE_INTENT_STATUSES.includes(intent.status) && !legacySquareProviderObject) {
+      return null;
+    }
+
+    const claimed = await transaction.billingCheckoutIntent.updateMany({
+      where: {
+        id: intent.id,
+        providerPaymentId: null,
+        status: intent.status,
+        userId,
+      },
+      data: {
+        leaseExpiresAt: new Date(Date.now() + INTENT_LEASE_MS),
+        status: "retiring",
+      },
+    });
+    if (claimed.count !== 1) return null;
+    return { ...intent, status: "retiring" };
+  });
 }
 
 async function recoverStripeCheckoutSession(intent: {
@@ -604,7 +688,7 @@ export async function completeBillingCheckoutIntent({
     });
     if (!reference) throw new BillingCheckoutConflictError("Checkout intent no longer exists.");
 
-    await lockBillingCheckout(transaction, reference.userId, reference.provider);
+    await lockBillingCheckout(transaction, reference.userId);
     await transaction.$queryRaw`
       SELECT "id"
       FROM "billing_checkout_intents"
@@ -700,13 +784,11 @@ export async function markBillingCheckoutIntentRecoverable(
   });
 }
 
-function normalizeSquareOrderState(state?: string | null) {
-  return state?.trim().toUpperCase() ?? "";
-}
-
-function isKnownNonCompletedSquareOrderState(state: string) {
-  return state === "CANCELED" || state === "DRAFT" || state === "OPEN";
-}
+const defaultImmediateSquareRetirementOperations: ImmediateSquareRetirementOperations = {
+  retrieveOrder: retrieveSquareOrder,
+  retrievePaymentLink: retrieveSquarePaymentLink,
+  searchPaymentsByOrder: searchSquarePaymentsByOrder,
+};
 
 function checkoutPricingSnapshot(
   provider: string,

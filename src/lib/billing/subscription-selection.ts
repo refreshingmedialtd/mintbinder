@@ -1,4 +1,4 @@
-import { SubscriptionStatus, type Subscription, type SubscriptionPlan } from "@prisma/client";
+import { SubscriptionStatus, type Subscription } from "@prisma/client";
 import { hasEffectivePlusAccess } from "./effective-access.ts";
 
 type SubscriptionCandidate = Pick<
@@ -13,16 +13,12 @@ type SubscriptionCandidate = Pick<
 /** Candidates must be ordered newest first. */
 export function selectSquarePaymentActivationTarget<T extends SubscriptionCandidate>(
   candidates: readonly T[],
-  plan: SubscriptionPlan,
-  now = new Date(),
 ) {
-  const effectiveForPlan = candidates.filter((candidate) =>
-    candidate.plan === plan && hasEffectivePlusAccess(candidate, now));
-
-  return effectiveForPlan.find((candidate) => Boolean(candidate.providerSubscriptionId))
-    ?? effectiveForPlan[0]
-    ?? candidates.find((candidate) => !candidate.providerSubscriptionId)
-    ?? null;
+  // A Square customer may own several historical subscriptions. A payment
+  // proves the checkout order, not which remote subscription Square created,
+  // so it may activate only the customer placeholder with no exact provider
+  // subscription ID. invoice.payment_made attaches that exact ID later.
+  return candidates.find((candidate) => !candidate.providerSubscriptionId) ?? null;
 }
 
 export function selectSquareTerminalCustomerRowsToDetach<T extends SubscriptionCandidate & { id: string }>(

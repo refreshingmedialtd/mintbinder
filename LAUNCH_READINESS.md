@@ -68,8 +68,9 @@ This file distinguishes four different states deliberately:
   and email calls are bounded by timeouts.
 - Square hosted checkout uses a signed opaque payment-note correlation because
   Square may create or select a buyer customer by phone rather than use the
-  profile Mint Binder prepared. Paid checkout remains fail-closed until the
-  payment.created/payment.updated sandbox path is explicitly verified.
+  profile Mint Binder prepared. The signature uses a dedicated secret, and paid
+  checkout remains fail-closed until the payment.created/payment.updated sandbox
+  path is explicitly verified for both plans.
 - The public health endpoint exposes only service state and time. Build,
   environment, and database diagnostics require an administrator or `JOB_SECRET`.
 - Security headers include a restrictive content policy, frame protection,
@@ -202,11 +203,36 @@ verified for a safe rollout. It does not enable any destructive retention job.
    output with the release evidence.
 10. Run the job-monitor report. Confirm every cadence lane is current, then keep
     the daily alert lane dry-run until recipients are intentionally enabled.
-11. Complete one Square hosted-checkout browser smoke with a buyer phone that maps
-   to a different Square customer. Confirm payment.created/payment.updated maps
-   the intended disposable account exactly once, then confirm subscription
-   webhook delivery and in-app entitlement state before enabling the correlation
-   flag or accepting paid users.
+11. Migrate the Square correlation signing key in two deployments. First deploy
+   this code with `SQUARE_CHECKOUT_CORRELATION_SECRET` unset or blank, while
+   Square remains in Sandbox and `SQUARE_PAYMENT_CORRELATION_VERIFIED=false`.
+   With checkout still disabled, run
+   `npm run job:live-billing-checkout-retirement`; resolve every live,
+   ambiguous, provider-error, or completed-pending-reconciliation legacy attempt
+   and repeat until none remains. `settling` requires Square DELETE to return the
+   exact link and `cancelled_order_id`, or crash recovery to prove the exact link
+   absent and exact stored order `CANCELED`; exact-order Payments/tenders must be
+   empty. A completed order, tender, or searched payment ID is not enough: one
+   exact retrieved completed payment must also match the signed note, customer,
+   order, amount, currency, and immutable Plus-plan snapshot, or the run stays
+   unhealthy for manual reconciliation. Wait at least 15 minutes and rerun so
+   the worker
+   repeats the empty provider check before recording the payment-free terminal
+   state; `OPEN`, `DRAFT`, mismatched proof, and payment evidence fail closed.
+   Next run the read-only
+   `npm run ops:audit-square-correlation-rollout` command against the same
+   database and require its JSON result to contain `"ok": true`. Only then set
+   the same new independent correlation secret in the deployed and operator
+   environments and redeploy.
+   Do not introduce or rotate the signing key before the legacy-attempt drain.
+   After that second deployment, run
+   `npm run qa:square-hosted-correlation -- --plan=monthly`, then run it again
+   with `--plan=yearly`. Complete the one hosted checkout printed by each command.
+   Retain both successful reports proving exact order/signature/amount correlation,
+   a different buyer customer, real payment.created/payment.updated delivery,
+   exactly-once entitlement, cancellation, refund, and billing-aware cleanup.
+   Enable the correlation flag only as part of the later switch to reviewed
+   production Square credentials; never enable it while Sandbox is public.
 
 ## External launch actions
 

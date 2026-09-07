@@ -15,19 +15,17 @@ export async function POST(request: Request) {
     await requireJobAccess(request);
     const body = (await request.json().catch(() => ({}))) as {
       batchSize?: number;
-      now?: string;
       scheduled?: boolean;
-      staleAfterMinutes?: number;
+    };
+    const input = {
+      batchSize: body.batchSize,
+      scheduled: body.scheduled === true,
     };
     const { jobRun, result } = await runTrackedJob({
-      input: { ...body, scheduled: body.scheduled === true },
+      input,
       type: "billing_checkout_retirement",
       task: async () => assertBillingCheckoutRetirementHealthy(await runBillingCheckoutRetirement({
-        batchSize: body.batchSize,
-        now: parseOptionalDate(body.now),
-        staleAfterMs: body.staleAfterMinutes === undefined
-          ? undefined
-          : body.staleAfterMinutes * 60 * 1000,
+        batchSize: input.batchSize,
       })),
     });
 
@@ -39,11 +37,4 @@ export async function POST(request: Request) {
     const result = jobErrorResultPayload(originalError);
     return NextResponse.json({ ...result, error: message, jobRun }, { status: jobErrorStatus(originalError) });
   }
-}
-
-function parseOptionalDate(value?: string) {
-  if (!value) return undefined;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) throw new Error("Invalid billing checkout retirement timestamp.");
-  return date;
 }

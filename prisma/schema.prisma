@@ -607,6 +607,7 @@ model BillingWebhookEvent {
   id              String               @id @default(uuid()) @db.Uuid
   provider        String
   providerEventId String               @map("provider_event_id")
+  resourceId      String?              @map("provider_resource_id")
   eventType       String               @map("event_type")
   status          BillingWebhookStatus @default(PROCESSING)
   occurredAt      DateTime?            @map("occurred_at")
@@ -616,6 +617,7 @@ model BillingWebhookEvent {
   updatedAt       DateTime             @updatedAt @map("updated_at")
 
   @@unique([provider, providerEventId])
+  @@index([provider, resourceId, eventType], map: "billing_webhook_provider_resource_type_idx")
   @@index([status, createdAt])
   @@index([status, processedAt])
   @@map("billing_webhook_events")

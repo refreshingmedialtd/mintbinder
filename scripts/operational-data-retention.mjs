@@ -258,8 +258,49 @@ function retentionTargets(now, options) {
       cutoff: billingCheckoutIntentCutoff,
       eligibility: "terminal checkout attempt last updated before cutoff",
       where: {
-        status: { in: ["completed", "failed", "retired"] },
         updatedAt: { lt: billingCheckoutIntentCutoff },
+        OR: [
+          {
+            status: "completed",
+            OR: [
+              { provider: { not: "square" } },
+              {
+                provider: "square",
+                checkoutUrl: null,
+                AND: [
+                  { providerOrderId: { not: null } },
+                  { providerOrderId: { not: "" } },
+                  { providerPaymentId: { not: null } },
+                  { providerPaymentId: { not: "" } },
+                ],
+              },
+            ],
+          },
+          {
+            provider: "square",
+            status: "retired_payment_free",
+            checkoutUrl: null,
+            providerCheckoutId: null,
+            providerPaymentId: null,
+            AND: [
+              { providerOrderId: { not: null } },
+              { providerOrderId: { not: "" } },
+            ],
+          },
+          {
+            status: { in: ["failed", "retired"] },
+            OR: [
+              { provider: { not: "square" } },
+              {
+                provider: "square",
+                checkoutUrl: null,
+                providerCheckoutId: null,
+                providerOrderId: null,
+                providerPaymentId: null,
+              },
+            ],
+          },
+        ],
       },
     },
     {

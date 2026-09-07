@@ -57,7 +57,10 @@ Billing:
 - `SQUARE_WEBHOOK_NOTIFICATION_URL`: `https://final-domain/api/billing/webhook/square`.
 - `SQUARE_WEBHOOK_SIGNATURE_KEY`: production webhook signature key.
 - `SQUARE_WEBHOOK_SUBSCRIPTION_ID`: production webhook subscription ID.
-- `SQUARE_PAYMENT_CORRELATION_VERIFIED=true`: set only after a hosted sandbox checkout proves `payment.created`/`payment.updated` correlation to the intended Mint Binder account. Checkout fails closed while false or absent.
+- `SQUARE_CHECKOUT_CORRELATION_SECRET`: independent high-entropy HMAC secret, at least 32 characters; do not reuse `AUTH_SECRET` or `JOB_SECRET`.
+- `SQUARE_PAYMENT_CORRELATION_VERIFIED=true`: set only in the controlled production-credential launch after both hosted sandbox acceptance runs pass. Checkout fails closed while false or absent, and the flag must remain false on a sandbox deployment.
+
+For the existing deployment, do not add `SQUARE_CHECKOUT_CORRELATION_SECRET` during the first deployment of the correlation-capable code. Deploy once with it unset or blank, with Square still in Sandbox and `SQUARE_PAYMENT_CORRELATION_VERIFIED=false`; this preserves the legacy `AUTH_SECRET` signature for in-flight/retried attempts. While checkout remains disabled, run `npm run job:live-billing-checkout-retirement`, resolve every live, ambiguous, provider-error, or completed-pending-reconciliation attempt, and repeat until no unresolved legacy attempt remains. Square reports `settling` only after DELETE identifies the exact link and canceled order, or crash recovery proves the exact stored link absent and exact stored order `CANCELED`; exact-order Payments/tenders must also be empty. Wait at least 15 minutes and rerun the job for the second canceled-order and empty-evidence check; `OPEN`, `DRAFT`, mismatched proof, or payment evidence fail closed. Then run `npm run ops:audit-square-correlation-rollout` against the same database and require `"ok": true`. Only after both checks pass may you set the same new independent secret in the deployed and operator environments and redeploy for hosted-checkout QA.
 
 Email and alerts:
 
@@ -117,12 +120,17 @@ Pricing:
    - The script rebuilds the app, packages a release-local standalone runtime, reloads the registered PM2 process, and verifies that `/api/health` reports the deployed commit. It uses 20i's global PM2 command when visible and otherwise the locked project-local PM2 client, so the non-login deployment shell does not depend on PATH setup. It fails before migration if neither client can see the registered app.
 7. Run `npm run qa:beta` against the production URL.
 8. Run `npm run qa:admin` against production data.
-9. Run Square hosted-checkout browser smoke for monthly and yearly plans.
-10. Schedule `scripts/cron-billing-checkout-retirement.sh` every ten minutes and verify one expired sandbox link is provider-checked and retired.
-11. Confirm Square webhook delivery updates the in-app subscription state.
-12. Run price-alert dry run, then controlled live smoke with `PRICE_ALERT_DIGEST_TEST_RECIPIENT`.
-13. Keep `PRICE_ALERT_DIGEST_ALLOW_LIVE_RECIPIENTS=false` until the first beta group is approved.
-14. Turn on uptime/error/job/webhook alerts.
+9. Perform the Square signing-key migration in two deployments while Square remains in Sandbox and the public correlation flag remains false:
+   - Deploy the new code first with `SQUARE_CHECKOUT_CORRELATION_SECRET` unset or blank so legacy `AUTH_SECRET`-signed retries remain deterministic.
+   - Run `npm run job:live-billing-checkout-retirement`; resolve every live, ambiguous, provider-error, or completed-pending-reconciliation attempt. If it reports `settling`, wait at least 15 minutes and rerun it; repeat until no unresolved legacy checkout remains.
+   - Run the read-only `npm run ops:audit-square-correlation-rollout` command against the same database and require `"ok": true`. Any listed intent must be reconciled before continuing.
+   - Only after that audit passes may you add the same new independent `SQUARE_CHECKOUT_CORRELATION_SECRET` to the deployed and operator environments and redeploy.
+10. After the second deployment, run `npm run qa:square-hosted-correlation -- --plan=monthly`, then repeat with `--plan=yearly`. Complete the one hosted test-card checkout printed by each run and retain both successful reports.
+11. Schedule `scripts/cron-billing-checkout-retirement.sh` every ten minutes and verify one expired sandbox link is provider-checked and retired.
+12. Confirm Square webhook delivery updates the in-app subscription state.
+13. Run price-alert dry run, then controlled live smoke with `PRICE_ALERT_DIGEST_TEST_RECIPIENT`.
+14. Keep `PRICE_ALERT_DIGEST_ALLOW_LIVE_RECIPIENTS=false` until the first beta group is approved.
+15. Turn on uptime/error/job/webhook alerts.
 
 ## Database Migration Policy
 
@@ -195,8 +203,13 @@ For `mintbinder.co.uk`:
 - Copy the production `SQUARE_WEBHOOK_SIGNATURE_KEY`.
 - Copy the production `SQUARE_WEBHOOK_SUBSCRIPTION_ID`.
 - Confirm Square events include `subscription.created`, `subscription.updated`, `invoice.payment_made`, `payment.created`, and `payment.updated`.
-- Complete a disposable hosted sandbox checkout whose buyer phone creates or selects a different Square customer; verify the signed payment note maps that customer and grants the intended account exactly once before setting `SQUARE_PAYMENT_CORRELATION_VERIFIED=true`.
-- Complete one monthly and one yearly hosted checkout smoke.
+- First deploy the correlation-capable code with `SQUARE_CHECKOUT_CORRELATION_SECRET` unset or blank in both environments. Keep `SQUARE_PAYMENT_CORRELATION_VERIFIED=false` while `SQUARE_ENVIRONMENT=sandbox`; the temporary `AUTH_SECRET` fallback preserves retries for existing attempts.
+- With checkout still disabled, run `npm run job:live-billing-checkout-retirement`. Resolve every live, ambiguous, provider-error, or completed-pending-reconciliation legacy attempt. A completed order, tender, or searched payment ID alone remains unsafe: only one exact retrieved completed payment whose signed note, customer, order, amount, currency, and immutable Plus-plan snapshot all match may enter payment reconciliation. Everything else is an unhealthy manual-reconciliation result. If the job reports `settling`, wait at least 15 minutes and run it again so the worker repeats its exact-order Payments and order-tender checks; repeat until none remains.
+- Run the read-only `npm run ops:audit-square-correlation-rollout` command against the same database. Its JSON must contain `"ok": true`; a non-zero exit or any sampled intent ID blocks the key change.
+- Only after that audit passes, configure the same newly generated `SQUARE_CHECKOUT_CORRELATION_SECRET` in the deployed environment and the operator's ignored local `.env`, then redeploy. Never reuse the auth or job secret.
+- Run `npm run qa:square-hosted-correlation -- --plan=monthly` and then `--plan=yearly`. The runner must attest the deployed commit, require one exact webhook subscription, observe real `payment.created` and `payment.updated` deliveries, prove a different hosted buyer maps to the exact signed checkout order once, cancel and refund the test purchase, and complete billing-aware cleanup.
+- Preserve the successful JSON reports as launch evidence. Only enable the correlation flag when switching the reviewed deployment to production Square credentials; never enable public checkout against Sandbox.
+- Do not defer the legacy-attempt drain until the later false-to-true flag transition: it must precede introducing the dedicated signing key. Verified mode intentionally stops accepting the migration fallback. Future correlation-secret rotation must also disable checkout, drain every live or unresolved attempt, require the read-only rollout audit to return `"ok": true`, and only then change the key.
 - Before changing any provider price ID/plan variation, Square amount, or currency, disable new checkout and retire every open checkout first. Each attempt keeps its purchase-time provider price/variation (and Square amount/currency) snapshot so an in-flight or already-paid checkout reconciles against what the buyer actually saw, not the new environment values. Run the protected checkout-retirement job and resolve every live or ambiguous attempt before applying the configuration change.
 - Confirm cancellation keeps Plus active until the paid-through date.
 

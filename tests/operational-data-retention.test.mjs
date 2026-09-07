@@ -129,9 +129,46 @@ test("dry-run reports auditable counts without selecting or deleting rows", asyn
   assert.deepEqual(billingWhere.status.in, ["SUCCEEDED", "FAILED"]);
   assert.equal(billingWhere.status.in.includes("PROCESSING"), false);
   const checkoutWhere = prisma.calls.count.find((call) => call.delegate === "billingCheckoutIntent").args.where;
-  assert.deepEqual(checkoutWhere.status.in, ["completed", "failed", "retired"]);
-  assert.equal(checkoutWhere.status.in.includes("ready"), false);
-  assert.equal(checkoutWhere.status.in.includes("recoverable"), false);
+  assert.deepEqual(checkoutWhere.OR[0], {
+    status: "completed",
+    OR: [
+      { provider: { not: "square" } },
+      {
+        provider: "square",
+        checkoutUrl: null,
+        AND: [
+          { providerOrderId: { not: null } },
+          { providerOrderId: { not: "" } },
+          { providerPaymentId: { not: null } },
+          { providerPaymentId: { not: "" } },
+        ],
+      },
+    ],
+  });
+  assert.deepEqual(checkoutWhere.OR[1], {
+    provider: "square",
+    status: "retired_payment_free",
+    checkoutUrl: null,
+    providerCheckoutId: null,
+    providerPaymentId: null,
+    AND: [
+      { providerOrderId: { not: null } },
+      { providerOrderId: { not: "" } },
+    ],
+  });
+  assert.deepEqual(checkoutWhere.OR[2].status.in, ["failed", "retired"]);
+  assert.deepEqual(checkoutWhere.OR[2].OR, [
+    { provider: { not: "square" } },
+    {
+      provider: "square",
+      checkoutUrl: null,
+      providerCheckoutId: null,
+      providerOrderId: null,
+      providerPaymentId: null,
+    },
+  ]);
+  assert.equal(JSON.stringify(checkoutWhere).includes("ready"), false);
+  assert.equal(JSON.stringify(checkoutWhere).includes("recoverable"), false);
 });
 
 test("confirmed retention still refuses deletion without the environment opt-in", async () => {

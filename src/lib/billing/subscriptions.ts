@@ -22,17 +22,21 @@ import {
 } from "@/lib/billing/checkout-intents";
 import {
   parseSquareCheckoutCorrelation,
-  squarePaymentMatchesCheckout,
+  validateSquareCompletedPaymentCorrelation,
 } from "@/lib/billing/square-checkout-correlation";
 import { claimBillingCustomerOwnership } from "@/lib/billing/customer-ownership";
 import {
-  selectSquarePaymentActivationTarget,
-  selectSquareTerminalCustomerRowsToDetach,
-} from "@/lib/billing/subscription-selection";
+  reconcileSquareCheckoutPaymentTransaction,
+} from "@/lib/billing/square-payment-transaction";
 import {
+  reconcileProviderSubscriptionTransaction,
+} from "@/lib/billing/provider-subscription-transaction";
+import {
+  exactSquareInvoiceOrderId,
   exactSquareInvoiceSubscriptionId,
   intentIsLiveForProviderReconciliation,
   providerEventMayAttachNewSubscription,
+  squareSubscriptionAttachmentDecision,
   squarePlanForProviderEvent,
   stripePlanForProviderEvent,
 } from "@/lib/billing/provider-event-safety";
@@ -85,6 +89,7 @@ type SquareSubscriptionEnvelope = {
 
 type SquareInvoice = {
   customer_id?: string | null;
+  order_id?: string | null;
   subscription_id?: string | null;
 };
 
@@ -163,20 +168,19 @@ export async function fulfillSquareWebhookEvent(
     const invoice = squareInvoiceFromEvent(event);
 
     const subscriptionId = exactSquareInvoiceSubscriptionId(invoice?.subscription_id);
-    if (subscriptionId) {
-      const current = await retrieveSquareSubscription(subscriptionId);
+    const orderId = exactSquareInvoiceOrderId(invoice?.order_id);
+    if (!subscriptionId || !orderId) {
+      throw reconciliationError(
+        "Square invoice did not include exact subscription and checkout order IDs.",
+      );
+    }
+    const current = await retrieveSquareSubscription(subscriptionId);
 
-      if (!current) {
-        throw reconciliationError("Square invoice subscription could not be retrieved for reconciliation.");
-      }
-
-      return fulfillSquareSubscription(current, new Date());
+    if (!current) {
+      throw reconciliationError("Square invoice subscription could not be retrieved for reconciliation.");
     }
 
-    return {
-      handled: false,
-      message: "Ignored a Square invoice without an exact subscription ID.",
-    };
+    return fulfillSquareSubscription(current, new Date(), { orderId, subscriptionId });
   }
 
   if (event.type === "payment.created" || event.type === "payment.updated") {
@@ -210,129 +214,48 @@ export async function fulfillSquareCheckoutPayment(payment: SquarePaymentRecord)
   }
 
   const intent = await prisma.billingCheckoutIntent.findUnique({ where: { idempotencyKey } });
-  const customerId = payment.customer_id?.trim();
   const paymentId = payment.id?.trim();
 
-  if (!intent || intent.provider !== "square" || !customerId || !paymentId) {
+  if (!intent || intent.provider !== "square" || !paymentId) {
     throw reconciliationError("Square payment correlation could not be matched to a checkout intent and customer.");
   }
-
-  if (!squarePaymentMatchesCheckout({
-    amountMinor: payment.amount_money?.amount,
-    currency: payment.amount_money?.currency,
-    expectedAmountMinor: intent.expectedAmountMinor,
-    expectedCurrency: intent.expectedCurrency,
-  })) {
-    throw reconciliationError("Square payment amount, currency, or plan did not match the checkout intent.");
-  }
-
-  if (intent.plan !== SubscriptionPlan.PLUS_MONTHLY && intent.plan !== SubscriptionPlan.PLUS_YEARLY) {
-    throw reconciliationError("Square payment checkout intent did not contain a Plus plan.");
-  }
-
-  const now = new Date();
-  const currentPeriodEnd = squareSubscriptionPeriodEnd({
-    anchor: now,
-    estimateWhenMissing: true,
-    plan: intent.plan,
+  const validation = validateSquareCompletedPaymentCorrelation({
+    expectedPaymentId: paymentId,
+    intent,
+    payment,
   });
+  if (!validation.ok) {
+    throw reconciliationError(validation.reason);
+  }
+  const customerId = validation.customerId;
 
-  const activated = await prisma.$transaction(async (transaction) => {
-    await transaction.$queryRaw`
-      SELECT "id"
-      FROM "billing_checkout_intents"
-      WHERE "id" = ${intent.id}::uuid
-      FOR UPDATE
-    `;
-    const lockedIntent = await transaction.billingCheckoutIntent.findUnique({ where: { id: intent.id } });
-
-    if (!lockedIntent || lockedIntent.idempotencyKey !== idempotencyKey) {
-      throw reconciliationError("Square checkout intent changed during payment reconciliation.");
-    }
-
-    if (![
-      "creating",
-      "recoverable",
-      "ready",
-      "retiring",
-      "paid_pending_subscription",
-      "completed",
-    ].includes(lockedIntent.status)) {
-      throw reconciliationError("Square payment matched a terminal checkout intent.");
-    }
-
-    if (lockedIntent.providerPaymentId) {
-      if (lockedIntent.providerPaymentId !== paymentId) {
-        throw reconciliationError("Square checkout intent was already completed by a different payment.");
-      }
-      return false;
-    }
-
-    await claimBillingCustomerOwnership({
-      allowDuringDeletion: true,
-      client: transaction,
+  const activation = await prisma.$transaction((transaction) =>
+    reconcileSquareCheckoutPaymentTransaction({
+      claimCustomerOwnership: ({ customerId: lockedCustomerId, userId }) =>
+        claimBillingCustomerOwnership({
+          allowDuringDeletion: true,
+          client: transaction,
+          customerId: lockedCustomerId,
+          provider: "square",
+          userId,
+        }),
       customerId,
-      provider: "square",
-      userId: lockedIntent.userId,
-    });
+      idempotencyKey,
+      initialIntent: intent,
+      payment,
+      paymentId,
+      transaction,
+    }));
 
-    const candidates = await transaction.subscription.findMany({
-      where: {
-        userId: lockedIntent.userId,
-        provider: "square",
-        providerCustomerId: customerId,
-      },
-      orderBy: { updatedAt: "desc" },
-    });
-    const existing = selectSquarePaymentActivationTarget(candidates, lockedIntent.plan, now);
-    const data = {
-      cancelAtPeriodEnd: false,
-      currentPeriodEnd,
-      plan: lockedIntent.plan,
-      providerCustomerId: customerId,
-      providerUpdatedAt: now,
-      status: SubscriptionStatus.ACTIVE,
-    };
-
-    if (existing) {
-      await transaction.subscription.update({ where: { id: existing.id }, data });
-    } else {
-      const terminalRows = selectSquareTerminalCustomerRowsToDetach(candidates);
-      const unsafeHolder = candidates.find((candidate) =>
-        !terminalRows.some((terminal) => terminal.id === candidate.id));
-      if (unsafeHolder) {
-        throw reconciliationError(
-          "Square payment customer is still linked to a different non-terminal subscription.",
-        );
-      }
-      if (terminalRows.length) {
-        await transaction.subscription.updateMany({
-          where: { id: { in: terminalRows.map((candidate) => candidate.id) } },
-          data: { providerCustomerId: null },
-        });
-      }
-      await transaction.subscription.create({
-        data: { ...data, provider: "square", userId: lockedIntent.userId },
-      });
-    }
-
-    await transaction.billingCheckoutIntent.update({
-      where: { id: lockedIntent.id },
-      data: {
-        checkoutUrl: null,
-        expiresAt: new Date(0),
-        providerPaymentId: paymentId,
-        status: existing?.providerSubscriptionId ? "completed" : "paid_pending_subscription",
-      },
-    });
-    return true;
-  });
-
-  await retireSupersededBillingCheckoutIntents(intent.userId, "square", intent.id);
+  await retireSupersededBillingCheckoutIntents(
+    activation.userId,
+    "square",
+    activation.intentId,
+  );
 
   return {
-    handled: activated,
-    message: activated
+    handled: activation.activated,
+    message: activation.activated
       ? "Square checkout payment correlated and Plus access activated."
       : "Square checkout payment was already correlated.",
   };
@@ -396,7 +319,11 @@ export async function fulfillSubscription(subscription: StripeSubscription, prov
   };
 }
 
-export async function fulfillSquareSubscription(subscription: SquareSubscription, providerUpdatedAt?: Date) {
+export async function fulfillSquareSubscription(
+  subscription: SquareSubscription,
+  providerUpdatedAt?: Date,
+  invoiceCorrelation?: { orderId: string; subscriptionId: string },
+) {
   const customerId = subscription.customer_id ?? null;
   const subscriptionId = subscription.id ?? null;
   const existing = await findExistingSubscription({ customerId, provider: "square", subscriptionId });
@@ -413,21 +340,30 @@ export async function fulfillSquareSubscription(subscription: SquareSubscription
     throw reconciliationError("Square subscription event could not be matched to a Mint Binder user.");
   }
 
-  const matchingIntent = await findMatchingBillingCheckoutIntent({
+  const matchingIntent = invoiceCorrelation
+    ? await findMatchingSquareInvoiceIntent({ orderId: invoiceCorrelation.orderId, userId })
+    : null;
+  const attachment = squareSubscriptionAttachmentDecision({
+    existingProviderSubscriptionId: existing?.providerSubscriptionId,
+    invoiceOrderId: invoiceCorrelation?.orderId,
+    invoiceSubscriptionId: invoiceCorrelation?.subscriptionId,
+    matchingIntent,
     planVariationId: subscription.plan_variation_id,
-    provider: "square",
-    userId,
+    subscriptionId,
   });
-  const plan = squarePlanForProviderEvent(subscription.plan_variation_id, matchingIntent);
+  if (attachment === "retry_invoice") {
+    throw reconciliationError(
+      "Square invoice subscription cannot be attached until its exact checkout payment is correlated.",
+    );
+  }
+  if (attachment === "ignore_unproven") {
+    return { handled: false, message: "Ignored an unproven Square subscription attachment." };
+  }
+  const plan = attachment === "update_exact" && isPlusPlan(existing?.plan)
+    ? existing!.plan
+    : squarePlanForProviderEvent(subscription.plan_variation_id, matchingIntent);
   if (!plan) {
     return { handled: false, message: "Ignored a Square subscription with an unknown plan variation." };
-  }
-  if (!providerEventMayAttachNewSubscription({
-    existingProviderSubscriptionId: existing?.providerSubscriptionId,
-    matchingIntent,
-    subscriptionId,
-  })) {
-    return { handled: false, message: "Ignored an unrelated Square subscription." };
   }
 
   const cancelAtPeriodEnd = Boolean(subscription.canceled_date);
@@ -459,8 +395,7 @@ export async function fulfillSquareSubscription(subscription: SquareSubscription
     providerUpdatedAt,
   });
   if (
-    written &&
-    !existing?.providerSubscriptionId &&
+    (attachment === "attach_invoice" || attachment === "update_exact_invoice") &&
     matchingIntent &&
     intentIsLiveForProviderReconciliation(matchingIntent)
   ) {
@@ -471,6 +406,10 @@ export async function fulfillSquareSubscription(subscription: SquareSubscription
     handled: written,
     message: written ? "Square subscription state synced." : "Ignored an older Square subscription event.",
   };
+}
+
+function isPlusPlan(plan?: SubscriptionPlan | null) {
+  return plan === SubscriptionPlan.PLUS_MONTHLY || plan === SubscriptionPlan.PLUS_YEARLY;
 }
 
 async function findExistingSubscription({
@@ -578,6 +517,31 @@ async function findMatchingBillingCheckoutIntent({
   });
 }
 
+async function findMatchingSquareInvoiceIntent({
+  orderId,
+  userId,
+}: {
+  orderId: string;
+  userId: string;
+}) {
+  return prisma.billingCheckoutIntent.findFirst({
+    where: {
+      provider: "square",
+      providerOrderId: orderId,
+      userId,
+    },
+    orderBy: { updatedAt: "desc" },
+    select: {
+      id: true,
+      plan: true,
+      providerOrderId: true,
+      providerPaymentId: true,
+      providerPlanVariationId: true,
+      status: true,
+    },
+  });
+}
+
 async function closeMatchingBillingCheckoutIntent(intentId: string) {
   await prisma.billingCheckoutIntent.updateMany({
     where: {
@@ -645,63 +609,29 @@ async function writeProviderSubscription({
   userId: string;
   providerUpdatedAt?: Date;
 }) {
-  return prisma.$transaction(async (transaction) => {
-    await claimBillingCustomerOwnership({
-      allowDuringDeletion: true,
-      client: transaction,
-      customerId,
-      provider,
-      userId,
-    });
-    const existing = await findExistingSubscription({ customerId, provider, subscriptionId }, transaction);
-    const effectiveProviderUpdatedAt = providerUpdatedAt ?? new Date();
-    const customerHolder = await transaction.subscription.findUnique({
-      where: { providerCustomerId: customerId },
-      select: { id: true },
-    });
-    const data = {
+  return prisma.$transaction((transaction) =>
+    reconcileProviderSubscriptionTransaction({
       cancelAtPeriodEnd,
+      claimCustomerOwnership: ({ customerId: lockedCustomerId, userId: lockedUserId }) =>
+        claimBillingCustomerOwnership({
+          allowDuringDeletion: true,
+          client: transaction,
+          customerId: lockedCustomerId,
+          provider,
+          userId: lockedUserId,
+        }),
       currentPeriodEnd,
+      customerId,
+      findExistingSubscription: () =>
+        findExistingSubscription({ customerId, provider, subscriptionId }, transaction),
       plan,
       provider,
-      // Historical exact subscriptions may receive late terminal events after
-      // a newer subscription has become the one local row holding the
-      // customer's rollback-compatible unique providerCustomerId. Keep the
-      // exact ID state update without stealing that live customer's slot.
-      providerCustomerId: customerHolder && customerHolder.id !== existing?.id ? null : customerId,
-      providerSubscriptionId: subscriptionId,
-      providerUpdatedAt: effectiveProviderUpdatedAt,
+      providerUpdatedAt,
       status,
-    };
-
-    if (existing) {
-      const updated = await transaction.subscription.updateMany({
-        where: {
-          id: existing.id,
-          OR: [
-            { providerUpdatedAt: null },
-            { providerUpdatedAt: { lt: effectiveProviderUpdatedAt } },
-          ],
-        },
-        data,
-      });
-      return updated.count > 0;
-    }
-
-    if (customerHolder) {
-      throw reconciliationError(
-        "Provider customer is already linked to a different subscription and no checkout placeholder matched.",
-      );
-    }
-
-    await transaction.subscription.create({
-      data: {
-        ...data,
-        userId,
-      },
-    });
-    return true;
-  });
+      subscriptionId,
+      transaction,
+      userId,
+    }));
 }
 
 function stripeId(value: string | { id?: string | null } | null | undefined) {

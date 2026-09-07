@@ -30,6 +30,7 @@ import {
   ProviderSubscriptionStillActiveError,
   reconcileExpiredScheduledCancellations,
 } from "@/lib/billing/scheduled-cancellation-reconciliation";
+import { squarePublicCheckoutIsEnabled } from "@/lib/billing/square-public-checkout";
 
 export const dynamic = "force-dynamic";
 
@@ -49,9 +50,9 @@ export async function POST(request: Request) {
     const plan = body.plan === "yearly" ? "yearly" : "monthly";
     const provider = activeBillingProvider();
     const origin = requestOrigin(request);
-    if (provider === "square" && process.env.SQUARE_PAYMENT_CORRELATION_VERIFIED?.trim().toLowerCase() !== "true") {
+    if (provider === "square" && !squarePublicCheckoutIsEnabled()) {
       throw new BillingConfigError(
-        "Square checkout is disabled until payment.updated correlation has passed the documented sandbox smoke test.",
+        "Square checkout is disabled until payment.updated correlation has passed the documented sandbox smoke test and Square is configured for production.",
       );
     }
     await reconcileExpiredScheduledCancellations({ userId: session.user.id });
@@ -68,7 +69,12 @@ export async function POST(request: Request) {
     });
 
     if (intent.kind === "retire") {
-      await retireProviderCheckout(intent.provider, intent.providerCheckoutId, intent.providerOrderId);
+      await retireProviderCheckout(
+        intent.provider,
+        intent.providerCheckoutId,
+        intent.providerOrderId,
+        intent.createdAt,
+      );
       await completeBillingCheckoutRetirement(intent.id, intent.idempotencyKey);
       intent = await claimBillingCheckoutIntent({
         expectation,
@@ -95,7 +101,12 @@ export async function POST(request: Request) {
 
         if (remoteSubscriptions.some(squareSubscriptionBlocksCheckout)) {
           await beginBillingCheckoutRetirement(intent.id, intent.idempotencyKey);
-          await retireProviderCheckout(intent.provider, intent.providerCheckoutId, intent.providerOrderId);
+          await retireProviderCheckout(
+            intent.provider,
+            intent.providerCheckoutId,
+            intent.providerOrderId,
+            intent.createdAt,
+          );
           await completeBillingCheckoutRetirement(intent.id, intent.idempotencyKey);
           throw new BillingCheckoutConflictError(
             "A Square subscription already exists for this account. Use Billing or contact support before starting another checkout.",
@@ -167,7 +178,12 @@ export async function POST(request: Request) {
       });
 
       if (completion.kind === "retire") {
-        await retireProviderCheckout(provider, checkoutSession.id, providerOrderId);
+        await retireProviderCheckout(
+          provider,
+          checkoutSession.id,
+          providerOrderId,
+          intent.createdAt,
+        );
         await completeBillingCheckoutRetirement(intent.id, intent.idempotencyKey);
         throw new BillingCheckoutConflictError(
           "Checkout was retired because account deletion or another terminal operation won the race.",

@@ -55,6 +55,8 @@ oneOf("STRIPE_WEBHOOK_ENABLED", ["true", "false", ""], "STRIPE_WEBHOOK_ENABLED s
 
 const lifecycle = billingProviderLifecycleSettings(process.env);
 const billingProvider = lifecycle.checkoutProvider;
+const squarePaymentCorrelationIsVerified =
+  normalized("SQUARE_PAYMENT_CORRELATION_VERIFIED").toLowerCase() === "true";
 
 if (lifecycle.squareWebhookEnabled) {
   required("SQUARE_ACCESS_TOKEN", "Set the Square access token while Square webhooks remain enabled.");
@@ -65,6 +67,58 @@ if (lifecycle.squareWebhookEnabled) {
   sameOrigin("SQUARE_WEBHOOK_NOTIFICATION_URL", "NEXT_PUBLIC_APP_URL", "Square webhook URL should share the app origin.");
   required("SQUARE_WEBHOOK_SIGNATURE_KEY", "Copy the Square webhook signature key.");
   required("SQUARE_WEBHOOK_SUBSCRIPTION_ID", "Record the Square webhook subscription ID.");
+  minLength(
+    "SQUARE_CHECKOUT_CORRELATION_SECRET",
+    32,
+    "SQUARE_CHECKOUT_CORRELATION_SECRET should be at least 32 characters.",
+  );
+  notPlaceholder(
+    "SQUARE_CHECKOUT_CORRELATION_SECRET",
+    ["replace", "secret", "password"],
+    "SQUARE_CHECKOUT_CORRELATION_SECRET still looks like a placeholder.",
+  );
+  const squareCorrelationSecret = normalized("SQUARE_CHECKOUT_CORRELATION_SECRET");
+  const squareCorrelationSecretIsReused = Boolean(
+    squareCorrelationSecret &&
+    [normalized("AUTH_SECRET"), normalized("JOB_SECRET")].includes(squareCorrelationSecret),
+  );
+  if (deploymentCheck) {
+    if (!squareCorrelationSecret && squarePaymentCorrelationIsVerified) {
+      blocker(
+        "SQUARE_CHECKOUT_CORRELATION_SECRET",
+        "A dedicated Square checkout correlation secret is required while verified checkout is enabled.",
+      );
+    } else {
+      warnIf(
+        !squareCorrelationSecret,
+        "SQUARE_CHECKOUT_CORRELATION_SECRET",
+        "Square checkout correlation is temporarily using AUTH_SECRET; add a dedicated high-entropy secret before public launch.",
+      );
+    }
+    if (squareCorrelationSecretIsReused && squarePaymentCorrelationIsVerified) {
+      blocker(
+        "SQUARE_CHECKOUT_CORRELATION_SECRET",
+        "The verified Square checkout correlation secret must be independent from AUTH_SECRET and JOB_SECRET.",
+      );
+    } else {
+      warnIf(
+        squareCorrelationSecretIsReused,
+        "SQUARE_CHECKOUT_CORRELATION_SECRET",
+        "The Square checkout correlation secret should be independently generated rather than reusing AUTH_SECRET or JOB_SECRET.",
+      );
+    }
+  } else {
+    required(
+      "SQUARE_CHECKOUT_CORRELATION_SECRET",
+      "Set a dedicated high-entropy Square checkout correlation secret before public launch.",
+    );
+    if (squareCorrelationSecretIsReused) {
+      blocker(
+        "SQUARE_CHECKOUT_CORRELATION_SECRET",
+        "SQUARE_CHECKOUT_CORRELATION_SECRET must be independently generated before public launch.",
+      );
+    }
+  }
 }
 
 if (lifecycle.stripeWebhookEnabled) {
@@ -79,21 +133,33 @@ if (lifecycle.stripeWebhookEnabled) {
 if (billingProvider === "square") {
   required("SQUARE_LOCATION_ID", "Set the production Square location ID.");
   if (deploymentCheck) {
-    warnIf(
-      normalized("SQUARE_ENVIRONMENT") !== "production",
-      "SQUARE_ENVIRONMENT",
-      "Square is not in production mode; paid public checkout must remain a beta/sandbox test.",
-    );
+    const squareEnvironmentIsProduction = normalized("SQUARE_ENVIRONMENT") === "production";
+    if (squarePaymentCorrelationIsVerified && !squareEnvironmentIsProduction) {
+      blocker(
+        "SQUARE_ENVIRONMENT",
+        "SQUARE_PAYMENT_CORRELATION_VERIFIED=true is unsafe unless SQUARE_ENVIRONMENT=production; public Square checkout must never use sandbox credentials.",
+      );
+    } else {
+      warnIf(
+        !squareEnvironmentIsProduction,
+        "SQUARE_ENVIRONMENT",
+        "Square is not in production mode; paid public checkout must remain a beta/sandbox test.",
+      );
+    }
   } else {
     exact("SQUARE_ENVIRONMENT", "production", "SQUARE_ENVIRONMENT must be production for public launch.");
   }
   if (deploymentCheck) {
     warnIf(
-      normalized("SQUARE_PAYMENT_CORRELATION_VERIFIED") !== "true",
+      !squarePaymentCorrelationIsVerified,
       "SQUARE_PAYMENT_CORRELATION_VERIFIED",
       "Paid Square checkout remains disabled until the hosted-checkout payment correlation smoke has passed.",
     );
   } else {
+    required(
+      "SQUARE_PAYMENT_CORRELATION_VERIFIED",
+      "Set SQUARE_PAYMENT_CORRELATION_VERIFIED=true only after the hosted-checkout correlation smoke passes.",
+    );
     exact(
       "SQUARE_PAYMENT_CORRELATION_VERIFIED",
       "true",

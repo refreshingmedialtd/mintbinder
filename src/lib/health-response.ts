@@ -1,3 +1,5 @@
+import { squareHostedQaRuntimeAttestation } from "./billing/square-runtime-attestation.ts";
+
 type HealthEnvironment = NodeJS.ProcessEnv;
 
 export type ServiceHealthCheck = {
@@ -29,6 +31,18 @@ export function detailedHealthPayload(
     build: buildInfo(environment),
     durationMs: check.durationMs,
     ...(!check.ok ? { error: "Database health check failed." } : {}),
+  };
+}
+
+export function jobProtectedDetailedHealthPayload(
+  check: ServiceHealthCheck,
+  environment: HealthEnvironment = process.env,
+) {
+  return {
+    ...detailedHealthPayload(check, environment),
+    attestations: {
+      squareHostedQa: squareHostedQaRuntimeAttestation(environment),
+    },
   };
 }
 

@@ -35,6 +35,7 @@ Thumbs.db
 .idea/
 .local-browser/
 .local-tunnel/
+.local-square-qa/
 
 # App data generated during local development
 *.sqlite

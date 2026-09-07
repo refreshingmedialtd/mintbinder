@@ -5,6 +5,7 @@ import { runInNewContext } from "node:vm";
 import manifest from "../src/app/manifest.ts";
 import {
   detailedHealthPayload,
+  jobProtectedDetailedHealthPayload,
   publicHealthPayload,
 } from "../src/lib/health-response.ts";
 
@@ -175,6 +176,11 @@ test("public health payload omits runtime and environment diagnostics", () => {
     MINTBINDER_RUNTIME_DIST_DIR: `.next-releases/${"a".repeat(40)}`,
     NEXT_PUBLIC_APP_URL: "https://mintbinder.co.uk",
   });
+  const jobProtectedPayload = jobProtectedDetailedHealthPayload(healthy, {
+    SQUARE_ACCESS_TOKEN: "square-secret-access-token",
+    SQUARE_CHECKOUT_CORRELATION_SECRET: "square-secret-correlation-key",
+    SQUARE_WEBHOOK_SIGNATURE_KEY: "square-secret-webhook-key",
+  });
 
   assert.deepEqual(publicPayload, {
     checkedAt: healthy.checkedAt,
@@ -184,9 +190,22 @@ test("public health payload omits runtime and environment diagnostics", () => {
   });
   assert.equal("build" in publicPayload, false);
   assert.equal("checks" in publicPayload, false);
+  assert.equal("attestations" in publicPayload, false);
   assert.equal(detailedPayload.build.commit, "a".repeat(40));
   assert.equal(detailedPayload.checks.database, "ok");
   assert.equal(detailedPayload.checks.auth.authSecretConfigured, true);
+  assert.equal("attestations" in detailedPayload, false);
+  assert.match(jobProtectedPayload.attestations.squareHostedQa.fingerprint, /^[0-9a-f]{64}$/);
+  assert.doesNotMatch(JSON.stringify(jobProtectedPayload), /square-secret/);
+});
+
+test("only JOB_SECRET-authorized public health diagnostics request the Square attestation", async () => {
+  const route = await readFile(new URL("../src/app/api/health/route.ts", import.meta.url), "utf8");
+  const adminRoute = await readFile(new URL("../src/app/api/admin/health/route.ts", import.meta.url), "utf8");
+
+  assert.match(route, /requireJobSecret\(request\)/);
+  assert.match(route, /hasDiagnosticAccess\(request\)[\s\S]*jobProtectedDetailedHealthPayload\(check\)/);
+  assert.doesNotMatch(adminRoute, /jobProtectedDetailedHealthPayload/);
 });
 
 test("robots policy is a static public asset for host compatibility", async () => {
