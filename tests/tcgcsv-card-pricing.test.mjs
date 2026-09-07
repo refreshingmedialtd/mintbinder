@@ -45,6 +45,35 @@ test("rotates past a recently attempted zero-output pricing group", () => {
   ) < 0);
 });
 
+test("rotates supplemental price groups independently when they share a local set", () => {
+  const baseSet = {
+    cardPrintings: [{
+      priceSnapshots: [{ observedAt: new Date("2026-09-07T09:00:00.000Z") }],
+    }],
+    metadata: {
+      tcgcsvCardPricingAttempts: {
+        "tcgcsv-card": {
+          attemptedAt: "2026-09-07T09:00:00.000Z",
+          groupId: "604",
+        },
+        "tcgcsv-card:604": {
+          attemptedAt: "2026-09-07T09:00:00.000Z",
+          groupId: "604",
+        },
+      },
+    },
+    name: "Base",
+  };
+
+  assert.ok(compareCardGroupRefreshPriority(baseSet, baseSet, {
+    leftGroupId: 1663,
+    leftSharesSet: true,
+    rightGroupId: 604,
+    rightSharesSet: true,
+    source: "tcgcsv-card",
+  }) < 0);
+});
+
 test("detects card products while excluding sealed products", () => {
   assert.equal(isCardProduct({
     extendedData: [{ name: "Number", value: "139/195" }],
@@ -219,6 +248,132 @@ test("preserves raw subtypes for cards actually named Poke Ball or Master Ball",
     "Normal",
     "Reverse Holofoil",
   ]);
+});
+
+test("maps the reviewed Base Set Shadowless group and interprets its legacy subtypes", () => {
+  const baseSet = { id: "set-base1", name: "Base Set", providerId: "base1" };
+  const shadowlessGroup = { groupId: 1663, name: "Base Set (Shadowless)" };
+
+  assert.deepEqual(
+    matchTcgcsvCardGroupsToSets([shadowlessGroup], [baseSet]),
+    [{ group: shadowlessGroup, set: baseSet }],
+  );
+  assert.deepEqual(
+    matchTcgcsvCardGroupsToSets([
+      { groupId: 1663, name: "Unexpected replacement group" },
+    ], [baseSet]),
+    [],
+  );
+  assert.equal(
+    tcgcsvCardVariantLabel({ name: "Charizard" }, "1st Edition Holofoil", shadowlessGroup),
+    "1st Edition Holofoil",
+  );
+  assert.equal(
+    tcgcsvCardVariantLabel({ name: "Charizard" }, "Unlimited Holofoil", shadowlessGroup),
+    "Shadowless Holofoil",
+  );
+  assert.equal(
+    tcgcsvCardVariantLabel({ name: "Pikachu" }, "1st Edition", shadowlessGroup),
+    "1st Edition",
+  );
+  assert.equal(
+    tcgcsvCardVariantLabel({ name: "Pikachu" }, "Unlimited", shadowlessGroup),
+    "Shadowless",
+  );
+  assert.equal(
+    tcgcsvCardVariantLabel({ name: "Charizard" }, "Unlimited Holofoil", {
+      groupId: 604,
+      name: "Base Set",
+    }),
+    "Unlimited Holofoil",
+  );
+});
+
+test("imports exact 1st Edition and Shadowless Base Set price streams", async () => {
+  const snapshots = [];
+  const prisma = {
+    $executeRaw: async () => 1,
+    cardPrinting: {
+      findMany: async () => [{
+        id: "card-base1-4",
+        imageLargeUrl: "https://example.test/charizard-large.jpg",
+        imageSmallUrl: "https://example.test/charizard-small.jpg",
+        name: "Charizard",
+        number: "4",
+      }],
+    },
+    cardSet: {
+      findMany: async () => [{
+        cardPrintings: [{ _count: { priceSnapshots: 0 }, priceSnapshots: [] }],
+        id: "set-base1",
+        language: "en",
+        metadata: {},
+        name: "Base",
+        providerIds: { pokemon_tcg_api: "base1" },
+        total: 102,
+      }],
+    },
+    priceSnapshot: {
+      create: async ({ data }) => {
+        snapshots.push(data);
+        return { id: `snapshot-${snapshots.length}`, ...data };
+      },
+      findMany: async () => [],
+    },
+  };
+  const fetchImpl = async (url) => ({
+    ok: true,
+    json: async () => {
+      if (url.endsWith("/groups")) {
+        return {
+          success: true,
+          results: [{ groupId: 1663, name: "Base Set (Shadowless)" }],
+        };
+      }
+
+      if (url.endsWith("/1663/products")) {
+        return {
+          success: true,
+          results: [{
+            extendedData: [{ name: "Number", value: "004/102" }],
+            name: "Charizard",
+            productId: 106999,
+            url: "https://www.tcgplayer.com/product/106999/pokemon-base-set-shadowless-charizard",
+          }],
+        };
+      }
+
+      return {
+        success: true,
+        results: [
+          { marketPrice: 3000, productId: 106999, subTypeName: "1st Edition Holofoil" },
+          { marketPrice: 1200, productId: 106999, subTypeName: "Unlimited Holofoil" },
+        ],
+      };
+    },
+  });
+
+  const summary = await syncTcgcsvCardPrices({
+    fetchImpl,
+    groupIds: ["1663"],
+    priceOnlyUnpriced: false,
+    prisma,
+    usdToGbpRate: 0.8,
+    waitMs: 0,
+    writeImages: false,
+  });
+
+  assert.equal(summary.groupsMatched, 1);
+  assert.equal(summary.cardProductsMatched, 1);
+  assert.equal(summary.pricingSnapshotsCreated, 2);
+  assert.deepEqual(
+    snapshots.map(({ priceMinor, variantLabel }) => ({ priceMinor, variantLabel })),
+    [
+      { priceMinor: 240_000, variantLabel: "1st Edition Holofoil" },
+      { priceMinor: 96_000, variantLabel: "Shadowless Holofoil" },
+    ],
+  );
+  assert.ok(snapshots.every((snapshot) => snapshot.metadata.groupId === 1663));
 });
 
 test("scheduled imports never relabel historical TCGCSV snapshots", async () => {

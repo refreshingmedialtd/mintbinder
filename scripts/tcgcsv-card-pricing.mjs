@@ -65,7 +65,14 @@ const reviewedCardGroupProviderAliases = new Map([
 const supplementalReviewedCardGroupProviderAliases = new Map([
   ["1465:legendarytreasuresradiantcollection", ["bw11"]],
   ["1729:generationsradiantcollection", ["g1"]],
+  ["1663:basesetshadowless", ["base1"]],
 ]);
+
+// TCGplayer models the original Base Set's Shadowless and 1st Edition cards
+// in one supplemental group. Within that group its legacy `Unlimited`
+// subtype means Shadowless (not the later unlimited printing represented by
+// group 604), so the group identity is required to interpret the price safely.
+const baseSetShadowlessGroupIdentity = "1663:basesetshadowless";
 
 // TCGplayer models both Aquapolis Porygon artworks as separate products while
 // the source catalogue exposes a single collector-number 103 printing. Keep
@@ -188,10 +195,21 @@ export async function syncTcgcsvCardPrices(options = {}) {
         where: language === "all" ? undefined : { language },
       }),
     ]);
-    const availableMatches = matchTcgcsvCardGroupsToSets(groups.results ?? [], sets)
+    const matchedGroups = matchTcgcsvCardGroupsToSets(groups.results ?? [], sets);
+    const groupCountBySetId = matchedGroups.reduce((counts, { set }) => {
+      counts.set(set.id, (counts.get(set.id) ?? 0) + 1);
+      return counts;
+    }, new Map());
+    const availableMatches = matchedGroups
       .filter(({ group }) => groupIds.size === 0 || groupIds.has(String(group.groupId)))
       .filter(({ set }) => !onlyUnpricedGroups || unpricedCardCount(set) >= minUnpricedCards)
-      .sort((a, b) => compareCardGroupRefreshPriority(a.set, b.set, { source }));
+      .sort((a, b) => compareCardGroupRefreshPriority(a.set, b.set, {
+        leftGroupId: a.group.groupId,
+        leftSharesSet: (groupCountBySetId.get(a.set.id) ?? 0) > 1,
+        rightGroupId: b.group.groupId,
+        rightSharesSet: (groupCountBySetId.get(b.set.id) ?? 0) > 1,
+        source,
+      }));
     const matches = availableMatches.slice(0, groupLimit);
     const summary = {
       cardProductsMatched: 0,
@@ -373,8 +391,28 @@ export function matchTcgcsvCardProduct(product, cards) {
   return byName.length === 1 ? byName[0] : null;
 }
 
-export function tcgcsvCardVariantLabel(product, subTypeName) {
+export function tcgcsvCardVariantLabel(product, subTypeName, group) {
   const baseLabel = optionalString(subTypeName) ?? "Normal";
+  const normalizedBaseLabel = normalizedVariantLabel(baseLabel);
+
+  if (group && reviewedCardGroupIdentity(group) === baseSetShadowlessGroupIdentity) {
+    if (normalizedBaseLabel === "unlimited") {
+      return "Shadowless";
+    }
+
+    if (normalizedBaseLabel === "unlimitedholofoil") {
+      return "Shadowless Holofoil";
+    }
+
+    if (normalizedBaseLabel === "1stedition") {
+      return "1st Edition";
+    }
+
+    if (normalizedBaseLabel === "1steditionholofoil") {
+      return "1st Edition Holofoil";
+    }
+  }
+
   const identityText = `${product?.name ?? ""} ${product?.url ?? ""}`
     .normalize("NFKD")
     .replace(/\p{M}/gu, "")
@@ -412,7 +450,7 @@ export function resolveTcgcsvVariantIdentities(entries) {
   const resolved = entries.map((entry) => ({
     ...entry,
     sourceRef: String(entry.product?.productId ?? entry.sourceRef ?? "").trim(),
-    variantLabel: tcgcsvCardVariantLabel(entry.product, entry.subTypeName),
+    variantLabel: tcgcsvCardVariantLabel(entry.product, entry.subTypeName, entry.group),
   }));
   const byCardAndLabel = new Map();
 
@@ -549,6 +587,7 @@ async function importCardGroup({
 
   const incomingVariantIdentities = matchedProducts.flatMap(({ card, prices, product }) => prices.map((price) => ({
       cardPrintingId: card.id,
+      group,
       product,
       subTypeName: price.subTypeName,
     })));
@@ -590,7 +629,7 @@ async function importCardGroup({
         card.id,
         String(product.productId ?? ""),
         price.subTypeName,
-      )) ?? tcgcsvCardVariantLabel(product, price.subTypeName);
+      )) ?? tcgcsvCardVariantLabel(product, price.subTypeName, group);
 
       if (priceOnlyUnpriced && await hasCardVariantPriceSnapshot(prisma, card.id, variantLabel)) {
         continue;
@@ -613,7 +652,7 @@ async function importCardGroup({
             originalCurrency: "USD",
             originalPrice: price.usd,
             priceSource: "TCGCSV TCGplayer market",
-            baseVariantLabel: tcgcsvCardVariantLabel(product, price.subTypeName),
+            baseVariantLabel: tcgcsvCardVariantLabel(product, price.subTypeName, group),
             subTypeName: price.subTypeName,
             tcgplayerUrl: product.url,
           },
@@ -659,6 +698,7 @@ async function recordTcgcsvCardPricingAttempt(prisma, {
     pricingSnapshotsCreated,
     productsFetched,
   });
+  const groupAttemptKey = `${source}:${groupId}`;
 
   await prisma.$executeRaw(Prisma.sql`
     UPDATE card_sets
@@ -667,7 +707,10 @@ async function recordTcgcsvCardPricingAttempt(prisma, {
         COALESCE(metadata, '{}'::jsonb),
         '{tcgcsvCardPricingAttempts}',
         COALESCE(metadata->'tcgcsvCardPricingAttempts', '{}'::jsonb) ||
-          jsonb_build_object(${source}, ${record}::jsonb),
+          jsonb_build_object(
+            ${source}, ${record}::jsonb,
+            ${groupAttemptKey}, ${record}::jsonb
+          ),
         true
       ),
       updated_at = CURRENT_TIMESTAMP
@@ -720,6 +763,10 @@ async function loadExistingTcgcsvVariantIdentities({ cardPrintingIds, prisma, so
         name: metadata.tcgplayerUrl,
         productId: snapshot.sourceRef,
         url: metadata.tcgplayerUrl,
+      },
+      group: {
+        groupId: metadata.groupId,
+        name: metadata.groupName,
       },
       sourceRef: snapshot.sourceRef,
       subTypeName: optionalString(metadata.subTypeName) ?? baseVariantLabel,
@@ -861,9 +908,7 @@ function usableTcgcsvPrices(prices) {
 }
 
 function variantSortRank(value) {
-  const normalized = String(value ?? "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "");
+  const normalized = normalizedVariantLabel(value);
   const ranks = {
     normal: 10,
     holofoil: 20,
@@ -880,6 +925,12 @@ function variantSortRank(value) {
   };
 
   return ranks[normalized] ?? 60;
+}
+
+function normalizedVariantLabel(value) {
+  return String(value ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
 }
 
 function tcgcsvVariantIdentityKey(cardPrintingId, sourceRef, subTypeName) {
@@ -1028,17 +1079,27 @@ function cardPriceSnapshotCount(card) {
   return Number(card._count?.priceSnapshots ?? 0);
 }
 
-export function compareCardGroupRefreshPriority(left, right, { source } = {}) {
+export function compareCardGroupRefreshPriority(left, right, {
+  leftGroupId,
+  leftSharesSet = false,
+  rightGroupId,
+  rightSharesSet = false,
+  source,
+} = {}) {
   const leftUnpriced = unpricedCardCount(left);
   const rightUnpriced = unpricedCardCount(right);
-  const leftLatest = Math.max(
-    latestCardPriceSnapshotTime(left),
-    latestTcgcsvCardPricingAttemptTime(left, source),
-  );
-  const rightLatest = Math.max(
-    latestCardPriceSnapshotTime(right),
-    latestTcgcsvCardPricingAttemptTime(right, source),
-  );
+  const leftLatest = leftSharesSet
+    ? latestTcgcsvCardPricingAttemptTime(left, source, leftGroupId)
+    : Math.max(
+      latestCardPriceSnapshotTime(left),
+      latestTcgcsvCardPricingAttemptTime(left, source),
+    );
+  const rightLatest = rightSharesSet
+    ? latestTcgcsvCardPricingAttemptTime(right, source, rightGroupId)
+    : Math.max(
+      latestCardPriceSnapshotTime(right),
+      latestTcgcsvCardPricingAttemptTime(right, source),
+    );
 
   if (leftLatest !== rightLatest) {
     return leftLatest - rightLatest;
@@ -1058,7 +1119,7 @@ export function compareCardGroupRefreshPriority(left, right, { source } = {}) {
   return String(left.name ?? "").localeCompare(String(right.name ?? ""));
 }
 
-function latestTcgcsvCardPricingAttemptTime(set, source) {
+function latestTcgcsvCardPricingAttemptTime(set, source, groupId) {
   if (!source || !isObject(set?.metadata)) {
     return 0;
   }
@@ -1066,6 +1127,25 @@ function latestTcgcsvCardPricingAttemptTime(set, source) {
   const attempts = isObject(set.metadata.tcgcsvCardPricingAttempts)
     ? set.metadata.tcgcsvCardPricingAttempts
     : {};
+
+  if (groupId !== undefined && groupId !== null) {
+    const groupAttempt = isObject(attempts[`${source}:${groupId}`])
+      ? attempts[`${source}:${groupId}`]
+      : {};
+    const groupAttemptTime = dateTime(groupAttempt.attemptedAt);
+
+    if (groupAttemptTime) {
+      return groupAttemptTime;
+    }
+
+    // Compatibility with records written before per-group rotation existed:
+    // only let the legacy latest record count for the group it names.
+    const legacyAttempt = isObject(attempts[source]) ? attempts[source] : {};
+    return String(legacyAttempt.groupId ?? "") === String(groupId)
+      ? dateTime(legacyAttempt.attemptedAt)
+      : 0;
+  }
+
   const attempt = isObject(attempts[source]) ? attempts[source] : {};
 
   return dateTime(attempt.attemptedAt);
