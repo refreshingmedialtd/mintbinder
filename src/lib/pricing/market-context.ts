@@ -32,6 +32,10 @@ export function priceMarketForSource(source?: string | null): PriceMarket {
 }
 
 export function priceMarketRole(source?: string | null) {
+  if (isCardTraderAskingPriceSource(source)) {
+    return "European seller asking-price estimate";
+  }
+
   const market = priceMarketForSource(source);
 
   if (market === "UK") {
@@ -89,7 +93,7 @@ export function priceSourceLabel(source?: string | null) {
   }
 
   if (normalized === "cardtrader-sealed") {
-    return "CardTrader European sealed marketplace (GBP converted)";
+    return "CardTrader European seller asking prices (GBP converted)";
   }
 
   if (normalized === "pulse-uk") {
@@ -171,6 +175,12 @@ function comparePricePoints(left: PricePoint, right: PricePoint, now: Date) {
   }
 
   if (leftCurrent && rightCurrent) {
+    const evidenceDifference = priceEvidenceRank(left.source) - priceEvidenceRank(right.source);
+
+    if (evidenceDifference !== 0) {
+      return evidenceDifference;
+    }
+
     const marketDifference = marketRank(priceMarketForSource(left.source)) -
       marketRank(priceMarketForSource(right.source));
 
@@ -186,6 +196,17 @@ function comparePricePoints(left: PricePoint, right: PricePoint, now: Date) {
   }
 
   return confidenceRank(left.confidence) - confidenceRank(right.confidence);
+}
+
+function priceEvidenceRank(source?: string | null) {
+  // CardTrader contributes a useful European cross-check, but this integration
+  // observes seller asks rather than completed sales or a calculated market
+  // price. Prefer any other current evidence for the headline valuation.
+  return isCardTraderAskingPriceSource(source) ? 1 : 2;
+}
+
+function isCardTraderAskingPriceSource(source?: string | null) {
+  return String(source ?? "").trim().toLowerCase() === "cardtrader-sealed";
 }
 
 function priceSourceFamily(source?: string | null) {

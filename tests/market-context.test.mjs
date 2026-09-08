@@ -48,6 +48,27 @@ test("uses a current US reference instead of a badly stale European estimate", (
   assert.equal(preferredLatestPricePoint([staleEurope, us], now), us);
 });
 
+test("uses a current calculated sealed market before CardTrader seller asks", () => {
+  const calculatedMarket = point({
+    source: "tcgcsv",
+    valueMinor: 9_934,
+  });
+  const cardTraderAsks = point({
+    confidence: "Fair",
+    source: "cardtrader-sealed",
+    valueMinor: 18_959,
+  });
+
+  assert.equal(
+    preferredLatestPricePoint([calculatedMarket, cardTraderAsks], now),
+    calculatedMarket,
+  );
+  assert.deepEqual(
+    preferredPriceSeries([calculatedMarket, cardTraderAsks], now),
+    [calculatedMarket],
+  );
+});
+
 test("marks high-value prices stale sooner and limits non-UK confidence", () => {
   const eightDayHighValue = point({
     observedAt: "2026-07-14T11:59:59.000Z",
@@ -75,9 +96,9 @@ test("labels market scope honestly and keeps one coherent price series", () => {
   ];
 
   assert.equal(priceMarketRole("tcgcsv-card"), "US market reference");
-  assert.equal(priceMarketRole("cardtrader-sealed"), "European market estimate");
+  assert.equal(priceMarketRole("cardtrader-sealed"), "European seller asking-price estimate");
   assert.match(priceSourceLabel("tcgcsv-card"), /US market/);
-  assert.match(priceSourceLabel("cardtrader-sealed"), /European sealed marketplace/);
+  assert.match(priceSourceLabel("cardtrader-sealed"), /European seller asking prices/);
   assert.match(priceSourceLabel("pricecharting-graded-card"), /US graded-card market/);
   assert.deepEqual(preferredPriceSeries(history, now), [history[2]]);
 });

@@ -190,6 +190,315 @@ test("treats provider legacy Base Set prices as unlimited prints", () => {
   assert.equal(options[0].valueMinor, 1200);
 });
 
+test("uses metadata-only holo evidence instead of a non-holo vintage rarity", () => {
+  const options = buildCatalogueVariantOptions({
+    itemType: "card",
+    rarity: "Rare",
+    setName: "Team Rocket",
+    variantMetadata: {
+      availablePrices: ["1stEditionHolofoil", "unlimitedHolofoil"],
+    },
+  });
+
+  assert.deepEqual(
+    options.map((option) => option.label),
+    ["Unlimited Holofoil", "1st Edition Holofoil"],
+  );
+});
+
+test("uses history-only holo evidence instead of a non-holo vintage rarity", () => {
+  const options = buildCatalogueVariantOptions({
+    itemType: "card",
+    priceHistory: [{
+      confidence: "Weak",
+      observedAt: "2026-09-05T22:01:50.661Z",
+      source: "tcgcsv-card",
+      valueMinor: 9208,
+      variantLabel: "Unlimited Holofoil",
+    }],
+    rarity: "Rare",
+    setName: "Neo Destiny",
+  });
+
+  assert.deepEqual(
+    options.map(({ label, valueMinor }) => ({ label, valueMinor })),
+    [
+      { label: "Unlimited Holofoil", valueMinor: 9208 },
+      { label: "1st Edition Holofoil", valueMinor: undefined },
+    ],
+  );
+});
+
+test("canonicalizes a generic priced vintage finish with the same evidence used for editions", () => {
+  const priceHistory = [{
+    confidence: "Weak",
+    observedAt: "2026-09-05T22:01:50.661Z",
+    source: "tcgcsv-card",
+    valueMinor: 9208,
+    variantLabel: "Holofoil",
+  }];
+  const options = buildCatalogueVariantOptions({
+    itemType: "card",
+    priceHistory,
+    rarity: "Rare",
+    setName: "Team Rocket",
+    variantMetadata: {
+      availablePrices: ["holofoil"],
+    },
+  });
+  const item = {
+    id: "base5-83",
+    type: "card",
+    name: "Dark Raichu",
+    set: "Team Rocket",
+    number: "83",
+    rarity: "Rare",
+    hasPrice: true,
+    valueMinor: 9208,
+    confidence: "Weak",
+    priceHistory,
+    variantOptions: options,
+  };
+
+  assert.deepEqual(
+    options.map(({ label, valueMinor }) => ({ label, valueMinor })),
+    [
+      { label: "Unlimited Holofoil", valueMinor: 9208 },
+      { label: "1st Edition Holofoil", valueMinor: undefined },
+    ],
+  );
+  assert.equal(catalogueValueMinorForVariant(item, "Unlimited Holofoil"), 9208);
+  assert.equal(catalogueValueMinorForVariant(item, "1st Edition Holofoil"), undefined);
+});
+
+test("repairs stale Dark Raichu defaults without borrowing prices across editions", () => {
+  const pricePoint = (variantLabel, valueMinor) => ({
+    confidence: "Weak",
+    observedAt: "2026-09-05T22:01:50.661Z",
+    source: "tcgcsv-card",
+    valueMinor,
+    variantLabel,
+  });
+  const itemWithHistory = (priceHistory) => ({
+    id: "base5-83",
+    type: "card",
+    name: "Dark Raichu",
+    set: "Team Rocket",
+    number: "83",
+    rarity: "Rare",
+    hasPrice: true,
+    valueMinor: priceHistory[0].valueMinor,
+    confidence: "Weak",
+    priceHistory,
+    variantOptions: buildCatalogueVariantOptions({
+      itemType: "card",
+      priceHistory,
+      rarity: "Rare",
+      setName: "Team Rocket",
+    }),
+  });
+  const unlimited = itemWithHistory([
+    pricePoint("Unlimited Holofoil", 9208),
+  ]);
+
+  assert.equal(catalogueVariantSelectionLabel(unlimited, "Normal"), "Unlimited Holofoil");
+  assert.equal(catalogueVariantSelectionLabel(unlimited, "Standard"), "Unlimited Holofoil");
+  assert.equal(catalogueVariantWriteLabel(unlimited), "Unlimited Holofoil");
+  assert.equal(catalogueValueMinorForVariant(unlimited, "Normal"), 9208);
+  assert.equal(catalogueValueMinorForVariant(unlimited, "Standard"), 9208);
+  assert.equal(catalogueValueMinorForVariant(unlimited, "1st Edition Holofoil"), undefined);
+
+  const firstEdition = itemWithHistory([
+    pricePoint("1st Edition Holofoil", 18_416),
+  ]);
+
+  assert.equal(catalogueVariantWriteLabel(firstEdition), "Unlimited Holofoil");
+  assert.equal(catalogueValueMinorForVariant(firstEdition, "Normal"), undefined);
+  assert.equal(catalogueValueMinorForVariant(firstEdition, "1st Edition Holofoil"), 18_416);
+});
+
+test("treats historical Standard as neutral finish evidence for Dark Raichu", () => {
+  const priceHistory = [{
+    confidence: "Weak",
+    observedAt: "2026-09-05T22:01:50.661Z",
+    source: "pokemon-tcg-api-cardmarket",
+    valueMinor: 9208,
+    variantLabel: "Standard",
+  }];
+  const variantOptions = buildCatalogueVariantOptions({
+    itemType: "card",
+    priceHistory,
+    rarity: "Rare Secret",
+    setName: "Team Rocket",
+  });
+  const item = {
+    id: "base5-83",
+    type: "card",
+    name: "Dark Raichu",
+    set: "Team Rocket",
+    number: "83",
+    rarity: "Rare Secret",
+    hasPrice: true,
+    valueMinor: 9208,
+    confidence: "Weak",
+    priceHistory,
+    variantOptions,
+  };
+
+  assert.deepEqual(
+    variantOptions.map(({ label, valueMinor }) => ({ label, valueMinor })),
+    [
+      { label: "Unlimited Holofoil", valueMinor: 9208 },
+      { label: "1st Edition Holofoil", valueMinor: undefined },
+    ],
+  );
+  assert.equal(catalogueVariantWriteLabel(item), "Unlimited Holofoil");
+  assert.equal(catalogueValueMinorForVariant(item, "Standard"), 9208);
+  assert.equal(catalogueValueMinorForVariant(item, "1st Edition Holofoil"), undefined);
+
+  const conflictedOptions = buildCatalogueVariantOptions({
+    itemType: "card",
+    priceHistory,
+    rarity: "Rare Secret",
+    setName: "Team Rocket",
+    variantMetadata: {
+      availablePrices: ["1stEditionNormal", "unlimitedHolofoil"],
+    },
+  });
+  const conflictedItem = {
+    ...item,
+    variantOptions: conflictedOptions,
+  };
+
+  assert.equal(conflictedOptions.some((option) => option.label === "Standard"), true);
+  assert.equal(catalogueValueMinorForVariant(conflictedItem, "Unlimited Holofoil"), undefined);
+});
+
+test("recognizes composite non-holo keys as normal vintage finish evidence", () => {
+  const options = buildCatalogueVariantOptions({
+    itemType: "card",
+    rarity: "Rare Holo",
+    setName: "Team Rocket",
+    variantMetadata: {
+      availablePrices: ["1stEditionNormal", "unlimitedNormal"],
+    },
+  });
+
+  assert.deepEqual(
+    options.map((option) => option.label),
+    ["Unlimited", "1st Edition"],
+  );
+});
+
+test("rejects inference when composite normal and holo metadata conflict", () => {
+  const options = buildCatalogueVariantOptions({
+    itemType: "card",
+    rarity: "Rare Secret",
+    setName: "Team Rocket",
+    variantMetadata: {
+      availablePrices: ["1stEditionNormal", "unlimitedHolofoil"],
+    },
+  });
+
+  assert.deepEqual(
+    options.map((option) => option.label),
+    ["Unlimited Holofoil", "1st Edition"],
+  );
+  assert.equal(options.some((option) => option.label === "Unlimited"), false);
+  assert.equal(options.some((option) => option.label === "1st Edition Holofoil"), false);
+
+  const item = {
+    id: "base5-83",
+    type: "card",
+    name: "Dark Raichu",
+    set: "Team Rocket",
+    number: "83",
+    rarity: "Rare Secret",
+    hasPrice: false,
+    valueMinor: 0,
+    confidence: "Unpriced",
+    variantOptions: options,
+  };
+
+  assert.equal(catalogueVariantSelectionLabel(item, "Normal"), "Normal");
+  assert.equal(catalogueVariantWriteLabel(item), "Standard");
+});
+
+test("combines metadata and history evidence so cross-source conflicts fail closed", () => {
+  const options = buildCatalogueVariantOptions({
+    itemType: "card",
+    priceHistory: [{
+      confidence: "Weak",
+      observedAt: "2026-09-05T22:01:50.661Z",
+      source: "tcgcsv-card",
+      valueMinor: 9208,
+      variantLabel: "Unlimited Holofoil",
+    }],
+    rarity: "Rare",
+    setName: "Team Rocket",
+    variantMetadata: {
+      availablePrices: ["1stEditionNormal"],
+    },
+  });
+
+  assert.deepEqual(
+    options.map(({ label, valueMinor }) => ({ label, valueMinor })),
+    [
+      { label: "Unlimited Holofoil", valueMinor: 9208 },
+      { label: "1st Edition", valueMinor: undefined },
+    ],
+  );
+  assert.equal(options.some((option) => option.label === "Unlimited"), false);
+  assert.equal(options.some((option) => option.label === "1st Edition Holofoil"), false);
+
+  const genericHistory = [{
+    confidence: "Weak",
+    observedAt: "2026-09-05T22:01:50.661Z",
+    source: "tcgcsv-card",
+    valueMinor: 5000,
+    variantLabel: "Holofoil",
+  }];
+  const genericOptions = buildCatalogueVariantOptions({
+    itemType: "card",
+    priceHistory: genericHistory,
+    rarity: "Rare",
+    setName: "Team Rocket",
+    variantMetadata: {
+      availablePrices: ["1stEditionNormal"],
+    },
+  });
+  const genericItem = {
+    id: "conflicted-card",
+    type: "card",
+    name: "Conflicted card",
+    set: "Team Rocket",
+    number: "1",
+    rarity: "Rare",
+    hasPrice: true,
+    valueMinor: 5000,
+    confidence: "Weak",
+    priceHistory: genericHistory,
+    variantOptions: genericOptions,
+  };
+
+  assert.deepEqual(genericOptions.map((option) => option.label), ["Holofoil", "1st Edition"]);
+  assert.equal(catalogueValueMinorForVariant(genericItem, "Unlimited Holofoil"), undefined);
+});
+
+test("does not infer reverse-holo editions for no-reverse WotC sets", () => {
+  const options = buildCatalogueVariantOptions({
+    itemType: "card",
+    rarity: "Rare",
+    setName: "Team Rocket",
+    variantMetadata: {
+      availablePrices: ["reverseHolofoil"],
+    },
+  });
+
+  assert.deepEqual(options.map((option) => option.label), ["Reverse Holofoil"]);
+  assert.equal(options.some((option) => /edition reverse|unlimited reverse/i.test(option.label)), false);
+});
+
 test("infers standard modern finishes when provider metadata is thin", () => {
   assert.deepEqual(
     buildCatalogueVariantOptions({
@@ -408,5 +717,24 @@ test("builds catalogue variant options from TCGdex variant metadata", () => {
   assert.deepEqual(
     options.map((option) => option.label),
     ["Normal", "Holofoil", "Reverse Holofoil", "1st Edition", "Jumbo", "Promo Stamp"],
+  );
+});
+
+test("combines a sole TCGdex finish with its first-edition flag", () => {
+  const options = buildCatalogueVariantOptions({
+    itemType: "card",
+    rarity: "Rare",
+    setName: "Team Rocket",
+    variantMetadata: {
+      variants: {
+        firstEdition: true,
+        holo: true,
+      },
+    },
+  });
+
+  assert.deepEqual(
+    options.map((option) => option.label),
+    ["Unlimited Holofoil", "1st Edition Holofoil"],
   );
 });

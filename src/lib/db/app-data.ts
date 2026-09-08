@@ -21,7 +21,6 @@ import {
   catalogueDisplayCardForText,
   catalogueNameAliasesForText,
   catalogueDisplaySetForText,
-  catalogueSearchTermsForQuery,
 } from "../catalogue/name-aliases.ts";
 import {
   catalogueLanguageCodesForSearch,
@@ -42,6 +41,12 @@ import {
 } from "../catalogue/lookup.ts";
 import { sortCatalogueSearchResults } from "../catalogue/search-order.ts";
 import { compactCatalogueSearchHistory } from "../catalogue/search-payload.ts";
+import {
+  catalogueFieldsMatchSearchQuery,
+  catalogueSearchTermGroups,
+  catalogueSearchTokens,
+  normalizeCatalogueSearchQuery,
+} from "../catalogue/search-query.ts";
 import { getEntitlements } from "../entitlements.ts";
 import {
   normalizeCollectionQuantity,
@@ -632,8 +637,8 @@ async function searchCatalogueItems(
   }
 
   const [cards, sealed] = await Promise.all([
-    searchCardPrintings({ ...query, type: "card" }),
-    searchSealedProducts(userId, { ...query, language: "all", type: "sealed" }),
+    searchCardPrintings(query),
+    searchSealedProducts(userId, { ...query, language: "all" }),
   ]);
 
   return sortCatalogueSearchResults([...cards, ...sealed], query.sort);
@@ -647,21 +652,25 @@ async function searchCardPrintings(query: NormalizedCatalogueSearchInput): Promi
   const filters: Prisma.CardPrintingWhereInput[] = [];
 
   if (query.q) {
-    const languageCodes = catalogueLanguageCodesForSearch(query.q);
-    const searchTerms = catalogueSearchTermsForQuery(query.q);
-    const searchFilters = searchTerms.flatMap((term): Prisma.CardPrintingWhereInput[] => [
-      { searchText: { contains: term, mode: "insensitive" } },
-      { name: { contains: term, mode: "insensitive" } },
-      { number: { contains: term, mode: "insensitive" } },
-      { rarity: { contains: term, mode: "insensitive" } },
-      { cardSet: { name: { contains: term, mode: "insensitive" } } },
-    ]);
+    const searchTermGroups = catalogueSearchTermGroups(query.q);
 
     filters.push({
-      OR: [
-        ...searchFilters,
-        ...(languageCodes.length ? [{ language: { in: languageCodes } }] : []),
-      ],
+      AND: searchTermGroups.map((terms): Prisma.CardPrintingWhereInput => {
+        const languageCodes = [...new Set(terms.flatMap(catalogueLanguageCodesForSearch))];
+
+        return {
+          OR: [
+            ...terms.flatMap((term): Prisma.CardPrintingWhereInput[] => [
+              { searchText: { contains: term, mode: "insensitive" } },
+              { name: { contains: term, mode: "insensitive" } },
+              { number: { contains: term, mode: "insensitive" } },
+              { rarity: { contains: term, mode: "insensitive" } },
+              { cardSet: { name: { contains: term, mode: "insensitive" } } },
+            ]),
+            ...(languageCodes.length ? [{ language: { in: languageCodes } }] : []),
+          ],
+        };
+      }),
     });
   }
 
@@ -692,6 +701,16 @@ async function searchSealedProducts(
   userId: string,
   query: NormalizedCatalogueSearchInput,
 ): Promise<CatalogueItem[]> {
+  const facetProductType = query.rarity === "all"
+    ? undefined
+    : sealedProductTypeFromSearchTerm(query.rarity, query.type === "sealed");
+
+  // The shared facet contains card rarities and sealed product types. A card
+  // rarity must not silently become the generic OTHER sealed-product type.
+  if (query.rarity !== "all" && !facetProductType) {
+    return [];
+  }
+
   if (isCatalogueValueSort(query.sort)) {
     return searchSealedProductsByValue(userId, query);
   }
@@ -700,8 +719,26 @@ async function searchSealedProducts(
 
   if (query.q) {
     const productType = sealedProductTypeFromSearchTerm(query.q);
+    const searchTokens = catalogueSearchTokens(query.q);
+    const allTokenFilter: Prisma.SealedProductWhereInput | undefined = searchTokens.length
+      ? {
+          AND: searchTokens.map((term): Prisma.SealedProductWhereInput => {
+            const tokenProductType = sealedProductTypeFromSearchTerm(term);
+
+            return {
+              OR: [
+                { name: { contains: term, mode: "insensitive" } },
+                { relatedCardSet: { name: { contains: term, mode: "insensitive" } } },
+                ...(tokenProductType ? [{ productType: { equals: tokenProductType } }] : []),
+              ],
+            };
+          }),
+        }
+      : undefined;
+
     filters.push({
       OR: [
+        ...(allTokenFilter ? [allTokenFilter] : []),
         { name: { contains: query.q, mode: "insensitive" } },
         { relatedCardSet: { name: { contains: query.q, mode: "insensitive" } } },
         ...(productType ? [{ productType: { equals: productType } }] : []),
@@ -713,8 +750,8 @@ async function searchSealedProducts(
     filters.push({ relatedCardSet: { name: query.set } });
   }
 
-  if (query.rarity !== "all") {
-    filters.push({ productType: sealedProductTypeToEnum(query.rarity) });
+  if (facetProductType) {
+    filters.push({ productType: facetProductType });
   }
 
   const products = await prisma.sealedProduct.findMany({
@@ -819,6 +856,13 @@ async function searchSealedProductsByValue(
           WHEN recent.observed_at >= CURRENT_TIMESTAMP -
             CASE WHEN recent.price_minor >= 10000 THEN INTERVAL '7 days' ELSE INTERVAL '14 days' END
           THEN 1 ELSE 0
+        END DESC,
+        CASE
+          WHEN recent.observed_at < CURRENT_TIMESTAMP -
+            CASE WHEN recent.price_minor >= 10000 THEN INTERVAL '7 days' ELSE INTERVAL '14 days' END
+          THEN 0
+          WHEN LOWER(BTRIM(recent.source)) = 'cardtrader-sealed' THEN 1
+          ELSE 2
         END DESC,
         CASE
           WHEN recent.observed_at < CURRENT_TIMESTAMP -
@@ -1059,7 +1103,7 @@ function normalizeCatalogueSearchInput(input: CatalogueSearchInput): NormalizedC
     language: normalizeCatalogueLanguageFilter(input.language),
     limit: normalizeCatalogueSearchLimit(input.limit),
     offset: normalizeCatalogueSearchOffset(input.offset),
-    q: normalizeOptionalText(input.q) ?? "",
+    q: normalizeCatalogueSearchQuery(input.q),
     rarity: normalizeCatalogueFacet(input.rarity),
     set: normalizeCatalogueFacet(input.set),
     sort: normalizeCatalogueSort(input.sort),
@@ -1154,20 +1198,29 @@ function cardCatalogueSearchWhere(query: NormalizedCatalogueSearchInput) {
   const filters: Prisma.Sql[] = [];
 
   if (query.q) {
-    const patterns = catalogueSearchTermsForQuery(query.q).map((term) => `%${term}%`);
-    const languageCodes = catalogueLanguageCodesForSearch(query.q);
-    const textFilters = patterns.map((pattern) => Prisma.sql`(
-      cp.search_text ILIKE ${pattern}
-      OR cp.name ILIKE ${pattern}
-      OR cp.number ILIKE ${pattern}
-      OR cp.rarity ILIKE ${pattern}
-      OR cs.name ILIKE ${pattern}
-    )`);
+    const searchGroups = catalogueSearchTermGroups(query.q).map((terms) => {
+      const languageCodes = [...new Set(terms.flatMap(catalogueLanguageCodesForSearch))];
+      const searchBranches = [
+        ...terms.map((term) => {
+          const pattern = `%${term}%`;
 
-    filters.push(Prisma.sql`(
-      ${Prisma.join(textFilters, " OR ")}
-      ${languageCodes.length ? Prisma.sql`OR cp.language IN (${Prisma.join(languageCodes)})` : Prisma.empty}
-    )`);
+          return Prisma.sql`(
+            cp.search_text ILIKE ${pattern}
+            OR cp.name ILIKE ${pattern}
+            OR cp.number ILIKE ${pattern}
+            OR cp.rarity ILIKE ${pattern}
+            OR cs.name ILIKE ${pattern}
+          )`;
+        }),
+        ...(languageCodes.length
+          ? [Prisma.sql`cp.language IN (${Prisma.join(languageCodes)})`]
+          : []),
+      ];
+
+      return Prisma.sql`(${Prisma.join(searchBranches, " OR ")})`;
+    });
+
+    filters.push(Prisma.sql`(${Prisma.join(searchGroups, " AND ")})`);
   }
 
   if (query.set !== "all") {
@@ -1194,14 +1247,31 @@ function sealedCatalogueSearchWhere(userId: string, query: NormalizedCatalogueSe
   ];
 
   if (query.q) {
-    const pattern = `%${query.q}%`;
+    const tokenPatterns = catalogueSearchTokens(query.q).map((term) => ({
+      pattern: `%${term}%`,
+      productType: sealedProductTypeFromSearchTerm(term),
+    }));
     const productType = sealedProductTypeFromSearchTerm(query.q);
+    const allTokenFilter = tokenPatterns.length
+      ? Prisma.sql`(${Prisma.join(tokenPatterns.map(({ pattern, productType: tokenProductType }) => Prisma.sql`(
+          sp.name ILIKE ${pattern}
+          OR cs.name ILIKE ${pattern}
+          ${tokenProductType
+            ? Prisma.sql`OR sp.product_type = ${sealedProductTypeDbValue(tokenProductType)}::sealed_product_type`
+            : Prisma.empty}
+        )`), " AND ")})`
+      : null;
+    const exactPattern = `%${query.q}%`;
+    const searchBranches = [
+      ...(allTokenFilter ? [allTokenFilter] : []),
+      Prisma.sql`sp.name ILIKE ${exactPattern}`,
+      Prisma.sql`cs.name ILIKE ${exactPattern}`,
+      ...(productType
+        ? [Prisma.sql`sp.product_type = ${sealedProductTypeDbValue(productType)}::sealed_product_type`]
+        : []),
+    ];
 
-    filters.push(Prisma.sql`(
-      sp.name ILIKE ${pattern}
-      OR cs.name ILIKE ${pattern}
-      ${productType ? Prisma.sql`OR sp.product_type = ${sealedProductTypeDbValue(productType)}::sealed_product_type` : Prisma.empty}
-    )`);
+    filters.push(Prisma.sql`(${Prisma.join(searchBranches, " OR ")})`);
   }
 
   if (query.set !== "all") {
@@ -1209,7 +1279,10 @@ function sealedCatalogueSearchWhere(userId: string, query: NormalizedCatalogueSe
   }
 
   if (query.rarity !== "all") {
-    filters.push(Prisma.sql`sp.product_type = ${sealedProductTypeDbValue(sealedProductTypeToEnum(query.rarity))}::sealed_product_type`);
+    const facetProductType = sealedProductTypeFromSearchTerm(query.rarity, query.type === "sealed");
+    filters.push(facetProductType
+      ? Prisma.sql`sp.product_type = ${sealedProductTypeDbValue(facetProductType)}::sealed_product_type`
+      : Prisma.sql`FALSE`);
   }
 
   return Prisma.sql`WHERE ${Prisma.join(filters, " AND ")}`;
@@ -1219,8 +1292,6 @@ function filterAndSortCatalogue(
   catalogue: CatalogueItem[],
   query: NormalizedCatalogueSearchInput,
 ): CatalogueItem[] {
-  const normalizedSearch = query.q.toLowerCase();
-
   return sortCatalogueSearchResults(
     catalogue.filter((item) => {
       if (query.type !== "all" && item.type !== query.type) {
@@ -1231,19 +1302,30 @@ function filterAndSortCatalogue(
         return false;
       }
 
-      if (query.rarity !== "all" && item.rarity !== query.rarity) {
-        return false;
+      if (query.rarity !== "all") {
+        if (item.type === "sealed") {
+          const productType = sealedProductTypeFromSearchTerm(
+            query.rarity,
+            query.type === "sealed",
+          );
+
+          if (!productType || item.rarity !== enumLabel(productType)) {
+            return false;
+          }
+        } else if (item.rarity !== query.rarity) {
+          return false;
+        }
       }
 
       if (query.language !== "all" && item.type === "card" && (item.language ?? "en") !== query.language) {
         return false;
       }
 
-      if (!normalizedSearch) {
+      if (!query.q) {
         return true;
       }
 
-      return [
+      return catalogueFieldsMatchSearchQuery([
         item.name,
         ...catalogueNameAliasesForText(item.name),
         item.set,
@@ -1252,10 +1334,7 @@ function filterAndSortCatalogue(
         item.language,
         item.languageLabel,
         item.regionLabel,
-      ]
-        .join(" ")
-        .toLowerCase()
-        .includes(normalizedSearch);
+      ], query.q);
     }),
     query.sort,
   );
@@ -2669,7 +2748,7 @@ function sealedProductTypeDbValue(value: SealedProductType) {
   return map[value];
 }
 
-function sealedProductTypeFromSearchTerm(value?: string) {
+export function sealedProductTypeFromSearchTerm(value?: string, allowOther = false) {
   const normalized = value?.trim().toLowerCase().replace(/[\s-]+/g, "_") ?? "";
   const map: Record<string, SealedProductType> = {
     booster_box: SealedProductType.BOOSTER_BOX,
@@ -2682,6 +2761,10 @@ function sealedProductTypeFromSearchTerm(value?: string) {
     deck: SealedProductType.DECK,
     case: SealedProductType.CASE,
   };
+
+  if (allowOther && normalized === "other") {
+    return SealedProductType.OTHER;
+  }
 
   return map[normalized];
 }

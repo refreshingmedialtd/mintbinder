@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  CATALOGUE_SEARCH_MAX_ALIAS_TERMS,
   catalogueDisplayCardForText,
   catalogueDisplayNameForText,
   catalogueDisplaySetForText,
+  catalogueSearchTermsForQuery,
 } from "../src/lib/catalogue/name-aliases.ts";
 
 test("provides readable English labels for Japanese Mega Charizard records", () => {
@@ -42,4 +44,18 @@ test("does not leak residual international script from a partial card translatio
     catalogueDisplayCardForText(`\uBD88\uBA85 ${"\uC57C\uB098\uD504"}`, { number: "001" }),
     "Pokemon card 001",
   );
+});
+
+test("catalogue search alias expansion stays small for short and partial queries", () => {
+  assert.deepEqual(catalogueSearchTermsForQuery("a"), ["a"]);
+  assert.deepEqual(catalogueSearchTermsForQuery("ex"), ["ex"]);
+  assert.ok(catalogueSearchTermsForQuery("ing").length <= CATALOGUE_SEARCH_MAX_ALIAS_TERMS);
+  assert.ok(catalogueSearchTermsForQuery("charizard").includes("リザードン"));
+});
+
+test("exact short non-Latin aliases expand without enabling short partial matches", () => {
+  assert.ok(catalogueSearchTermsForQuery("梦幻").includes("Mew"));
+  assert.ok(catalogueSearchTermsForQuery("超梦").includes("Mewtwo"));
+  assert.ok(catalogueSearchTermsForQuery("伊布").includes("Eevee"));
+  assert.deepEqual(catalogueSearchTermsForQuery("喷火"), ["喷火"]);
 });

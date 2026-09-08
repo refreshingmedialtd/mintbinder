@@ -460,6 +460,27 @@ export function catalogueSearchTermsForQuery(value?: string | null) {
     return [];
   }
 
+  // Very short Latin fragments (notably "a" and "ex") occur inside hundreds
+  // of Pokemon names. Exact short non-Latin names remain useful aliases, so
+  // allow those without enabling partial matching.
+  if ([...normalized].length < CATALOGUE_SEARCH_ALIAS_MIN_QUERY_LENGTH) {
+    if (hasNonLatinLetter(normalized)) {
+      const exactAliasTerms = POKEMON_NAME_ALIASES.flatMap((entry) => {
+        const terms = [entry.english, ...entry.aliases];
+
+        return terms.some((term) => normalizeAliasText(term) === normalized) ? terms : [];
+      });
+
+      return uniqueAliasValues([
+        raw,
+        ...exactAliasTerms,
+        ...exactGeneratedPokemonAliasesForText(raw),
+      ]).slice(0, CATALOGUE_SEARCH_MAX_ALIAS_TERMS);
+    }
+
+    return [raw];
+  }
+
   const aliasTerms = POKEMON_NAME_ALIASES.flatMap((entry) => {
     const terms = [entry.english, ...entry.aliases];
     const matches = terms.some((term) => {
@@ -471,8 +492,12 @@ export function catalogueSearchTermsForQuery(value?: string | null) {
     return matches ? terms : [];
   });
 
-  return uniqueAliasValues([raw, ...aliasTerms, ...generatedPokemonAliasesForText(raw, true)]);
+  return uniqueAliasValues([raw, ...aliasTerms, ...generatedPokemonAliasesForText(raw, true)])
+    .slice(0, CATALOGUE_SEARCH_MAX_ALIAS_TERMS);
 }
+
+export const CATALOGUE_SEARCH_ALIAS_MIN_QUERY_LENGTH = 3;
+export const CATALOGUE_SEARCH_MAX_ALIAS_TERMS = 24;
 
 function englishDisplayText(value: string | null | undefined, phraseReplacements: Array<[string, string]>) {
   const raw = value?.trim();
@@ -520,6 +545,7 @@ const CURATED_POKEMON_REPLACEMENT_PAIRS = POKEMON_NAME_ALIASES.flatMap((entry) =
 
 const GENERATED_ALIASES_BY_FIRST_CHARACTER = generatedAliasesByFirstCharacter();
 const GENERATED_ALIASES_BY_ENGLISH = generatedAliasesByEnglish();
+const GENERATED_ENGLISH_BY_NORMALIZED_ALIAS = generatedEnglishByNormalizedAlias();
 
 function replaceGeneratedPokemonNames(value: string) {
   if (!hasInternationalScript(value)) {
@@ -551,6 +577,15 @@ function generatedPokemonAliasesForText(value: string, includeEnglishMatches = f
   }
 
   return matches;
+}
+
+function exactGeneratedPokemonAliasesForText(value: string) {
+  const englishNames = GENERATED_ENGLISH_BY_NORMALIZED_ALIAS.get(normalizeAliasText(value)) ?? [];
+
+  return englishNames.flatMap((english) => [
+    english,
+    ...(GENERATED_ALIASES_BY_ENGLISH.get(english) ?? []),
+  ]);
 }
 
 function generatedPokemonCandidates(value: string) {
@@ -598,8 +633,32 @@ function generatedAliasesByEnglish() {
   return aliasesByEnglish;
 }
 
+function generatedEnglishByNormalizedAlias() {
+  const englishByAlias = new Map<string, string[]>();
+
+  for (const [alias, english] of GENERATED_POKEMON_NAME_ALIASES) {
+    for (const value of [alias, english]) {
+      const normalized = normalizeAliasText(value);
+      const names = englishByAlias.get(normalized) ?? [];
+
+      if (!names.includes(english)) {
+        names.push(english);
+        englishByAlias.set(normalized, names);
+      }
+    }
+  }
+
+  return englishByAlias;
+}
+
 function hasInternationalScript(value: string) {
   return /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(value);
+}
+
+function hasNonLatinLetter(value: string) {
+  return [...value].some((character) =>
+    /\p{Letter}/u.test(character) && !/\p{Script=Latin}/u.test(character),
+  );
 }
 
 function normalizeAliasText(value?: string | null) {

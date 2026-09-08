@@ -17,8 +17,11 @@ export function cardTraderOutlierRepairOptions({
   return {
     apply: args.includes("--confirm"),
     limit: boundedPositiveInteger(argumentValue(args, "--limit"), defaultLimit, maxLimit),
-    maxOfferPriceRatio: positiveNumber(env.CARDTRADER_SEALED_MAX_OFFER_PRICE_RATIO, 4),
-    maxReferencePriceRatio: positiveNumber(env.CARDTRADER_SEALED_MAX_REFERENCE_PRICE_RATIO, 4),
+    maxOfferPriceRatio: conservativeRatio(env.CARDTRADER_SEALED_MAX_OFFER_PRICE_RATIO, 2),
+    maxReferencePriceRatio: conservativeRatio(
+      env.CARDTRADER_SEALED_MAX_REFERENCE_PRICE_RATIO,
+      1.5,
+    ),
     minOfferCount: boundedPositiveInteger(env.CARDTRADER_SEALED_MIN_OFFERS, 3, 10),
     minReferenceDifferenceMinor: boundedPositiveInteger(
       env.CARDTRADER_SEALED_MIN_REFERENCE_DIFFERENCE_MINOR,
@@ -265,6 +268,10 @@ function positiveNumber(value, fallback) {
   const number = Number(value);
 
   return Number.isFinite(number) && number > 0 ? number : fallback;
+}
+
+function conservativeRatio(value, ceiling) {
+  return Math.min(positiveNumber(value, ceiling), ceiling);
 }
 
 function validDate(value) {

@@ -158,14 +158,16 @@ export function squareHostedCorrelationSettings(env, options) {
 
 export function createSquareQaIdentity(runId) {
   assertSquareQaRunId(runId);
-  const phoneTail = String(parseInt(createHash("sha256").update(runId).digest("hex").slice(0, 8), 16) % 10_000)
-    .padStart(4, "0");
+  const phoneTail = String(parseInt(createHash("sha256").update(runId).digest("hex").slice(0, 8), 16) % 1_000)
+    .padStart(3, "0");
 
   return {
     buyer: {
       displayName: `Square QA Buyer ${runId}`,
       email: `${QA_BUYER_PREFIX}${runId}@${QA_EMAIL_DOMAIN}`,
-      phone: `+1555555${phoneTail}`,
+      // Ofcom reserves 07700 900000-900999 for fictional use. It is a valid
+      // UK mobile shape without risking a real person's phone number.
+      phone: `+447700900${phoneTail}`,
       referenceId: `mintbinder-${QA_BUYER_PREFIX}${runId}`,
     },
     user: {

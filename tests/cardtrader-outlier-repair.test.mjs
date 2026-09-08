@@ -7,7 +7,20 @@ import {
 } from "../scripts/quarantine-cardtrader-sealed-outliers.mjs";
 
 test("CardTrader historical repair is dry-run by default and requires --confirm to apply", () => {
-  assert.equal(cardTraderOutlierRepairOptions({ args: [] }).apply, false);
+  const defaults = cardTraderOutlierRepairOptions({ args: [], env: {} });
+
+  assert.equal(defaults.apply, false);
+  assert.equal(defaults.maxOfferPriceRatio, 2);
+  assert.equal(defaults.maxReferencePriceRatio, 1.5);
+  const capped = cardTraderOutlierRepairOptions({
+    args: [],
+    env: {
+      CARDTRADER_SEALED_MAX_OFFER_PRICE_RATIO: "4",
+      CARDTRADER_SEALED_MAX_REFERENCE_PRICE_RATIO: "4",
+    },
+  });
+  assert.equal(capped.maxOfferPriceRatio, 2);
+  assert.equal(capped.maxReferencePriceRatio, 1.5);
   assert.equal(cardTraderOutlierRepairOptions({ args: ["--confirm", "--limit=50"] }).apply, true);
   assert.equal(cardTraderOutlierRepairOptions({ args: ["--limit=999999"] }).limit, 2_000);
 });
@@ -101,8 +114,8 @@ test("confirmed historical quarantine is idempotent", async () => {
 function defaultOptions() {
   return {
     limit: 500,
-    maxOfferPriceRatio: 4,
-    maxReferencePriceRatio: 4,
+    maxOfferPriceRatio: 2,
+    maxReferencePriceRatio: 1.5,
     minOfferCount: 3,
     minReferenceDifferenceMinor: 5_000,
     referenceMaxAgeDays: 14,

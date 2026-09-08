@@ -13,6 +13,8 @@ const pokemonGameId = 5;
 const maxTargetedProductIds = 20;
 const sourceName = "cardtrader-sealed";
 const referenceSourceNames = ["tcgcsv"];
+const defaultMaxOfferPriceRatio = 2;
+const defaultMaxReferencePriceRatio = 1.5;
 
 export function cardTraderSealedOptionsFromEnv(env = process.env) {
   const token = stringSetting(env.CARDTRADER_API_TOKEN ?? env.CARDTRADER_TOKEN);
@@ -26,8 +28,14 @@ export function cardTraderSealedOptionsFromEnv(env = process.env) {
       conversionRate(env.POKEMON_TCG_EUR_TO_GBP_RATE),
     limit: positiveInteger(env.CARDTRADER_SEALED_PRODUCT_LIMIT, 5),
     manualAliases: stringSetting(env.CARDTRADER_SEALED_ALIASES_JSON),
-    maxOfferPriceRatio: positiveNumber(env.CARDTRADER_SEALED_MAX_OFFER_PRICE_RATIO, 4),
-    maxReferencePriceRatio: positiveNumber(env.CARDTRADER_SEALED_MAX_REFERENCE_PRICE_RATIO, 4),
+    maxOfferPriceRatio: conservativeRatio(
+      env.CARDTRADER_SEALED_MAX_OFFER_PRICE_RATIO,
+      defaultMaxOfferPriceRatio,
+    ),
+    maxReferencePriceRatio: conservativeRatio(
+      env.CARDTRADER_SEALED_MAX_REFERENCE_PRICE_RATIO,
+      defaultMaxReferencePriceRatio,
+    ),
     minOfferCount: positiveInteger(env.CARDTRADER_SEALED_MIN_OFFERS, 3),
     minReferenceDifferenceMinor: positiveInteger(
       env.CARDTRADER_SEALED_MIN_REFERENCE_DIFFERENCE_MINOR,
@@ -68,8 +76,11 @@ export async function syncCardTraderSealedPrices(options = {}) {
   const apiTimeoutMs = positiveInteger(options.apiTimeoutMs, 10_000);
   const manualAliases = normalizeManualAliases(options.manualAliases);
   const guardrailOptions = {
-    maxOfferPriceRatio: positiveNumber(options.maxOfferPriceRatio, 4),
-    maxReferencePriceRatio: positiveNumber(options.maxReferencePriceRatio, 4),
+    maxOfferPriceRatio: conservativeRatio(options.maxOfferPriceRatio, defaultMaxOfferPriceRatio),
+    maxReferencePriceRatio: conservativeRatio(
+      options.maxReferencePriceRatio,
+      defaultMaxReferencePriceRatio,
+    ),
     minOfferCount: positiveInteger(options.minOfferCount, 3),
     minReferenceDifferenceMinor: positiveInteger(options.minReferenceDifferenceMinor, 5_000),
   };
@@ -461,15 +472,21 @@ export function cardTraderMarketplacePrice(response, rates = {}) {
 }
 
 export function assessCardTraderMarketPrice(marketPrice, {
-  maxOfferPriceRatio = 4,
-  maxReferencePriceRatio = 4,
+  maxOfferPriceRatio = defaultMaxOfferPriceRatio,
+  maxReferencePriceRatio = defaultMaxReferencePriceRatio,
   minOfferCount = 3,
   minReferenceDifferenceMinor = 5_000,
   referencePrice,
 } = {}) {
   const normalizedMinOfferCount = positiveInteger(minOfferCount, 3);
-  const normalizedMaxOfferPriceRatio = positiveNumber(maxOfferPriceRatio, 4);
-  const normalizedMaxReferencePriceRatio = positiveNumber(maxReferencePriceRatio, 4);
+  const normalizedMaxOfferPriceRatio = conservativeRatio(
+    maxOfferPriceRatio,
+    defaultMaxOfferPriceRatio,
+  );
+  const normalizedMaxReferencePriceRatio = conservativeRatio(
+    maxReferencePriceRatio,
+    defaultMaxReferencePriceRatio,
+  );
   const normalizedMinReferenceDifferenceMinor = positiveInteger(minReferenceDifferenceMinor, 5_000);
   const samplePrices = asArray(marketPrice?.samplePricesMinor)
     .map(Number)
@@ -634,7 +651,7 @@ export function resolveCardTraderBlueprint(product, blueprintIndex, aliases = ne
   const directCandidates = tcgplayerId ? blueprintIndex.byTcgplayerId.get(tcgplayerId) ?? [] : [];
 
   if (directCandidates.length === 1) {
-    return resolvedBlueprint(directCandidates[0], "tcgplayerId");
+    return resolveAutomaticBlueprint(product, directCandidates[0], "tcgplayerId");
   }
 
   if (directCandidates.length > 1) {
@@ -651,7 +668,7 @@ export function resolveCardTraderBlueprint(product, blueprintIndex, aliases = ne
   ));
 
   if (identifierCandidates.length === 1) {
-    return resolvedBlueprint(identifierCandidates[0], "identifier");
+    return resolveAutomaticBlueprint(product, identifierCandidates[0], "identifier");
   }
 
   if (identifierCandidates.length > 1) {
@@ -666,7 +683,7 @@ export function resolveCardTraderBlueprint(product, blueprintIndex, aliases = ne
   const nameCandidates = nameTypeKey ? blueprintIndex.byNameType.get(nameTypeKey) ?? [] : [];
 
   if (nameCandidates.length === 1) {
-    return resolvedBlueprint(nameCandidates[0], "normalizedNameType");
+    return resolveAutomaticBlueprint(product, nameCandidates[0], "normalizedNameType");
   }
 
   if (nameCandidates.length > 1) {
@@ -681,7 +698,7 @@ export function resolveCardTraderBlueprint(product, blueprintIndex, aliases = ne
   const tokenCandidates = tokenTypeKey ? blueprintIndex.byTokenType.get(tokenTypeKey) ?? [] : [];
 
   if (tokenCandidates.length === 1) {
-    return resolvedBlueprint(tokenCandidates[0], "normalizedTokenType");
+    return resolveAutomaticBlueprint(product, tokenCandidates[0], "normalizedTokenType");
   }
 
   if (tokenCandidates.length > 1) {
@@ -1127,7 +1144,6 @@ function normalizedProductType(explicitValue, name) {
     "collection_box",
     "deck",
     "elite_trainer_box",
-    "other",
     "tin",
   ].includes(explicit)) {
     return explicit;
@@ -1218,6 +1234,73 @@ function resolvedBlueprint(blueprint, method) {
     method,
     reason: null,
   };
+}
+
+function resolveAutomaticBlueprint(product, blueprint, method) {
+  const conflicts = automaticBlueprintIdentityConflicts(product, blueprint);
+
+  if (conflicts.length) {
+    return unresolvedBlueprint(
+      `CardTrader blueprint ${blueprint.id} matched by ${method}, but its sealed-product identity conflicts with ${product.name}: ${conflicts.join(", ")}.`,
+      [blueprint],
+    );
+  }
+
+  return resolvedBlueprint(blueprint, method);
+}
+
+function automaticBlueprintIdentityConflicts(product, blueprint) {
+  const conflicts = [];
+  const productType = localProductType(product);
+  const candidateType = blueprintProductType(blueprint);
+
+  if (productType && candidateType && productType !== candidateType) {
+    conflicts.push(`product type ${productType} does not match ${candidateType}`);
+  }
+
+  const productQualifiers = criticalSealedProductQualifiers(product.name, productType);
+  const candidateQualifiers = criticalSealedProductQualifiers(
+    blueprintName(blueprint),
+    candidateType,
+  );
+
+  for (const qualifier of new Set([...productQualifiers.keys(), ...candidateQualifiers.keys()])) {
+    if (productQualifiers.get(qualifier) !== candidateQualifiers.get(qualifier)) {
+      conflicts.push(`${qualifier} qualifier differs`);
+    }
+  }
+
+  return conflicts;
+}
+
+function criticalSealedProductQualifiers(name, productType) {
+  const normalized = normalizedWords(name);
+  const qualifiers = new Map([
+    ["Pokemon Center", /\bpokemon center\b/.test(normalized)],
+    ["enhanced", /\benhanced\b/.test(normalized)],
+    ["ultra-premium", /\bultra premium\b/.test(normalized)],
+    ["super-premium", /\bsuper premium\b/.test(normalized)],
+    ["sleeved", /\bsleeved\b/.test(normalized)],
+    ["case", /\bcase\b/.test(normalized)],
+  ]);
+  const packCount = normalized.match(/\b(\d+)\s*(?:booster\s+)?packs?\b/)?.[1] ??
+    normalized.match(/\bpacks?\s+of\s+(\d+)\b/)?.[1];
+  const quantityChangingDisplay = productType !== "booster_box" && (
+    /\b(?:build and battle|collection|mini tin|pin collection) display\b/.test(normalized) ||
+    /\bdisplay (?:collection|mini tin)\b/.test(normalized)
+  );
+
+  if (packCount) {
+    qualifiers.set("pack count", packCount);
+  }
+
+  // CardTrader commonly calls an ordinary booster box a display box. Only
+  // enforce `display` where the word denotes a multi-unit retail product.
+  if (quantityChangingDisplay) {
+    qualifiers.set("display", true);
+  }
+
+  return qualifiers;
 }
 
 function unresolvedBlueprint(reason, candidates = [], ambiguous = false) {
@@ -1496,6 +1579,10 @@ function positiveNumber(value, fallback) {
   const number = Number(value);
 
   return Number.isFinite(number) && number > 0 ? number : fallback;
+}
+
+function conservativeRatio(value, ceiling) {
+  return Math.min(positiveNumber(value, ceiling), ceiling);
 }
 
 function validDate(value) {

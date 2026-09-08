@@ -14,7 +14,7 @@ import {
 } from "../scripts/cardtrader-sealed-pricing.mjs";
 import { cardTraderSealedImportOptionsFromEnv } from "../scripts/import-cardtrader-sealed-prices.mjs";
 
-test("reads CardTrader sealed pricing options and enables them when a token exists", () => {
+test("reads CardTrader sealed pricing options and caps unsafe ratio overrides", () => {
   assert.deepEqual(
     cardTraderSealedOptionsFromEnv({
       CARDTRADER_API_TOKEN: "token",
@@ -39,8 +39,8 @@ test("reads CardTrader sealed pricing options and enables them when a token exis
       eurToGbpRate: 0.84,
       limit: 7,
       manualAliases: undefined,
-      maxOfferPriceRatio: 3,
-      maxReferencePriceRatio: 5,
+      maxOfferPriceRatio: 2,
+      maxReferencePriceRatio: 1.5,
       minOfferCount: 4,
       minReferenceDifferenceMinor: 7_500,
       priceOnlyUnpriced: true,
@@ -53,6 +53,15 @@ test("reads CardTrader sealed pricing options and enables them when a token exis
       writePrices: false,
     },
   );
+});
+
+test("uses conservative CardTrader price guardrails by default", () => {
+  const options = cardTraderSealedOptionsFromEnv({ CARDTRADER_API_TOKEN: "token" });
+
+  assert.equal(options.maxOfferPriceRatio, 2);
+  assert.equal(options.maxReferencePriceRatio, 1.5);
+  assert.equal(options.minOfferCount, 3);
+  assert.equal(options.minReferenceDifferenceMinor, 5_000);
 });
 
 test("reserves every fourth UTC-hour slot for priced CardTrader refreshes", () => {
@@ -484,6 +493,101 @@ test("uses exact normalized name and compatible sealed type as a conservative fa
   assert.equal(result.method, "normalizedNameType");
 });
 
+test("rejects an automatic provider-ID match with a conflicting Pokemon Center qualifier", () => {
+  const result = resolveCardTraderBlueprint(
+    sealedProduct({
+      name: "Chaos Rising Pokemon Center Elite Trainer Box",
+      productType: "ELITE_TRAINER_BOX",
+      providerIds: { tcgplayer: "100" },
+    }),
+    buildCardTraderBlueprintIndex([{
+      id: 20,
+      name: "Chaos Rising Elite Trainer Box",
+      tcg_player_id: "100",
+    }]),
+  );
+
+  assert.equal(result.blueprint, null);
+  assert.equal(result.ambiguous, false);
+  assert.deepEqual(result.candidates.map((candidate) => candidate.id), [20]);
+  assert.match(result.reason, /Pokemon Center qualifier differs/);
+});
+
+test("rejects an automatic provider-ID match with an incompatible sealed product type", () => {
+  const result = resolveCardTraderBlueprint(
+    sealedProduct({ providerIds: { tcgplayer: "100" } }),
+    buildCardTraderBlueprintIndex([{
+      id: 20,
+      name: "Silver Tempest Booster Pack",
+      product_type: "BOOSTER_PACK",
+      tcg_player_id: "100",
+    }]),
+  );
+
+  assert.equal(result.blueprint, null);
+  assert.match(result.reason, /product type booster_box does not match booster_pack/);
+});
+
+test("uses a specific product name when the local sealed type is only OTHER", () => {
+  const result = resolveCardTraderBlueprint(
+    sealedProduct({
+      name: "Chaos Rising Booster Bundle",
+      productType: "OTHER",
+      providerIds: { tcgplayer: "100" },
+    }),
+    buildCardTraderBlueprintIndex([{
+      id: 20,
+      name: "Chaos Rising Booster Bundle",
+      tcg_player_id: "100",
+    }]),
+  );
+
+  assert.equal(result.blueprint.id, 20);
+  assert.equal(result.method, "tcgplayerId");
+});
+
+test("rejects automatic matches whose common pack-count phrasing describes a different quantity", () => {
+  for (const localName of [
+    "Chaos Rising Booster Bundle 6 Packs",
+    "Chaos Rising Booster Bundle 6 Booster Packs",
+    "Chaos Rising Booster Bundle Pack of 6",
+  ]) {
+    const result = resolveCardTraderBlueprint(
+      sealedProduct({
+        name: localName,
+        productType: "BOOSTER_BUNDLE",
+        providerIds: { tcgplayer: "100" },
+      }),
+      buildCardTraderBlueprintIndex([{
+        id: 20,
+        name: "Chaos Rising Booster Bundle 36 Packs",
+        tcg_player_id: "100",
+      }]),
+    );
+
+    assert.equal(result.blueprint, null, localName);
+    assert.match(result.reason, /pack count qualifier differs/);
+  }
+});
+
+test("accepts equivalent direct and inverse pack-count phrasing", () => {
+  const result = resolveCardTraderBlueprint(
+    sealedProduct({
+      name: "Chaos Rising Booster Bundle 6 Booster Packs",
+      productType: "BOOSTER_BUNDLE",
+      providerIds: { tcgplayer: "100" },
+    }),
+    buildCardTraderBlueprintIndex([{
+      id: 20,
+      name: "Chaos Rising Booster Bundle Pack of 6",
+      tcg_player_id: "100",
+    }]),
+  );
+
+  assert.equal(result.blueprint.id, 20);
+  assert.equal(result.method, "tcgplayerId");
+});
+
 test("rejects ambiguous normalized fallback matches and emits review candidates", () => {
   const result = resolveCardTraderBlueprint(
     sealedProduct({ name: "Alakazam V Box", productType: "COLLECTION_BOX" }),
@@ -643,6 +747,43 @@ test("quarantines an extreme listing spread without discarding its audit evidenc
   assert.deepEqual(marketPrice.samplePricesMinor, [8_000, 900_000, 950_000]);
 });
 
+test("quarantines a split listing market that the former four-times spread allowed", () => {
+  const marketPrice = cardTraderMarketplacePrice({
+    20: [
+      listing(122_834, "GBP"),
+      listing(139_151, "GBP"),
+      listing(472_404, "GBP"),
+      listing(472_405, "GBP"),
+    ],
+  }, { GBP: 1 });
+  const assessment = assessCardTraderMarketPrice(marketPrice);
+
+  assert.equal(marketPrice.priceMinor, 305_778);
+  assert.equal(assessment.trusted, false);
+  assert.equal(assessment.status, "quarantined_extreme_spread");
+  assert.equal(assessment.coherentOfferCount, 2);
+});
+
+test("does not allow direct assessment options to loosen the guardrail ceilings", () => {
+  const marketPrice = cardTraderMarketplacePrice({
+    20: [
+      listing(12_283, "GBP"),
+      listing(13_915, "GBP"),
+      listing(47_240, "GBP"),
+      listing(47_241, "GBP"),
+    ],
+  }, { GBP: 1 });
+  const assessment = assessCardTraderMarketPrice(marketPrice, {
+    maxOfferPriceRatio: 4,
+    maxReferencePriceRatio: 4,
+  });
+
+  assert.equal(assessment.maxOfferPriceRatio, 2);
+  assert.equal(assessment.maxReferencePriceRatio, 1.5);
+  assert.equal(assessment.trusted, false);
+  assert.equal(assessment.status, "quarantined_extreme_spread");
+});
+
 test("requires one genuinely coherent offer cluster instead of chaining material differences", () => {
   const marketPrice = cardTraderMarketplacePrice({
     20: [
@@ -655,7 +796,7 @@ test("requires one genuinely coherent offer cluster instead of chaining material
 
   assert.equal(assessment.trusted, false);
   assert.equal(assessment.status, "quarantined_extreme_spread");
-  assert.equal(assessment.coherentOfferCount, 2);
+  assert.equal(assessment.coherentOfferCount, 1);
   assert.equal(assessment.samplePriceRatio, 190);
 });
 
@@ -679,6 +820,30 @@ test("quarantines a coherent CardTrader cluster that materially diverges from TC
   assert.equal(assessment.status, "quarantined_reference_divergence");
   assert.equal(assessment.reasonKey, "referenceDivergence");
   assert.equal(assessment.referencePriceMinor, 7_880);
+});
+
+test("quarantines the observed Chaos Rising Pokemon Center ETB asking-price premium", () => {
+  const marketPrice = cardTraderMarketplacePrice({
+    377892: [
+      listing(15_179, "GBP"),
+      listing(18_014, "GBP"),
+      listing(18_959, "GBP"),
+      listing(23_587, "GBP"),
+      listing(33_130, "GBP"),
+    ],
+  }, { GBP: 1 });
+  const assessment = assessCardTraderMarketPrice(marketPrice, {
+    referencePrice: {
+      observedAt: "2026-09-06T05:50:05.453Z",
+      priceMinor: 10_021,
+      source: "tcgcsv",
+    },
+  });
+
+  assert.equal(marketPrice.priceMinor, 18_959);
+  assert.equal(assessment.trusted, false);
+  assert.equal(assessment.status, "quarantined_reference_divergence");
+  assert.equal(assessment.reasonKey, "referenceDivergence");
 });
 
 test("accepts a normal coherent CardTrader market that agrees with its recent reference", () => {

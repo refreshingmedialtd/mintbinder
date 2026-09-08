@@ -26,8 +26,25 @@ export function buildCatalogueVariantOptions({
 }: VariantOptionInput): CatalogueVariantOption[] {
   const options = new Map<string, CatalogueVariantOption>();
   const pricedOptions = new Map<string, { label: string; points: PricePoint[] }>();
-  const specialLabels = inferredSpecialVariantLabels({ itemType, rarity, setName });
-  const legacyDefaultLabel = legacyDefaultVariantLabel({ itemType, rarity, setName });
+  const metadataLabels = variantLabelsFromMetadata(variantMetadata);
+  const legacyEditionSet = itemType === "card" && isLegacyNoReverseSet(normalizeSetName(setName));
+  const legacyFinish = resolvedLegacyFinish({
+    itemType,
+    priceHistory,
+    rarity,
+    setName,
+    variantMetadata,
+  });
+  const specialLabels = inferredSpecialVariantLabels({
+    itemType,
+    setName,
+    finish: legacyFinish,
+  });
+  const legacyDefaultLabel = legacyDefaultVariantLabel({
+    itemType,
+    setName,
+    finish: legacyFinish,
+  });
 
   for (const point of priceHistory) {
     if (!point.variantLabel) {
@@ -37,7 +54,8 @@ export function buildCatalogueVariantOptions({
     const label = canonicalVariantLabelForItemType(itemType, displayVariantLabelForCatalogue({
       label: point.variantLabel,
       legacyDefaultLabel,
-      rarity,
+      legacyEditionSet,
+      legacyFinish,
     })) ?? displayVariantLabel(point.variantLabel);
     const normalized = normalizeVariantLabel(label);
     const candidate = pricedOptions.get(normalized) ?? { label, points: [] };
@@ -62,11 +80,12 @@ export function buildCatalogueVariantOptions({
     });
   }
 
-  for (const label of variantLabelsFromMetadata(variantMetadata)) {
+  for (const label of metadataLabels) {
     const displayLabel = canonicalVariantLabelForItemType(itemType, displayVariantLabelForCatalogue({
       label,
       legacyDefaultLabel,
-      rarity,
+      legacyEditionSet,
+      legacyFinish,
     })) ?? displayVariantLabel(label);
     const normalized = normalizeVariantLabel(displayLabel);
 
@@ -75,7 +94,7 @@ export function buildCatalogueVariantOptions({
     }
   }
 
-  if (!legacyDefaultLabel) {
+  if (!legacyDefaultLabel && (!legacyEditionSet || !options.size)) {
     for (const label of inferredStandardVariantLabels({ itemType, rarity, setName })) {
       const normalized = normalizeVariantLabel(label);
 
@@ -178,6 +197,12 @@ export function catalogueVariantSelectionLabel(
         return exact?.label ?? requested;
       }
 
+      const legacyDefaultOption = legacyDefaultOptionLabel(item);
+
+      if (legacyDefaultOption) {
+        return legacyDefaultOption;
+      }
+
       // `Standard` was the original generic raw-card default. Once a real
       // Normal stream exists, persist and select the concrete provider finish.
       if (normalEvidence) {
@@ -188,7 +213,10 @@ export function catalogueVariantSelectionLabel(
       // valid raw finish is Holofoil. Metadata can be absent or advertise
       // unpriced generic variants, so the rarity plus the absence of actual
       // Normal evidence is the reliable repair boundary.
-      if (isPremiumSingleFinishRarity(item.rarity.toLowerCase())) {
+      if (
+        !isLegacyNoReverseSet(normalizeSetName(item.set)) &&
+        isPremiumSingleFinishRarity(item.rarity.toLowerCase())
+      ) {
         return optionLabel(item, "Holofoil") ?? "Holofoil";
       }
     }
@@ -253,7 +281,7 @@ export function latestPricePointForCatalogueVariant(item: CatalogueItem, variant
  * eligible for the generic legacy defaults (`Standard` and `Factory sealed`).
  */
 export function priceHistoryForCatalogueVariant(
-  item: Pick<CatalogueItem, "rarity" | "set" | "type">,
+  item: Pick<CatalogueItem, "rarity" | "set" | "type" | "variantOptions">,
   priceHistory: PricePoint[],
   variant?: string | null,
 ) {
@@ -271,11 +299,13 @@ export function priceHistoryForCatalogueVariant(
     return exact;
   }
 
-  const genericLegacyLabel = legacyGenericVariantLabelForSelection(item, variant);
+  const genericLegacyLabels = legacyGenericVariantLabelsForSelection(item, variant);
 
-  if (genericLegacyLabel) {
+  if (genericLegacyLabels.length) {
     const legacy = priceHistory.filter(
-      (point) => normalizeVariantLabel(point.variantLabel) === normalizeVariantLabel(genericLegacyLabel),
+      (point) => genericLegacyLabels.some(
+        (label) => normalizeVariantLabel(point.variantLabel) === normalizeVariantLabel(label),
+      ),
     );
 
     if (legacy.length) {
@@ -376,6 +406,18 @@ export function displayVariantLabel(value: string) {
 }
 
 export function normalizeVariantLabel(value?: string | null) {
+  const normalized = compactVariantLabel(value);
+  const aliases: Record<string, string> = {
+    "1steditionnormal": "1stedition",
+    firsteditionnormal: "1stedition",
+    shadowlessnormal: "shadowless",
+    unlimitednormal: "unlimited",
+  };
+
+  return aliases[normalized] ?? normalized;
+}
+
+function compactVariantLabel(value?: string | null) {
   return String(value ?? "")
     .trim()
     .replace(/foil/i, "foil")
@@ -410,13 +452,29 @@ function variantLabelsFromMetadata(metadata: unknown) {
 }
 
 function tcgdexVariantLabels(source: Record<string, unknown>) {
-  const labels: string[] = [];
+  const finishLabels: string[] = [];
+  const otherLabels: string[] = [];
   const variants = source.variants;
+  let firstEdition = false;
 
   if (variants && typeof variants === "object" && !Array.isArray(variants)) {
     for (const [key, enabled] of Object.entries(variants)) {
-      if (enabled === true) {
-        labels.push(tcgdexVariantLabel(key));
+      if (enabled !== true) {
+        continue;
+      }
+
+      const normalized = normalizeVariantLabel(key);
+
+      if (normalized === "1stedition" || normalized === "firstedition") {
+        firstEdition = true;
+        continue;
+      }
+
+      const label = tcgdexVariantLabel(key);
+      if (["Normal", "Holofoil", "Reverse Holofoil"].includes(label)) {
+        finishLabels.push(label);
+      } else {
+        otherLabels.push(label);
       }
     }
   }
@@ -431,16 +489,26 @@ function tcgdexVariantLabels(source: Record<string, unknown>) {
       const size = (variant as Record<string, unknown>).size;
 
       if (typeof type === "string") {
-        labels.push(tcgdexVariantLabel(type));
+        finishLabels.push(tcgdexVariantLabel(type));
       }
 
       if (typeof size === "string" && size !== "standard") {
-        labels.push(displayVariantLabel(size));
+        otherLabels.push(displayVariantLabel(size));
       }
     }
   }
 
-  return labels;
+  const uniqueFinishes = uniqueLabels(finishLabels);
+
+  if (firstEdition) {
+    otherLabels.push(
+      uniqueFinishes.length === 1
+        ? editionVariantLabel("1st Edition", uniqueFinishes[0])
+        : "1st Edition",
+    );
+  }
+
+  return [...uniqueFinishes, ...otherLabels];
 }
 
 function tcgdexVariantLabel(value: string) {
@@ -459,23 +527,31 @@ function tcgdexVariantLabel(value: string) {
 function displayVariantLabelForCatalogue({
   label,
   legacyDefaultLabel,
-  rarity,
+  legacyEditionSet,
+  legacyFinish,
 }: {
   label: string;
   legacyDefaultLabel?: string;
-  rarity?: string;
+  legacyEditionSet?: boolean;
+  legacyFinish?: string;
 }) {
   const displayLabel = displayVariantLabel(label);
+  const explicitNormalEdition = legacyEditionSet
+    ? legacyNormalEditionLabel(compactVariantLabel(displayLabel))
+    : undefined;
+
+  if (explicitNormalEdition) {
+    return explicitNormalEdition;
+  }
 
   if (!legacyDefaultLabel) {
     return displayLabel;
   }
 
   const normalized = normalizeVariantLabel(displayLabel);
-  const finish = finishLabelFromRarity(rarity);
 
   if (
-    normalized === normalizeVariantLabel(finish) ||
+    normalized === normalizeVariantLabel(legacyFinish) ||
     normalized === normalizeVariantLabel(defaultVariantLabel("card"))
   ) {
     return legacyDefaultLabel;
@@ -484,57 +560,85 @@ function displayVariantLabelForCatalogue({
   return displayLabel;
 }
 
+function legacyNormalEditionLabel(normalized: string) {
+  const labels: Record<string, string> = {
+    "1steditionnormal": "1st Edition",
+    firsteditionnormal: "1st Edition",
+    shadowlessnormal: "Shadowless",
+    unlimitednormal: "Unlimited",
+  };
+
+  return labels[normalized];
+}
+
 function legacyDefaultVariantLabel({
+  finish,
   itemType,
-  rarity,
   setName,
-}: Pick<VariantOptionInput, "itemType" | "rarity" | "setName">) {
-  if (itemType !== "card") {
+}: Pick<VariantOptionInput, "itemType" | "setName"> & { finish?: string }) {
+  if (itemType !== "card" || !finish) {
     return undefined;
   }
 
   return isLegacyNoReverseSet(normalizeSetName(setName))
-    ? editionVariantLabel("Unlimited", finishLabelFromRarity(rarity))
+    ? editionVariantLabel("Unlimited", finish)
     : undefined;
 }
 
-function legacyGenericVariantLabelForSelection(
-  item: Pick<CatalogueItem, "rarity" | "set" | "type">,
+function legacyGenericVariantLabelsForSelection(
+  item: Pick<CatalogueItem, "rarity" | "set" | "type" | "variantOptions">,
   variant?: string | null,
 ) {
-  const legacyDefaultLabel = legacyDefaultVariantLabel({
-    itemType: item.type,
-    rarity: item.rarity,
-    setName: item.set,
-  });
-
-  if (!legacyDefaultLabel || normalizeVariantLabel(variant) !== normalizeVariantLabel(legacyDefaultLabel)) {
-    return undefined;
+  if (item.type !== "card" || !isLegacyNoReverseSet(normalizeSetName(item.set))) {
+    return [];
   }
 
-  return finishLabelFromRarity(item.rarity);
+  const normalized = normalizeVariantLabel(variant);
+  const genericFinish = normalized === "unlimited"
+    ? "Normal"
+    : normalized === "unlimitedholofoil"
+      ? "Holofoil"
+      : undefined;
+
+  if (!genericFinish) {
+    return [];
+  }
+
+  const optionLabels = item.variantOptions?.map((option) => option.label) ?? [];
+  const selectedOptionSupported = optionLabels.some(
+    (label) => normalizeVariantLabel(label) === normalized,
+  );
+
+  if (!selectedOptionSupported) {
+    return [];
+  }
+
+  const standardWasCanonicalized = !optionLabels.some(
+    (label) => normalizeVariantLabel(label) === "standard",
+  );
+
+  return standardWasCanonicalized ? [genericFinish, "Standard"] : [genericFinish];
 }
 
 function inferredSpecialVariantLabels({
+  finish,
   itemType,
-  rarity,
   setName,
-}: Pick<VariantOptionInput, "itemType" | "rarity" | "setName">) {
+}: Pick<VariantOptionInput, "itemType" | "setName"> & { finish?: string }) {
   if (itemType !== "card") {
     return [];
   }
 
   const setKey = normalizeSetName(setName);
-  const finish = finishLabelFromRarity(rarity);
   const labels: string[] = [];
 
-  if (isBaseSet(setKey)) {
+  if (finish && isBaseSet(setKey)) {
     labels.push(
       editionVariantLabel("1st Edition", finish),
       editionVariantLabel("Shadowless", finish),
       editionVariantLabel("Unlimited", finish),
     );
-  } else if (isWotcFirstEditionSet(setKey)) {
+  } else if (finish && isWotcFirstEditionSet(setKey)) {
     labels.push(
       editionVariantLabel("1st Edition", finish),
       editionVariantLabel("Unlimited", finish),
@@ -546,6 +650,120 @@ function inferredSpecialVariantLabels({
   }
 
   return uniqueLabels(labels);
+}
+
+function resolvedLegacyFinish(input: VariantOptionInput) {
+  if (input.itemType !== "card" || !isLegacyNoReverseSet(normalizeSetName(input.setName))) {
+    return undefined;
+  }
+
+  const evidence = evidencedLegacyFinish(input);
+  const candidate = evidence.finish ?? finishLabelFromRarity(input.rarity);
+
+  return evidence.rejected || candidate === "Reverse Holofoil" ? undefined : candidate;
+}
+
+/**
+ * Vintage edition labels are composite identities: `1st Edition Holofoil`
+ * and `1st Edition` are different physical printings. Consider the provider's
+ * explicit finish metadata together with exact priced history before inferring
+ * other editions in the same set. This prevents unusual holo-only rarities
+ * such as Dark Raichu's `Rare Secret` and the Neo Shining cards from gaining
+ * impossible non-holo options.
+ *
+ * If those evidence sources conflict, or either one describes a reverse holo
+ * in a set that never had reverse-holo editions, inference is rejected. Exact
+ * provider labels remain available; we simply do not manufacture companions.
+ */
+function evidencedLegacyFinish({
+  priceHistory = [],
+  variantMetadata,
+}: Pick<VariantOptionInput, "priceHistory" | "variantMetadata">) {
+  return finishEvidence(
+    [
+      ...variantFinishLabelsFromMetadata(variantMetadata),
+      ...priceHistory
+        .map((point) => point.variantLabel)
+        .filter((label): label is string => Boolean(label?.trim())),
+    ],
+  );
+}
+
+function variantFinishLabelsFromMetadata(metadata: unknown) {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return [];
+  }
+
+  const source = metadata as Record<string, unknown>;
+  const labels: string[] = [];
+
+  if (Array.isArray(source.availablePrices)) {
+    labels.push(
+      ...source.availablePrices.filter(
+        (value): value is string => typeof value === "string" && Boolean(value.trim()),
+      ),
+    );
+  }
+
+  if (typeof source.finish === "string" && source.finish.trim()) {
+    labels.push(source.finish);
+  }
+
+  const variants = source.variants;
+  if (variants && typeof variants === "object" && !Array.isArray(variants)) {
+    for (const [key, enabled] of Object.entries(variants)) {
+      if (enabled === true && ["normal", "holo", "reverse"].includes(normalizeVariantLabel(key))) {
+        labels.push(key);
+      }
+    }
+  }
+
+  if (Array.isArray(source.variantsDetailed)) {
+    for (const variant of source.variantsDetailed) {
+      if (!variant || typeof variant !== "object" || Array.isArray(variant)) {
+        continue;
+      }
+
+      const type = (variant as Record<string, unknown>).type;
+      if (typeof type === "string" && type.trim()) {
+        labels.push(type);
+      }
+    }
+  }
+
+  return labels;
+}
+
+function finishEvidence(labels: string[]) {
+  const finishes = new Set<string>();
+  let hasReverseHolo = false;
+
+  for (const label of labels) {
+    const normalized = normalizeVariantLabel(label);
+
+    if (normalized.includes("reverseholo") || normalized === "reverse") {
+      hasReverseHolo = true;
+    } else if (normalized.includes("holo")) {
+      finishes.add("Holofoil");
+    } else if ([
+      "1stedition",
+      "1steditionnormal",
+      "firstedition",
+      "firsteditionnormal",
+      "normal",
+      "shadowless",
+      "shadowlessnormal",
+      "unlimited",
+      "unlimitednormal",
+    ].includes(normalized)) {
+      finishes.add("Normal");
+    }
+  }
+
+  return {
+    finish: !hasReverseHolo && finishes.size === 1 ? [...finishes][0] : undefined,
+    rejected: hasReverseHolo || finishes.size > 1,
+  };
 }
 
 function inferredStandardVariantLabels({
@@ -597,6 +815,7 @@ function isPremiumSingleFinishRarity(normalizedRarity: string) {
     "rare prime",
     "rare rainbow",
     "rare secret",
+    "rare shining",
     "rare ultra",
     "secret rare",
     "shiny rare",
@@ -610,12 +829,12 @@ function isPremiumSingleFinishRarity(normalizedRarity: string) {
 function finishLabelFromRarity(rarity?: string) {
   const normalized = String(rarity ?? "").toLowerCase();
 
-  if (normalized.includes("holo")) {
-    return "Holofoil";
-  }
-
   if (normalized.includes("reverse")) {
     return "Reverse Holofoil";
+  }
+
+  if (normalized.includes("holo") || isPremiumSingleFinishRarity(normalized)) {
+    return "Holofoil";
   }
 
   return "Normal";
@@ -742,6 +961,22 @@ function optionLabel(item: CatalogueItem, variant: string) {
   return item.variantOptions?.find((option) =>
     variantLabelsMatch(item.type, option.label, variant)
   )?.label;
+}
+
+function legacyDefaultOptionLabel(item: CatalogueItem) {
+  const evidence = finishEvidence((item.variantOptions ?? []).map((option) => option.label));
+
+  if (evidence.rejected || !evidence.finish) {
+    return undefined;
+  }
+
+  const label = legacyDefaultVariantLabel({
+    finish: evidence.finish,
+    itemType: item.type,
+    setName: item.set,
+  });
+
+  return label ? optionLabel(item, label) : undefined;
 }
 
 function hasExactPricedVariantEvidence(

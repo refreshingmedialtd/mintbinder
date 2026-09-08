@@ -5,20 +5,21 @@ import test from "node:test";
 const pageSource = readFile(new URL("../src/app/page.tsx", import.meta.url), "utf8");
 const styleSource = readFile(new URL("../src/app/globals.css", import.meta.url), "utf8");
 
-test("Portfolio search carries a trimmed card query into the catalogue screen", async () => {
+test("Portfolio search carries a trimmed query into the combined catalogue screen", async () => {
   const page = await pageSource;
   const dashboard = page.slice(
     page.indexOf("function DashboardScreen("),
     page.indexOf("function PortfolioHero(", page.indexOf("function DashboardScreen(")),
   );
 
-  assert.match(dashboard, /function searchCardCatalogue\(event: FormEvent<HTMLFormElement>\)/);
-  assert.match(dashboard, /const query = portfolioCardSearch\.trim\(\)/);
+  assert.match(dashboard, /function searchCatalogue\(event: FormEvent<HTMLFormElement>\)/);
+  assert.match(dashboard, /const query = portfolioCatalogueSearch\.trim\(\)/);
   assert.match(dashboard, /setAddSearch\(query\)/);
-  assert.match(dashboard, /addType: "card"/);
   assert.match(dashboard, /screen: "add"/);
   assert.match(dashboard, /role="search"/);
-  assert.match(dashboard, /aria-label="Search the card catalogue"/);
+  assert.match(dashboard, /Find any item/);
+  assert.match(dashboard, /Search cards and sealed products together/);
+  assert.match(dashboard, /aria-label="Search the card and sealed-product catalogue"/);
 
   const styles = await styleSource;
   const tabletRules = styles.slice(styles.indexOf("@media (min-width: 760px) {"), styles.indexOf("@media (min-width: 1080px) {"));

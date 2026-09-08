@@ -237,7 +237,8 @@ test("creates a strict run-scoped app user and deliberately different buyer", ()
   const identity = createSquareQaIdentity(RUN_ID);
   assert.equal(identity.user.email, `square-qa-${RUN_ID}@mintbinder.invalid`);
   assert.equal(identity.buyer.email, `square-buyer-${RUN_ID}@mintbinder.invalid`);
-  assert.match(identity.buyer.phone, /^\+1555555\d{4}$/);
+  assert.match(identity.buyer.phone, /^\+447700900\d{3}$/);
+  assert.doesNotMatch(identity.buyer.phone, /^\+1555/);
   assert.notEqual(identity.user.email, identity.buyer.email);
   assert.equal(isSquareQaFixtureIdentity({ ...identity.user, runId: RUN_ID }), true);
   assert.equal(isSquareQaFixtureIdentity({ ...identity.user, email: "real@example.com", runId: RUN_ID }), false);

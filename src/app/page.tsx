@@ -256,6 +256,7 @@ type CatalogueSort =
   | "name-asc"
   | "name-desc"
   | "rarity";
+type CatalogueTypeFilter = ItemType | "all";
 type SetDetailSort =
   | "number"
   | "number-asc"
@@ -3194,7 +3195,7 @@ function DashboardScreen({
   setAddSearch,
   setAppState,
 }: ScreenContext) {
-  const [portfolioCardSearch, setPortfolioCardSearch] = useState("");
+  const [portfolioCatalogueSearch, setPortfolioCatalogueSearch] = useState("");
   const recent = collection.slice(-5).reverse();
   const focusSets = sets
     .filter((set) => set.owned > 0)
@@ -3204,9 +3205,9 @@ function DashboardScreen({
   const gain = summary.value - summary.cost;
   const hasDataLoadError = dataSource === "database" && Boolean(dataNotice) && !isLoadingData;
 
-  function searchCardCatalogue(event: FormEvent<HTMLFormElement>) {
+  function searchCatalogue(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const query = portfolioCardSearch.trim();
+    const query = portfolioCatalogueSearch.trim();
 
     if (!query) {
       return;
@@ -3238,25 +3239,25 @@ function DashboardScreen({
         <div className="portfolio-card-search-copy">
           <span className="tag blue">Catalogue</span>
           <div>
-            <h2 id="portfolio-card-search-title">Find any card</h2>
-            <p>Search by card name, set, or collector number to check the exact printing and its price history.</p>
+            <h2 id="portfolio-card-search-title">Find any item</h2>
+            <p>Search cards and sealed products together by name, set, or collector number.</p>
           </div>
         </div>
-        <form className="portfolio-card-search-form" onSubmit={searchCardCatalogue} role="search">
+        <form className="portfolio-card-search-form" onSubmit={searchCatalogue} role="search">
           <label className="search-box">
             <Search aria-hidden="true" size={18} />
-            <span className="sr-only">Search the card catalogue</span>
+            <span className="sr-only">Search the card and sealed-product catalogue</span>
             <input
-              aria-label="Search the card catalogue"
+              aria-label="Search the card and sealed-product catalogue"
               autoComplete="off"
-              onChange={(event) => setPortfolioCardSearch(event.target.value)}
-              placeholder="Try Latias & Latios-GX, Team Up, or 170"
-              value={portfolioCardSearch}
+              onChange={(event) => setPortfolioCatalogueSearch(event.target.value)}
+              placeholder="Try Chaos Rising Elite, Latias & Latios-GX, or Team Up 170"
+              value={portfolioCatalogueSearch}
             />
           </label>
-          <button className="button primary" disabled={!portfolioCardSearch.trim()} type="submit">
+          <button className="button primary" disabled={!portfolioCatalogueSearch.trim()} type="submit">
             <Search size={17} />
-            Search cards
+            Search catalogue
           </button>
         </form>
       </section>
@@ -5609,6 +5610,7 @@ function AddScreen({
   const [catalogueRarityFilter, setCatalogueRarityFilter] = useState("all");
   const [catalogueLanguageFilter, setCatalogueLanguageFilter] = useState("all");
   const [catalogueSort, setCatalogueSort] = useState<CatalogueSort>("value-desc");
+  const [catalogueTypeFilter, setCatalogueTypeFilter] = useState<CatalogueTypeFilter>("all");
   const [catalogueSearchResults, setCatalogueSearchResults] = useState<CatalogueItem[]>([]);
   const [catalogueSearchInfo, setCatalogueSearchInfo] = useState({
     hasMore: false,
@@ -5635,7 +5637,7 @@ function AddScreen({
   const catalogueLoadMoreAbortRef = useRef<AbortController | null>(null);
   const catalogueQuerySignature = [
     addSearch.trim(),
-    appState.addType,
+    catalogueTypeFilter,
     catalogueLanguageFilter,
     catalogueRarityFilter,
     catalogueSetFilter,
@@ -5674,7 +5676,7 @@ function AddScreen({
           rarity: catalogueRarityFilter,
           set: catalogueSetFilter,
           sort: catalogueSort,
-          type: appState.addType,
+          type: catalogueTypeFilter,
         });
         const response = await fetch(`/api/catalogue/search?${params.toString()}`, {
           cache: "no-store",
@@ -5724,12 +5726,12 @@ function AddScreen({
     };
   }, [
     addSearch,
-    appState.addType,
     cacheCatalogueItems,
     catalogueLanguageFilter,
     catalogueRarityFilter,
     catalogueSetFilter,
     catalogueSort,
+    catalogueTypeFilter,
     catalogueQuerySignature,
     dataSource,
     setAppState,
@@ -5744,6 +5746,7 @@ function AddScreen({
   ]).sort((left, right) => left.localeCompare(right));
   const hasNarrowedResults =
     Boolean(normalizedSearch) ||
+    catalogueTypeFilter !== "all" ||
     catalogueLanguageFilter !== "all" ||
     catalogueSetFilter !== "all" ||
     catalogueRarityFilter !== "all";
@@ -5874,7 +5877,7 @@ function AddScreen({
         rarity: catalogueRarityFilter,
         set: catalogueSetFilter,
         sort: catalogueSort,
-        type: appState.addType,
+        type: catalogueTypeFilter,
       });
       const response = await fetch(`/api/catalogue/search?${params.toString()}`, {
         cache: "no-store",
@@ -5914,10 +5917,24 @@ function AddScreen({
     }
   }
 
+  function selectCatalogueTypeFilter(type: CatalogueTypeFilter) {
+    if (type === catalogueTypeFilter) {
+      return;
+    }
+
+    setCatalogueTypeFilter(type);
+    setCatalogueRarityFilter("all");
+    setAppState((current) => ({
+      ...current,
+      selectedCatalogueId: "",
+      selectedCatalogueVariant: "",
+    }));
+  }
+
   return (
     <section className="page">
       <PageHeader
-        title={appState.addType === "sealed" ? "Add sealed product" : "Add card"}
+        title="Add item"
         action={
           <button className="button" onClick={() => navigate("collection")}>
             <X size={17} />
@@ -5926,36 +5943,29 @@ function AddScreen({
         }
       />
 
-      <div className="segmented add-type-tabs" aria-label="Item type">
+      <div className="segmented add-type-tabs" aria-label="Catalogue item type">
         <button
-          aria-pressed={appState.addType === "card"}
-          className={appState.addType === "card" ? "active" : ""}
-          onClick={() => {
-            setAppState((current) => ({
-              ...current,
-              addType: "card",
-              selectedCatalogueId: "",
-              selectedCatalogueVariant: "",
-            }));
-            setCatalogueRarityFilter("all");
-          }}
+          aria-pressed={catalogueTypeFilter === "all"}
+          className={catalogueTypeFilter === "all" ? "active" : ""}
+          onClick={() => selectCatalogueTypeFilter("all")}
+          type="button"
+        >
+          <Boxes size={16} />
+          All items
+        </button>
+        <button
+          aria-pressed={catalogueTypeFilter === "card"}
+          className={catalogueTypeFilter === "card" ? "active" : ""}
+          onClick={() => selectCatalogueTypeFilter("card")}
           type="button"
         >
           <Layers3 size={16} />
           Cards
         </button>
         <button
-          aria-pressed={appState.addType === "sealed"}
-          className={appState.addType === "sealed" ? "active" : ""}
-          onClick={() => {
-            setAppState((current) => ({
-              ...current,
-              addType: "sealed",
-              selectedCatalogueId: "",
-              selectedCatalogueVariant: "",
-            }));
-            setCatalogueRarityFilter("all");
-          }}
+          aria-pressed={catalogueTypeFilter === "sealed"}
+          className={catalogueTypeFilter === "sealed" ? "active" : ""}
+          onClick={() => selectCatalogueTypeFilter("sealed")}
           type="button"
         >
           <PackagePlus size={16} />
@@ -5969,9 +5979,10 @@ function AddScreen({
             <label className="search-box">
               <Search size={18} />
               <input
+                aria-label="Search cards and sealed products"
                 value={addSearch}
                 onChange={(event) => setAddSearch(event.target.value)}
-                placeholder={appState.addType === "sealed" ? "Search sealed products or sets" : "Search cards, sets, or collector numbers"}
+                placeholder="Search cards, sealed products, sets, or collector numbers"
               />
             </label>
 
@@ -6026,7 +6037,7 @@ function AddScreen({
             </div>
           </div>
 
-          {appState.addType === "sealed" ? (
+          {catalogueTypeFilter !== "card" ? (
             <ManualSealedProductPanel sets={sets} onCreate={createManualSealedProduct} />
           ) : null}
 
@@ -9973,16 +9984,15 @@ function CatalogueResult({
             {selected ? <span className="set-print-status owned">Selected</span> : <span className="set-print-rarity">{item.rarity}</span>}
           </div>
           <p className="item-value">{formatValuation(catalogueMarketValueMinor(item))}</p>
-          {item.type === "card" && item.variantOptions?.length ? (
-            <div className="tag-row">
-              {item.language && item.language !== "en" ? (
-                <span className="tag blue">{item.languageLabel ?? item.language}</span>
-              ) : null}
-              {item.variantOptions.slice(0, 3).map((option) => (
-                <span className="tag" key={option.label}>{option.label}</span>
-              ))}
-            </div>
-          ) : null}
+          <div className="tag-row">
+            <span className="tag blue">{item.type === "sealed" ? "Sealed" : "Card"}</span>
+            {item.language && item.language !== "en" ? (
+              <span className="tag blue">{item.languageLabel ?? item.language}</span>
+            ) : null}
+            {item.type === "card" ? item.variantOptions?.slice(0, 3).map((option) => (
+              <span className="tag" key={option.label}>{option.label}</span>
+            )) : null}
+          </div>
         </div>
       </button>
       <div className="catalogue-result-actions">

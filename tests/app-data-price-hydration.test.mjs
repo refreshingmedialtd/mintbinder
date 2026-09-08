@@ -44,6 +44,19 @@ test("value-sorted catalogue SQL excludes restricted sources before its price li
   }
 });
 
+test("sealed value sorting ranks current calculated markets above CardTrader seller asks", () => {
+  const start = source.indexOf("async function searchSealedProductsByValue");
+  const next = source.indexOf("\nasync function ", start + 1);
+  const body = source.slice(start, next < 0 ? undefined : next);
+  const freshnessRank = body.indexOf("THEN 1 ELSE 0");
+  const evidenceRank = body.indexOf("WHEN LOWER(BTRIM(recent.source)) = 'cardtrader-sealed' THEN 1");
+  const marketRank = body.indexOf("LIKE 'pulse-uk%'");
+
+  assert.ok(start >= 0, "expected sealed value-sort query");
+  assert.ok(freshnessRank >= 0 && freshnessRank < evidenceRank);
+  assert.ok(evidenceRank < marketRank, "evidence quality must be applied before regional preference");
+});
+
 test("collection and wishlist mutations canonicalize variants from identity-preserving catalogue evidence", () => {
   const helperStart = source.indexOf("async function mutationCatalogueReference");
   const createStart = source.indexOf("export async function createCollectionItem");

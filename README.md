@@ -202,8 +202,8 @@ CARDTRADER_SEALED_PRODUCT_LIMIT="5"
 CARDTRADER_SEALED_PRICE_ONLY_UNPRICED="false"
 CARDTRADER_SEALED_REFRESH_EVERY_HOURS="4"
 CARDTRADER_SEALED_MIN_OFFERS="3"
-CARDTRADER_SEALED_MAX_OFFER_PRICE_RATIO="4"
-CARDTRADER_SEALED_MAX_REFERENCE_PRICE_RATIO="4"
+CARDTRADER_SEALED_MAX_OFFER_PRICE_RATIO="2"
+CARDTRADER_SEALED_MAX_REFERENCE_PRICE_RATIO="1.5"
 CARDTRADER_SEALED_MIN_REFERENCE_DIFFERENCE_MINOR="5000"
 CARDTRADER_SEALED_REFERENCE_MAX_AGE_DAYS="14"
 CARDTRADER_SEALED_WAIT_MS="1000"
@@ -227,6 +227,8 @@ PRICECHARTING_SEALED_PRICE_ONLY_UNPRICED="true"
 PRICECHARTING_SEALED_USE_NAME_SEARCH="true"
 PRICECHARTING_SEALED_WRITE_PRICES="false"
 ```
+
+The CardTrader ratio settings can make the seller-ask checks stricter, but the application caps them at the documented `2` and `1.5` safety ceilings. Current calculated market sources remain the primary valuation; accepted CardTrader asks are retained as a labelled European comparison and can stand in only when stronger current evidence is unavailable.
 
 Useful commands:
 
