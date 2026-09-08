@@ -27,7 +27,7 @@ test("Square hosted QA checkout prepopulates the run-scoped buyer phone and emai
       },
       idempotencyKey: "11111111-1111-4111-8111-111111111111",
       origin: "https://mintbinder.co.uk",
-      phoneNumber: "+15555551234",
+      phoneNumber: "+14255550111",
       plan: "monthly",
     });
 
@@ -35,7 +35,7 @@ test("Square hosted QA checkout prepopulates the run-scoped buyer phone and emai
     const body = JSON.parse(requests[0].init.body);
     assert.deepEqual(body.pre_populated_data, {
       buyer_email: "square-buyer-run@mintbinder.invalid",
-      buyer_phone_number: "+15555551234",
+      buyer_phone_number: "+14255550111",
     });
     assert.equal(body.checkout_options.subscription_plan_id, "monthly-plan");
     assert.match(body.payment_note, /^mintbinder_checkout_v1:/);
@@ -57,7 +57,7 @@ test("Square QA customer creation carries the exact run marker and sandbox buyer
       idempotencyKey: "customer-idempotency-key",
       name: "Square QA Buyer run",
       note: "Mint Binder hosted-correlation QA buyer run",
-      phoneNumber: "+15555551234",
+      phoneNumber: "+14255550111",
       userId: "mintbinder-square-buyer-run",
     });
 
@@ -71,7 +71,7 @@ test("Square QA customer creation carries the exact run marker and sandbox buyer
       given_name: "Square QA Buyer run",
       idempotency_key: "customer-idempotency-key",
       note: "Mint Binder hosted-correlation QA buyer run",
-      phone_number: "+15555551234",
+      phone_number: "+14255550111",
       reference_id: "mintbinder-square-buyer-run",
     });
   }, ({ pathname }) => pathname === "/v2/customers"

@@ -5,6 +5,7 @@ import {
   assertEntitlementIsolation,
   assertHostedPaymentMatches,
   assertRunPaymentLink,
+  assertSquareQaCustomerCreationOutcomesKnown,
   assertSquareWebhookSubscription,
   canRecoverPaidFailureBuyerDeletion,
   createSquareQaIdentity,
@@ -17,6 +18,7 @@ import {
   squareQaExactOrderPaymentSearchBeginTime,
   squareHostedCorrelationSettings,
   squareHostedRunIsProviderPrepared,
+  squareMutationWasDefinitivelyRejected,
   squareSubscriptionHasScheduledCancellation,
   squareSubscriptionIsInactive,
 } from "../scripts/square-hosted-correlation-policy.mjs";
@@ -237,11 +239,85 @@ test("creates a strict run-scoped app user and deliberately different buyer", ()
   const identity = createSquareQaIdentity(RUN_ID);
   assert.equal(identity.user.email, `square-qa-${RUN_ID}@mintbinder.invalid`);
   assert.equal(identity.buyer.email, `square-buyer-${RUN_ID}@mintbinder.invalid`);
-  assert.match(identity.buyer.phone, /^\+447700900\d{3}$/);
-  assert.doesNotMatch(identity.buyer.phone, /^\+1555/);
+  assert.match(identity.buyer.phone, /^\+142555501\d{2}$/);
+  assert.equal(createSquareQaIdentity(RUN_ID).buyer.phone, identity.buyer.phone);
   assert.notEqual(identity.user.email, identity.buyer.email);
   assert.equal(isSquareQaFixtureIdentity({ ...identity.user, runId: RUN_ID }), true);
   assert.equal(isSquareQaFixtureIdentity({ ...identity.user, email: "real@example.com", runId: RUN_ID }), false);
+});
+
+test("recognizes only an observed Square 400 invalid-request response as a definitive non-mutation", () => {
+  assert.equal(squareMutationWasDefinitivelyRejected({
+    name: "SquareApiRequestError",
+    status: 400,
+    errors: [{ category: "INVALID_REQUEST_ERROR", code: "INVALID_PHONE_NUMBER" }],
+  }), true);
+  assert.equal(squareMutationWasDefinitivelyRejected({
+    name: "SquareApiRequestError",
+    status: 503,
+    errors: [{ category: "API_ERROR", code: "INTERNAL_SERVER_ERROR" }],
+  }), false);
+  assert.equal(squareMutationWasDefinitivelyRejected({
+    name: "SquareApiRequestError",
+    status: 400,
+    errors: [],
+  }), false);
+});
+
+test("unpaid abort fences both customer provider-success/checkpoint crash windows", () => {
+  const base = {
+    appCustomerId: null,
+    appCustomerCreationAttemptStartedAt: null,
+    appCustomerCreationRejectedAt: null,
+    buyer: {
+      customerId: null,
+      customerCreationAttemptStartedAt: null,
+      customerCreationRejectedAt: null,
+    },
+  };
+  assert.doesNotThrow(() => assertSquareQaCustomerCreationOutcomesKnown(base));
+  assert.throws(
+    () => assertSquareQaCustomerCreationOutcomesKnown({
+      ...base,
+      appCustomerCreationAttemptStartedAt: "2026-09-08T12:00:00.000Z",
+    }),
+    /app-prepared Square customer creation has an unconfirmed outcome.*Resume/,
+  );
+  assert.doesNotThrow(() => assertSquareQaCustomerCreationOutcomesKnown({
+    ...base,
+    appCustomerCreationAttemptStartedAt: "2026-09-08T12:00:00.000Z",
+    appCustomerCreationRejectedAt: "2026-09-08T12:00:01.000Z",
+  }));
+  assert.doesNotThrow(() => assertSquareQaCustomerCreationOutcomesKnown({
+    ...base,
+    appCustomerId: "app-customer",
+    appCustomerCreationAttemptStartedAt: "2026-09-08T12:00:00.000Z",
+  }));
+  assert.throws(
+    () => assertSquareQaCustomerCreationOutcomesKnown({
+      ...base,
+      buyer: {
+        ...base.buyer,
+        customerCreationAttemptStartedAt: "2026-09-08T12:00:00.000Z",
+      },
+    }),
+    /run-scoped Square buyer customer creation has an unconfirmed outcome.*Resume/,
+  );
+  assert.doesNotThrow(() => assertSquareQaCustomerCreationOutcomesKnown({
+    ...base,
+    buyer: {
+      ...base.buyer,
+      customerCreationAttemptStartedAt: "2026-09-08T12:00:00.000Z",
+      customerCreationRejectedAt: "2026-09-08T12:00:01.000Z",
+    },
+  }));
+  assert.throws(
+    () => assertSquareQaCustomerCreationOutcomesKnown({
+      ...base,
+      appCustomerCreationRejectedAt: "2026-09-08T12:00:01.000Z",
+    }),
+    /rejection checkpoint without a creation attempt/,
+  );
 });
 
 test("requires one enabled exact webhook subscription with every billing event", () => {
@@ -584,6 +660,25 @@ test("the harness keeps public checkout closed and makes correlation cleanup exa
   const abortEnd = harness.indexOf("async function assertNoExactOrderPaymentEvidence");
   const abortBody = harness.slice(abortStart, abortEnd);
   assert.ok(abortStart >= 0 && abortEnd > abortStart);
+  const abortEntry = harness.slice(
+    harness.indexOf("if (options.abortRunId)"),
+    harness.indexOf("} else {", harness.indexOf("if (options.abortRunId)")),
+  );
+  assert.doesNotMatch(abortEntry, /ensurePreparedRun/);
+  assert.match(abortEntry, /preflight\(settings, \{ cleanupOnly: true \}\)/);
+  assert.match(abortBody, /hydrateAbortStateFromDurableIntent/);
+  assert.ok(
+    abortBody.indexOf("assertSquareQaCustomerCreationOutcomesKnown(runState)") <
+      abortBody.indexOf("deleteExactRunPaymentLink"),
+    "Ambiguous customer creation must stop abort before the checkout link is destroyed.",
+  );
+  assert.match(abortBody, /creationAttemptStartedAt && !runState\.checkout\.creationRejectedAt/);
+  assert.match(harness, /prepared\.checkout\.creationAttemptStartedAt = new Date\(\)\.toISOString\(\)/);
+  assert.match(harness, /prepared\.appCustomerCreationAttemptStartedAt = new Date\(\)\.toISOString\(\)/);
+  assert.match(harness, /prepared\.buyer\.customerCreationAttemptStartedAt = new Date\(\)\.toISOString\(\)/);
+  assert.match(harness, /prepared\.appCustomerCreationRejectedAt = new Date\(\)\.toISOString\(\)/);
+  assert.match(harness, /prepared\.buyer\.customerCreationRejectedAt = new Date\(\)\.toISOString\(\)/);
+  assert.match(harness, /squareMutationWasDefinitivelyRejected\(error\)/);
   assert.ok(
     abortBody.indexOf("deleteExactRunPaymentLink") < abortBody.indexOf("assertNoExactOrderPaymentEvidence"),
     "The abort path must retire its link before checking and deleting fixtures.",

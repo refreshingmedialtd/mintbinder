@@ -311,6 +311,25 @@ test("fixture identity requires both the run-scoped email and display-name marke
   );
 });
 
+test("the browser journey exercises unified catalogue search with uniquely scoped optional kind filters", async () => {
+  const source = await readFile(new URL("../scripts/authenticated-browser-qa.mjs", import.meta.url), "utf8");
+
+  assert.match(source, /Search the card and sealed-product catalogue/);
+  assert.match(source, /Search catalogue/);
+  assert.match(source, /addCatalogueSearch\(page\)/);
+  assert.match(source, /addCatalogueTypeButton\(page, "All items"\)/);
+  assert.match(source, /addCatalogueTypeButton\(page, "Cards"\)/);
+  assert.match(source, /addCatalogueTypeButton\(page, "Sealed"\)/);
+  assert.match(source, /page\.locator\("\.add-type-tabs:visible"\)/);
+  assert.match(source, /uniqueVisible\([\s\S]*?Add unified catalogue search/);
+  assert.match(source, /uniqueVisible\([\s\S]*?Add catalogue item-type controls/);
+  assert.doesNotMatch(source, /Search the card catalogue/);
+  assert.doesNotMatch(source, /Search cards, sets, or collector numbers/);
+  assert.doesNotMatch(source, /Search sealed products or sets/);
+  assert.doesNotMatch(source, /name: "Add card"/);
+  assert.doesNotMatch(source, /name: "Add sealed product"/);
+});
+
 test("run IDs cannot create ambiguous fixture addresses or markers", () => {
   for (const value of ["", "-run", "run-", "run_id", "run@example.com", "x".repeat(54)]) {
     assert.throws(() => createBrowserQaIdentity(value), /run ID/);

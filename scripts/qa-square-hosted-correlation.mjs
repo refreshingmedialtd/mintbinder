@@ -39,6 +39,7 @@ import {
   assertEntitlementIsolation,
   assertHostedPaymentMatches,
   assertRunPaymentLink,
+  assertSquareQaCustomerCreationOutcomesKnown,
   assertSquareWebhookSubscription,
   canRecoverPaidFailureBuyerDeletion,
   createSquareQaIdentity,
@@ -51,13 +52,14 @@ import {
   squareQaExactOrderPaymentSearchBeginTime,
   squareHostedCorrelationSettings,
   squareHostedRunIsProviderPrepared,
+  squareMutationWasDefinitivelyRejected,
   squareSubscriptionHasScheduledCancellation,
   squareSubscriptionIsInactive,
 } from "./square-hosted-correlation-policy.mjs";
 import { writeAtomicJsonCheckpoint } from "./atomic-json-checkpoint.mjs";
 
 const STATE_DIRECTORY = path.join(process.cwd(), ".local-square-qa");
-const STATE_VERSION = 5;
+const STATE_VERSION = 7;
 const QA_USER_PREFIX = "square-qa-";
 const QA_USER_DOMAIN = "@mintbinder.invalid";
 const POLL_MS = 3_000;
@@ -85,17 +87,8 @@ try {
       ...options,
       plan: state.plan,
     });
-    await preflight(settings);
+    await preflight(settings, { cleanupOnly: true });
     assertStateMatchesSettings(state, settings, { requireCommit: false });
-    if (
-      !state.evidence &&
-      !state.paymentId &&
-      !state.abort?.observationStartedAt &&
-      !state.abort?.paymentLinkDeletedAt &&
-      !state.abort?.paymentLinkDeletionStartedAt
-    ) {
-      state = await ensurePreparedRun(state, settings);
-    }
     await abortUnpaidRun(state);
     console.log(JSON.stringify({ aborted: true, ok: true, plan: state.plan, runId: state.runId }, null, 2));
   } else {
@@ -186,7 +179,13 @@ try {
 
 if (primaryError) process.exitCode = 1;
 
-async function preflight(config) {
+async function preflight(config, { cleanupOnly = false } = {}) {
+  if (cleanupOnly) {
+    // Abort operates only on exact, already-checkpointed local/provider IDs. It
+    // must remain usable after a preparation defect without requiring that
+    // defective checkout build to be deployed or replaying provider creation.
+    return;
+  }
   attestLocalCheckoutSources(config.expectedCommit);
   status("Checking the exact deployed runtime...");
   const healthResponse = await fetch(`${config.baseUrl}/api/health`, {
@@ -307,9 +306,16 @@ async function initialiseRun(config) {
     createdAt: now.toISOString(),
     phase: "initialised",
     user: { ...identity.user, password, id: null },
-    buyer: { ...identity.buyer, customerId: null },
+    buyer: {
+      ...identity.buyer,
+      customerId: null,
+      customerCreationAttemptStartedAt: null,
+      customerCreationRejectedAt: null,
+    },
     appCustomerId: null,
     appCustomerIdempotencyKey: randomUUID(),
+    appCustomerCreationAttemptStartedAt: null,
+    appCustomerCreationRejectedAt: null,
     buyerCustomerIdempotencyKey: randomUUID(),
     checkout: {
       idempotencyKey: randomUUID(),
@@ -317,6 +323,8 @@ async function initialiseRun(config) {
       paymentLinkId: null,
       orderId: null,
       url: null,
+      creationAttemptStartedAt: null,
+      creationRejectedAt: null,
     },
     paymentId: null,
     providerSubscriptionId: null,
@@ -433,13 +441,28 @@ async function ensurePreparedRun(prepared, config) {
     expectedId: prepared.appCustomerId,
     operationName: "app-prepared Square customer",
     retrieve: retrieveSquareCustomer,
-    create: () => createSquareCustomer({
-      email: prepared.user.email,
-      idempotencyKey: prepared.appCustomerIdempotencyKey,
-      name: prepared.user.displayName,
-      note: `Mint Binder hosted-correlation QA app customer ${prepared.runId}`,
-      userId: user.id,
-    }),
+    create: async () => {
+      prepared.appCustomerCreationAttemptStartedAt = new Date().toISOString();
+      prepared.appCustomerCreationRejectedAt = null;
+      prepared.phase = "app-customer-creation-started";
+      await writeState(prepared);
+      try {
+        return await createSquareCustomer({
+          email: prepared.user.email,
+          idempotencyKey: prepared.appCustomerIdempotencyKey,
+          name: prepared.user.displayName,
+          note: `Mint Binder hosted-correlation QA app customer ${prepared.runId}`,
+          userId: user.id,
+        });
+      } catch (error) {
+        if (squareMutationWasDefinitivelyRejected(error)) {
+          prepared.appCustomerCreationRejectedAt = new Date().toISOString();
+          prepared.phase = "app-customer-creation-rejected";
+          await writeState(prepared);
+        }
+        throw error;
+      }
+    },
     validate: (customer) => {
       assert.equal(customer.referenceId, user.id, "The app-prepared customer has a different owner marker.");
     },
@@ -523,14 +546,29 @@ async function ensurePreparedRun(prepared, config) {
           url: link.url ?? link.long_url,
         };
       },
-      create: () => createSquareSubscriptionCheckout({
-        email: prepared.buyer.email,
-        expectation,
-        idempotencyKey: prepared.checkout.idempotencyKey,
-        origin: config.baseUrl,
-        plan: config.plan,
-        phoneNumber: prepared.buyer.phone,
-      }),
+      create: async () => {
+        prepared.checkout.creationAttemptStartedAt = new Date().toISOString();
+        prepared.checkout.creationRejectedAt = null;
+        prepared.phase = "payment-link-creation-started";
+        await writeState(prepared);
+        try {
+          return await createSquareSubscriptionCheckout({
+            email: prepared.buyer.email,
+            expectation,
+            idempotencyKey: prepared.checkout.idempotencyKey,
+            origin: config.baseUrl,
+            plan: config.plan,
+            phoneNumber: prepared.buyer.phone,
+          });
+        } catch (error) {
+          if (squareMutationWasDefinitivelyRejected(error)) {
+            prepared.checkout.creationRejectedAt = new Date().toISOString();
+            prepared.phase = "payment-link-creation-rejected";
+            await writeState(prepared);
+          }
+          throw error;
+        }
+      },
       validate: (paymentLink) => {
         assertSquareCheckoutUrl(paymentLink.url);
         if (prepared.checkout.paymentLinkId) {
@@ -582,14 +620,29 @@ async function ensurePreparedRun(prepared, config) {
     expectedId: prepared.buyer.customerId,
     operationName: "run-scoped Square buyer customer",
     retrieve: retrieveSquareCustomer,
-    create: () => createSquareCustomer({
-      email: prepared.buyer.email,
-      idempotencyKey: prepared.buyerCustomerIdempotencyKey,
-      name: prepared.buyer.displayName,
-      note: `Mint Binder hosted-correlation QA buyer ${prepared.runId}`,
-      phoneNumber: prepared.buyer.phone,
-      userId: prepared.buyer.referenceId,
-    }),
+    create: async () => {
+      prepared.buyer.customerCreationAttemptStartedAt = new Date().toISOString();
+      prepared.buyer.customerCreationRejectedAt = null;
+      prepared.phase = "buyer-customer-creation-started";
+      await writeState(prepared);
+      try {
+        return await createSquareCustomer({
+          email: prepared.buyer.email,
+          idempotencyKey: prepared.buyerCustomerIdempotencyKey,
+          name: prepared.buyer.displayName,
+          note: `Mint Binder hosted-correlation QA buyer ${prepared.runId}`,
+          phoneNumber: prepared.buyer.phone,
+          userId: prepared.buyer.referenceId,
+        });
+      } catch (error) {
+        if (squareMutationWasDefinitivelyRejected(error)) {
+          prepared.buyer.customerCreationRejectedAt = new Date().toISOString();
+          prepared.phase = "buyer-customer-creation-rejected";
+          await writeState(prepared);
+        }
+        throw error;
+      }
+    },
     validate: (customer) => {
       assert.notEqual(customer.id, appCustomer.id);
       assert.equal(customer.referenceId, prepared.buyer.referenceId);
@@ -1406,9 +1459,14 @@ async function cancelRefundAndDelete(runState, config, evidence, context) {
 
 async function abortUnpaidRun(runState) {
   assertStateMatchesSettings(runState, settings, { requireCommit: false });
+  await hydrateAbortStateFromDurableIntent(runState);
   if (runState.evidence || runState.paymentId) {
     throw new Error("This run has payment evidence and cannot use unpaid abort. Resume it for verified cleanup.");
   }
+  // Never destroy a known link, local user, or known customer while another
+  // customer creation might have succeeded without its response being saved.
+  // Resume replays the persisted idempotency key and recovers that exact ID.
+  assertSquareQaCustomerCreationOutcomesKnown(runState);
 
   // Retire the checkout first. A Square payment-link order can remain OPEN
   // even after payment, so order state is never used as proof that raw fixture
@@ -1425,15 +1483,26 @@ async function abortUnpaidRun(runState) {
     await writeState(runState);
   }
 
-  if (!runState.abort.observationStartedAt) {
-    runState.abort.observationStartedAt = new Date().toISOString();
-    await writeState(runState);
+  if (runState.checkout.orderId) {
+    if (!runState.abort.observationStartedAt) {
+      runState.abort.observationStartedAt = new Date().toISOString();
+      await writeState(runState);
+    }
+    const observeUntil = new Date(runState.abort.observationStartedAt).getTime() + ABORT_PAYMENT_SETTLE_MS;
+    do {
+      await assertNoExactOrderPaymentEvidence(runState, { requireCanceledOrder: true });
+      if (Date.now() < observeUntil) await delay(POLL_MS);
+    } while (Date.now() < observeUntil);
+  } else {
+    assert.equal(runState.checkout.paymentLinkId, null, "A payment link without its exact order cannot be aborted safely.");
+    assert.equal(runState.checkout.url, null, "A checkout URL without exact provider IDs cannot be aborted safely.");
+    if (runState.checkout.creationAttemptStartedAt && !runState.checkout.creationRejectedAt) {
+      throw new Error(
+        "Square checkout creation has an unconfirmed outcome. Resume to recover its exact idempotent resource before aborting.",
+      );
+    }
+    await assertNoExactOrderPaymentEvidence(runState);
   }
-  const observeUntil = new Date(runState.abort.observationStartedAt).getTime() + ABORT_PAYMENT_SETTLE_MS;
-  do {
-    await assertNoExactOrderPaymentEvidence(runState, { requireCanceledOrder: true });
-    if (Date.now() < observeUntil) await delay(POLL_MS);
-  } while (Date.now() < observeUntil);
 
   for (const customer of [
     [runState.appCustomerId, runState.user.id],
@@ -1487,6 +1556,58 @@ async function abortUnpaidRun(runState) {
     );
   }
   await rm(statePath(runState.runId), { force: true });
+}
+
+async function hydrateAbortStateFromDurableIntent(runState) {
+  if (!runState.checkout.intentId) return;
+  const intent = await prisma.billingCheckoutIntent.findUnique({
+    where: { id: runState.checkout.intentId },
+  });
+  if (!intent) {
+    throw new Error("The saved checkout intent no longer exists; refusing partial-run cleanup.");
+  }
+  const expectation = squareCheckoutExpectation(runState.plan);
+  const expectedPlan = runState.plan === "yearly"
+    ? SubscriptionPlan.PLUS_YEARLY
+    : SubscriptionPlan.PLUS_MONTHLY;
+  assert.equal(intent.userId, runState.user.id, "The saved checkout intent belongs to another user.");
+  assert.equal(intent.provider, "square");
+  assert.equal(intent.plan, expectedPlan);
+  assert.equal(intent.idempotencyKey, runState.checkout.idempotencyKey);
+  assert.equal(intent.providerCustomerId, runState.appCustomerId);
+  assert.equal(intent.checkoutOrigin, runState.baseUrl);
+  assert.equal(intent.expectedAmountMinor, expectation.amountMinor);
+  assert.equal(intent.expectedCurrency, expectation.currency);
+  assert.equal(intent.providerPlanVariationId, expectation.planVariationId);
+
+  for (const [stateKey, providerValue] of [
+    ["paymentLinkId", intent.providerCheckoutId],
+    ["orderId", intent.providerOrderId],
+    ["url", intent.checkoutUrl],
+  ]) {
+    const savedValue = runState.checkout[stateKey];
+    if (savedValue && providerValue) {
+      assert.equal(savedValue, providerValue, `The saved checkout ${stateKey} differs from durable provider state.`);
+    }
+    if (!savedValue && providerValue) runState.checkout[stateKey] = providerValue;
+  }
+  if (intent.providerPaymentId) runState.paymentId = intent.providerPaymentId;
+  if (["completed", "paid_pending_subscription"].includes(intent.status)) {
+    throw new Error("The checkout intent has paid provider state; unpaid abort is forbidden.");
+  }
+
+  const hasAnyCheckoutState = Boolean(
+    runState.checkout.paymentLinkId || runState.checkout.orderId || runState.checkout.url,
+  );
+  const hasCompleteCheckoutState = Boolean(
+    runState.checkout.paymentLinkId && runState.checkout.orderId && runState.checkout.url,
+  );
+  assert.equal(
+    hasAnyCheckoutState,
+    hasCompleteCheckoutState,
+    "Partial durable checkout identity cannot be aborted safely.",
+  );
+  await writeState(runState);
 }
 
 async function deleteExactRunPaymentLink(runState, {

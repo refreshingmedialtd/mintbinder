@@ -158,16 +158,18 @@ export function squareHostedCorrelationSettings(env, options) {
 
 export function createSquareQaIdentity(runId) {
   assertSquareQaRunId(runId);
-  const phoneTail = String(parseInt(createHash("sha256").update(runId).digest("hex").slice(0, 8), 16) % 1_000)
-    .padStart(3, "0");
+  const phoneTail = String(100 + (
+    parseInt(createHash("sha256").update(runId).digest("hex").slice(0, 8), 16) % 100
+  ))
+    .padStart(4, "0");
 
   return {
     buyer: {
       displayName: `Square QA Buyer ${runId}`,
       email: `${QA_BUYER_PREFIX}${runId}@${QA_EMAIL_DOMAIN}`,
-      // Ofcom reserves 07700 900000-900999 for fictional use. It is a valid
-      // UK mobile shape without risking a real person's phone number.
-      phone: `+447700900${phoneTail}`,
+      // Square documents +1<valid-area-code>555<any-four-digits> for Sandbox.
+      // Restrict the suffix to NANPA's fictional-use 0100-0199 block.
+      phone: `+1425555${phoneTail}`,
       referenceId: `mintbinder-${QA_BUYER_PREFIX}${runId}`,
     },
     user: {
@@ -175,6 +177,45 @@ export function createSquareQaIdentity(runId) {
       email: `${QA_USER_PREFIX}${runId}@${QA_EMAIL_DOMAIN}`,
     },
   };
+}
+
+export function squareMutationWasDefinitivelyRejected(error) {
+  return Boolean(
+    error?.name === "SquareApiRequestError" &&
+    error?.status === 400 &&
+    Array.isArray(error.errors) &&
+    error.errors.length > 0 &&
+    error.errors.every((item) => item?.category === "INVALID_REQUEST_ERROR"),
+  );
+}
+
+export function assertSquareQaCustomerCreationOutcomesKnown(runState) {
+  const resources = [
+    {
+      id: runState?.appCustomerId,
+      label: "app-prepared Square customer",
+      rejectedAt: runState?.appCustomerCreationRejectedAt,
+      startedAt: runState?.appCustomerCreationAttemptStartedAt,
+    },
+    {
+      id: runState?.buyer?.customerId,
+      label: "run-scoped Square buyer customer",
+      rejectedAt: runState?.buyer?.customerCreationRejectedAt,
+      startedAt: runState?.buyer?.customerCreationAttemptStartedAt,
+    },
+  ];
+
+  for (const resource of resources) {
+    if (resource.rejectedAt && !resource.startedAt) {
+      throw new Error(`The ${resource.label} has a rejection checkpoint without a creation attempt.`);
+    }
+    if (!resource.id && resource.startedAt && !resource.rejectedAt) {
+      throw new Error(
+        `The ${resource.label} creation has an unconfirmed outcome. ` +
+        "Resume to recover its exact idempotent resource before aborting.",
+      );
+    }
+  }
 }
 
 export function isSquareQaFixtureIdentity({ displayName, email, runId }) {

@@ -185,10 +185,25 @@ try {
   });
 
   await step("Search from Portfolio and load the exact card", async () => {
-    const dashboardSearch = page.getByLabel("Search the card catalogue", { exact: true });
+    const dashboardSearch = await uniqueVisible(
+      page.getByLabel("Search the card and sealed-product catalogue", { exact: true }),
+      "Portfolio unified catalogue search",
+    );
     await dashboardSearch.fill(targetCard.name);
-    await page.getByRole("button", { name: "Search cards", exact: true }).click();
-    await page.getByRole("heading", { name: "Add card", exact: true }).waitFor();
+    const searchCatalogue = await uniqueVisible(
+      page.getByRole("button", { name: "Search catalogue", exact: true }),
+      "Portfolio catalogue search button",
+    );
+    await searchCatalogue.click();
+    await page.getByRole("heading", { name: "Add item", exact: true }).waitFor();
+
+    const allItems = await addCatalogueTypeButton(page, "All items");
+    assert.equal(await allItems.getAttribute("aria-pressed"), "true", "Portfolio search did not open All-items results.");
+    assert.equal(
+      await (await addCatalogueSearch(page)).inputValue(),
+      targetCard.name,
+      "Portfolio search query was not carried into the unified Add search.",
+    );
 
     const result = await findCatalogueResult(page, targetCard);
     const price = (await result.locator(".item-value").innerText()).trim();
@@ -198,7 +213,7 @@ try {
     await page.getByRole("button", { name: "View price history", exact: true }).waitFor();
   });
 
-  await step("Open price history from Add card", async () => {
+  await step("Open price history from Add item", async () => {
     const [historyResponse] = await runWithPrearmedWaiters(
       [() => expectPriceHistoryResponse(page, targetCard.id)],
       () => page.getByRole("button", { name: "View price history", exact: true }).click(),
@@ -235,7 +250,7 @@ try {
       "wishlist owned-copy action",
     );
     await addOwnedCopy.click();
-    await page.getByRole("heading", { name: "Add card", exact: true }).waitFor();
+    await page.getByRole("heading", { name: "Add item", exact: true }).waitFor();
     const [historyResponse] = await runWithPrearmedWaiters(
       [() => expectPriceHistoryResponse(page, targetCard.id)],
       () => page.getByRole("button", { name: "Save to collection", exact: true }).click(),
@@ -459,11 +474,17 @@ try {
 
   await step("Add a second card directly without Wishlist conversion", async () => {
     await clickDesktopNav(page, "Add");
-    await page.getByRole("heading", { name: "Add card", exact: true }).waitFor();
-    await page.locator(".add-type-tabs").getByRole("button", { name: "Cards", exact: true }).click();
+    await page.getByRole("heading", { name: "Add item", exact: true }).waitFor();
+    assert.equal(
+      await (await addCatalogueTypeButton(page, "All items")).getAttribute("aria-pressed"),
+      "true",
+      "A fresh Add journey did not default to All items.",
+    );
+    const cardsFilter = await addCatalogueTypeButton(page, "Cards");
+    await cardsFilter.click();
+    assert.equal(await cardsFilter.getAttribute("aria-pressed"), "true", "Cards filter did not become active.");
     await (await addCatalogueSetFilter(page)).selectOption(directCard.cardSet.name);
-    await page.getByPlaceholder("Search cards, sets, or collector numbers", { exact: true })
-      .fill(directCard.name);
+    await (await addCatalogueSearch(page)).fill(directCard.name);
     const result = await findCatalogueResult(page, directCard);
     assert.match((await result.locator(".item-value").innerText()).trim(), /^\u00a3\d/);
     await assertLoadedImage(result.locator("img").first(), `${directCard.name} direct-add result`);
@@ -492,11 +513,17 @@ try {
 
   await step("Add a priced sealed product and verify API persistence", async () => {
     await clickDesktopNav(page, "Add");
-    await page.getByRole("heading", { name: "Add card", exact: true }).waitFor();
-    await page.locator(".add-type-tabs").getByRole("button", { name: "Sealed", exact: true }).click();
-    await page.getByRole("heading", { name: "Add sealed product", exact: true }).waitFor();
+    await page.getByRole("heading", { name: "Add item", exact: true }).waitFor();
+    assert.equal(
+      await (await addCatalogueTypeButton(page, "All items")).getAttribute("aria-pressed"),
+      "true",
+      "A fresh Add journey did not default to All items.",
+    );
+    const sealedFilter = await addCatalogueTypeButton(page, "Sealed");
+    await sealedFilter.click();
+    assert.equal(await sealedFilter.getAttribute("aria-pressed"), "true", "Sealed filter did not become active.");
     await (await addCatalogueSetFilter(page)).selectOption(sealedProduct.cardSet.name);
-    await page.getByPlaceholder("Search sealed products or sets", { exact: true }).fill(sealedProduct.name);
+    await (await addCatalogueSearch(page)).fill(sealedProduct.name);
     const result = await findCatalogueResult(page, sealedProduct);
     assert.match((await result.locator(".item-value").innerText()).trim(), /^\u00a3\d/);
     await assertLoadedImage(result.locator("img").first(), `${sealedProduct.name} sealed result`);
@@ -550,8 +577,8 @@ try {
         await assertActionableWithinViewport(locator, label, 360);
       }
       await mobilePage.locator("nav.bottom-nav").getByRole("button", { name: "Add", exact: true }).click();
-      await mobilePage.getByRole("heading", { name: "Add card", exact: true }).waitFor();
-      await assertNoHorizontalDocumentOverflow(mobilePage, "Add card");
+      await mobilePage.getByRole("heading", { name: "Add item", exact: true }).waitFor();
+      await assertNoHorizontalDocumentOverflow(mobilePage, "Add item");
       await mobilePage.locator("nav.bottom-nav").getByRole("button", { name: "More", exact: true }).click();
       await mobilePage.getByRole("heading", { name: "Settings", exact: true }).waitFor();
     } finally {
@@ -1165,6 +1192,24 @@ async function addCatalogueSetFilter(page) {
   const filters = controls.locator("select");
   assert.equal(await filters.count(), 4, "Add catalogue controls did not contain the four expected filters.");
   return filters.nth(0);
+}
+
+async function addCatalogueSearch(page) {
+  return uniqueVisible(
+    page.getByLabel("Search cards and sealed products", { exact: true }),
+    "Add unified catalogue search",
+  );
+}
+
+async function addCatalogueTypeButton(page, name) {
+  const typeControls = await uniqueVisible(
+    page.locator(".add-type-tabs:visible"),
+    "Add catalogue item-type controls",
+  );
+  return uniqueVisible(
+    typeControls.getByRole("button", { name, exact: true }),
+    `${name} catalogue item-type filter`,
+  );
 }
 
 async function responseJsonWithTimeout(response, label, timeoutMs = 10_000) {
