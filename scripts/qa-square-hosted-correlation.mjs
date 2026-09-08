@@ -59,7 +59,7 @@ import {
 import { writeAtomicJsonCheckpoint } from "./atomic-json-checkpoint.mjs";
 
 const STATE_DIRECTORY = path.join(process.cwd(), ".local-square-qa");
-const STATE_VERSION = 7;
+const STATE_VERSION = 8;
 const QA_USER_PREFIX = "square-qa-";
 const QA_USER_DOMAIN = "@mintbinder.invalid";
 const POLL_MS = 3_000;

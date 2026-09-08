@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
-const QA_EMAIL_DOMAIN = "mintbinder.invalid";
+const QA_USER_EMAIL_DOMAIN = "mintbinder.invalid";
+const QA_BUYER_EMAIL_DOMAIN = "example.com";
 const QA_USER_PREFIX = "square-qa-";
 const QA_BUYER_PREFIX = "square-buyer-";
 const RUN_ID_PATTERN = /^\d{14}-[0-9a-f]{8}$/;
@@ -166,7 +167,9 @@ export function createSquareQaIdentity(runId) {
   return {
     buyer: {
       displayName: `Square QA Buyer ${runId}`,
-      email: `${QA_BUYER_PREFIX}${runId}@${QA_EMAIL_DOMAIN}`,
+      // Square validates the top-level domain even in Sandbox. example.com is
+      // reserved for documentation/testing and cannot deliver to a real user.
+      email: `${QA_BUYER_PREFIX}${runId}@${QA_BUYER_EMAIL_DOMAIN}`,
       // Square documents +1<valid-area-code>555<any-four-digits> for Sandbox.
       // Restrict the suffix to NANPA's fictional-use 0100-0199 block.
       phone: `+1425555${phoneTail}`,
@@ -174,7 +177,7 @@ export function createSquareQaIdentity(runId) {
     },
     user: {
       displayName: `Square QA ${runId}`,
-      email: `${QA_USER_PREFIX}${runId}@${QA_EMAIL_DOMAIN}`,
+      email: `${QA_USER_PREFIX}${runId}@${QA_USER_EMAIL_DOMAIN}`,
     },
   };
 }
