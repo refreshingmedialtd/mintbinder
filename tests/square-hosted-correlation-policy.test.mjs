@@ -238,8 +238,9 @@ test("requires an attested Square sandbox while the public correlation gate stay
 test("creates a strict run-scoped app user and deliberately different buyer", () => {
   const identity = createSquareQaIdentity(RUN_ID);
   assert.equal(identity.user.email, `square-qa-${RUN_ID}@mintbinder.invalid`);
-  assert.equal(identity.buyer.email, `square-buyer-${RUN_ID}@example.com`);
+  assert.match(identity.buyer.email, /^square-buyer-[0-9a-f]{16}@mintbinder\.co\.uk$/);
   assert.doesNotMatch(identity.buyer.email, /\.invalid$/);
+  assert.equal(createSquareQaIdentity(RUN_ID).buyer.email, identity.buyer.email);
   assert.match(identity.buyer.phone, /^\+142555501\d{2}$/);
   assert.equal(createSquareQaIdentity(RUN_ID).buyer.phone, identity.buyer.phone);
   assert.notEqual(identity.user.email, identity.buyer.email);

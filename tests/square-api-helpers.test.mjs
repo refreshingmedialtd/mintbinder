@@ -19,7 +19,7 @@ import {
 test("Square hosted QA checkout prepopulates the run-scoped buyer phone and email", async () => {
   await withSquareFetch(async (requests) => {
     const checkout = await createSquareSubscriptionCheckout({
-      email: "square-buyer-run@example.com",
+      email: "square-buyer-0123456789abcdef@mintbinder.co.uk",
       expectation: {
         amountMinor: 249,
         currency: "GBP",
@@ -34,7 +34,7 @@ test("Square hosted QA checkout prepopulates the run-scoped buyer phone and emai
     assert.equal(checkout.orderId, "order-1");
     const body = JSON.parse(requests[0].init.body);
     assert.deepEqual(body.pre_populated_data, {
-      buyer_email: "square-buyer-run@example.com",
+      buyer_email: "square-buyer-0123456789abcdef@mintbinder.co.uk",
       buyer_phone_number: "+14255550111",
     });
     assert.equal(body.checkout_options.subscription_plan_id, "monthly-plan");
@@ -53,7 +53,7 @@ test("Square hosted QA checkout prepopulates the run-scoped buyer phone and emai
 test("Square QA customer creation carries the exact run marker and sandbox buyer phone", async () => {
   await withSquareFetch(async (requests) => {
     const customer = await createSquareCustomer({
-      email: "square-buyer-run@example.com",
+      email: "square-buyer-0123456789abcdef@mintbinder.co.uk",
       idempotencyKey: "customer-idempotency-key",
       name: "Square QA Buyer run",
       note: "Mint Binder hosted-correlation QA buyer run",
@@ -67,7 +67,7 @@ test("Square QA customer creation carries the exact run marker and sandbox buyer
     assert.equal(requests[0].url, "https://connect.squareupsandbox.com/v2/customers");
     assert.equal(requests[0].init.method, "POST");
     assert.deepEqual(JSON.parse(requests[0].init.body), {
-      email_address: "square-buyer-run@example.com",
+      email_address: "square-buyer-0123456789abcdef@mintbinder.co.uk",
       given_name: "Square QA Buyer run",
       idempotency_key: "customer-idempotency-key",
       note: "Mint Binder hosted-correlation QA buyer run",
