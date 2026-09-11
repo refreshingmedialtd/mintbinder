@@ -124,3 +124,13 @@ test("sealed catalogue hydration exposes one canonical Factory sealed history", 
 
   assert.match(body, /canonicalCataloguePriceHistory\(\s*"sealed"/);
 });
+
+test("card catalogue headlines use the first exactly priced canonical variant", () => {
+  const start = source.indexOf("function mapCardPrintingToCatalogueItem");
+  const next = source.indexOf("function mapSealedProductToCatalogueItem", start);
+  const body = source.slice(start, next);
+
+  assert.match(body, /const variantOptions = buildCatalogueVariantOptions/);
+  assert.match(body, /preferredCatalogueHeadlinePricePoint\([\s\S]*?variantOptions[\s\S]*?rawPriceHistory/);
+  assert.doesNotMatch(body, /const latestPrice = preferredLatestPricePoint\(rawPriceHistory\)/);
+});

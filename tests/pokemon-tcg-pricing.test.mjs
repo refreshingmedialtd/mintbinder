@@ -8,6 +8,17 @@ import {
 } from "../src/lib/pricing/pokemon-tcg-card-prices.ts";
 import { preferredLatestPricePoint } from "../src/lib/pricing/market-context.ts";
 
+test("Pokemon TCG catalogue search indexes padded full collector numbers", async () => {
+  const source = await readFile(
+    new URL("../src/lib/pricing/pokemon-tcg-api.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(source, /catalogueCollectorNumberSearchTerms/);
+  assert.match(source, /pokemonCollectorSearchTerms\(card\.number, card\.set\.printedTotal, card\.set\.total\)/);
+  assert.match(source, /return catalogueCollectorNumberSearchTerms\(number, printedTotal, total\)/);
+});
+
 test("uses TCGPlayer card prices when no European price is available", () => {
   const price = bestPokemonTcgCardPrice(
     {

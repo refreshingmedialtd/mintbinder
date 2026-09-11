@@ -16,6 +16,7 @@ TCGCSV_JAPAN_CARD_GROUP_LIMIT="1"
 TCGCSV_JAPAN_CARD_SOURCE="tcgcsv-japan-card"
 TCGCSV_JAPAN_CARD_ONLY_UNPRICED_GROUPS="false"
 TCGCSV_JAPAN_CARD_PRICE_ONLY_UNPRICED="false"
+TCGCSV_REVIEWED_CATALOGUE_GROUP_IDS=""
 TCGCSV_SEALED_GROUP_LIMIT="1"
 TCGCSV_SEALED_PRICE_ONLY_UNPRICED="false"
 TCGCSV_SEALED_WRITE_PRICES="true"
@@ -108,7 +109,7 @@ cd /home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder
 Expected results:
 
 - `job:live-health` returns `ok: true`.
-- `cron-live-daily.sh` refreshes the slowly changing set catalogue and records a forced dry-run price-alert digest. The wrapper cannot email real users.
+- `cron-live-daily.sh` refreshes the reviewed card-supplement allowlist, refreshes the slowly changing set catalogue, and records a forced dry-run price-alert digest. The wrapper cannot email real users.
 - `cron-live-pricing.sh` runs the Pokemon TCG set rotation, then refreshes two TCGCSV English groups serially. Both calls create `pricing_refresh` job runs, and either may fail without preventing the other from being attempted.
 - `job:live-japan-card-pricing` calls `/api/jobs/international-card-pricing`, creates a `pricing_refresh` job run, and reports `categoryId: 85` plus `language: "ja"`.
 - `job:live-sealed-pricing` creates a `sealed_pricing_refresh` job run. With `CARDTRADER_API_TOKEN` configured, its result also contains a `secondSource` diagnostic object for `cardtrader-sealed`; an API-healthy discovery pass may legitimately report no safe match or eligible listing, while aggregate coverage, freshness, and last-evidence checks still detect a stalled source.
@@ -201,7 +202,7 @@ They use the same `Authorization: Bearer <JOB_SECRET>` header. Keep the request 
 
 ## Operating Notes
 
-- Scheduled card pricing writes new snapshots over time, so price history charts become more useful the longer the job runs. UK-facing valuation selects current UK evidence first, then current European evidence, then converted US references. Converted US data is labelled as a reference and cannot receive a Strong UK confidence rating.
+- Scheduled card pricing writes new snapshots over time, so price history charts become more useful the longer the job runs. The daily reviewed-card lane is restricted to immutable TCGplayer product IDs whose provider name and collector number still match the approved identity; it preserves exact stamp labels and fills catalogue gaps that TCGdex and Pokemon TCG API cannot supply. `TCGCSV_REVIEWED_CATALOGUE_GROUP_IDS` is an optional targeted-recovery filter and should normally remain empty. UK-facing valuation selects current UK evidence first, then current European evidence, then converted US references. Converted US data is labelled as a reference and cannot receive a Strong UK confidence rating.
 - The existing `cron-live-pricing.sh` command covers Pokemon TCG API set rotation and two serial TCGCSV English groups. Set discovery is deliberately decoupled into the daily wrapper so it does not add another request to the hourly provider burst. Do not add a second 20i task for English TCGCSV pricing.
 - `POKEMON_TCG_SET_PRICING_LIMIT` controls how many sets a live pricing run refreshes. `POKEMON_TCG_SET_PRICING_REQUEST_LIMIT` defaults to `1`, so the live helper sends several small set-refresh requests rather than one long request. `POKEMON_TCG_PRICING_BATCH_WAIT_MS` pauses between those calls; `POKEMON_TCG_API_TIMEOUT_MS` bounds the primary provider attempt (up to 22 seconds), while a second recovery attempt and its preceding wait are each capped at two seconds so the complete request budget remains at most 26 seconds. `POKEMON_TCG_API_RETRY_ATTEMPTS` retries transient Pokemon TCG API `408`/`425`/`429`/`5xx` or transport failures before the affected set is marked degraded and rotation continues. Exhausted transient failures receive a persistent 30-minute exponential cooldown capped at six hours; provider `Retry-After` is honoured up to 24 hours, and 404 sets are deferred for seven days. A successful set refresh clears the failure count and cooldown. Credentials and other structural `4xx` responses remain fatal. Keep the hourly job history clean before raising set batch sizes further.
 - Keep `TCGCSV_SEALED_GROUP_LIMIT=1`, `TCGCSV_SEALED_PRODUCT_LIMIT=40`, `TCGCSV_SEALED_PRICE_ONLY_UNPRICED=false`, and `TCGCSV_SEALED_WRITE_PRICES=true` for hourly sealed pricing history. The live helper defaults to a 40-product batch when `TCGCSV_SEALED_PRODUCT_LIMIT` is not set, records a per-set sealed cursor, fills blanks, and writes fresh snapshots for products that already have prices without making one long web request. A successfully scanned group with no sealed products receives a 30-day cooldown so card-only promo/subset catalogues do not consume hourly rotation slots; an explicit `TCGCSV_SEALED_GROUP_IDS` request bypasses that cooldown for manual rechecks.

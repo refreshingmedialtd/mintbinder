@@ -15,6 +15,7 @@ import {
   canonicalCataloguePriceHistory,
   catalogueVariantWriteLabel,
   catalogueValueMinorForVariant,
+  preferredCatalogueHeadlinePricePoint,
 } from "../catalogue/variants.ts";
 import { cardImageCandidates } from "../catalogue/card-images.ts";
 import {
@@ -435,12 +436,14 @@ export async function getAppData(userId: string, options: AppDataOptions = {}): 
       catalogueComplete: false,
       collection,
       wishlist: wishlistItems.map(mapWishlistItem),
-      sets: cardSets.map((set) =>
-        mapSetProgress(set, {
-          owned: ownedCardsBySet.get(set.id) ?? 0,
-          total: cardSetTotals.get(set.id) ?? 0,
-        }),
-      ),
+      sets: cardSets
+        .filter((set) => cardSetIsReadyForProgress(set, cardSetTotals.get(set.id) ?? 0))
+        .map((set) =>
+          mapSetProgress(set, {
+            owned: ownedCardsBySet.get(set.id) ?? 0,
+            total: cardSetTotals.get(set.id) ?? 0,
+          }),
+        ),
       storageLocations: mapStorageLocations(storageLocations, collection, catalogue),
       events: collectionEvents.map(mapCollectionEvent),
       source: "database",
@@ -2274,7 +2277,6 @@ function mapCardPrintingToCatalogueItem(
   const priceHistory = options.includeGradedHistory
     ? buildPriceHistory(visiblePrices)
     : rawPriceHistory;
-  const latestPrice = preferredLatestPricePoint(rawPriceHistory);
   const [image, ...imageFallbacks] = cardImageCandidates({
     imageLargeUrl: card.imageLargeUrl,
     imageSmallUrl: card.imageSmallUrl,
@@ -2290,6 +2292,19 @@ function mapCardPrintingToCatalogueItem(
     providerCode: tcgdexProviderCode(card.cardSet.providerIds),
   });
   const rarity = displayCatalogueRarity(card.rarity);
+  const variantOptions = buildCatalogueVariantOptions({
+    itemType: "card",
+    priceHistory: rawPriceHistory,
+    rarity,
+    setName: card.cardSet.name,
+    variantMetadata: card.variantMetadata,
+  });
+  const latestPrice = preferredCatalogueHeadlinePricePoint({
+    rarity,
+    set: card.cardSet.name,
+    type: "card",
+    variantOptions,
+  }, rawPriceHistory);
 
   return {
     id: card.id,
@@ -2317,13 +2332,7 @@ function mapCardPrintingToCatalogueItem(
     priceStatus: latestPrice ? priceFreshnessStatus(latestPrice) : undefined,
     priceObservedAt: latestPrice?.observedAt,
     priceHistory: priceHistory.length ? priceHistory : undefined,
-    variantOptions: buildCatalogueVariantOptions({
-      itemType: "card",
-      priceHistory: rawPriceHistory,
-      rarity,
-      setName: card.cardSet.name,
-      variantMetadata: card.variantMetadata,
-    }),
+    variantOptions,
   };
 }
 
@@ -2473,6 +2482,33 @@ function mapSetProgress(set: {
     owned: counts.owned,
     total: set.total ?? counts.total,
   };
+}
+
+/**
+ * Reviewed supplements intentionally import a small, approved subset first.
+ * Keep those provisional set rows out of completion tracking until the local
+ * catalogue contains the set's complete, reviewed card count. Card search and
+ * direct catalogue lookup do not use this predicate and remain available.
+ */
+export function cardSetIsReadyForProgress(
+  set: { metadata?: unknown; total?: number | null },
+  importedCardCount: number,
+) {
+  const metadata = set.metadata;
+  const catalogueScope = metadata && typeof metadata === "object" && !Array.isArray(metadata)
+    ? (metadata as Record<string, unknown>).catalogueScope
+    : undefined;
+
+  if (catalogueScope !== "reviewed-supplement") {
+    return true;
+  }
+
+  const expectedTotal = set.total;
+
+  return Number.isInteger(expectedTotal) &&
+    (expectedTotal ?? 0) > 0 &&
+    Number.isFinite(importedCardCount) &&
+    importedCardCount >= (expectedTotal ?? 0);
 }
 
 function tcgdexProviderCode(providerIds: unknown) {

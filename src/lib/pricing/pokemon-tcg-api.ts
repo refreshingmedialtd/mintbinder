@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { ItemCondition, ItemType, type Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
+import { catalogueCollectorNumberSearchTerms } from "@/lib/catalogue/collector-number-search";
+import { mergeCardPrintingProviderUpdate } from "@/lib/pricing/card-printing-enrichment";
 import { preserveCardSetMetadataOnUpdate } from "@/lib/pricing/card-set-metadata";
 import { catalogueLanguageSearchAliases } from "@/lib/catalogue/languages";
 import { ExchangeRateConfigError, resolvePokemonPricingRates } from "@/lib/pricing/exchange-rates";
@@ -418,7 +420,10 @@ export async function syncPokemonTcgCards({
   for (const card of cards) {
     const setId = cardSetId(card.set.id);
     const cardId = cardPrintingId(card.id);
-    const cardData = pokemonCardPrintingData(card, setId);
+    const cardData = mergeCardPrintingProviderUpdate(
+      pokemonCardPrintingData(card, setId),
+      existingCardsById.get(cardId),
+    );
 
     setIds.add(setId);
 
@@ -776,6 +781,7 @@ function searchText(card: PokemonTcgCard) {
     card.name,
     card.set.name,
     card.number,
+    ...pokemonCollectorSearchTerms(card.number, card.set.printedTotal, card.set.total),
     card.rarity,
     card.supertype,
     ...(card.subtypes ?? []),
@@ -784,6 +790,14 @@ function searchText(card: PokemonTcgCard) {
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
+}
+
+export function pokemonCollectorSearchTerms(
+  number?: string,
+  printedTotal?: number,
+  total?: number,
+) {
+  return catalogueCollectorNumberSearchTerms(number, printedTotal, total);
 }
 
 function variantMetadata(card: PokemonTcgCard) {

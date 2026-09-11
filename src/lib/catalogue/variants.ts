@@ -94,7 +94,7 @@ export function buildCatalogueVariantOptions({
     }
   }
 
-  if (!legacyDefaultLabel && (!legacyEditionSet || !options.size)) {
+  if (!legacyDefaultLabel && !options.size) {
     for (const label of inferredStandardVariantLabels({ itemType, rarity, setName })) {
       const normalized = normalizeVariantLabel(label);
 
@@ -276,6 +276,27 @@ export function latestPricePointForCatalogueVariant(item: CatalogueItem, variant
 }
 
 /**
+ * Selects the catalogue headline from the first canonically ordered variant
+ * that has an exact price. This keeps a premium parallel printing (for
+ * example, a Pokemon Center stamp) from becoming the generic card value just
+ * because its snapshot is newer than the regular printing's snapshot.
+ */
+export function preferredCatalogueHeadlinePricePoint(
+  item: Pick<CatalogueItem, "rarity" | "set" | "type" | "variantOptions">,
+  priceHistory: PricePoint[],
+) {
+  const headlineVariant = item.variantOptions?.find(
+    (option) => option.valueMinor !== undefined,
+  );
+
+  return preferredLatestPricePoint(
+    headlineVariant
+      ? priceHistoryForCatalogueVariant(item, priceHistory, headlineVariant.label)
+      : priceHistory,
+  );
+}
+
+/**
  * Narrows an already identity-filtered price history to the selected catalogue
  * variant. Explicit variants fail closed: an unlabelled headline price is only
  * eligible for the generic legacy defaults (`Standard` and `Factory sealed`).
@@ -446,9 +467,42 @@ function variantLabelsFromMetadata(metadata: unknown) {
     labels.push(displayVariantLabel(source.finish));
   }
 
-  labels.push(...tcgdexVariantLabels(source));
+  const reviewedLabels = reviewedVariantLabels(source);
+
+  // A reviewed list is an authoritative correction for provider metadata that
+  // cannot express the commercial identity precisely (for example, a generic
+  // `set-logo` stamp that is sold as a named expansion stamp). Keep any
+  // source-backed price keys above, but do not also expose contradictory
+  // provider-derived variants.
+  labels.push(...(
+    reviewedLabels.length
+      ? reviewedLabels
+      : tcgdexVariantLabels(source)
+  ));
 
   return uniqueLabels(labels);
+}
+
+function reviewedVariantLabels(source: Record<string, unknown>) {
+  if (!Array.isArray(source.reviewedVariants)) {
+    return [];
+  }
+
+  return source.reviewedVariants
+    .map((variant) => {
+      if (typeof variant === "string") {
+        return variant.trim();
+      }
+
+      if (!variant || typeof variant !== "object" || Array.isArray(variant)) {
+        return "";
+      }
+
+      const label = (variant as Record<string, unknown>).label;
+
+      return typeof label === "string" ? label.trim() : "";
+    })
+    .filter(Boolean);
 }
 
 function tcgdexVariantLabels(source: Record<string, unknown>) {
@@ -485,15 +539,17 @@ function tcgdexVariantLabels(source: Record<string, unknown>) {
         continue;
       }
 
-      const type = (variant as Record<string, unknown>).type;
-      const size = (variant as Record<string, unknown>).size;
+      const detail = variant as Record<string, unknown>;
+      const label = tcgdexDetailedVariantLabel(detail);
 
-      if (typeof type === "string") {
-        finishLabels.push(tcgdexVariantLabel(type));
+      if (!label) {
+        continue;
       }
 
-      if (typeof size === "string" && size !== "standard") {
-        otherLabels.push(displayVariantLabel(size));
+      if (tcgdexDetailedVariantHasQualifier(detail)) {
+        otherLabels.push(label);
+      } else {
+        finishLabels.push(label);
       }
     }
   }
@@ -509,6 +565,87 @@ function tcgdexVariantLabels(source: Record<string, unknown>) {
   }
 
   return [...uniqueFinishes, ...otherLabels];
+}
+
+/**
+ * TCGdex describes parallel physical variants in `variants_detailed`. The
+ * type alone is not a complete identity: a regular holo and a Pokemon Center
+ * stamped holo deliberately share the same type. Preserve every explicit
+ * foil/stamp/size qualifier so one variant cannot inherit another's price.
+ */
+function tcgdexDetailedVariantLabel(
+  variant: Record<string, unknown>,
+) {
+  const type = typeof variant.type === "string" ? variant.type : undefined;
+  const size = typeof variant.size === "string" ? variant.size : undefined;
+  const foil = typeof variant.foil === "string" ? variant.foil : undefined;
+  const stamps = Array.isArray(variant.stamp)
+    ? variant.stamp.filter((value): value is string => typeof value === "string" && Boolean(value.trim()))
+    : [];
+  const finish = type ? tcgdexVariantLabel(type) : undefined;
+  const normalizedFoil = normalizeVariantLabel(foil);
+
+  if (normalizedFoil === "pokeball") {
+    return "Poke Ball Reverse Holofoil";
+  }
+
+  if (normalizedFoil === "masterball") {
+    return "Master Ball Reverse Holofoil";
+  }
+
+  const nonStandardSize = size && normalizeVariantLabel(size) !== "standard"
+    ? displayVariantLabel(size)
+    : undefined;
+  const stampLabels = stamps.map(tcgdexStampLabel);
+
+  if (stampLabels.length) {
+    return uniqueLabels([
+      nonStandardSize,
+      ...stampLabels,
+      foil ? displayVariantLabel(foil) : undefined,
+      finish,
+    ].filter((value): value is string => Boolean(value))).join(" ");
+  }
+
+  if (foil) {
+    return [
+      nonStandardSize,
+      displayVariantLabel(foil),
+      finish,
+    ].filter(Boolean).join(" ");
+  }
+
+  // Retain the established concise label for oversize cards while still
+  // treating size as an exact variant identity.
+  return nonStandardSize ?? finish;
+}
+
+function tcgdexDetailedVariantHasQualifier(variant: Record<string, unknown>) {
+  const size = typeof variant.size === "string" ? variant.size : undefined;
+
+  return Boolean(
+    (size && normalizeVariantLabel(size) !== "standard") ||
+    (typeof variant.foil === "string" && variant.foil.trim()) ||
+    (Array.isArray(variant.stamp) && variant.stamp.some(
+      (value) => typeof value === "string" && Boolean(value.trim()),
+    )),
+  );
+}
+
+function tcgdexStampLabel(value: string) {
+  const normalized = normalizeVariantLabel(value);
+
+  if (normalized === "pokemoncenter") {
+    return "Pokémon Center Stamp";
+  }
+
+  if (normalized === "setlogo") {
+    return "Set Logo Stamp";
+  }
+
+  const display = displayVariantLabel(value);
+
+  return normalizeVariantLabel(display).endsWith("stamp") ? display : `${display} Stamp`;
 }
 
 function tcgdexVariantLabel(value: string) {
@@ -643,10 +780,6 @@ function inferredSpecialVariantLabels({
       editionVariantLabel("1st Edition", finish),
       editionVariantLabel("Unlimited", finish),
     );
-  }
-
-  if (isPromoSet(setKey)) {
-    labels.push("Stamped promo");
   }
 
   return uniqueLabels(labels);
@@ -871,10 +1004,6 @@ function isWotcFirstEditionSet(setKey: string) {
 
 function isLegacyNoReverseSet(setKey: string) {
   return isBaseSet(setKey) || isWotcFirstEditionSet(setKey);
-}
-
-function isPromoSet(setKey: string) {
-  return setKey.includes("blackstarpromos") || setKey.includes("promo");
 }
 
 function providerIdValue(providerIds: unknown, key: string) {

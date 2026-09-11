@@ -5,6 +5,10 @@ cd "$(dirname "$0")/.."
 
 status=0
 
+# A small product-ID allowlist fills source gaps and preserves exact stamped
+# variants without importing TCGCSV's broad miscellaneous catalogue.
+npm run job:live-reviewed-card-catalogue || status=$?
+
 # Set discovery changes slowly and no longer shares the hourly pricing burst.
 npm run job:live-catalogue-discovery || status=$?
 

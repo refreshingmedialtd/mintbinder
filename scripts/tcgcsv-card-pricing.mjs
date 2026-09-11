@@ -55,6 +55,8 @@ const reviewedCardGroupProviderAliases = new Map([
   ["2782:mcdonalds25thanniversarypromos", ["mcd21"]],
   ["22873:sv01scarletvioletbaseset", ["sv1"]],
   ["23237:svscarletviolet151", ["sv3pt5"]],
+  ["23323:tradingcardgameclassic", ["cl"]],
+  ["24451:memegaevolutionpromo", ["mep"]],
 ]);
 
 // TCGplayer splits a small number of set subsets into separate groups while
@@ -81,6 +83,17 @@ const baseSetShadowlessGroupIdentity = "1663:basesetshadowless";
 const reviewedCardProductNumberAliases = new Map([
   ["88306", "103"],
   ["88307", "103"],
+]);
+
+// These parallel products belong to an existing card identity but represent
+// a physically distinct stamped finish. Keep the mapping tied to immutable
+// product IDs so a generic Holofoil observation can never overwrite or borrow
+// the stamped price.
+const reviewedCardProductVariantLabels = new Map([
+  ["648585", "Stellar Crown Stamp Holofoil"],
+  ["648587", "Stellar Crown Stamp Holofoil"],
+  ["668959", "White Flare Stamp Holofoil"],
+  ["685563", "Pokémon Center Stamp Holofoil"],
 ]);
 const {
   ambiguousProviderCodes: ambiguousReviewedProviderCodes,
@@ -394,6 +407,11 @@ export function matchTcgcsvCardProduct(product, cards) {
 export function tcgcsvCardVariantLabel(product, subTypeName, group) {
   const baseLabel = optionalString(subTypeName) ?? "Normal";
   const normalizedBaseLabel = normalizedVariantLabel(baseLabel);
+  const reviewedLabel = reviewedCardProductVariantLabels.get(String(product?.productId ?? "").trim());
+
+  if (reviewedLabel) {
+    return reviewedLabel;
+  }
 
   if (group && reviewedCardGroupIdentity(group) === baseSetShadowlessGroupIdentity) {
     if (normalizedBaseLabel === "unlimited") {
@@ -1056,7 +1074,8 @@ function setProviderId(set) {
       set.providerIds.tcgdex_zh_tw ??
       set.providerIds.tcgdex_zh_cn ??
       set.providerIds.tcgdex_ko ??
-      set.providerIds.tcgdex
+      set.providerIds.tcgdex ??
+      set.providerIds.tcgcsv_card_group_code
     );
   }
 

@@ -89,6 +89,19 @@ test("detects card products while excluding sealed products", () => {
   }), false);
 });
 
+test("uses reviewed product IDs for exact stamped finish identities", () => {
+  const cases = [
+    [648585, "Stellar Crown Stamp Holofoil"],
+    [648587, "Stellar Crown Stamp Holofoil"],
+    [668959, "White Flare Stamp Holofoil"],
+    [685563, "Pokémon Center Stamp Holofoil"],
+  ];
+
+  for (const [productId, expected] of cases) {
+    assert.equal(tcgcsvCardVariantLabel({ productId }, "Holofoil"), expected);
+  }
+});
+
 test("matches TCGCSV card products to local cards by number and name", () => {
   const cards = [
     { id: "card-1", name: "Lugia VSTAR", number: "139" },
@@ -527,6 +540,8 @@ const reviewedEnglishGroupMappings = [
   [1399, "Unleashed", "HS—Unleashed", "hgss2"],
   [2782, "McDonald's 25th Anniversary Promos", "McDonald's Collection 2021", "mcd21"],
   [1455, "Best of Promos", "Best of Game", "bp"],
+  [23323, "Trading Card Game Classic", "Trading Card Game Classic", "cl"],
+  [24451, "ME: Mega Evolution Promo", "MEP Black Star Promos", "mep"],
 ];
 
 for (const [groupId, groupName, setName, providerId] of reviewedEnglishGroupMappings) {
@@ -537,6 +552,17 @@ for (const [groupId, groupName, setName, providerId] of reviewedEnglishGroupMapp
     assert.deepEqual(matchTcgcsvCardGroupsToSets([group], [set]), [{ group, set }]);
   });
 }
+
+test("reads the reviewed Classic group code from catalogue provider metadata", () => {
+  const group = { groupId: 23323, name: "Trading Card Game Classic" };
+  const set = {
+    id: "classic-set",
+    name: "Trading Card Game Classic",
+    providerIds: { tcgcsv_card_group_code: "CL" },
+  };
+
+  assert.deepEqual(matchTcgcsvCardGroupsToSets([group], [set]), [{ group, set }]);
+});
 
 test("requires both parts of a reviewed TCGCSV group identity", () => {
   const sets = [

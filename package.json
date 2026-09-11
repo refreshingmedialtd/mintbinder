@@ -85,6 +85,7 @@
     "job:international-catalogue-batch": "node scripts/run-international-catalogue-batch.mjs",
     "job:live-international-catalogue-backfill": "node scripts/run-live-international-catalogue-backfill.mjs",
     "job:live-international-catalogue-refresh": "node scripts/run-live-international-catalogue-refresh.mjs",
+    "job:live-reviewed-card-catalogue": "node scripts/run-live-reviewed-card-catalogue-refresh.mjs",
     "job:production-bootstrap": "node scripts/bootstrap-production-catalogue.mjs",
     "job:production-set-bootstrap": "node scripts/bootstrap-pokemon-sets.mjs",
     "job:price-alert-fixture": "node scripts/price-alert-smoke-fixture.mjs",

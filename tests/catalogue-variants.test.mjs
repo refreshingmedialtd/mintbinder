@@ -10,6 +10,7 @@ import {
   catalogueVariantLabels,
   displayVariantLabel,
   pokemonTcgImageUrlFromProviderIds,
+  preferredCatalogueHeadlinePricePoint,
 } from "../src/lib/catalogue/variants.ts";
 import { catalogueVariantPriceRows } from "../src/lib/catalogue/variant-price-rows.ts";
 
@@ -53,6 +54,51 @@ test("builds catalogue variant options from prices and metadata", () => {
   assert.equal(options[1].valueMinor, 1200);
   assert.equal(options[1].confidence, "Weak");
   assert.equal(options[2].valueMinor, 800);
+});
+
+test("uses the regular canonically ordered printing for the card headline", () => {
+  const tyruntHistory = [
+    {
+      observedAt: "2026-09-11T12:00:00.000Z",
+      valueMinor: 191,
+      confidence: "Weak",
+      source: "tcgcsv-card",
+      variantLabel: "Holofoil",
+    },
+    {
+      observedAt: "2026-09-11T12:01:00.000Z",
+      valueMinor: 2202,
+      confidence: "Weak",
+      source: "tcgcsv-card",
+      variantLabel: "Pokémon Center Stamp Holofoil",
+    },
+  ];
+  const variantOptions = buildCatalogueVariantOptions({
+    itemType: "card",
+    priceHistory: tyruntHistory,
+    rarity: "Promo",
+    setName: "Mega Evolution Promo",
+    variantMetadata: {
+      reviewedVariants: ["Holofoil", "Pokémon Center Stamp Holofoil"],
+    },
+  });
+
+  assert.deepEqual(
+    variantOptions.map(({ label, valueMinor }) => ({ label, valueMinor })),
+    [
+      { label: "Holofoil", valueMinor: 191 },
+      { label: "Pokémon Center Stamp Holofoil", valueMinor: 2202 },
+    ],
+  );
+  assert.equal(
+    preferredCatalogueHeadlinePricePoint({
+      rarity: "Promo",
+      set: "Mega Evolution Promo",
+      type: "card",
+      variantOptions,
+    }, tyruntHistory)?.valueMinor,
+    191,
+  );
 });
 
 test("keeps existing custom variants in selector labels", () => {
@@ -717,6 +763,108 @@ test("builds catalogue variant options from TCGdex variant metadata", () => {
   assert.deepEqual(
     options.map((option) => option.label),
     ["Normal", "Holofoil", "Reverse Holofoil", "1st Edition", "Jumbo", "Promo Stamp"],
+  );
+});
+
+test("keeps TCGdex Pokemon Center stamped holos distinct from the regular holo", () => {
+  const options = buildCatalogueVariantOptions({
+    itemType: "card",
+    setName: "MEP Black Star Promos",
+    variantMetadata: {
+      variants: {
+        holo: true,
+      },
+      variantsDetailed: [
+        { size: "standard", type: "holo" },
+        { size: "standard", stamp: ["pokemon-center"], type: "holo" },
+      ],
+    },
+  });
+
+  assert.deepEqual(
+    options.map((option) => option.label),
+    ["Holofoil", "Pokémon Center Stamp Holofoil"],
+  );
+});
+
+test("preserves set-logo stamps, patterned reverse holos, and stamped jumbo identities", () => {
+  const whiteFlare = buildCatalogueVariantOptions({
+    itemType: "card",
+    setName: "White Flare",
+    variantMetadata: {
+      variants: {
+        holo: true,
+        reverse: true,
+      },
+      variantsDetailed: [
+        { size: "standard", type: "holo" },
+        { size: "standard", type: "reverse" },
+        { foil: "pokeball", size: "standard", type: "reverse" },
+        { foil: "masterball", size: "standard", type: "reverse" },
+        { size: "standard", stamp: ["set-logo"], type: "holo" },
+      ],
+    },
+  });
+  const stellarCrown = buildCatalogueVariantOptions({
+    itemType: "card",
+    setName: "Stellar Crown",
+    variantMetadata: {
+      variants: { holo: true },
+      variantsDetailed: [
+        { size: "standard", type: "holo" },
+        { size: "standard", stamp: ["set-logo"], type: "holo" },
+        { size: "jumbo", stamp: ["set-logo"], type: "holo" },
+      ],
+    },
+  });
+
+  assert.deepEqual(
+    whiteFlare.map((option) => option.label),
+    [
+      "Holofoil",
+      "Reverse Holofoil",
+      "Master Ball Reverse Holofoil",
+      "Poke Ball Reverse Holofoil",
+      "Set Logo Stamp Holofoil",
+    ],
+  );
+  assert.deepEqual(
+    stellarCrown.map((option) => option.label),
+    [
+      "Holofoil",
+      "Jumbo Set Logo Stamp Holofoil",
+      "Set Logo Stamp Holofoil",
+    ],
+  );
+});
+
+test("lets an explicit reviewed variant list replace ambiguous TCGdex detail labels", () => {
+  const options = buildCatalogueVariantOptions({
+    itemType: "card",
+    setName: "White Flare",
+    variantMetadata: {
+      reviewedVariants: [
+        { label: "Holofoil" },
+        { label: "Reverse Holofoil" },
+        { label: "White Flare Stamp Holofoil" },
+      ],
+      variants: {
+        holo: true,
+        reverse: true,
+      },
+      variantsDetailed: [
+        { size: "standard", stamp: ["set-logo"], type: "holo" },
+      ],
+    },
+  });
+
+  assert.deepEqual(
+    options.map((option) => option.label),
+    ["Holofoil", "Reverse Holofoil", "White Flare Stamp Holofoil"],
+  );
+  assert.equal(
+    options.some((option) => option.label === "Set Logo Stamp Holofoil"),
+    false,
   );
 });
 

@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
+import { catalogueCollectorNumberSearchTerms } from "@/lib/catalogue/collector-number-search";
+import { mergeCardPrintingProviderUpdate } from "@/lib/pricing/card-printing-enrichment";
 import { preserveCardSetMetadataOnUpdate } from "@/lib/pricing/card-set-metadata";
 import {
   catalogueDisplayNameForText,
@@ -46,7 +48,9 @@ type TcgdexCard = TcgdexCardBrief & {
   types?: string[];
   variants?: Record<string, boolean>;
   variants_detailed?: Array<{
+    foil?: string;
     size?: string;
+    stamp?: string[];
     type?: string;
     variantId?: string;
   }>;
@@ -72,6 +76,20 @@ export async function syncTcgdexCardPages({
   const briefs = await fetchTcgdexCardList(resolvedLanguage.tcgdexCode);
   const startIndex = (safePage - 1) * safePageSize;
   const requested = briefs.slice(startIndex, startIndex + safePageSize * safeMaxPages);
+  const existingCards = await prisma.cardPrinting.findMany({
+    select: {
+      id: true,
+      providerIds: true,
+      searchText: true,
+      variantMetadata: true,
+    },
+    where: {
+      id: {
+        in: requested.map((card) => cardPrintingId(resolvedLanguage.code, card.id)),
+      },
+    },
+  });
+  const existingCardsById = new Map(existingCards.map((card) => [card.id, card]));
   const setIds = new Set<string>();
   let cardsSkipped = 0;
   let cardsUpserted = 0;
@@ -123,42 +141,30 @@ export async function syncTcgdexCardPages({
       },
     });
 
+    const cardData = {
+      artist: card.illustrator,
+      cardSetId: setId,
+      imageLargeUrl: tcgdexImageUrl(card.image, "high"),
+      imageSmallUrl: tcgdexImageUrl(card.image, "low"),
+      language: resolvedLanguage.code,
+      legalities: card.legal ?? {},
+      name: card.name,
+      number: card.localId ?? "",
+      providerIds: providerIds(resolvedLanguage.code, card.id),
+      rarity: card.rarity,
+      region: resolvedLanguage.region,
+      searchText: searchText(card, resolvedLanguage.code),
+      subtypes: cardSubtypes(card),
+      supertype: card.category,
+      variantMetadata: variantMetadata(card, resolvedLanguage.code),
+    } satisfies Prisma.CardPrintingUncheckedCreateInput;
+
     await prisma.cardPrinting.upsert({
       where: { id: cardId },
-      update: {
-        artist: card.illustrator,
-        cardSetId: setId,
-        imageLargeUrl: tcgdexImageUrl(card.image, "high"),
-        imageSmallUrl: tcgdexImageUrl(card.image, "low"),
-        language: resolvedLanguage.code,
-        legalities: card.legal ?? {},
-        name: card.name,
-        number: card.localId ?? "",
-        providerIds: providerIds(resolvedLanguage.code, card.id),
-        rarity: card.rarity,
-        region: resolvedLanguage.region,
-        searchText: searchText(card, resolvedLanguage.code),
-        subtypes: cardSubtypes(card),
-        supertype: card.category,
-        variantMetadata: variantMetadata(card, resolvedLanguage.code),
-      },
+      update: mergeCardPrintingProviderUpdate(cardData, existingCardsById.get(cardId)),
       create: {
         id: cardId,
-        artist: card.illustrator,
-        cardSetId: setId,
-        imageLargeUrl: tcgdexImageUrl(card.image, "high"),
-        imageSmallUrl: tcgdexImageUrl(card.image, "low"),
-        language: resolvedLanguage.code,
-        legalities: card.legal ?? {},
-        name: card.name,
-        number: card.localId ?? "",
-        providerIds: providerIds(resolvedLanguage.code, card.id),
-        rarity: card.rarity,
-        region: resolvedLanguage.region,
-        searchText: searchText(card, resolvedLanguage.code),
-        subtypes: cardSubtypes(card),
-        supertype: card.category,
-        variantMetadata: variantMetadata(card, resolvedLanguage.code),
+        ...cardData,
       },
     });
 
@@ -271,7 +277,7 @@ function searchText(card: TcgdexCard, language: string) {
     catalogueDisplayNameForText(card.name),
     card.set?.name,
     catalogueDisplaySetForText(card.set?.name),
-    card.localId,
+    ...tcgdexCollectorNumberSearchTerms(card),
     card.rarity,
     card.category,
     card.stage,
@@ -303,9 +309,58 @@ function tcgdexVariantSearchTerms(card: TcgdexCard) {
     if (variant.size) {
       terms.push(variant.size);
     }
+
+    if (variant.foil) {
+      terms.push(variant.foil, tcgdexFoilSearchLabel(variant.foil));
+    }
+
+    for (const stamp of variant.stamp ?? []) {
+      terms.push(stamp, tcgdexStampSearchLabel(stamp));
+    }
   }
 
   return terms;
+}
+
+/**
+ * TCGdex stores only the local numerator on a card record. Index the set's
+ * official and total counts too so collector references such as `061/078`
+ * remain searchable after punctuation is tokenized into `061` and `078`.
+ */
+export function tcgdexCollectorNumberSearchTerms(card: TcgdexCard) {
+  return catalogueCollectorNumberSearchTerms(
+    card.localId,
+    card.set?.cardCount?.official,
+    card.set?.cardCount?.total,
+  );
+}
+
+function tcgdexFoilSearchLabel(value: string) {
+  const normalized = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+
+  if (normalized === "pokeball") {
+    return "Poke Ball Reverse Holofoil";
+  }
+
+  if (normalized === "masterball") {
+    return "Master Ball Reverse Holofoil";
+  }
+
+  return value;
+}
+
+function tcgdexStampSearchLabel(value: string) {
+  const normalized = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+
+  if (normalized === "pokemoncenter") {
+    return "Pokémon Center Stamp";
+  }
+
+  if (normalized === "setlogo") {
+    return "Set Logo Stamp";
+  }
+
+  return `${value} Stamp`;
 }
 
 function tcgdexImageUrl(value: string | undefined, size: "high" | "low") {
