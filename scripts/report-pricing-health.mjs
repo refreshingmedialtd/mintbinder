@@ -19,6 +19,7 @@ export function buildPricingHealthReport({
   sealedRotation,
   sealedSources = [],
   snapshotGrowth = {},
+  trackedPriceStreams = {},
 }, thresholds = {}) {
   const cardTraderExpected = thresholds.cardTraderExpected === undefined ||
     thresholds.cardTraderExpected === null ||
@@ -26,7 +27,7 @@ export function buildPricingHealthReport({
     ? booleanSetting(cardTraderConfigured, false)
     : booleanSetting(thresholds.cardTraderExpected, false);
   const settings = {
-    cardFreshDays: positiveNumber(thresholds.cardFreshDays, 7),
+    cardFreshDays: positiveNumber(thresholds.cardFreshDays, 2),
     cardTraderExpected,
     maxCardTraderAgeHours: positiveNumber(thresholds.maxCardTraderAgeHours, 72),
     maxPriceChartingGradedAgeHours: positiveNumber(thresholds.maxPriceChartingGradedAgeHours, 720),
@@ -56,7 +57,7 @@ export function buildPricingHealthReport({
     minSealedCoveragePercent: positiveNumber(thresholds.minSealedCoveragePercent, 80),
     minSealedFreshPricedPercent: positiveNumber(thresholds.minSealedFreshPricedPercent, 75),
     minSealedRotationPercent: positiveNumber(thresholds.minSealedRotationPercent, 80),
-    sealedFreshDays: positiveNumber(thresholds.sealedFreshDays, 30),
+    sealedFreshDays: positiveNumber(thresholds.sealedFreshDays, 2),
   };
   settings.priceChartingGradedExpected = thresholds.priceChartingGradedExpected === undefined ||
     thresholds.priceChartingGradedExpected === null ||
@@ -123,6 +124,19 @@ export function buildPricingHealthReport({
   });
   const problems = [];
   const limitations = [];
+  const tracked = {
+    targets: numberValue(trackedPriceStreams.targets),
+    priced: numberValue(trackedPriceStreams.priced),
+    fresh: numberValue(trackedPriceStreams.fresh),
+    stale: numberValue(trackedPriceStreams.stale),
+    oldestAgeHours: numberValue(trackedPriceStreams.oldestAgeHours),
+  };
+  if (tracked.stale > 0) {
+    problems.push(`${tracked.stale} exact owned/wishlisted price stream(s) exceed the 48-hour freshness ceiling; oldest is ${tracked.oldestAgeHours} hours old.`);
+  }
+  if (tracked.targets > tracked.priced) {
+    limitations.push(`${tracked.targets - tracked.priced} exact owned/wishlisted price stream(s) have no matching supported market observation; another finish's price is never substituted.`);
+  }
 
   for (const lane of normalizedCards.filter((row) => ["en", "ja"].includes(row.language))) {
     if (lane.priced > 0 && lane.freshPricedPercent < settings.minCardFreshPricedPercent) {
@@ -298,16 +312,17 @@ export function buildPricingHealthReport({
     sealedRotation7d: normalizedRotation,
     sealedSources: normalizedSources,
     snapshotGrowth: normalizedGrowth,
+    trackedPriceStreams: tracked,
     status: problems.length === 0 ? "healthy" : "degraded",
   };
 }
 
 export async function loadPricingHealthMetrics({ now = new Date(), prisma, thresholds = {} }) {
   const cardFreshSince = new Date(
-    now.getTime() - positiveNumber(thresholds.cardFreshDays, 7) * dayMs,
+    now.getTime() - positiveNumber(thresholds.cardFreshDays, 2) * dayMs,
   );
   const sealedFreshSince = new Date(
-    now.getTime() - positiveNumber(thresholds.sealedFreshDays, 30) * dayMs,
+    now.getTime() - positiveNumber(thresholds.sealedFreshDays, 2) * dayMs,
   );
   const rotationSince = new Date(now.getTime() - 7 * dayMs);
   const gradedFreshSince = new Date(
@@ -326,6 +341,7 @@ export async function loadPricingHealthMetrics({ now = new Date(), prisma, thres
     sealedSourceRows,
     snapshotGrowthRows,
     cardTraderConfigurationRows,
+    trackedPriceStreamRows,
     gradedPriceChartingRows,
     priceChartingGradedConfigurationRows,
   ] = await runSerialTasks([
@@ -491,7 +507,7 @@ export async function loadPricingHealthMetrics({ now = new Date(), prisma, thres
       SELECT
         COUNT(*)::int AS total,
         COUNT(*) FILTER (WHERE created_at >= ${rotationSince})::int AS "created7d",
-        COUNT(*) FILTER (WHERE created_at >= ${sealedFreshSince})::int AS "created30d",
+        COUNT(*) FILTER (WHERE created_at >= ${new Date(now.getTime() - 30 * dayMs)})::int AS "created30d",
         MIN(created_at) AS "oldestCreatedAt",
         pg_total_relation_size('price_snapshots'::regclass)::bigint AS "storageBytes"
       FROM price_snapshots
@@ -505,6 +521,38 @@ export async function loadPricingHealthMetrics({ now = new Date(), prisma, thres
       WHERE job_type = 'sealed_pricing_refresh'::job_run_type
       ORDER BY started_at DESC
       LIMIT 1
+    `,
+    () => prisma.$queryRaw`
+      WITH tracked_price_targets AS (
+        SELECT item_type, card_printing_id, sealed_product_id, language,
+          REGEXP_REPLACE(LOWER(COALESCE(variant_label, '')), '[^a-z0-9]+', '', 'g') AS variant_label
+        FROM collection_items
+        WHERE archived_at IS NULL AND sold_at IS NULL AND graded_company IS NULL
+        UNION
+        SELECT wi.item_type, wi.card_printing_id, wi.sealed_product_id, COALESCE(cp.language, 'en') AS language,
+          REGEXP_REPLACE(LOWER(COALESCE(wi.variant_label, '')), '[^a-z0-9]+', '', 'g') AS variant_label
+        FROM wishlist_items wi
+        LEFT JOIN card_printings cp ON cp.id = wi.card_printing_id
+      ), tracked_price_latest AS (
+        SELECT target.*, matched.observed_at
+        FROM tracked_price_targets target
+        LEFT JOIN LATERAL (
+          SELECT MAX(ps.observed_at) AS observed_at
+          FROM price_snapshots ps
+          WHERE ps.item_type = target.item_type AND ps.currency = 'GBP'
+            AND ps.graded_company IS NULL
+            AND (ps.language IS NULL OR ps.language = target.language)
+            AND (ps.card_printing_id = target.card_printing_id OR ps.sealed_product_id = target.sealed_product_id)
+            AND REGEXP_REPLACE(LOWER(COALESCE(ps.variant_label, '')), '[^a-z0-9]+', '', 'g') = target.variant_label
+            ${customerPriceSourceFilter}
+        ) matched ON TRUE
+        WHERE target.variant_label NOT IN ('', 'standard')
+      )
+      SELECT COUNT(*)::int AS targets, COUNT(observed_at)::int AS priced,
+        COUNT(*) FILTER (WHERE observed_at >= ${new Date(now.getTime() - 2 * dayMs)})::int AS fresh,
+        COUNT(*) FILTER (WHERE observed_at < ${new Date(now.getTime() - 2 * dayMs)})::int AS stale,
+        COALESCE(ROUND(EXTRACT(EPOCH FROM (${now}::timestamptz - MIN(observed_at))) / 3600), 0)::int AS "oldestAgeHours"
+      FROM tracked_price_latest
     `,
     () => prisma.$queryRaw`
       WITH targets AS (
@@ -584,6 +632,7 @@ export async function loadPricingHealthMetrics({ now = new Date(), prisma, thres
     sealedRotation: rotationRows[0] ?? {},
     sealedSources: sealedSourceRows,
     snapshotGrowth: snapshotGrowthRows[0] ?? {},
+    trackedPriceStreams: trackedPriceStreamRows[0] ?? {},
   };
 }
 
@@ -605,7 +654,7 @@ export function pricingHealthThresholdsFromEnv(env = process.env) {
   const priceChartingGradedEnabled = env.PRICECHARTING_GRADED_ENABLED?.trim();
 
   return {
-    cardFreshDays: env.PRICING_HEALTH_CARD_FRESH_DAYS,
+    cardFreshDays: Math.min(2, positiveNumber(env.PRICING_HEALTH_CARD_FRESH_DAYS, 2)),
     cardTraderExpected: explicitEnabled
       ? booleanSetting(explicitEnabled, Boolean(token))
       : token
@@ -633,7 +682,7 @@ export function pricingHealthThresholdsFromEnv(env = process.env) {
     minSealedFreshPricedPercent: env.PRICING_HEALTH_MIN_SEALED_FRESH_PERCENT,
     minSealedRotationPercent: env.PRICING_HEALTH_MIN_SEALED_ROTATION_PERCENT,
     minVariantFreshPricedPercent: env.PRICING_HEALTH_MIN_VARIANT_FRESH_PERCENT,
-    sealedFreshDays: env.PRICING_HEALTH_SEALED_FRESH_DAYS,
+    sealedFreshDays: Math.min(2, positiveNumber(env.PRICING_HEALTH_SEALED_FRESH_DAYS, 2)),
   };
 }
 

@@ -4,6 +4,7 @@ export type TcgcsvSealedImportOptions = {
   apiTimeoutMs?: number;
   fetchImpl?: typeof fetch;
   groupIds?: string[] | string;
+  excludeGroupIds?: string[] | string;
   groupLimit?: number;
   priceOnlyUnpriced?: boolean;
   productLimit?: number;
@@ -17,6 +18,7 @@ export type TcgcsvSealedImportSummary = {
   failedGroups: number;
   groupResults: Array<Record<string, unknown>>;
   groupsAvailable: number;
+  rotationGroupsAvailable: number;
   groupsDeferredKnownEmpty: number;
   groupsMatched: number;
   groupsProcessed: number;

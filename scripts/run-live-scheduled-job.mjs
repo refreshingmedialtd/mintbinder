@@ -44,6 +44,10 @@ export async function runLiveScheduledJob({
 
   const request = protectedJobRequest(kind, env);
 
+  if (["english-card-pricing", "japan-card-pricing", "sealed-pricing"].includes(kind)) {
+    return runCardPricingJobBatches({ baseUrl, env, fetchImpl, kind, request, secret });
+  }
+
   return requestJson({
     body: request.body,
     fetchImpl,
@@ -141,6 +145,77 @@ export function protectedJobRequest(kind, env = process.env) {
   }
 
   throw new Error(`Unsupported scheduled job "${kind}".`);
+}
+
+// The existing hourly cron remains unchanged. Size its work from the actual
+// catalogue, not a fixed two/one groups that takes several days to rotate.
+// One group per HTTP request bounds the live worker's memory and duration.
+async function runCardPricingJobBatches({ baseUrl, env, fetchImpl, kind, request, secret }) {
+  const rotationHours = Math.min(24, optionalPositiveInteger(env.TCGCSV_CARD_ROTATION_HOURS) ?? 20);
+  const maxBatches = Math.min(24, optionalPositiveInteger(env.TCGCSV_CARD_MAX_BATCHES_PER_RUN) ?? 24);
+  const headers = { authorization: `Bearer ${secret}`, "content-type": "application/json" };
+  const url = new URL(request.path, baseUrl);
+  const excluded = new Set();
+  const batches = [];
+  let target = Math.min(maxBatches, request.body.groupLimit ?? 1);
+  let rotationGroups = 0;
+
+  for (let index = 0; index < target; index += 1) {
+    const batch = await requestJson({
+      body: { ...request.body, excludeGroupIds: [...excluded], groupLimit: 1,
+        ...(kind === "sealed-pricing" ? { runSecondSource: index === 0 } : {}) },
+      fetchImpl, headers, method: "POST", url,
+    });
+    batches.push(batch);
+    const payload = batch.response ?? {};
+    rotationGroups = optionalPositiveInteger(payload.rotationGroupsAvailable) ?? rotationGroups;
+    if (index === 0 && !request.body.groupIds?.length && rotationGroups) {
+      target = Math.min(maxBatches, Math.max(target, Math.ceil(rotationGroups / rotationHours)));
+    }
+    const groupResults = Array.isArray(payload.groupResults) ? payload.groupResults : [];
+    const groupIds = Array.isArray(payload.processedGroupIds) ? payload.processedGroupIds
+      : groupResults.filter((result) => result.status === "succeeded").map((result) => result.groupId);
+    for (const id of groupIds) {
+      // A bounded sealed-product page can leave a cursor to continue this run.
+      if (!groupResults.some((result) => String(result.groupId) === String(id) && result.complete === false)) {
+        excluded.add(String(id));
+      }
+    }
+    // Old deployments do not return IDs; never keep requesting the same group.
+    if (!batch.ok || !groupIds.length || !(payload.groupsProcessed > 0)) break;
+  }
+
+  const responses = batches.map((batch) => batch.response ?? {});
+  const capacityWarning = rotationGroups > maxBatches * rotationHours
+    ? `Daily card rotation needs ${Math.ceil(rotationGroups / rotationHours)} groups per hour, above the configured safety cap of ${maxBatches}.`
+    : null;
+  const degradation = [...new Set([
+    ...batches.map((batch) => batch.degradation).filter(Boolean), capacityWarning,
+  ].filter(Boolean))].join(" ") || null;
+  return {
+    body: request.body,
+    degradation,
+    ok: batches.every((batch) => batch.ok) && !degradation,
+    status: batches.at(-1)?.status ?? 200,
+    url: url.toString(),
+    response: {
+      batched: true, batchCount: batches.length, kind,
+      targetRotationHours: rotationHours, rotationGroupsAvailable: rotationGroups,
+      processedGroupIds: [...excluded],
+      groupsProcessed: sumResponses(responses, "groupsProcessed"),
+      pricingSnapshotsCreated: sumResponses(responses, "pricingSnapshotsCreated"),
+      pricingSnapshotsUpdated: sumResponses(responses, "pricingSnapshotsUpdated"),
+      cardImagesUpdated: sumResponses(responses, "cardImagesUpdated"),
+      cardProductsMatched: sumResponses(responses, "cardProductsMatched"),
+      warning: degradation,
+      batches: responses.map((payload) => ({
+        jobRunId: payload.jobRun?.id,
+        processedGroupIds: payload.processedGroupIds,
+        groupsProcessed: payload.groupsProcessed,
+        pricingSnapshotsCreated: payload.pricingSnapshotsCreated,
+      })),
+    },
+  };
 }
 
 async function runPricingJobBatches({ baseUrl, env, fetchImpl, secret }) {
@@ -704,7 +779,7 @@ export function scheduledResponseDegradation(payload) {
     const output = (optionalPositiveInteger(secondSource.pricingSnapshotsCreated) ?? 0) +
       (optionalPositiveInteger(secondSource.pricingSnapshotsUpdated) ?? 0);
 
-    if (status && !["succeeded", "not_configured"].includes(status)) {
+    if (status && !["succeeded", "not_configured", "not_due"].includes(status)) {
       reasons.push(`${provider} reported ${status}.`);
     } else if (
       status === "succeeded" &&

@@ -18,10 +18,12 @@ export const runtime = "nodejs";
 
 type SealedPricingBody = {
   groupIds?: string[] | string;
+  excludeGroupIds?: string[] | string;
   groupLimit?: number | string;
   priceOnlyUnpriced?: boolean;
   productLimit?: number | string;
   scheduled?: boolean;
+  runSecondSource?: boolean;
   usdToGbpRate?: number | string;
   waitMs?: number | string;
   writePrices?: boolean;
@@ -37,6 +39,7 @@ export async function POST(request: Request) {
     const { jobRun, result } = await runTrackedJob({
       input: {
         ...input,
+        runSecondSource: body.runSecondSource !== false,
         scheduled: body.scheduled === true,
         secondSource: {
           enabled: cardTraderOptions.enabled,
@@ -56,13 +59,13 @@ export async function POST(request: Request) {
           prisma,
         });
 
-        if (!cardTraderOptions.enabled) {
+        if (!cardTraderOptions.enabled || body.runSecondSource === false) {
           return {
             ...primary,
             primarySource: "tcgcsv",
             secondSource: {
               provider: "cardtrader-sealed",
-              status: "not_configured",
+              status: cardTraderOptions.enabled ? "not_due" : "not_configured",
             },
           };
         }
@@ -158,6 +161,7 @@ function mergeSealedPricingResults(
 async function sealedPricingInput(body: SealedPricingBody): Promise<TcgcsvSealedImportOptions> {
   const input: TcgcsvSealedImportOptions = {};
   const groupIds = optionalGroupIds(body.groupIds);
+  const excludeGroupIds = optionalGroupIds(body.excludeGroupIds);
   const groupLimit = optionalPositiveInteger(body.groupLimit);
   const productLimit = optionalPositiveInteger(body.productLimit);
   const usdToGbpRate = optionalRate(body.usdToGbpRate);
@@ -165,6 +169,10 @@ async function sealedPricingInput(body: SealedPricingBody): Promise<TcgcsvSealed
 
   if (groupIds?.length) {
     input.groupIds = groupIds;
+  }
+
+  if (excludeGroupIds?.length) {
+    input.excludeGroupIds = excludeGroupIds;
   }
 
   if (groupLimit !== undefined) {

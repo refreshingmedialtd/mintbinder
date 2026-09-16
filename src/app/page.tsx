@@ -92,12 +92,14 @@ import {
 } from "@/lib/pricing/price-history-series";
 import {
   effectivePriceConfidence,
+  priceConfidenceExplanation,
   preferredLatestPricePoint,
   priceFreshnessStatus,
   priceMarketForSource,
   priceMarketRole,
   priceSourceLabel,
 } from "@/lib/pricing/market-context";
+import { closeOtherPriceHelp, positionPriceHelp, PRICE_HELP_GROUP } from "@/lib/pricing/price-help-disclosure";
 import { buildInsuranceReportHtml } from "@/lib/reports/insurance";
 import {
   appendBinderEntriesToBlankSlots,
@@ -3687,6 +3689,28 @@ function CollectionScreen({
   navigate,
 }: ScreenContext) {
   const [filtersOpen, setFiltersOpen] = useState(false);
+  useEffect(() => {
+    const dismissOutside = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element) || !target.closest(`details[name="${PRICE_HELP_GROUP}"]`)) {
+        closeOtherPriceHelp(document);
+      }
+    };
+    const dismissEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeOtherPriceHelp(document);
+    };
+    const dismissMoved = () => closeOtherPriceHelp(document);
+    document.addEventListener("pointerdown", dismissOutside);
+    document.addEventListener("keydown", dismissEscape);
+    window.addEventListener("resize", dismissMoved);
+    window.addEventListener("scroll", dismissMoved, { passive: true });
+    return () => {
+      document.removeEventListener("pointerdown", dismissOutside);
+      document.removeEventListener("keydown", dismissEscape);
+      window.removeEventListener("resize", dismissMoved);
+      window.removeEventListener("scroll", dismissMoved);
+    };
+  }, []);
   const filters: Array<[ScreenContext["appState"]["collectionFilter"], string]> = [
     ["all", "All"],
     ["card", "Cards"],
@@ -9921,9 +9945,17 @@ function OwnedItemCard({
           <div className="collection-lot-price">
             <strong>{formatValuation(ownedValue)}</strong>
             <details
+              name={PRICE_HELP_GROUP}
               className="market-help collection-price-help"
               onClick={(event) => event.stopPropagation()}
-              onKeyDown={(event) => event.stopPropagation()}
+              onToggle={(event) => {
+                if (event.currentTarget.open) closeOtherPriceHelp(document, event.currentTarget);
+                if (event.currentTarget.open) positionPriceHelp(event.currentTarget);
+              }}
+              onKeyDown={(event) => {
+                event.stopPropagation();
+                if (event.key === "Escape") event.currentTarget.open = false;
+              }}
             >
               <summary aria-label={`Price confidence for ${catalogueItemTitle(catalogueItem)}`}>?</summary>
               <span className="market-help-popover">
@@ -11112,7 +11144,7 @@ function MarketConfidencePopover({
   return (
     <span className="market-help-content">
       <span className="market-help-heading">
-        Market confidence
+        UK-market confidence
         <strong className={marketConfidenceBadgeClass(confidence)}>{confidence}</strong>
       </span>
       <span className="market-help-row">
@@ -11131,7 +11163,7 @@ function MarketConfidencePopover({
         <span>Freshness</span>
         <strong>{marketPoint ? priceFreshnessStatus(marketPoint) : item.priceStatus ?? "Unknown"}</strong>
       </span>
-      <span>{marketConfidenceReason(confidence)}</span>
+      <span>{marketPoint ? priceConfidenceExplanation(marketPoint) : marketConfidenceReason(confidence)}</span>
     </span>
   );
 }

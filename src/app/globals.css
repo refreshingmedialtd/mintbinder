@@ -2479,6 +2479,9 @@ h3 {
   right: 0;
   bottom: calc(100% + 9px);
   white-space: normal;
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  z-index: 30;
 }
 
 .collection-lot-set {
@@ -4473,6 +4476,7 @@ h3 {
 }
 
 .market-help-heading {
+  grid-template-columns: minmax(0, 1fr) auto;
   color: var(--ink);
   font-weight: 900;
 }

@@ -8,6 +8,7 @@ import { booleanSetting, positiveInteger } from "./catalogue-batch-options.mjs";
 import { fetchJsonWithRetry } from "./provider-fetch.mjs";
 import {
   extendedDataValue,
+  deterministicUuid,
   isSealedProduct,
   matchTcgcsvGroupsToSets,
   tcgcsvPokemonJapanCategoryId,
@@ -154,6 +155,7 @@ export async function syncTcgcsvCardPrices(options = {}) {
   };
   const categoryId = positiveInteger(options.categoryId, tcgcsvPokemonCategoryId);
   const groupIds = idSet(options.groupIds);
+  const excludedGroupIds = idSet(options.excludeGroupIds);
   const groupLimit = positiveInteger(options.groupLimit, Number.POSITIVE_INFINITY);
   const language = normalizedLanguage(options.language ?? languageForCategory(categoryId));
   const minUnpricedCards = positiveInteger(options.minUnpricedCards, 1);
@@ -215,6 +217,7 @@ export async function syncTcgcsvCardPrices(options = {}) {
     }, new Map());
     const availableMatches = matchedGroups
       .filter(({ group }) => groupIds.size === 0 || groupIds.has(String(group.groupId)))
+      .filter(({ group }) => !excludedGroupIds.has(String(group.groupId)))
       .filter(({ set }) => !onlyUnpricedGroups || unpricedCardCount(set) >= minUnpricedCards)
       .sort((a, b) => compareCardGroupRefreshPriority(a.set, b.set, {
         leftGroupId: a.group.groupId,
@@ -235,12 +238,16 @@ export async function syncTcgcsvCardPrices(options = {}) {
       groupsAvailable: availableMatches.length,
       groupsMatched: matches.length,
       groupsProcessed: 0,
+      processedGroupIds: [],
+      rotationGroupsAvailable: matchedGroups.filter(({ group }) =>
+        groupIds.size === 0 || groupIds.has(String(group.groupId))).length,
       identitySnapshotsRelabelled: 0,
       language,
       minUnpricedCards,
       onlyUnpricedGroups,
       priceOnlyUnpriced,
       pricingSnapshotsCreated: 0,
+      pricingSnapshotsUpdated: 0,
       productsFetched: 0,
       sampleUnmatchedProducts: [],
       sampleIncompleteGroups: [],
@@ -272,8 +279,10 @@ export async function syncTcgcsvCardPrices(options = {}) {
       summary.catalogueCardsExpected += groupSummary.catalogueCardsExpected;
       summary.catalogueIncompleteGroups += groupSummary.catalogueIncomplete ? 1 : 0;
       summary.groupsProcessed += 1;
+      summary.processedGroupIds.push(String(match.group.groupId));
       summary.identitySnapshotsRelabelled += groupSummary.identitySnapshotsRelabelled;
       summary.pricingSnapshotsCreated += groupSummary.pricingSnapshotsCreated;
+      summary.pricingSnapshotsUpdated += groupSummary.pricingSnapshotsUpdated;
       summary.productsFetched += groupSummary.productsFetched;
       summary.sampleUnmatchedProducts.push(...groupSummary.sampleUnmatchedProducts);
       summary.sampleUnmatchedProducts = summary.sampleUnmatchedProducts.slice(0, 10);
@@ -560,6 +569,7 @@ async function importCardGroup({
     catalogueIncomplete: false,
     identitySnapshotsRelabelled: 0,
     pricingSnapshotsCreated: 0,
+    pricingSnapshotsUpdated: 0,
     productsFetched: productsResponse.results?.length ?? 0,
     sampleUnmatchedProducts: [],
   };
@@ -653,48 +663,66 @@ async function importCardGroup({
         continue;
       }
 
-      await prisma.priceSnapshot.create({
-        data: {
-          cardPrintingId: card.id,
-          condition: ItemCondition.NEAR_MINT,
-          confidenceScore: price.confidenceScore,
-          currency: "GBP",
-          itemType: ItemType.CARD,
+      const data = {
+        cardPrintingId: card.id,
+        condition: ItemCondition.NEAR_MINT,
+        confidenceScore: price.confidenceScore,
+        currency: "GBP",
+        itemType: ItemType.CARD,
+        language,
+        metadata: {
+          categoryId,
+          conversionRate: usdToGbp,
+          groupId: group.groupId,
+          groupName: group.name,
           language,
-          metadata: {
-            categoryId,
-            conversionRate: usdToGbp,
-            groupId: group.groupId,
-            groupName: group.name,
-            language,
-            originalCurrency: "USD",
-            originalPrice: price.usd,
-            priceSource: "TCGCSV TCGplayer market",
-            baseVariantLabel: tcgcsvCardVariantLabel(product, price.subTypeName, group),
-            subTypeName: price.subTypeName,
-            tcgplayerUrl: product.url,
-          },
-          observedAt: new Date(),
-          priceMinor: Math.round(price.usd * usdToGbp * 100),
-          source,
-          sourceRef: String(product.productId),
-          variantLabel,
+          originalCurrency: "USD",
+          originalPrice: price.usd,
+          priceSource: "TCGCSV TCGplayer market",
+          baseVariantLabel: tcgcsvCardVariantLabel(product, price.subTypeName, group),
+          subTypeName: price.subTypeName,
+          tcgplayerUrl: product.url,
         },
-      });
-      summary.pricingSnapshotsCreated += 1;
+        observedAt: new Date(),
+        priceMinor: Math.round(price.usd * usdToGbp * 100),
+        source,
+        sourceRef: String(product.productId),
+        variantLabel,
+      };
+      const outcome = await writeDailyTcgcsvCardSnapshot(prisma, data);
+      summary[outcome === "created" ? "pricingSnapshotsCreated" : "pricingSnapshotsUpdated"] += 1;
     }
   }
 
   await recordTcgcsvCardPricingAttempt(prisma, {
     attemptedAt: new Date(),
     groupId: group.groupId,
-    pricingSnapshotsCreated: summary.pricingSnapshotsCreated,
+    pricingSnapshotsCreated: summary.pricingSnapshotsCreated + summary.pricingSnapshotsUpdated,
     productsFetched: summary.productsFetched,
     setId: set.id,
     source,
   });
 
   return summary;
+}
+
+export async function writeDailyTcgcsvCardSnapshot(prisma, data) {
+  // Store the latest observed value per UTC day and exact provider identity.
+  // Extra cron runs do not grow duplicate daily points or blend other finishes.
+  const id = deterministicUuid(JSON.stringify([
+    "tcgcsv-daily-card-price", data.observedAt.toISOString().slice(0, 10),
+    data.itemType, data.cardPrintingId, data.source, data.sourceRef,
+    data.condition, data.language, data.variantLabel, data.currency,
+  ]));
+  try {
+    await prisma.priceSnapshot.create({ data: { ...data, id } });
+    return "created";
+  } catch (error) {
+    if (error?.code !== "P2002") throw error;
+    // Update only the deterministic ID. Never overwrite older random-ID history.
+    await prisma.priceSnapshot.update({ where: { id }, data });
+    return "updated";
+  }
 }
 
 async function recordTcgcsvCardPricingAttempt(prisma, {

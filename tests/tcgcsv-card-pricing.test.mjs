@@ -1,5 +1,32 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { writeDailyTcgcsvCardSnapshot } from "../scripts/tcgcsv-card-pricing.mjs";
+
+test("daily writes update only the same day and full exact provider identity", async () => {
+  const rows = new Map();
+  const prisma = { priceSnapshot: {
+    create: async ({ data }) => {
+      if (rows.has(data.id)) throw Object.assign(new Error("Duplicate"), { code: "P2002" });
+      rows.set(data.id, data);
+    },
+    update: async ({ where, data }) => rows.set(where.id, { ...data, id: where.id }),
+  } };
+  const data = { observedAt: new Date("2026-09-16T10:00:00Z"), cardPrintingId: "card-1",
+    itemType: "CARD", source: "tcgcsv-card", sourceRef: "123", condition: "NEAR_MINT",
+    language: "en", variantLabel: "Holofoil", currency: "GBP", priceMinor: 100 };
+  assert.equal(await writeDailyTcgcsvCardSnapshot(prisma, data), "created");
+  assert.equal(await writeDailyTcgcsvCardSnapshot(prisma, { ...data, priceMinor: 120 }), "updated");
+  assert.equal(rows.size, 1);
+  assert.equal([...rows.values()][0].priceMinor, 120);
+  for (const extra of [{ sourceRef: "456" }, { variantLabel: "Reverse Holofoil" },
+    { language: "ja" }, { observedAt: new Date("2026-09-17T10:00:00Z") }]) {
+    assert.equal(await writeDailyTcgcsvCardSnapshot(prisma, { ...data, ...extra }), "created");
+  }
+  assert.equal(rows.size, 5);
+  await assert.rejects(writeDailyTcgcsvCardSnapshot({ priceSnapshot: {
+    create: async () => { throw new Error("Database offline"); },
+  } }, data), /Database offline/);
+});
 import {
   cardPricingOptionsFromEnv,
   compareCardGroupRefreshPriority,
@@ -377,6 +404,14 @@ test("imports exact 1st Edition and Shadowless Base Set price streams", async ()
   });
 
   assert.equal(summary.groupsMatched, 1);
+  assert.deepEqual(summary.processedGroupIds, ["1663"]);
+  assert.equal(summary.rotationGroupsAvailable, 1);
+  const excluded = await syncTcgcsvCardPrices({
+    fetchImpl, groupIds: ["1663"], excludeGroupIds: ["1663"],
+    prisma, usdToGbpRate: 0.8, waitMs: 0,
+  });
+  assert.equal(excluded.groupsProcessed, 0);
+  assert.equal(excluded.rotationGroupsAvailable, 1);
   assert.equal(summary.cardProductsMatched, 1);
   assert.equal(summary.pricingSnapshotsCreated, 2);
   assert.deepEqual(

@@ -3,7 +3,44 @@ import test from "node:test";
 import {
   buildPricingHealthReport,
   loadPricingHealthMetrics,
+  pricingHealthThresholdsFromEnv,
 } from "../scripts/report-pricing-health.mjs";
+
+test("owned and wishlisted exact streams cannot hide behind aggregate freshness", () => {
+  const report = buildPricingHealthReport({
+    cardLanguages: [], collisionStreams: 0,
+    sealed: {}, sealedRotation: {},
+    trackedPriceStreams: { targets: 103, priced: 102, fresh: 101, stale: 1, oldestAgeHours: 144 },
+  });
+  assert.equal(report.ok, false);
+  assert.match(report.problems.join(" "), /1 exact owned\/wishlisted.*144 hours/);
+  assert.match(report.limitations.join(" "), /1 exact owned\/wishlisted.*no matching/);
+  const settings = pricingHealthThresholdsFromEnv({ PRICING_HEALTH_CARD_FRESH_DAYS: "7", PRICING_HEALTH_SEALED_FRESH_DAYS: "30" });
+  assert.equal(settings.cardFreshDays, 2);
+  assert.equal(settings.sealedFreshDays, 2);
+});
+
+test("tracked-stream SQL matches the exact finish and keeps growth windows independent", async () => {
+  const queries = [];
+  const now = new Date("2026-09-16T12:00:00Z");
+  const metrics = await loadPricingHealthMetrics({ now, prisma: {
+    $queryRaw: async (strings, ...values) => {
+      const sql = strings.join("?");
+      queries.push({ sql, values });
+      if (sql.includes("tracked_price_latest")) return [{ targets: 3, priced: 2, fresh: 1, stale: 1, oldestAgeHours: 144 }];
+      if (sql.includes("SELECT true AS configured")) return [{ configured: true }];
+      return [];
+    },
+  } });
+  assert.equal(metrics.trackedPriceStreams.stale, 1);
+  assert.equal(metrics.priceChartingGradedConfigured, true);
+  const tracked = queries.find(({ sql }) => sql.includes("tracked_price_latest"));
+  assert.match(tracked.sql, /LEFT JOIN card_printings/);
+  assert.match(tracked.sql, /= target.variant_label/);
+  assert.match(tracked.sql, /archived_at IS NULL AND sold_at IS NULL/);
+  const growth = queries.find(({ sql }) => sql.includes('AS "created30d"'));
+  assert(growth.values.some((value) => value instanceof Date && value.toISOString() === "2026-08-17T12:00:00.000Z"));
+});
 
 test("reports healthy regular card and sealed pricing rotation", () => {
   const report = buildPricingHealthReport({

@@ -13,6 +13,8 @@ EXCHANGE_RATES_PROVIDER="frankfurter"
 EXCHANGE_RATES_AUTO="true"
 EXCHANGE_RATES_ALLOW_ENV_FALLBACK="true"
 TCGCSV_JAPAN_CARD_GROUP_LIMIT="1"
+TCGCSV_CARD_ROTATION_HOURS="20"
+TCGCSV_CARD_MAX_BATCHES_PER_RUN="24"
 TCGCSV_JAPAN_CARD_SOURCE="tcgcsv-japan-card"
 TCGCSV_JAPAN_CARD_ONLY_UNPRICED_GROUPS="false"
 TCGCSV_JAPAN_CARD_PRICE_ONLY_UNPRICED="false"
@@ -65,7 +67,11 @@ operator/address/support/privacy values and review flags, and also scans the
 legal page source for unresolved draft/pre-launch wording. Environment flags do
 not override draft copy; both must be complete.
 
-The deployed English pricing wrapper refreshes two oldest-priced TCGCSV English groups serially per hourly run. Its timeout-safe defaults are built into the live helper (`groupLimit=2`, `priceOnlyUnpriced=false`, `writePrices=true`), keeping the mapped rotation comfortably inside the seven-day freshness window without requiring another scheduled task.
+The hourly English, Japanese and sealed live helpers size their work from the number of mapped, eligible provider groups. The default target is a 20-hour full rotation, with one group per sequential HTTP request and a maximum of 24 requests per run. At the September 2026 catalogue size this means nine English, five Japanese and approximately eight sealed requests per hour. Existing `*_GROUP_LIMIT` values are minimum hourly work budgets, not the daily-rotation capacity. Explicit `*_GROUP_IDS` recovery filters bypass automatic sizing. No additional 20i cron entry is needed. Completed groups are excluded from later requests in the same run; partial sealed-product cursors continue in bounded pages. CardTrader runs only on the first sealed request, preserving its existing API request budget and discovery/refresh safeguards.
+
+The target is daily refresh, not a guarantee that an unavailable provider or unsupported finish can supply a price. Customer-facing observations become stale after 48 hours for every value band. Pricing-health defaults use the same two-day window, and legacy environment values of seven/thirty days are capped at two days. The monitor additionally flags **any** overdue exact raw owned/wishlisted stream; it matches the saved finish and language rather than borrowing another finish's timestamp. Missing exact observations are reported separately. TCGCSV card writes retain the latest observation per UTC day and full provider identity, updating the same daily row on extra runs without deleting history. Storage-growth ceilings remain enabled: review actual database growth before increasing catalogue size or request caps.
+
+`Weak` is UK-market confidence, not a claim that every provider payload is bad. Current converted TCGplayer US references remain weak UK evidence; repeated imports, exchange-rate conversion, or two integrations of the same TCGplayer market are not independent UK corroboration. Stronger confidence requires licensed, recent UK comparable-sales evidence matched to product, finish, condition, language and grade. European trends and seller asks have separate limitations. Never change provider observation dates merely because an old payload was fetched again.
 
 Pricing jobs fetch fresh GBP exchange rates from Frankfurter by default. Keep `POKEMON_TCG_USD_TO_GBP_RATE`, `POKEMON_TCG_EUR_TO_GBP_RATE`, and `TCGCSV_USD_TO_GBP_RATE` only as optional fallback values in case the exchange-rate provider is temporarily unavailable. Set `EXCHANGE_RATES_PROVIDER="manual"` only if you deliberately want to disable automatic exchange rates.
 

@@ -15,6 +15,7 @@ export const runtime = "nodejs";
 type InternationalCardPricingBody = {
   categoryId?: number | string;
   groupIds?: string[] | string;
+  excludeGroupIds?: string[] | string;
   groupLimit?: number | string;
   language?: string;
   minUnpricedCards?: number | string;
@@ -65,6 +66,7 @@ async function internationalCardPricingInput(
   const input: TcgcsvCardPricingOptions = {};
   const categoryId = optionalPositiveInteger(body.categoryId);
   const groupIds = optionalGroupIds(body.groupIds);
+  const excludeGroupIds = optionalGroupIds(body.excludeGroupIds);
   const groupLimit = optionalPositiveInteger(body.groupLimit);
   const minUnpricedCards = optionalPositiveInteger(body.minUnpricedCards);
   const usdToGbpRate = optionalRate(body.usdToGbpRate);
@@ -78,6 +80,10 @@ async function internationalCardPricingInput(
 
   if (groupIds?.length) {
     input.groupIds = groupIds;
+  }
+
+  if (excludeGroupIds?.length) {
+    input.excludeGroupIds = excludeGroupIds;
   }
 
   if (groupLimit !== undefined) {

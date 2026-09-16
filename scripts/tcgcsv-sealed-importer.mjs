@@ -41,6 +41,7 @@ export async function syncTcgcsvSealedProducts(options = {}) {
     timeoutMs: positiveInteger(options.apiTimeoutMs, 10_000),
   };
   const groupIds = idSet(options.groupIds);
+  const excludedGroupIds = idSet(options.excludeGroupIds);
   const groupLimit = positiveInteger(options.groupLimit, Number.POSITIVE_INFINITY);
   const priceOnlyUnpriced = options.priceOnlyUnpriced ?? true;
   const productLimit = positiveInteger(options.productLimit, Number.POSITIVE_INFINITY);
@@ -88,11 +89,12 @@ export async function syncTcgcsvSealedProducts(options = {}) {
         groupIds.size > 0 || !sealedPricingEmptyInFuture(set.metadata)
       ),
     );
-    const matches = availableMatches.slice(0, groupLimit);
+    const matches = availableMatches.filter(({ group }) => !excludedGroupIds.has(String(group.groupId))).slice(0, groupLimit);
     const summary = {
       failedGroups: 0,
       groupResults: [],
       groupsAvailable: availableMatches.length,
+      rotationGroupsAvailable: availableMatches.length,
       groupsDeferredKnownEmpty: deferredKnownEmptyGroups.length,
       groupsMatched: matches.length,
       groupsProcessed: 0,

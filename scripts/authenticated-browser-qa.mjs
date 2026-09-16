@@ -551,6 +551,28 @@ try {
     assert.match(sealedCollectionItemId ?? "", /^[0-9a-f-]{36}$/i, "Sealed collection item did not have a UUID.");
   });
 
+  await step("Verify exclusive, dismissible collection price help", async () => {
+    await clickDesktopNav(page, "Collection");
+    await page.getByRole("heading", { name: "Collection", exact: true }).waitFor();
+    await page.getByRole("button", { name: "Grid view", exact: true }).click();
+    const boxes = page.locator('.collection-grid details[name="collection-price-confidence"]');
+    assert.equal(await boxes.count(), 3);
+    await boxes.nth(0).locator("summary").click();
+    await boxes.nth(0).locator(".market-help-popover").waitFor({ state: "visible" });
+    await boxes.nth(1).locator("summary").click();
+    await boxes.nth(0).locator(".market-help-popover").waitFor({ state: "hidden" });
+    await boxes.nth(1).locator(".market-help-popover").waitFor({ state: "visible" });
+    assert.equal(await page.locator('details[name="collection-price-confidence"][open]').count(), 1);
+    const popup = await boxes.nth(1).locator(".market-help-popover").boundingBox();
+    assert(popup && popup.x >= 0 && popup.y >= 0 && popup.x + popup.width <= 1440 && popup.y + popup.height <= 1000);
+    await page.keyboard.press("Escape");
+    await boxes.nth(1).locator(".market-help-popover").waitFor({ state: "hidden" });
+    await boxes.nth(2).locator("summary").click();
+    await boxes.nth(2).locator(".market-help-popover").waitFor({ state: "visible" });
+    await page.getByRole("heading", { name: "Collection", exact: true }).click();
+    await boxes.nth(2).locator(".market-help-popover").waitFor({ state: "hidden" });
+  });
+
   await step("Verify the authenticated mobile navigation", async () => {
     const storageState = await context.storageState();
     const mobile = await browser.newContext({

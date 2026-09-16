@@ -395,6 +395,99 @@ test("live English TCGCSV pricing defaults to two history-building groups", () =
   });
 });
 
+for (const [job, groups, expected] of [
+  ["english-card-pricing", 179, 9],
+  ["japan-card-pricing", 86, 5],
+  ["sealed-pricing", 153, 8],
+]) {
+  test(`${job} automatically fits the catalogue into a daily, bounded rotation`, async () => {
+    const calls = [];
+    const result = await runLiveScheduledJob({
+      job, env: { JOB_SECRET: "secret", SCHEDULED_JOB_APP_URL: "https://mintbinder.co.uk" },
+      fetchImpl: async (_url, init) => {
+        const body = JSON.parse(init.body);
+        calls.push(body);
+        assert.equal(body.groupLimit, 1);
+        assert.equal(body.writePrices, true);
+        if (job === "sealed-pricing") assert.equal(body.runSecondSource, calls.length === 1);
+        assert.deepEqual(body.excludeGroupIds, Array.from({ length: calls.length - 1 }, (_, i) => String(i + 1)));
+        return { ok: true, status: 200, json: async () => ({
+          rotationGroupsAvailable: groups, groupsProcessed: 1,
+          processedGroupIds: [String(calls.length)], pricingSnapshotsCreated: 100,
+        }) };
+      },
+    });
+    assert.equal(calls.length, expected);
+    assert.equal(result.ok, true);
+    assert.equal(result.response.targetRotationHours, 20);
+    assert.equal(result.response.pricingSnapshotsCreated, 100 * expected);
+  });
+}
+
+test("sealed batching continues partial product cursors and spends the second-source budget once", async () => {
+  const calls = [];
+  const result = await runLiveScheduledJob({
+    job: "sealed-pricing",
+    env: { JOB_SECRET: "secret", TCGCSV_SEALED_GROUP_LIMIT: "3", TCGCSV_SEALED_GROUP_IDS: "123,456", SCHEDULED_JOB_APP_URL: "https://mintbinder.co.uk" },
+    fetchImpl: async (_url, init) => {
+      const body = JSON.parse(init.body);
+      calls.push(body);
+      assert.deepEqual(body.excludeGroupIds, calls.length <= 2 ? [] : ["123"]);
+      return { ok: true, status: 200, json: async () => ({
+        groupsProcessed: 1, rotationGroupsAvailable: 2,
+        groupResults: [{ groupId: calls.length < 3 ? "123" : "456", complete: calls.length !== 1, status: "succeeded" }],
+        secondSource: { status: calls.length === 1 ? "succeeded" : "not_due", provider: "cardtrader-sealed" },
+      }) };
+    },
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual(calls.map((call) => call.runSecondSource), [true, false, false]);
+  assert.deepEqual(result.response.processedGroupIds, ["123", "456"]);
+});
+
+test("daily card rotation respects explicit targets and stops on degraded output", async () => {
+  let calls = 0;
+  const result = await runLiveScheduledJob({
+    job: "english-card-pricing",
+    env: { JOB_SECRET: "secret", TCGCSV_CARD_GROUP_IDS: "123,456", SCHEDULED_JOB_APP_URL: "https://mintbinder.co.uk" },
+    fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({
+      rotationGroupsAvailable: 179, groupsProcessed: 1,
+      processedGroupIds: [String(++calls)], warning: calls === 2 ? "Provider partial" : null,
+    }) }),
+  });
+  assert.equal(calls, 2);
+  assert.equal(result.ok, false);
+  assert.match(result.degradation, /Provider partial/);
+});
+
+test("card rotation flags a catalogue larger than its safety cap can refresh daily", async () => {
+  let calls = 0;
+  const result = await runLiveScheduledJob({
+    job: "japan-card-pricing",
+    env: { JOB_SECRET: "secret", TCGCSV_CARD_MAX_BATCHES_PER_RUN: "2", SCHEDULED_JOB_APP_URL: "https://mintbinder.co.uk" },
+    fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({
+      rotationGroupsAvailable: 86, groupsProcessed: 1, processedGroupIds: [String(++calls)],
+    }) }),
+  });
+  assert.equal(calls, 2);
+  assert.equal(result.ok, false);
+  assert.match(result.degradation, /above the configured safety cap/);
+});
+
+test("old card-pricing deployments without processed IDs cannot repeat indefinitely", async () => {
+  let calls = 0;
+  const result = await runLiveScheduledJob({
+    job: "english-card-pricing",
+    env: { JOB_SECRET: "secret", SCHEDULED_JOB_APP_URL: "https://mintbinder.co.uk" },
+    fetchImpl: async () => {
+      calls += 1;
+      return { ok: true, status: 200, json: async () => ({ groupsProcessed: 1 }) };
+    },
+  });
+  assert.equal(calls, 1);
+  assert.equal(result.ok, true);
+});
+
 test("live PriceCharting graded-card pricing defaults to a bounded history refresh", () => {
   const request = protectedJobRequest("graded-card-pricing", {});
 

@@ -4,6 +4,7 @@ export type PriceMarket = "UK" | "Europe" | "US" | "Other";
 export type PriceFreshness = "Current" | "Stale";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+export const PRICE_FRESHNESS_MAX_AGE_HOURS = 48;
 
 export function priceMarketForSource(source?: string | null): PriceMarket {
   const normalized = String(source ?? "").trim().toLowerCase();
@@ -121,9 +122,25 @@ export function priceFreshnessStatus(
     return "Stale";
   }
 
-  const maxAgeDays = point.valueMinor >= 10_000 ? 7 : 14;
+  const ageMs = now.getTime() - observedAt;
+  return ageMs >= -5 * 60 * 1000 && ageMs <= PRICE_FRESHNESS_MAX_AGE_HOURS / 24 * DAY_MS
+    ? "Current" : "Stale";
+}
 
-  return now.getTime() - observedAt <= maxAgeDays * DAY_MS ? "Current" : "Stale";
+export function priceConfidenceExplanation(
+  point: Pick<PricePoint, "confidence" | "observedAt" | "source" | "valueMinor">,
+  now = new Date(),
+) {
+  if (priceFreshnessStatus(point, now) === "Stale") {
+    return "This observation is outside the 48-hour freshness window. Daily refresh is the target; treat the last known price as a guide until newer evidence arrives.";
+  }
+  if (priceMarketForSource(point.source) === "US") {
+    return "This is a US-market reference converted to GBP, not evidence of UK sale prices. A fresh feed can still have weak UK-market confidence. Stronger confidence needs recent, exact-finish UK sales evidence.";
+  }
+  if (isCardTraderAskingPriceSource(point.source)) {
+    return "Seller asking prices are not completed sales. Check against recent sales of the same finish, condition and language before relying on this estimate.";
+  }
+  return "Confidence reflects the market, freshness and source evidence, not just how often this price is refreshed. Check higher-value purchases against recent comparable sales.";
 }
 
 export function effectivePriceConfidence(

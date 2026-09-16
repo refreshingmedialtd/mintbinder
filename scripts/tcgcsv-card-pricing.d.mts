@@ -5,6 +5,7 @@ export type TcgcsvCardPricingOptions = {
   categoryId?: number;
   fetchImpl?: typeof fetch;
   groupIds?: string[] | string;
+  excludeGroupIds?: string[] | string;
   groupLimit?: number;
   language?: string;
   minUnpricedCards?: number;
@@ -30,12 +31,15 @@ export type TcgcsvCardPricingSummary = {
   groupsAvailable: number;
   groupsMatched: number;
   groupsProcessed: number;
+  processedGroupIds: string[];
+  rotationGroupsAvailable: number;
   identitySnapshotsRelabelled: number;
   language: string;
   minUnpricedCards: number;
   onlyUnpricedGroups: boolean;
   priceOnlyUnpriced: boolean;
   pricingSnapshotsCreated: number;
+  pricingSnapshotsUpdated: number;
   productsFetched: number;
   sampleUnmatchedProducts: Array<Record<string, unknown>>;
   sampleIncompleteGroups: Array<Record<string, unknown>>;

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   effectivePriceConfidence,
+  priceConfidenceExplanation,
   preferredLatestPricePoint,
   preferredPriceSeries,
   priceFreshnessStatus,
@@ -29,7 +30,7 @@ test("prefers current UK and European evidence over current US references", () =
     valueMinor: 4_500,
   });
   const uk = point({
-    observedAt: "2026-07-19T12:00:00.000Z",
+    observedAt: "2026-07-21T10:00:00.000Z",
     source: "pulse-uk",
     valueMinor: 4_300,
   });
@@ -69,7 +70,7 @@ test("uses a current calculated sealed market before CardTrader seller asks", ()
   );
 });
 
-test("marks high-value prices stale sooner and limits non-UK confidence", () => {
+test("uses a 48-hour freshness ceiling for every price and limits non-UK confidence", () => {
   const eightDayHighValue = point({
     observedAt: "2026-07-14T11:59:59.000Z",
     source: "pulse-uk",
@@ -82,10 +83,24 @@ test("marks high-value prices stale sooner and limits non-UK confidence", () => 
   });
 
   assert.equal(priceFreshnessStatus(eightDayHighValue, now), "Stale");
-  assert.equal(priceFreshnessStatus(eightDayLowValue, now), "Current");
+  assert.equal(priceFreshnessStatus(eightDayLowValue, now), "Stale");
   assert.equal(effectivePriceConfidence(point(), now), "Weak");
   assert.equal(effectivePriceConfidence(point({ source: "pokemon-tcg-api-cardmarket" }), now), "Fair");
   assert.equal(effectivePriceConfidence(point({ source: "pulse-uk" }), now), "Strong");
+});
+
+test("freshness boundaries reject six-day-old and future-dated observations", () => {
+  assert.equal(priceFreshnessStatus(point({ observedAt: "2026-07-20T12:00:00Z" }), now), "Current");
+  assert.equal(priceFreshnessStatus(point({ observedAt: "2026-07-20T11:59:59Z" }), now), "Stale");
+  assert.equal(priceFreshnessStatus(point({ observedAt: "2026-07-16T12:00:00Z" }), now), "Stale");
+  assert.equal(priceFreshnessStatus(point({ observedAt: "2026-07-23T12:00:00Z" }), now), "Stale");
+  assert.equal(priceFreshnessStatus(point({ observedAt: "invalid" }), now), "Stale");
+});
+
+test("explains weak UK confidence without pretending a US refresh adds UK evidence", () => {
+  assert.match(priceConfidenceExplanation(point(), now), /not evidence of UK sale prices/);
+  assert.match(priceConfidenceExplanation(point({ observedAt: "2026-07-16T12:00:00Z" }), now), /48-hour/);
+  assert.match(priceConfidenceExplanation(point({ source: "cardtrader-sealed" }), now), /not completed sales/);
 });
 
 test("labels market scope honestly and keeps one coherent price series", () => {
