@@ -103,6 +103,7 @@ test("reviewed sync makes every reported card searchable with all nine exact pri
 
   for (const target of reviewedTcgcsvCatalogueTargets()) {
     await syncReviewedTcgcsvCardCatalogue({
+      observedAt: "2026-09-15T20:06:20Z",
       categoryId: target.categoryId,
       fetchImpl: providerFetch(target.categoryId, target.groupId),
       groupId: target.groupId,

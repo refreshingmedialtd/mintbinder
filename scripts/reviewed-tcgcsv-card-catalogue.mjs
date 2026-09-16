@@ -5,6 +5,7 @@ import {
 } from "@prisma/client";
 import { deterministicUuid, extendedDataValue } from "./tcgcsv-sealed-products.mjs";
 import { fetchJsonWithRetry } from "./provider-fetch.mjs";
+import { fetchTcgcsvFeedDate, tcgcsvFetch } from "./tcgcsv-feed-clock.mjs";
 
 const reviewedGroups = [
   {
@@ -304,9 +305,6 @@ export async function syncReviewedTcgcsvCardCatalogue(options = {}) {
   const group = reviewedTcgcsvGroup(options.categoryId, options.groupId);
   const writePrices = options.writePrices ?? true;
   const usdToGbpRate = positiveRate(options.usdToGbpRate);
-  const observedAt = reviewedObservedAt(options.observedAt);
-  const snapshotDay = observedAt.toISOString().slice(0, 10);
-  const reviewedAt = `${snapshotDay}T00:00:00.000Z`;
   const fetchOptions = {
     retryAttempts: positiveInteger(options.retryAttempts, 3),
     retryWaitMs: nonNegativeInteger(options.retryWaitMs, 500),
@@ -318,6 +316,11 @@ export async function syncReviewedTcgcsvCardCatalogue(options = {}) {
   }
 
   try {
+    const observedAt = options.observedAt === undefined
+      ? await fetchTcgcsvFeedDate({ fetchImpl, ...fetchOptions })
+      : reviewedObservedAt(options.observedAt);
+    const snapshotDay = observedAt.toISOString().slice(0, 10);
+    const reviewedAt = `${snapshotDay}T00:00:00.000Z`;
     const [productsPayload, pricesPayload] = await Promise.all([
       fetchTcgcsvGroup(group, "products", fetchImpl, fetchOptions),
       fetchTcgcsvGroup(group, "prices", fetchImpl, fetchOptions),
@@ -515,7 +518,7 @@ export async function syncReviewedTcgcsvCardCatalogue(options = {}) {
 
 async function fetchTcgcsvGroup(group, resource, fetchImpl, options) {
   const { body } = await fetchJsonWithRetry({
-    fetchImpl,
+    fetchImpl: (requestUrl, init) => tcgcsvFetch(requestUrl, init, fetchImpl),
     init: {
       headers: {
         accept: "application/json",
@@ -716,6 +719,8 @@ function reviewedPriceSnapshot({ card, group, observedAt, price, product, produc
       originalCurrency: "USD",
       originalPrice: price.usd,
       priceSource: "TCGCSV TCGplayer market",
+      providerUpdatedAt: observedAt.toISOString(),
+      importedAt: new Date().toISOString(),
       reviewedSupplement: true,
       reviewedSnapshotDay: snapshotDay,
       selectedPriceField: price.selectedPriceField,

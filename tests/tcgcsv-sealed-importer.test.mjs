@@ -3,7 +3,16 @@ import test from "node:test";
 import {
   orderSealedPricingMatches,
   selectSealedProductBatch,
+  sealedPricingFeedBatchMetadata,
 } from "../scripts/tcgcsv-sealed-importer.mjs";
+
+test("a new provider file restarts partial sealed pages before declaring completion", () => {
+  const metadata = { scheduledSealedPricingCursorVersion: 2, scheduledSealedPricingNextProductIndex: 40,
+    scheduledSealedPricingActiveProviderUpdatedAt: "2026-09-14T20:00:00.000Z" };
+  assert.equal(sealedPricingFeedBatchMetadata(metadata, new Date("2026-09-14T20:00:00Z")).scheduledSealedPricingNextProductIndex, 40);
+  assert.equal(sealedPricingFeedBatchMetadata(metadata, new Date("2026-09-15T20:00:00Z")).scheduledSealedPricingNextProductIndex, 0);
+  assert.equal(metadata.scheduledSealedPricingNextProductIndex, 40);
+});
 
 test("batches sealed products after filtering card rows", () => {
   const products = [

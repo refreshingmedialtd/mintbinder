@@ -35,9 +35,13 @@ import {
   matchTcgcsvCardGroupsToSets,
   matchTcgcsvCardProduct,
   resolveTcgcsvVariantIdentities,
-  syncTcgcsvCardPrices,
+  syncTcgcsvCardPrices as syncTcgcsvCardPricesImpl,
   tcgcsvCardVariantLabel,
 } from "../scripts/tcgcsv-card-pricing.mjs";
+
+const syncTcgcsvCardPrices = (options) => syncTcgcsvCardPricesImpl({
+  providerUpdatedAt: "2026-09-15T20:06:20Z", ...options,
+});
 
 test("rotates past a recently attempted zero-output pricing group", () => {
   const zeroOutputOldest = {
@@ -422,6 +426,8 @@ test("imports exact 1st Edition and Shadowless Base Set price streams", async ()
     ],
   );
   assert.ok(snapshots.every((snapshot) => snapshot.metadata.groupId === 1663));
+  assert.ok(snapshots.every((snapshot) => snapshot.observedAt.toISOString() === "2026-09-15T20:06:20.000Z"));
+  assert.ok(snapshots.every((snapshot) => snapshot.metadata.importedAt && snapshot.metadata.providerUpdatedAt));
 });
 
 test("scheduled imports never relabel historical TCGCSV snapshots", async () => {

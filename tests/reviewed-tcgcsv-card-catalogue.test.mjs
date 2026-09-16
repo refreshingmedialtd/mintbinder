@@ -3,9 +3,13 @@ import test from "node:test";
 import {
   reviewedTcgcsvCatalogueTargets,
   reviewedTcgcsvGroup,
-  syncReviewedTcgcsvCardCatalogue,
+  syncReviewedTcgcsvCardCatalogue as syncReviewedTcgcsvCardCatalogueImpl,
   validateReviewedTcgcsvProduct,
 } from "../scripts/reviewed-tcgcsv-card-catalogue.mjs";
+
+const syncReviewedTcgcsvCardCatalogue = (options) => syncReviewedTcgcsvCardCatalogueImpl({
+  observedAt: "2026-09-15T20:06:20Z", ...options,
+});
 
 test("the reviewed allowlist contains only the exact provider groups and products", () => {
   assert.deepEqual(

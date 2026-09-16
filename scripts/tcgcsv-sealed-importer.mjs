@@ -6,6 +6,7 @@ import {
 } from "@prisma/client";
 import { booleanSetting, positiveInteger } from "./catalogue-batch-options.mjs";
 import { fetchJsonWithRetry } from "./provider-fetch.mjs";
+import { fetchTcgcsvFeedDate, tcgcsvFetch, validatedTcgcsvFeedDate } from "./tcgcsv-feed-clock.mjs";
 import { importedTcgcsvSealedImageState } from "../src/lib/catalogue/sealed-image-quarantine.mjs";
 import {
   bestTcgcsvPrice,
@@ -54,6 +55,9 @@ export async function syncTcgcsvSealedProducts(options = {}) {
   }
 
   try {
+    const providerUpdatedAt = options.providerUpdatedAt
+      ? validatedTcgcsvFeedDate(options.providerUpdatedAt)
+      : await fetchTcgcsvFeedDate({ fetchImpl, ...providerFetchOptions });
     const [groups, sets] = await Promise.all([
       fetchTcgcsv(`https://tcgcsv.com/tcgplayer/${tcgcsvPokemonCategoryId}/groups`, fetchImpl, providerFetchOptions),
       prisma.cardSet.findMany({
@@ -89,16 +93,19 @@ export async function syncTcgcsvSealedProducts(options = {}) {
         groupIds.size > 0 || !sealedPricingEmptyInFuture(set.metadata)
       ),
     );
-    const matches = availableMatches.filter(({ group }) => !excludedGroupIds.has(String(group.groupId))).slice(0, groupLimit);
+    const dueMatches = availableMatches.filter(({ set }) => groupIds.size > 0 || !writePrices || priceOnlyUnpriced ||
+      set.metadata?.scheduledSealedPricingProviderUpdatedAt !== providerUpdatedAt.toISOString());
+    const matches = dueMatches.filter(({ group }) => !excludedGroupIds.has(String(group.groupId))).slice(0, groupLimit);
     const summary = {
       failedGroups: 0,
       groupResults: [],
-      groupsAvailable: availableMatches.length,
+      groupsAvailable: dueMatches.length,
       rotationGroupsAvailable: availableMatches.length,
       groupsDeferredKnownEmpty: deferredKnownEmptyGroups.length,
       groupsMatched: matches.length,
       groupsProcessed: 0,
       priceOnlyUnpriced,
+      providerUpdatedAt: providerUpdatedAt.toISOString(),
       productLimit: Number.isFinite(productLimit) ? productLimit : null,
       productsProcessed: 0,
       pricingSnapshotsCreated: 0,
@@ -118,6 +125,7 @@ export async function syncTcgcsvSealedProducts(options = {}) {
           priceOnlyUnpriced,
           prisma,
           providerFetchOptions,
+          providerUpdatedAt,
           productLimit,
           usdToGbp,
           writePrices,
@@ -128,6 +136,7 @@ export async function syncTcgcsvSealedProducts(options = {}) {
           match,
           prisma,
           productLimit,
+          providerUpdatedAt: writePrices && !priceOnlyUnpriced ? providerUpdatedAt : undefined,
         });
 
         summary.groupsProcessed += 1;
@@ -199,6 +208,7 @@ async function importGroup({
   priceOnlyUnpriced,
   prisma,
   providerFetchOptions,
+  providerUpdatedAt,
   productLimit,
   usdToGbp,
   writePrices,
@@ -211,7 +221,8 @@ async function importGroup({
   const pricesByProductId = new Map();
   const products = productsResponse.results ?? [];
   const productBatch = selectSealedProductBatch({
-    metadata: set.metadata,
+    metadata: writePrices && !priceOnlyUnpriced
+      ? sealedPricingFeedBatchMetadata(set.metadata, providerUpdatedAt) : set.metadata,
     productLimit,
     products,
   });
@@ -264,9 +275,11 @@ async function importGroup({
           originalCurrency: "USD",
           originalPrice: price.usd,
           priceSource: "TCGCSV TCGplayer market",
+          providerUpdatedAt: providerUpdatedAt.toISOString(),
+          importedAt: new Date().toISOString(),
           subTypeName: price.subTypeName,
         },
-        observedAt: new Date(),
+        observedAt: providerUpdatedAt,
         priceMinor: Math.round(price.usd * usdToGbp * 100),
         sealedProductId: sealedProduct.id,
         source: "tcgcsv",
@@ -286,6 +299,7 @@ async function recordSealedPricingProgress({
   match,
   prisma,
   productLimit,
+  providerUpdatedAt,
 }) {
   const attemptedAt = new Date().toISOString();
   await updateCardSetMetadata(prisma, match.set, {
@@ -297,6 +311,9 @@ async function recordSealedPricingProgress({
     scheduledSealedPricingLastSnapshotCount: groupSummary.pricingSnapshotsCreated,
     scheduledSealedPricingLastSnapshotUpdateCount: groupSummary.pricingSnapshotsUpdated,
     scheduledSealedPricingLastSucceededAt: attemptedAt,
+    scheduledSealedPricingActiveProviderUpdatedAt: providerUpdatedAt?.toISOString() ?? null,
+    scheduledSealedPricingProviderUpdatedAt: groupSummary.complete && providerUpdatedAt
+      ? providerUpdatedAt.toISOString() : null,
     scheduledSealedPricingLastSealedProductCount: groupSummary.sealedProductsAvailable,
     scheduledSealedPricingLastTotalProducts: groupSummary.productsFetched,
     scheduledSealedPricingCursorVersion: 2,
@@ -399,7 +416,7 @@ export async function upsertSealedProduct({ group, product, prisma, set }) {
 
 async function fetchTcgcsv(url, fetchImpl, providerFetchOptions) {
   const result = await fetchJsonWithRetry({
-    fetchImpl,
+    fetchImpl: (requestUrl, init) => tcgcsvFetch(requestUrl, init, fetchImpl),
     init: {
       headers: {
         accept: "application/json",
@@ -517,6 +534,13 @@ export function selectSealedProductBatch({ metadata, productLimit, products }) {
     sealedProductsAvailable: sealedProducts.length,
     sealedProductsSkipped: products.length - sealedProducts.length,
   };
+}
+
+export function sealedPricingFeedBatchMetadata(metadata, providerUpdatedAt) {
+  if (metadata?.scheduledSealedPricingActiveProviderUpdatedAt === providerUpdatedAt.toISOString()) return metadata;
+  // If a file changes between bounded pages, restart at the first product.
+  // Finishing the tail of a new file must not mark its older head up to date.
+  return { ...(isObject(metadata) ? metadata : {}), scheduledSealedPricingNextProductIndex: 0 };
 }
 
 function providerErrorStatus(message) {

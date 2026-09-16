@@ -3,6 +3,7 @@ export type TcgcsvSealedImportOptions = {
   apiRetryWaitMs?: number;
   apiTimeoutMs?: number;
   fetchImpl?: typeof fetch;
+  providerUpdatedAt?: Date | string;
   groupIds?: string[] | string;
   excludeGroupIds?: string[] | string;
   groupLimit?: number;
@@ -23,6 +24,7 @@ export type TcgcsvSealedImportSummary = {
   groupsMatched: number;
   groupsProcessed: number;
   priceOnlyUnpriced: boolean;
+  providerUpdatedAt: string;
   productLimit: number | null;
   productsProcessed: number;
   pricingSnapshotsCreated: number;
@@ -41,3 +43,6 @@ export function sealedImportOptionsFromEnv(
 export function syncTcgcsvSealedProducts(
   options?: TcgcsvSealedImportOptions,
 ): Promise<TcgcsvSealedImportSummary>;
+
+export function sealedPricingFeedBatchMetadata(metadata: Record<string, unknown> | null | undefined,
+  providerUpdatedAt: Date): Record<string, unknown>;

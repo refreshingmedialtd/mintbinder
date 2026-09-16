@@ -6,6 +6,7 @@ import {
 } from "@prisma/client";
 import { booleanSetting, positiveInteger } from "./catalogue-batch-options.mjs";
 import { fetchJsonWithRetry } from "./provider-fetch.mjs";
+import { fetchTcgcsvFeedDate, tcgcsvFetch, validatedTcgcsvFeedDate } from "./tcgcsv-feed-clock.mjs";
 import {
   extendedDataValue,
   deterministicUuid,
@@ -172,6 +173,9 @@ export async function syncTcgcsvCardPrices(options = {}) {
   }
 
   try {
+    const providerUpdatedAt = options.providerUpdatedAt
+      ? validatedTcgcsvFeedDate(options.providerUpdatedAt)
+      : await fetchTcgcsvFeedDate({ fetchImpl, ...providerFetchOptions });
     const [groups, sets] = await Promise.all([
       fetchTcgcsv(`https://tcgcsv.com/tcgplayer/${categoryId}/groups`, fetchImpl, providerFetchOptions),
       prisma.cardSet.findMany({
@@ -218,6 +222,8 @@ export async function syncTcgcsvCardPrices(options = {}) {
     const availableMatches = matchedGroups
       .filter(({ group }) => groupIds.size === 0 || groupIds.has(String(group.groupId)))
       .filter(({ group }) => !excludedGroupIds.has(String(group.groupId)))
+      .filter(({ group, set }) => groupIds.size > 0 || !writePrices || priceOnlyUnpriced ||
+        set.metadata?.tcgcsvCardPricingAttempts?.[`${source}:${group.groupId}`]?.providerUpdatedAt !== providerUpdatedAt.toISOString())
       .filter(({ set }) => !onlyUnpricedGroups || unpricedCardCount(set) >= minUnpricedCards)
       .sort((a, b) => compareCardGroupRefreshPriority(a.set, b.set, {
         leftGroupId: a.group.groupId,
@@ -246,6 +252,7 @@ export async function syncTcgcsvCardPrices(options = {}) {
       minUnpricedCards,
       onlyUnpricedGroups,
       priceOnlyUnpriced,
+      providerUpdatedAt: providerUpdatedAt.toISOString(),
       pricingSnapshotsCreated: 0,
       pricingSnapshotsUpdated: 0,
       productsFetched: 0,
@@ -263,6 +270,7 @@ export async function syncTcgcsvCardPrices(options = {}) {
         priceOnlyUnpriced,
         prisma,
         providerFetchOptions,
+        providerUpdatedAt,
         categoryId,
         language,
         source,
@@ -534,6 +542,7 @@ async function importCardGroup({
   priceOnlyUnpriced,
   prisma,
   providerFetchOptions,
+  providerUpdatedAt,
   categoryId,
   language,
   source,
@@ -679,11 +688,14 @@ async function importCardGroup({
           originalCurrency: "USD",
           originalPrice: price.usd,
           priceSource: "TCGCSV TCGplayer market",
+          providerUpdatedAt: providerUpdatedAt.toISOString(),
+          importedAt: new Date().toISOString(),
+          conditionBasis: "Market aggregate; provider does not supply a condition-specific sales sample",
           baseVariantLabel: tcgcsvCardVariantLabel(product, price.subTypeName, group),
           subTypeName: price.subTypeName,
           tcgplayerUrl: product.url,
         },
-        observedAt: new Date(),
+        observedAt: providerUpdatedAt,
         priceMinor: Math.round(price.usd * usdToGbp * 100),
         source,
         sourceRef: String(product.productId),
@@ -701,6 +713,7 @@ async function importCardGroup({
     productsFetched: summary.productsFetched,
     setId: set.id,
     source,
+    providerUpdatedAt: writePrices && !priceOnlyUnpriced ? providerUpdatedAt : undefined,
   });
 
   return summary;
@@ -732,6 +745,7 @@ async function recordTcgcsvCardPricingAttempt(prisma, {
   productsFetched,
   setId,
   source,
+  providerUpdatedAt,
 }) {
   if (typeof prisma.$executeRaw !== "function") {
     return;
@@ -743,6 +757,7 @@ async function recordTcgcsvCardPricingAttempt(prisma, {
     outcome: pricingSnapshotsCreated > 0 ? "priced" : "zero_output",
     pricingSnapshotsCreated,
     productsFetched,
+    providerUpdatedAt: providerUpdatedAt?.toISOString(),
   });
   const groupAttemptKey = `${source}:${groupId}`;
 
@@ -859,7 +874,7 @@ async function updateTcgcsvCardImage(prisma, card, product) {
 
 async function fetchTcgcsv(url, fetchImpl, providerFetchOptions) {
   const result = await fetchJsonWithRetry({
-    fetchImpl,
+    fetchImpl: (requestUrl, init) => tcgcsvFetch(requestUrl, init, fetchImpl),
     init: {
       headers: {
         accept: "application/json",

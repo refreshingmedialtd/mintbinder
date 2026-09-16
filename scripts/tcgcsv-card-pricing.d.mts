@@ -4,6 +4,7 @@ export type TcgcsvCardPricingOptions = {
   apiTimeoutMs?: number;
   categoryId?: number;
   fetchImpl?: typeof fetch;
+  providerUpdatedAt?: Date | string;
   groupIds?: string[] | string;
   excludeGroupIds?: string[] | string;
   groupLimit?: number;
@@ -38,6 +39,7 @@ export type TcgcsvCardPricingSummary = {
   minUnpricedCards: number;
   onlyUnpricedGroups: boolean;
   priceOnlyUnpriced: boolean;
+  providerUpdatedAt: string;
   pricingSnapshotsCreated: number;
   pricingSnapshotsUpdated: number;
   productsFetched: number;

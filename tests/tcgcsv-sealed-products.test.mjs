@@ -9,9 +9,13 @@ import {
 } from "../scripts/tcgcsv-sealed-products.mjs";
 import {
   sealedImportOptionsFromEnv,
-  syncTcgcsvSealedProducts,
+  syncTcgcsvSealedProducts as syncTcgcsvSealedProductsImpl,
   upsertSealedProduct,
 } from "../scripts/tcgcsv-sealed-importer.mjs";
+
+const syncTcgcsvSealedProducts = (options) => syncTcgcsvSealedProductsImpl({
+  providerUpdatedAt: "2026-09-15T20:06:20Z", ...options,
+});
 import { sealedImageMetadataWithQuarantine } from "../src/lib/catalogue/sealed-image-quarantine.mjs";
 
 test("detects sealed products while excluding cards and code cards", () => {
@@ -263,7 +267,8 @@ test("resumes sealed product batches from set metadata", async () => {
         {
           id: "set-1",
           metadata: {
-            scheduledSealedPricingCursorVersion: 2,
+          scheduledSealedPricingCursorVersion: 2,
+          scheduledSealedPricingActiveProviderUpdatedAt: "2026-09-15T20:06:20.000Z",
             scheduledSealedPricingNextProductIndex: 1,
           },
           name: "Silver Tempest",

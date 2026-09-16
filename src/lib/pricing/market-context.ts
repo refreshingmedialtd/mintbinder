@@ -135,6 +135,9 @@ export function priceConfidenceExplanation(
     return "This observation is outside the 48-hour freshness window. Daily refresh is the target; treat the last known price as a guide until newer evidence arrives.";
   }
   if (priceMarketForSource(point.source) === "US") {
+    if (["tcgcsv-card", "tcgcsv-japan-card"].includes(point.source)) {
+      return "This is a US-market aggregate converted to GBP, not UK sold-price evidence. The provider does not supply condition-specific sales samples. Fresh data alone cannot resolve those limitations; stronger confidence needs recent comparable UK sales for the exact printing, finish and condition.";
+    }
     return "This is a US-market reference converted to GBP, not evidence of UK sale prices. A fresh feed can still have weak UK-market confidence. Stronger confidence needs recent, exact-finish UK sales evidence.";
   }
   if (isCardTraderAskingPriceSource(point.source)) {
