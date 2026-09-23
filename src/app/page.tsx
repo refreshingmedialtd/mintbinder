@@ -1452,7 +1452,11 @@ export default function Home() {
     setAddSearch("");
   }
 
-  async function addToCollection(catalogueId: string, formData?: FormData) {
+  async function addToCollection(
+    catalogueId: string,
+    formData?: FormData,
+    options?: { navigateToItem?: boolean },
+  ) {
     const catalogueItem = catalogueById.get(catalogueId);
     if (!catalogueItem) {
       showToast("That catalogue item is no longer available. Search again and retry.", "error");
@@ -1505,11 +1509,13 @@ export default function Home() {
             !wishlistMatchesOwnedVariant(item, catalogueId, payload.variant, catalogueItem),
           ));
         }
-        setAppState((current) => ({
-          ...current,
-          screen: "item",
-          selectedItemId: result.item.id,
-        }));
+        if (options?.navigateToItem !== false) {
+          setAppState((current) => ({
+            ...current,
+            screen: "item",
+            selectedItemId: result.item.id,
+          }));
+        }
         void refreshAppData({ quiet: true });
         showToast(
           wishlistRemoved
@@ -1548,7 +1554,9 @@ export default function Home() {
     setWishlist((items) => items.filter((item) =>
       !wishlistMatchesOwnedVariant(item, catalogueId, payload.variant, catalogueItem),
     ));
-    setAppState((current) => ({ ...current, screen: "item", selectedItemId: nextItem.id }));
+    if (options?.navigateToItem !== false) {
+      setAppState((current) => ({ ...current, screen: "item", selectedItemId: nextItem.id }));
+    }
     showToast(`${catalogueItemTitle(catalogueItem)} added to collection.`);
     return true;
   }
@@ -2742,7 +2750,11 @@ type ScreenContext = {
   intelligence: CollectionIntelligence;
   wishlist: WishlistItem[];
   wishlistTotal: number;
-  addToCollection: (catalogueId: string, formData?: FormData) => Promise<boolean>;
+  addToCollection: (
+    catalogueId: string,
+    formData?: FormData,
+    options?: { navigateToItem?: boolean },
+  ) => Promise<boolean>;
   beginBinderDraft: (snapshot: CustomBinder[]) => void;
   binderDraftProtected: boolean;
   clearBinderDraftProtection: () => void;
@@ -6951,6 +6963,7 @@ function SetDetailScreen({
   loadedCatalogueSetNames,
   loadSetCatalogueData,
   sets,
+  storageLocations,
   wishlist,
   setAppState,
   addToWishlist,
@@ -6960,11 +6973,13 @@ function SetDetailScreen({
   setActiveSetGoal,
   setActiveSetGoalNotice,
   showToast,
+  addToCollection,
 }: ScreenContext) {
   const [cardSearch, setCardSearch] = useState("");
   const [rarityFilter, setRarityFilter] = useState("all");
   const [sort, setSort] = useState<SetDetailSort>("number-asc");
   const [previewItemId, setPreviewItemId] = useState<string | null>(null);
+  const [addItemId, setAddItemId] = useState<string | null>(null);
   const set = sets.find((item) => item.id === appState.selectedSetId) ?? sets[0];
   const setCards = set
     ? catalogueItems.filter((item) =>
@@ -7024,6 +7039,7 @@ function SetDetailScreen({
   const missingCount = Math.max(set.total - set.owned, 0);
   const wantedCount = setCards.filter((item) => wishlist.some((entry) => entry.catalogueId === item.id)).length;
   const previewItem = previewItemId ? catalogueItems.find((item) => item.id === previewItemId) : undefined;
+  const addItem = addItemId ? catalogueItems.find((item) => item.id === addItemId) : undefined;
   const previewOwned = previewItem ? collection.find((entry) => entry.catalogueId === previewItem.id) : undefined;
   const previewWanted = previewItem ? wishlist.some((entry) => entry.catalogueId === previewItem.id) : false;
 
@@ -7194,32 +7210,39 @@ function SetDetailScreen({
                   <span className="set-print-rarity">{item.rarity}</span>
                 </div>
                 <CatalogueVariantPrices item={item} limit={3} />
-                <div className="set-print-actions">
+                <div className={owned ? "set-print-actions owned-actions" : "set-print-actions"}>
                   {owned ? (
-                    <button
-                      className="button"
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        setAppState((current) => ({ ...current, selectedItemId: owned.id }));
-                        navigate("item");
-                      }}
-                    >
-                      Open
-                    </button>
+                    <>
+                      <button
+                        className="button"
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setAppState((current) => ({ ...current, selectedItemId: owned.id }));
+                          navigate("item");
+                        }}
+                      >
+                        Open
+                      </button>
+                      <button
+                        className="button primary"
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setAddItemId(item.id);
+                        }}
+                      >
+                        <Plus size={17} />
+                        Add another
+                      </button>
+                    </>
                   ) : (
                     <button
                       className="button primary"
                       type="button"
                       onClick={(event) => {
                         event.stopPropagation();
-                        setAppState((current) => ({
-                          ...current,
-                          selectedCatalogueId: item.id,
-                          selectedCatalogueVariant: "",
-                          addType: "card",
-                        }));
-                        navigate("add");
+                        setAddItemId(item.id);
                       }}
                     >
                       <Plus size={17} />
@@ -7262,13 +7285,7 @@ function SetDetailScreen({
           wanted={previewWanted}
           onAdd={() => {
             setPreviewItemId(null);
-            setAppState((current) => ({
-              ...current,
-              selectedCatalogueId: previewItem.id,
-              selectedCatalogueVariant: "",
-              addType: "card",
-            }));
-            navigate("add");
+            setAddItemId(previewItem.id);
           }}
           onClose={() => setPreviewItemId(null)}
           onOpenOwned={() => {
@@ -7283,7 +7300,202 @@ function SetDetailScreen({
           onWant={() => void addToWishlist(previewItem.id)}
         />
       ) : null}
+      {addItem ? (
+        <SetCollectionAddModal
+          item={addItem}
+          onClose={() => setAddItemId(null)}
+          onSubmit={async (formData) => {
+            const saved = await addToCollection(addItem.id, formData, { navigateToItem: false });
+            if (saved) {
+              setAddItemId(null);
+            }
+            return saved;
+          }}
+          storageLocations={storageLocations}
+        />
+      ) : null}
     </section>
+  );
+}
+
+function SetCollectionAddModal({
+  item,
+  onClose,
+  onSubmit,
+  storageLocations,
+}: {
+  item: CatalogueItem;
+  onClose: () => void;
+  onSubmit: (formData: FormData) => Promise<boolean>;
+  storageLocations: StorageLocation[];
+}) {
+  const [condition, setCondition] = useState("Near mint");
+  const [language, setLanguage] = useState(item.languageLabel ?? "English");
+  const [quantity, setQuantity] = useState(1);
+  const [variant, setVariant] = useState(() => selectedVariantLabel(item));
+  const [isSaving, setIsSaving] = useState(false);
+  const dialogRef = useDialogFocus<HTMLElement>(true);
+  const titleId = `set-add-title-${item.id}`;
+  const descriptionId = `set-add-description-${item.id}`;
+  const locations = storageOptionNames(storageLocations, defaultStorageLocation(storageLocations, item.type));
+  const estimatedValue = adjustedMarketValueMinor(item, variant, condition, quantity);
+  const catalogueLanguage = item.languageLabel ?? "English";
+  const usesDifferentLanguage = language !== catalogueLanguage;
+  const needsLocalPricing = Boolean(item.language && item.language !== "en" && !item.hasPrice);
+
+  useEffect(() => {
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape" && !isSaving) {
+        onClose();
+      }
+    }
+
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [isSaving, onClose]);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (isSaving) {
+      return;
+    }
+
+    setIsSaving(true);
+    const saved = await onSubmit(new FormData(event.currentTarget));
+    if (!saved) {
+      setIsSaving(false);
+    }
+  }
+
+  return (
+    <div
+      className="catalogue-preview-backdrop set-add-backdrop"
+      onClick={() => {
+        if (!isSaving) {
+          onClose();
+        }
+      }}
+      role="presentation"
+    >
+      <article
+        aria-describedby={descriptionId}
+        aria-labelledby={titleId}
+        aria-modal="true"
+        className="set-add-modal"
+        onClick={(event) => event.stopPropagation()}
+        ref={dialogRef}
+        role="dialog"
+        tabIndex={-1}
+      >
+        <button
+          aria-label="Close add card dialog"
+          className="icon-button set-add-close"
+          disabled={isSaving}
+          onClick={onClose}
+          type="button"
+        >
+          <X size={18} />
+        </button>
+
+        <header className="set-add-header">
+          <div className="item-image set-add-image">{renderItemImage(item)}</div>
+          <div>
+            <p className="eyebrow">Add directly from this set</p>
+            <h2 id={titleId}>{catalogueItemTitle(item)}</h2>
+            <p id={descriptionId}>{catalogueItemSetLabel(item)} · No. {item.number} · {item.rarity}</p>
+          </div>
+        </header>
+
+        <form className="set-add-form" onSubmit={handleSubmit}>
+          <section className="set-add-estimate" aria-live="polite">
+            <span>Estimated lot value</span>
+            <strong>{formatValuation(estimatedValue)}</strong>
+            <small>
+              {quantity} × {variant} at {condition.toLowerCase()}. {conditionAdjustmentLabel(collectionConditionMultiplier(condition, item.type))}
+            </small>
+          </section>
+
+          <div className="field-grid set-add-field-grid">
+            <Field label="Finish">
+              <VariantSelect item={item} name="variant" value={variant} onChange={setVariant} />
+            </Field>
+            <Field label="Condition">
+              <select name="condition" value={condition} onChange={(event) => setCondition(event.target.value)}>
+                <option>Mint</option>
+                <option>Near mint</option>
+                <option>Excellent</option>
+                <option>Light played</option>
+                <option>Played</option>
+                <option>Poor</option>
+                <option>Unknown</option>
+              </select>
+            </Field>
+            <Field label="Language">
+              <select name="language" value={language} onChange={(event) => setLanguage(event.target.value)}>
+                {LOT_LANGUAGE_OPTIONS.map((option) => (
+                  <option key={option.code}>{option.label}</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Quantity">
+              <input
+                min={1}
+                name="quantity"
+                onChange={(event) => setQuantity(Math.max(1, Number(event.target.value) || 1))}
+                type="number"
+                value={quantity}
+              />
+            </Field>
+            <Field label="Location">
+              <select name="location" defaultValue={defaultStorageLocation(storageLocations, item.type)}>
+                {locations.map((location) => <option key={location}>{location}</option>)}
+              </select>
+            </Field>
+            <Field label="Purchase date">
+              <input defaultValue={dateStamp()} name="purchaseDate" type="date" />
+            </Field>
+            <Field label="Paid (lot total)">
+              <input inputMode="decimal" name="paid" placeholder="£0.00" />
+            </Field>
+            <Field label="Manual lot value">
+              <input inputMode="decimal" name="overrideValue" placeholder="£0.00" />
+            </Field>
+          </div>
+
+          {usesDifferentLanguage ? (
+            <p className="form-note">
+              This lot language differs from the selected {catalogueLanguage} catalogue printing. Add a manual value if
+              its market should not use this printing&apos;s price.
+            </p>
+          ) : null}
+          {needsLocalPricing ? (
+            <p className="form-note">
+              Local pricing is not available for this printing yet. You can add a manual value from a trusted sale comp.
+            </p>
+          ) : null}
+
+          <details className="set-add-more-details">
+            <summary>Notes and valuation details</summary>
+            <div className="field-grid set-add-notes-grid">
+              <Field label="Valuation note">
+                <textarea name="valuationNote" placeholder="Source or reason for valuation" />
+              </Field>
+              <Field label="Notes">
+                <textarea name="notes" placeholder="Optional" />
+              </Field>
+            </div>
+          </details>
+
+          <div className="set-add-actions">
+            <button className="button" disabled={isSaving} onClick={onClose} type="button">Cancel</button>
+            <button className="button primary" disabled={isSaving} type="submit">
+              <Plus size={17} />
+              {isSaving ? "Adding card" : "Add to collection"}
+            </button>
+          </div>
+        </form>
+      </article>
+    </div>
   );
 }
 
