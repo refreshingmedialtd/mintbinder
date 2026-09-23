@@ -11,3 +11,20 @@ export function preserveCardSetMetadataOnUpdate<T extends { metadata?: unknown }
 
   return update as Omit<T, "metadata">;
 }
+
+/**
+ * Exact-set refreshes are allowed to update provider-owned catalogue facts,
+ * but must retain scheduler cursors and other operational metadata.
+ */
+export function mergeCardSetMetadata(existing: unknown, incoming: unknown): Record<string, unknown> {
+  return {
+    ...metadataObject(existing),
+    ...metadataObject(incoming),
+  };
+}
+
+function metadataObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}

@@ -3,7 +3,10 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { catalogueCollectorNumberSearchTerms } from "@/lib/catalogue/collector-number-search";
 import { mergeCardPrintingProviderUpdate } from "@/lib/pricing/card-printing-enrichment";
-import { preserveCardSetMetadataOnUpdate } from "@/lib/pricing/card-set-metadata";
+import {
+  mergeCardSetMetadata,
+  preserveCardSetMetadataOnUpdate,
+} from "@/lib/pricing/card-set-metadata";
 import {
   catalogueDisplayNameForText,
   catalogueDisplaySetForText,
@@ -113,11 +116,9 @@ export async function syncTcgdexCardPages({
     : briefs.slice(startIndex, startIndex + safePageSize * safeMaxPages);
 
   if (targetedSet) {
-    const expectedTotal = positiveInteger(targetedSet.cardCount?.total);
-
-    if (!expectedTotal || requested.length !== expectedTotal) {
+    if (!requested.length) {
       throw new Error(
-        `TCGdex set ${targetedSet.id} returned ${requested.length} cards but declares ${expectedTotal ?? "no"} total.`,
+        `TCGdex set ${targetedSet.id} does not expose any importable cards.`,
       );
     }
   }
@@ -166,9 +167,11 @@ export async function syncTcgdexCardPages({
 
   if (targetedSet) {
     const setId = cardSetId(resolvedLanguage.code, targetedSet.id);
-    const setData = tcgdexSetData(targetedSet, resolvedLanguage);
+    const setData = tcgdexSetData(targetedSet, resolvedLanguage, {
+      availableCardCount: requested.length,
+    });
     const existingSet = await prisma.cardSet.findUnique({
-      select: { providerIds: true },
+      select: { metadata: true, providerIds: true },
       where: { id: setId },
     });
 
@@ -177,6 +180,7 @@ export async function syncTcgdexCardPages({
       where: { id: setId },
       update: {
         ...preserveCardSetMetadataOnUpdate(setData),
+        metadata: mergeCardSetMetadata(existingSet?.metadata, setData.metadata) as Prisma.InputJsonObject,
         providerIds: mergeProviderIds(existingSet?.providerIds, setData.providerIds),
       },
       create: {
@@ -259,7 +263,7 @@ export async function syncTcgdexCardPages({
   });
 
   const catalogueCardsExpected = targetedSet
-    ? positiveInteger(targetedSet.cardCount?.total) ?? requested.length
+    ? requested.length
     : undefined;
   const catalogueCardsAvailable = targetedSet
     ? await prisma.cardPrinting.count({
@@ -290,6 +294,7 @@ export async function syncTcgdexCardPages({
     pageSize: targetedSet ? requested.length : safePageSize,
     provider: "tcgdex",
     requestedSetId: targetedSet?.id,
+    sourceCardsDeclared: targetedSet?.cardCount?.total,
     setIds: [...setIds],
     setsUpserted: setIds.size,
     supportedLanguages: supportedTcgdexLanguages(),
@@ -400,8 +405,11 @@ function jsonObject(value: unknown): Record<string, Prisma.InputJsonValue> {
 function tcgdexSetData(
   set: TcgdexSet,
   language: ReturnType<typeof resolveTcgdexLanguage>,
+  options: { availableCardCount?: number } = {},
 ) {
   const now = new Date().toISOString();
+  const declaredCardCount = positiveInteger(set.cardCount?.total);
+  const availableCardCount = positiveInteger(options.availableCardCount);
 
   return {
     language: language.code,
@@ -415,6 +423,8 @@ function tcgdexSetData(
       provider: "tcgdex",
       providerUpdatedAt: now,
       regionLabel: language.regionLabel,
+      ...(availableCardCount ? { providerAvailableCardCount: availableCardCount } : {}),
+      ...(declaredCardCount ? { sourceCardCount: declaredCardCount } : {}),
       tcgdexLanguage: language.tcgdexCode,
     }),
     name: set.name,
@@ -424,7 +434,7 @@ function tcgdexSetData(
     releaseDate: set.releaseDate ? new Date(`${set.releaseDate}T00:00:00.000Z`) : undefined,
     series: set.serie?.name,
     symbolImageUrl: set.symbol,
-    total: set.cardCount?.total,
+    total: availableCardCount ?? set.cardCount?.total,
   } satisfies Prisma.CardSetUncheckedCreateInput;
 }
 
