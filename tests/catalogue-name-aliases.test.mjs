@@ -32,6 +32,23 @@ test("translates Pokemon names across Korean, Japanese, and Chinese catalogues",
   assert.equal(catalogueDisplayNameForText("\u55B7\u706B\u9F99 ex"), "Charizard ex");
 });
 
+test("does not translate ordinary English catalogue names as Pokemon aliases", () => {
+  for (const setName of ["Lost Thunder", "FireRed & LeafGreen"]) {
+    assert.equal(catalogueDisplaySetForText(setName), undefined);
+  }
+
+  for (const cardName of [
+    "Basic Fire Energy",
+    "Ancient Booster Energy Capsule",
+    "Thunder Mountain ◇",
+    "Calyrex",
+    "Hex Maniac",
+  ]) {
+    assert.equal(catalogueDisplayNameForText(cardName), undefined);
+    assert.equal(catalogueDisplayCardForText(cardName), undefined);
+  }
+});
+
 test("uses a readable numbered fallback for untranslated trainer cards", () => {
   assert.equal(
     catalogueDisplayCardForText("\uBD88\uC0AC\uB974\uAE30", { number: "087", supertype: "Trainer" }),

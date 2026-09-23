@@ -506,6 +506,15 @@ function englishDisplayText(value: string | null | undefined, phraseReplacements
     return undefined;
   }
 
+  // The romanized Japanese aliases used for international catalogue records
+  // include ordinary English words such as "Fire", "Thunder", and "Booster".
+  // Applying them to an English title corrupts legitimate names (for example,
+  // "Lost Thunder" became "Lost Zapdos"). Only translate records that actually
+  // contain one of the international scripts this display layer supports.
+  if (!hasInternationalScript(raw)) {
+    return undefined;
+  }
+
   let display = raw;
   let changed = false;
 
