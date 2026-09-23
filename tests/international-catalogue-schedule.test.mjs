@@ -21,6 +21,31 @@ test("starts the first language when no scheduled catalogue history exists", () 
   });
 });
 
+test("prioritizes the largest incomplete provider-backed set over the global page cursor", () => {
+  assert.deepEqual(selectInternationalCatalogueBatch({
+    history: [{
+      cardsFetched: 100,
+      language: "ja",
+      maxPages: 1,
+      page: 5,
+      pageSize: 100,
+      startedAt: "2026-09-22T00:00:00Z",
+      totalCount: 10_000,
+    }],
+    incompleteSets: [
+      { language: "en", missing: 61, setId: "me55" },
+      { language: "ja", missing: 25, setId: "sv5k" },
+      { language: "ko", missing: 22, setId: "sv5k" },
+    ],
+    languages,
+    maxPages: 1,
+    pageSize: 100,
+  }), {
+    language: "ja",
+    setId: "sv5k",
+  });
+});
+
 test("selects the least-recently visited language and advances its bounded cursor", () => {
   const batch = selectInternationalCatalogueBatch({
     history: [

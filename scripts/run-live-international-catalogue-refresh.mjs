@@ -23,6 +23,7 @@ export async function runLiveInternationalCatalogueRefresh({
   }
 
   let history;
+  let incompleteSets;
 
   try {
     history = await prisma.$queryRaw`
@@ -39,14 +40,38 @@ export async function runLiveInternationalCatalogueRefresh({
         AND status = 'succeeded'::job_run_status
         AND request_payload->>'provider' = 'tcgdex'
         AND request_payload->>'scheduled' = 'true'
+        AND request_payload->>'setId' IS NULL
         AND request_payload->>'language' IS NOT NULL
       ORDER BY request_payload->>'language', started_at DESC
+    `;
+    incompleteSets = await prisma.$queryRaw`
+      SELECT
+        cs.language,
+        cs.name,
+        cs.provider_ids->>'tcgdex' AS "setId",
+        COUNT(cp.id)::int AS imported,
+        cs.total::int AS total,
+        (cs.total - COUNT(cp.id))::int AS missing
+      FROM card_sets cs
+      LEFT JOIN card_printings cp ON cp.card_set_id = cs.id
+      WHERE cs.provider_ids->>'tcgdex' IS NOT NULL
+        AND cs.language <> 'en'
+        AND cs.total IS NOT NULL
+      GROUP BY cs.id
+      HAVING COUNT(cp.id) < cs.total
+      ORDER BY missing DESC, cs.release_date DESC NULLS LAST, cs.name
     `;
   } finally {
     await prisma.$disconnect();
   }
 
-  const batch = selectInternationalCatalogueBatch({ history, languages, maxPages, pageSize });
+  const batch = selectInternationalCatalogueBatch({
+    history,
+    incompleteSets,
+    languages,
+    maxPages,
+    pageSize,
+  });
   const baseUrl = appBaseUrl(env);
   const response = await fetchImpl(new URL("/api/jobs/international-catalogue-refresh", baseUrl), {
     body: JSON.stringify({ ...batch, scheduled: true }),
@@ -68,7 +93,24 @@ export async function runLiveInternationalCatalogueRefresh({
   };
 }
 
-export function selectInternationalCatalogueBatch({ history = [], languages, maxPages, pageSize }) {
+export function selectInternationalCatalogueBatch({
+  history = [],
+  incompleteSets = [],
+  languages,
+  maxPages,
+  pageSize,
+}) {
+  const incomplete = incompleteSets.find((set) =>
+    languages.includes(String(set.language)) && String(set.setId ?? "").trim(),
+  );
+
+  if (incomplete) {
+    return {
+      language: String(incomplete.language),
+      setId: String(incomplete.setId),
+    };
+  }
+
   const latestByLanguage = new Map(
     history
       .filter((row) => languages.includes(String(row.language)))

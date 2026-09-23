@@ -104,7 +104,7 @@ export async function syncTcgdexCardPages({
   const safeMaxPages = Math.min(positiveInteger(maxPages) ?? 1, 20);
   const requestedSetId = setId?.trim();
   const targetedSet = requestedSetId
-    ? await fetchReviewedTcgdexSet(resolvedLanguage.code, resolvedLanguage.tcgdexCode, requestedSetId)
+    ? await fetchTargetedTcgdexSet(resolvedLanguage.code, resolvedLanguage.tcgdexCode, requestedSetId)
     : undefined;
   const briefs = targetedSet?.cards ?? await fetchTcgdexCardList(resolvedLanguage.tcgdexCode);
   const startIndex = targetedSet ? 0 : (safePage - 1) * safePageSize;
@@ -297,15 +297,20 @@ export async function syncTcgdexCardPages({
   };
 }
 
-async function fetchReviewedTcgdexSet(language: string, tcgdexLanguage: string, setId: string) {
-  const normalizedSetId = setId.trim().toLowerCase();
+async function fetchTargetedTcgdexSet(language: string, tcgdexLanguage: string, setId: string) {
+  const exactSetId = setId.trim();
+  const normalizedSetId = exactSetId.toLowerCase();
 
-  if (language !== "en" || !reviewedEnglishSetIds.has(normalizedSetId)) {
+  // English TCGdex IDs overlap the primary Pokemon TCG API catalogue, so only
+  // explicitly approved supplemental English sets may use this path. Other
+  // supported languages are already TCGdex-owned and can safely repair any
+  // provider-backed incomplete set by its exact ID.
+  if (language === "en" && !reviewedEnglishSetIds.has(normalizedSetId)) {
     throw new Error(`Targeted TCGdex set refresh is not approved for ${language}:${setId}.`);
   }
 
   const set = await fetchTcgdexJson<TcgdexSet>(
-    `/${tcgdexLanguage}/sets/${encodeURIComponent(normalizedSetId)}`,
+    `/${tcgdexLanguage}/sets/${encodeURIComponent(exactSetId)}`,
   );
 
   if (set.id.toLowerCase() !== normalizedSetId || !set.name || !Array.isArray(set.cards)) {
