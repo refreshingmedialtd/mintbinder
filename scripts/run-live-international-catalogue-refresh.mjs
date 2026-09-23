@@ -57,6 +57,7 @@ export async function runLiveInternationalCatalogueRefresh({
       WHERE cs.provider_ids->>'tcgdex' IS NOT NULL
         AND cs.language <> 'en'
         AND cs.total IS NOT NULL
+        AND COALESCE(cs.metadata->>'catalogueScope', '') <> 'reviewed-supplement'
       GROUP BY cs.id
       HAVING COUNT(cp.id) < cs.total
       ORDER BY missing DESC, cs.release_date DESC NULLS LAST, cs.name

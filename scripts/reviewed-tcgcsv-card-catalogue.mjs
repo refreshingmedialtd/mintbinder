@@ -192,6 +192,7 @@ const reviewedGroups = [
         localName: "エメラルドブレイク",
         provider: "tcgdex+tcgcsv",
         regionLabel: "Japan",
+        sourceCardCount: 91,
       },
       name: "Emerald Break",
       printedTotal: 78,
@@ -203,7 +204,7 @@ const reviewedGroups = [
       },
       region: "jp",
       releaseDate: "2015-03-14",
-      total: 91,
+      total: 1,
     },
   },
   {
