@@ -37,6 +37,7 @@ import {
   resolveTcgcsvVariantIdentities,
   syncTcgcsvCardPrices as syncTcgcsvCardPricesImpl,
   tcgcsvCardVariantLabel,
+  tcgdexProductVariantLabel,
 } from "../scripts/tcgcsv-card-pricing.mjs";
 
 const syncTcgcsvCardPrices = (options) => syncTcgcsvCardPricesImpl({
@@ -259,6 +260,79 @@ test("uses printing details and deterministic provider suffixes for parallel var
     "Holofoil",
     "Holofoil · TCGplayer #205",
   ]);
+});
+
+test("uses exact TCGdex product identities for regular and stamped MEP promos", () => {
+  const variantMetadata = {
+    variantsDetailed: [
+      {
+        size: "standard",
+        thirdParty: { tcgplayer: 694694 },
+        type: "holo",
+        variantId: "regular-fennekin",
+      },
+      {
+        size: "standard",
+        stamp: ["pokemon-center"],
+        thirdParty: { tcgplayer: 694695 },
+        type: "holo",
+        variantId: "pc-fennekin",
+      },
+    ],
+  };
+  const card = { variantMetadata };
+
+  assert.equal(tcgdexProductVariantLabel(variantMetadata, 694694), "Holofoil");
+  assert.equal(
+    tcgdexProductVariantLabel(variantMetadata, "694695"),
+    "Pokémon Center Stamp Holofoil",
+  );
+  assert.equal(
+    tcgcsvCardVariantLabel({ productId: 694694, name: "Fennekin - 080" }, "Holofoil", undefined, card),
+    "Holofoil",
+  );
+  assert.equal(
+    tcgcsvCardVariantLabel({
+      productId: 694695,
+      name: "Fennekin - 080 (Pokemon Center Exclusive)",
+    }, "Holofoil", undefined, card),
+    "Pokémon Center Stamp Holofoil",
+  );
+
+  assert.deepEqual(
+    resolveTcgcsvVariantIdentities([
+      {
+        card,
+        cardPrintingId: "mep-080",
+        product: { name: "Fennekin - 080", productId: 694694 },
+        subTypeName: "Holofoil",
+      },
+      {
+        card,
+        cardPrintingId: "mep-080",
+        product: {
+          name: "Fennekin - 080 (Pokemon Center Exclusive)",
+          productId: 694695,
+        },
+        subTypeName: "Holofoil",
+      },
+    ]).map((entry) => entry.variantLabel),
+    ["Holofoil", "Pokémon Center Stamp Holofoil"],
+  );
+});
+
+test("falls back to explicit promo wording when product-linked detail is unavailable", () => {
+  assert.equal(
+    tcgcsvCardVariantLabel({
+      name: "Fennekin - 080 (Pokemon Center Exclusive)",
+      productId: 694695,
+    }, "Holofoil"),
+    "Pokémon Center Stamp Holofoil",
+  );
+  assert.equal(
+    tcgcsvCardVariantLabel({ name: "Delphox - 074 [Staff]" }, "Holofoil"),
+    "Staff Stamp Holofoil",
+  );
 });
 
 test("preserves raw subtypes for cards actually named Poke Ball or Master Ball", () => {

@@ -421,13 +421,22 @@ export function matchTcgcsvCardProduct(product, cards) {
   return byName.length === 1 ? byName[0] : null;
 }
 
-export function tcgcsvCardVariantLabel(product, subTypeName, group) {
+export function tcgcsvCardVariantLabel(product, subTypeName, group, card) {
   const baseLabel = optionalString(subTypeName) ?? "Normal";
   const normalizedBaseLabel = normalizedVariantLabel(baseLabel);
   const reviewedLabel = reviewedCardProductVariantLabels.get(String(product?.productId ?? "").trim());
 
   if (reviewedLabel) {
     return reviewedLabel;
+  }
+
+  const detailedLabel = tcgdexProductVariantLabel(
+    card?.variantMetadata,
+    product?.productId,
+  );
+
+  if (detailedLabel) {
+    return detailedLabel;
   }
 
   if (group && reviewedCardGroupIdentity(group) === baseSetShadowlessGroupIdentity) {
@@ -455,6 +464,14 @@ export function tcgcsvCardVariantLabel(product, subTypeName, group) {
     .replace(/%20/g, " ")
     .replace(/[-_]+/g, " ");
 
+  if (/pokemon\s*center(?:\s+exclusive)?/.test(identityText)) {
+    return `Pokémon Center Stamp ${baseFinishLabel(baseLabel)}`;
+  }
+
+  if (/\bstaff\b/.test(identityText)) {
+    return `Staff Stamp ${baseFinishLabel(baseLabel)}`;
+  }
+
   // "Master Ball" and "Poke Ball" are also real card names. Only promote a
   // product to a patterned reverse-holo identity when TCGplayer explicitly
   // describes it as a pattern; otherwise preserve the provider's raw subtype.
@@ -481,11 +498,109 @@ export function tcgcsvCardVariantLabel(product, subTypeName, group) {
   return baseLabel;
 }
 
+/**
+ * TCGCSV exposes a generic price subtype while TCGdex carries the exact
+ * physical variant tied to the same immutable TCGplayer product ID. Prefer
+ * that identity when present so parallel promo printings never collide.
+ */
+export function tcgdexProductVariantLabel(variantMetadata, productId) {
+  const productIdentity = String(productId ?? "").trim();
+  const variants = jsonObject(variantMetadata).variantsDetailed;
+
+  if (!productIdentity || !Array.isArray(variants)) {
+    return undefined;
+  }
+
+  const variant = variants.find((candidate) => {
+    const thirdParty = jsonObject(jsonObject(candidate).thirdParty);
+    return String(thirdParty.tcgplayer ?? "").trim() === productIdentity;
+  });
+
+  if (!variant) {
+    return undefined;
+  }
+
+  const detail = jsonObject(variant);
+  const type = optionalString(detail.type);
+  const size = optionalString(detail.size);
+  const foil = optionalString(detail.foil);
+  const stamps = Array.isArray(detail.stamp)
+    ? detail.stamp.map(optionalString).filter(Boolean)
+    : [];
+  const finish = type ? tcgdexFinishLabel(type) : undefined;
+  const labels = [];
+
+  if (size && normalizedVariantLabel(size) !== "standard") {
+    labels.push(displayWords(size));
+  }
+
+  for (const stamp of stamps) {
+    labels.push(tcgdexStampLabel(stamp));
+  }
+
+  if (foil) {
+    labels.push(tcgdexFoilLabel(foil));
+  }
+
+  if (finish) {
+    labels.push(finish);
+  }
+
+  return [...new Set(labels.filter(Boolean))].join(" ") || undefined;
+}
+
+function tcgdexFinishLabel(value) {
+  const labels = {
+    holo: "Holofoil",
+    normal: "Normal",
+    reverse: "Reverse Holofoil",
+  };
+
+  return labels[normalizedVariantLabel(value)] ?? displayWords(value);
+}
+
+function tcgdexStampLabel(value) {
+  const normalized = normalizedVariantLabel(value);
+
+  if (normalized === "pokemoncenter") return "Pokémon Center Stamp";
+  if (normalized === "setlogo") return "Set Logo Stamp";
+
+  const display = displayWords(value);
+  return normalizedVariantLabel(display).endsWith("stamp") ? display : `${display} Stamp`;
+}
+
+function tcgdexFoilLabel(value) {
+  const normalized = normalizedVariantLabel(value);
+
+  if (normalized === "pokeball") return "Poke Ball";
+  if (normalized === "masterball") return "Master Ball";
+
+  return displayWords(value);
+}
+
+function baseFinishLabel(value) {
+  const normalized = normalizedVariantLabel(value);
+
+  if (normalized.includes("reverseholo")) return "Reverse Holofoil";
+  if (normalized.includes("holo")) return "Holofoil";
+  if (normalized === "normal" || normalized === "standard") return "Normal";
+
+  return displayWords(value);
+}
+
+function displayWords(value) {
+  return String(value ?? "")
+    .replace(/[_-]+/g, " ")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .trim()
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
 export function resolveTcgcsvVariantIdentities(entries) {
   const resolved = entries.map((entry) => ({
     ...entry,
     sourceRef: String(entry.product?.productId ?? entry.sourceRef ?? "").trim(),
-    variantLabel: tcgcsvCardVariantLabel(entry.product, entry.subTypeName, entry.group),
+    variantLabel: tcgcsvCardVariantLabel(entry.product, entry.subTypeName, entry.group, entry.card),
   }));
   const byCardAndLabel = new Map();
 
@@ -561,6 +676,7 @@ async function importCardGroup({
         imageSmallUrl: true,
         name: true,
         number: true,
+        variantMetadata: true,
       },
       where: {
         cardSetId: set.id,
@@ -623,11 +739,12 @@ async function importCardGroup({
   }
 
   const incomingVariantIdentities = matchedProducts.flatMap(({ card, prices, product }) => prices.map((price) => ({
-      cardPrintingId: card.id,
-      group,
-      product,
-      subTypeName: price.subTypeName,
-    })));
+    card,
+    cardPrintingId: card.id,
+    group,
+    product,
+    subTypeName: price.subTypeName,
+  })));
   const existingVariantIdentities = await loadExistingTcgcsvVariantIdentities({
     cardPrintingIds: [...new Set(matchedProducts.map(({ card }) => card.id))],
     prisma,
@@ -666,7 +783,7 @@ async function importCardGroup({
         card.id,
         String(product.productId ?? ""),
         price.subTypeName,
-      )) ?? tcgcsvCardVariantLabel(product, price.subTypeName, group);
+      )) ?? tcgcsvCardVariantLabel(product, price.subTypeName, group, card);
 
       if (priceOnlyUnpriced && await hasCardVariantPriceSnapshot(prisma, card.id, variantLabel)) {
         continue;
@@ -691,7 +808,7 @@ async function importCardGroup({
           providerUpdatedAt: providerUpdatedAt.toISOString(),
           importedAt: new Date().toISOString(),
           conditionBasis: "Market aggregate; provider does not supply a condition-specific sales sample",
-          baseVariantLabel: tcgcsvCardVariantLabel(product, price.subTypeName, group),
+          baseVariantLabel: tcgcsvCardVariantLabel(product, price.subTypeName, group, card),
           subTypeName: price.subTypeName,
           tcgplayerUrl: product.url,
         },
@@ -1263,6 +1380,10 @@ function optionalString(value) {
   const trimmed = String(value ?? "").trim();
 
   return trimmed || undefined;
+}
+
+function jsonObject(value) {
+  return isObject(value) ? value : {};
 }
 
 function isObject(value) {

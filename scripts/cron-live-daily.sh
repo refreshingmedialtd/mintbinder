@@ -5,8 +5,8 @@ cd "$(dirname "$0")/.."
 
 status=0
 
-# A small product-ID allowlist fills source gaps and preserves exact stamped
-# variants without importing TCGCSV's broad miscellaneous catalogue.
+# Refresh complete approved evolving promo sets before applying the narrow
+# product-ID allowlist used for other source gaps and exact stamped variants.
 npm run job:live-reviewed-card-catalogue || status=$?
 
 # Set discovery changes slowly and no longer shares the hourly pricing burst.

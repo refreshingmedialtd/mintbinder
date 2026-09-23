@@ -35,6 +35,7 @@ test("reviewed supplements fail closed without a trustworthy expected total or c
 
 test("reviewed set specifications publish their complete expected totals", () => {
   assert.equal(reviewedTcgcsvGroup(3, "24451").set.total, 89);
-  assert.equal(reviewedTcgcsvGroup(3, "23323").set.total, 102);
+  assert.equal(reviewedTcgcsvGroup(3, "23323").set.total, 3);
+  assert.equal(reviewedTcgcsvGroup(3, "23323").set.metadata.sourceCardCount, 102);
   assert.equal(reviewedTcgcsvGroup(85, "23923").set.total, 91);
 });

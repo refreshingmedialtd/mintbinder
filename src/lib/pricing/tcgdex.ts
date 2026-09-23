@@ -51,9 +51,34 @@ type TcgdexCard = TcgdexCardBrief & {
     foil?: string;
     size?: string;
     stamp?: string[];
+    thirdParty?: {
+      cardmarket?: number;
+      tcgplayer?: number;
+    };
     type?: string;
     variantId?: string;
   }>;
+};
+
+type TcgdexSet = {
+  abbreviation?: {
+    official?: string;
+  };
+  cardCount?: {
+    official?: number;
+    total?: number;
+  };
+  cards?: TcgdexCardBrief[];
+  id: string;
+  legal?: Record<string, boolean>;
+  logo?: string;
+  name: string;
+  releaseDate?: string;
+  serie?: {
+    id?: string;
+    name?: string;
+  };
+  symbol?: string;
 };
 
 type SyncTcgdexCardsInput = {
@@ -61,21 +86,66 @@ type SyncTcgdexCardsInput = {
   maxPages?: number;
   page?: number;
   pageSize?: number;
+  setId?: string;
 };
+
+const reviewedEnglishSetIds = new Set(["mep"]);
 
 export async function syncTcgdexCardPages({
   language = "ja",
   maxPages = 1,
   page = 1,
   pageSize = 50,
+  setId,
 }: SyncTcgdexCardsInput = {}) {
   const resolvedLanguage = resolveTcgdexLanguage(language);
   const safePage = positiveInteger(page) ?? 1;
   const safePageSize = Math.min(positiveInteger(pageSize) ?? 50, 250);
   const safeMaxPages = Math.min(positiveInteger(maxPages) ?? 1, 20);
-  const briefs = await fetchTcgdexCardList(resolvedLanguage.tcgdexCode);
-  const startIndex = (safePage - 1) * safePageSize;
-  const requested = briefs.slice(startIndex, startIndex + safePageSize * safeMaxPages);
+  const requestedSetId = setId?.trim();
+  const targetedSet = requestedSetId
+    ? await fetchReviewedTcgdexSet(resolvedLanguage.code, resolvedLanguage.tcgdexCode, requestedSetId)
+    : undefined;
+  const briefs = targetedSet?.cards ?? await fetchTcgdexCardList(resolvedLanguage.tcgdexCode);
+  const startIndex = targetedSet ? 0 : (safePage - 1) * safePageSize;
+  const requested = targetedSet
+    ? briefs
+    : briefs.slice(startIndex, startIndex + safePageSize * safeMaxPages);
+
+  if (targetedSet) {
+    const expectedTotal = positiveInteger(targetedSet.cardCount?.total);
+
+    if (!expectedTotal || requested.length !== expectedTotal) {
+      throw new Error(
+        `TCGdex set ${targetedSet.id} returned ${requested.length} cards but declares ${expectedTotal ?? "no"} total.`,
+      );
+    }
+  }
+
+  // Fetch and validate the complete reviewed set before the first database
+  // mutation. Provider identity drift must not leave a half-imported set.
+  const targetedCards = targetedSet
+    ? await mapWithConcurrency(requested, 8, async (brief) => {
+      const detail = await fetchTcgdexCard(resolvedLanguage.tcgdexCode, brief.id);
+      const card = { ...brief, ...detail };
+
+      if (
+        card.id !== brief.id ||
+        !card.name ||
+        !card.set?.id ||
+        card.set.id.toLowerCase() !== targetedSet.id.toLowerCase() ||
+        !card.set.name
+      ) {
+        throw new Error(`TCGdex card ${brief.id} no longer matches reviewed set ${targetedSet.id}.`);
+      }
+
+      return card;
+    })
+    : undefined;
+  const targetedCardsById = targetedCards
+    ? new Map(targetedCards.map((card) => [card.id, card]))
+    : undefined;
+
   const existingCards = await prisma.cardPrinting.findMany({
     select: {
       id: true,
@@ -94,11 +164,36 @@ export async function syncTcgdexCardPages({
   let cardsSkipped = 0;
   let cardsUpserted = 0;
 
-  for (const brief of requested) {
-    const detail = await fetchTcgdexCard(resolvedLanguage.tcgdexCode, brief.id);
-    const card = { ...brief, ...detail };
+  if (targetedSet) {
+    const setId = cardSetId(resolvedLanguage.code, targetedSet.id);
+    const setData = tcgdexSetData(targetedSet, resolvedLanguage);
+    const existingSet = await prisma.cardSet.findUnique({
+      select: { providerIds: true },
+      where: { id: setId },
+    });
 
-    if (!card.image && resolvedLanguage.code !== "ja") {
+    setIds.add(setId);
+    await prisma.cardSet.upsert({
+      where: { id: setId },
+      update: {
+        ...preserveCardSetMetadataOnUpdate(setData),
+        providerIds: mergeProviderIds(existingSet?.providerIds, setData.providerIds),
+      },
+      create: {
+        id: setId,
+        ...setData,
+      },
+    });
+  }
+
+  await mapWithConcurrency(requested, 8, async (brief) => {
+    const preloadedCard = targetedCardsById?.get(brief.id);
+    const card = preloadedCard ?? {
+      ...brief,
+      ...await fetchTcgdexCard(resolvedLanguage.tcgdexCode, brief.id),
+    };
+
+    if (!card.image && !["en", "ja"].includes(resolvedLanguage.code)) {
       const japaneseCard = await fetchTcgdexCardFallback("ja", brief.id);
       card.image = japaneseCard?.image;
       card.dexId = card.dexId ?? japaneseCard?.dexId;
@@ -106,40 +201,32 @@ export async function syncTcgdexCardPages({
 
     if (!card.name || !card.set?.id || !card.set.name) {
       cardsSkipped += 1;
-      continue;
+      return;
     }
 
     const setId = cardSetId(resolvedLanguage.code, card.set.id);
     const cardId = cardPrintingId(resolvedLanguage.code, card.id);
-    const now = new Date().toISOString();
 
     setIds.add(setId);
 
-    const setData = {
-      language: resolvedLanguage.code,
-      logoImageUrl: card.set.logo,
-      metadata: compactJson({
-        provider: "tcgdex",
-        providerUpdatedAt: now,
-        regionLabel: resolvedLanguage.regionLabel,
-        tcgdexLanguage: resolvedLanguage.tcgdexCode,
-      }),
-      name: card.set.name,
-      printedTotal: card.set.cardCount?.official,
-      providerIds: providerIds(resolvedLanguage.code, card.set.id),
-      region: resolvedLanguage.region,
-      symbolImageUrl: card.set.symbol,
-      total: card.set.cardCount?.total,
-    };
+    if (!targetedSet) {
+      const setData = tcgdexSetData({
+        cardCount: card.set.cardCount,
+        id: card.set.id,
+        logo: card.set.logo,
+        name: card.set.name,
+        symbol: card.set.symbol,
+      }, resolvedLanguage);
 
-    await prisma.cardSet.upsert({
-      where: { id: setId },
-      update: preserveCardSetMetadataOnUpdate(setData),
-      create: {
-        id: setId,
-        ...setData,
-      },
-    });
+      await prisma.cardSet.upsert({
+        where: { id: setId },
+        update: preserveCardSetMetadataOnUpdate(setData),
+        create: {
+          id: setId,
+          ...setData,
+        },
+      });
+    }
 
     const cardData = {
       artist: card.illustrator,
@@ -169,22 +256,63 @@ export async function syncTcgdexCardPages({
     });
 
     cardsUpserted += 1;
+  });
+
+  const catalogueCardsExpected = targetedSet
+    ? positiveInteger(targetedSet.cardCount?.total) ?? requested.length
+    : undefined;
+  const catalogueCardsAvailable = targetedSet
+    ? await prisma.cardPrinting.count({
+      where: { cardSetId: cardSetId(resolvedLanguage.code, targetedSet.id) },
+    })
+    : undefined;
+  const catalogueComplete = targetedSet
+    ? cardsSkipped === 0 && (catalogueCardsAvailable ?? 0) >= (catalogueCardsExpected ?? 0)
+    : undefined;
+
+  if (targetedSet && !catalogueComplete) {
+    throw new Error(
+      `TCGdex set ${targetedSet.id} catalogue is incomplete after refresh: ` +
+      `${catalogueCardsAvailable ?? 0}/${catalogueCardsExpected ?? 0} cards available, ${cardsSkipped} skipped.`,
+    );
   }
 
   return {
     cardsFetched: requested.length,
     cardsSkipped,
     cardsUpserted,
+    catalogueCardsAvailable,
+    catalogueCardsExpected,
+    catalogueComplete,
     language: resolvedLanguage.code,
     languageLabel: resolvedLanguage.label,
-    page: safePage,
-    pageSize: safePageSize,
+    page: targetedSet ? 1 : safePage,
+    pageSize: targetedSet ? requested.length : safePageSize,
     provider: "tcgdex",
+    requestedSetId: targetedSet?.id,
     setIds: [...setIds],
     setsUpserted: setIds.size,
     supportedLanguages: supportedTcgdexLanguages(),
     totalCount: briefs.length,
   };
+}
+
+async function fetchReviewedTcgdexSet(language: string, tcgdexLanguage: string, setId: string) {
+  const normalizedSetId = setId.trim().toLowerCase();
+
+  if (language !== "en" || !reviewedEnglishSetIds.has(normalizedSetId)) {
+    throw new Error(`Targeted TCGdex set refresh is not approved for ${language}:${setId}.`);
+  }
+
+  const set = await fetchTcgdexJson<TcgdexSet>(
+    `/${tcgdexLanguage}/sets/${encodeURIComponent(normalizedSetId)}`,
+  );
+
+  if (set.id.toLowerCase() !== normalizedSetId || !set.name || !Array.isArray(set.cards)) {
+    throw new Error(`TCGdex returned an invalid identity for reviewed set ${language}:${setId}.`);
+  }
+
+  return set;
 }
 
 async function fetchTcgdexCardList(language: string) {
@@ -249,6 +377,50 @@ function providerIds(language: string, providerId: string): Prisma.InputJsonObje
     tcgdex: providerId,
     [`tcgdex_${language.replaceAll("-", "_")}`]: providerId,
   };
+}
+
+function mergeProviderIds(existing: unknown, incoming: unknown): Prisma.InputJsonObject {
+  return {
+    ...jsonObject(existing),
+    ...jsonObject(incoming),
+  } as Prisma.InputJsonObject;
+}
+
+function jsonObject(value: unknown): Record<string, Prisma.InputJsonValue> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, Prisma.InputJsonValue>
+    : {};
+}
+
+function tcgdexSetData(
+  set: TcgdexSet,
+  language: ReturnType<typeof resolveTcgdexLanguage>,
+) {
+  const now = new Date().toISOString();
+
+  return {
+    language: language.code,
+    logoImageUrl: set.logo,
+    metadata: compactJson({
+      ...(language.code === "en" && reviewedEnglishSetIds.has(set.id.toLowerCase())
+        ? { catalogueScope: "reviewed-supplement" }
+        : {}),
+      abbreviation: set.abbreviation?.official,
+      legal: set.legal,
+      provider: "tcgdex",
+      providerUpdatedAt: now,
+      regionLabel: language.regionLabel,
+      tcgdexLanguage: language.tcgdexCode,
+    }),
+    name: set.name,
+    printedTotal: set.cardCount?.official,
+    providerIds: providerIds(language.code, set.id),
+    region: language.region,
+    releaseDate: set.releaseDate ? new Date(`${set.releaseDate}T00:00:00.000Z`) : undefined,
+    series: set.serie?.name,
+    symbolImageUrl: set.symbol,
+    total: set.cardCount?.total,
+  } satisfies Prisma.CardSetUncheckedCreateInput;
 }
 
 function cardSetId(language: string, providerId: string) {
@@ -400,4 +572,29 @@ function positiveInteger(value: unknown) {
   }
 
   return Math.floor(number);
+}
+
+async function mapWithConcurrency<T, R>(
+  values: T[],
+  concurrency: number,
+  task: (value: T) => Promise<R>,
+) {
+  let index = 0;
+  const results = new Array<R>(values.length);
+
+  async function worker() {
+    while (index < values.length) {
+      const currentIndex = index;
+      const value = values[currentIndex];
+
+      index += 1;
+      results[currentIndex] = await task(value);
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, values.length) }, () => worker()),
+  );
+
+  return results;
 }

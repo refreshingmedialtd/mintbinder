@@ -23,17 +23,21 @@ test("live reviewed catalogue helper sends one bounded scheduled request per rev
   });
 
   assert.equal(result.complete, true);
-  assert.equal(calls.length, 4);
+  assert.equal(calls.length, 5);
   assert.deepEqual(
     calls.map((call) => JSON.parse(call.init.body)),
     [
+      { language: "en", scheduled: true, setId: "mep" },
       { categoryId: 3, groupId: "24451", scheduled: true, writePrices: true },
       { categoryId: 3, groupId: "23323", scheduled: true, writePrices: true },
       { categoryId: 85, groupId: "23923", scheduled: true, writePrices: true },
       { categoryId: 3, groupId: "2374", scheduled: true, writePrices: true },
     ],
   );
-  assert.ok(calls.every((call) => call.url === "https://mintbinder.example/api/jobs/reviewed-card-catalogue-refresh"));
+  assert.equal(calls[0].url, "https://mintbinder.example/api/jobs/international-catalogue-refresh");
+  assert.ok(calls.slice(1).every(
+    (call) => call.url === "https://mintbinder.example/api/jobs/reviewed-card-catalogue-refresh",
+  ));
   assert.ok(calls.every((call) => call.init.headers.authorization === "Bearer job-secret"));
 });
 
@@ -52,6 +56,7 @@ test("live reviewed catalogue helper supports an explicit recovery group", async
   });
 
   assert.equal(result.groupsRequested, 1);
+  assert.equal(result.setRefreshesRequested, 0);
   assert.deepEqual(calls, [
     { categoryId: 3, groupId: "2374", scheduled: true, writePrices: true },
   ]);
@@ -79,5 +84,33 @@ test("live reviewed catalogue helper attempts later groups after one failure", a
       return true;
     },
   );
-  assert.equal(calls, 4);
+  assert.equal(calls, 5);
+});
+
+test("an explicit MEP recovery refreshes the complete provider set before its reviewed products", async () => {
+  const calls = [];
+  const result = await runLiveReviewedCardCatalogueRefresh({
+    env: {
+      JOB_SECRET: "job-secret",
+      SCHEDULED_JOB_APP_URL: "https://mintbinder.example",
+      TCGCSV_REVIEWED_CATALOGUE_GROUP_IDS: "24451",
+    },
+    fetchImpl: async (url, init) => {
+      calls.push({ body: JSON.parse(init.body), url: String(url) });
+      return Response.json({ ok: true });
+    },
+  });
+
+  assert.equal(result.groupsRequested, 1);
+  assert.equal(result.setRefreshesRequested, 1);
+  assert.deepEqual(calls, [
+    {
+      body: { language: "en", scheduled: true, setId: "mep" },
+      url: "https://mintbinder.example/api/jobs/international-catalogue-refresh",
+    },
+    {
+      body: { categoryId: 3, groupId: "24451", scheduled: true, writePrices: true },
+      url: "https://mintbinder.example/api/jobs/reviewed-card-catalogue-refresh",
+    },
+  ]);
 });

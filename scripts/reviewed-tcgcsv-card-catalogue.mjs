@@ -146,7 +146,11 @@ const reviewedGroups = [
       },
       region: "international",
       releaseDate: "2023-11-17",
-      total: 102,
+      // This supplemental set intentionally exposes the three English-only
+      // tool cards that are absent from the primary catalogue. Keep the
+      // provider's complete 102-card count in metadata without pretending
+      // that the local reviewed subset is incomplete forever.
+      total: 3,
     },
   },
   {

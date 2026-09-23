@@ -119,7 +119,7 @@ cd /home/virtual/vps-05742c/0/0ddcd8e9a0/mintbinder
 Expected results:
 
 - `job:live-health` returns `ok: true`.
-- `cron-live-daily.sh` refreshes the reviewed card-supplement allowlist, refreshes the slowly changing set catalogue, and records a forced dry-run price-alert digest. The wrapper cannot email real users.
+- `cron-live-daily.sh` first synchronises and count-verifies the complete live MEP promo set, then refreshes exact reviewed card supplements, the slowly changing primary set catalogue, and a forced dry-run price-alert digest. The wrapper cannot email real users, and the MEP stage fails visibly if the local card count does not reach the provider total.
 - `cron-live-pricing.sh` runs the Pokemon TCG set rotation, then the capacity-sized TCGCSV English daily rotation serially. Both lanes create `pricing_refresh` job runs, and either may fail without preventing the other from being attempted.
 - `job:live-japan-card-pricing` calls `/api/jobs/international-card-pricing`, creates a `pricing_refresh` job run, and reports `categoryId: 85` plus `language: "ja"`.
 - `job:live-sealed-pricing` creates a `sealed_pricing_refresh` job run. With `CARDTRADER_API_TOKEN` configured, its result also contains a `secondSource` diagnostic object for `cardtrader-sealed`; an API-healthy discovery pass may legitimately report no safe match or eligible listing, while aggregate coverage, freshness, and last-evidence checks still detect a stalled source.
