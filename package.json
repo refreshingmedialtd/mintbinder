@@ -109,6 +109,7 @@
     "job:tcgcsv-card-pricing": "node scripts/import-tcgcsv-card-prices.mjs",
     "job:tcgcsv-japan-card-pricing": "node scripts/import-tcgcsv-japan-card-prices.mjs",
     "job:cardtrader-sealed": "node scripts/import-cardtrader-sealed-prices.mjs",
+    "job:ebay-uk-sold": "node scripts/import-ebay-uk-sold-prices.mjs",
     "job:pricecharting-sealed": "node scripts/import-pricecharting-sealed-prices.mjs",
     "job:pricecharting-graded": "node scripts/import-pricecharting-graded-card-prices.mjs",
     "job:sealed-tcgcsv": "node scripts/import-tcgcsv-sealed-products.mjs",

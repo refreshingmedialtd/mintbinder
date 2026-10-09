@@ -101,6 +101,10 @@ export function priceSourceLabel(source?: string | null) {
     return "PulseTCG UK market";
   }
 
+  if (normalized === "ebay-uk-sold") {
+    return "eBay UK completed sales";
+  }
+
   if (normalized === "uk-market-import") {
     return "Reviewed UK market data";
   }

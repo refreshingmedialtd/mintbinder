@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   assertPriceChartingWriteAllowed,
   customerVisiblePriceSource,
+  ebayUkSoldCustomerVisible,
   priceChartingLicenceConfirmed,
   restrictedCustomerPriceSources,
 } from "../src/lib/pricing/provider-permissions.mjs";
@@ -23,14 +24,25 @@ test("hides licence-restricted and quarantined price sources", () => {
   assert.equal(customerVisiblePriceSource("cardtrader-sealed-quarantined", {
     PRICECHARTING_LICENCE_CONFIRMED: "true",
   }), false);
+  assert.equal(ebayUkSoldCustomerVisible({}), false);
+  assert.equal(customerVisiblePriceSource("ebay-uk-sold", {}), false);
+  assert.equal(customerVisiblePriceSource("ebay-uk-sold", {
+    EBAY_UK_SOLD_CUSTOMER_VISIBLE: "true",
+  }), true);
   assert.deepEqual(restrictedCustomerPriceSources({}), [
     "pricecharting-graded-card",
     "pricecharting-sealed",
+    "ebay-uk-sold",
     "cardtrader-sealed-quarantined",
   ]);
   assert.deepEqual(restrictedCustomerPriceSources({ PRICECHARTING_LICENCE_CONFIRMED: "true" }), [
+    "ebay-uk-sold",
     "cardtrader-sealed-quarantined",
   ]);
+  assert.deepEqual(restrictedCustomerPriceSources({
+    EBAY_UK_SOLD_CUSTOMER_VISIBLE: "true",
+    PRICECHARTING_LICENCE_CONFIRMED: "true",
+  }), ["cardtrader-sealed-quarantined"]);
 });
 
 test("rejects PriceCharting writes unless permission is confirmed", () => {

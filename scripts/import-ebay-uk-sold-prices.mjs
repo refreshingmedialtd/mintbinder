@@ -1,0 +1,18 @@
+import "dotenv/config";
+import { pathToFileURL } from "node:url";
+import {
+  ebayUkSoldOptionsFromEnv,
+  syncEbayUkSoldPrices,
+} from "./ebay-uk-sold-pricing.mjs";
+
+export async function main() {
+  const summary = await syncEbayUkSoldPrices(ebayUkSoldOptionsFromEnv(process.env));
+  console.log(JSON.stringify(summary, null, 2));
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}

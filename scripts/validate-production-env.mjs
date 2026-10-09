@@ -355,6 +355,28 @@ for (const writeFlag of ["PRICECHARTING_GRADED_WRITE_PRICES", "PRICECHARTING_SEA
     );
   }
 }
+for (const flag of [
+  "EBAY_UK_SOLD_ENABLED",
+  "EBAY_UK_SOLD_CUSTOMER_VISIBLE",
+  "EBAY_UK_SOLD_WRITE_PRICES",
+]) {
+  oneOf(flag, ["true", "false", ""], `${flag} must be exactly true or false when set.`);
+}
+const ebayUkSoldEnabled = normalized("EBAY_UK_SOLD_ENABLED") === "true";
+const ebayUkSoldCustomerVisible = normalized("EBAY_UK_SOLD_CUSTOMER_VISIBLE") === "true";
+const ebayUkSoldWritePrices = normalized("EBAY_UK_SOLD_WRITE_PRICES") === "true";
+if (ebayUkSoldEnabled && !normalized("EBAYSOLDLISTINGS_API_KEY")) {
+  blocker(
+    "EBAYSOLDLISTINGS_API_KEY",
+    "EBAYSOLDLISTINGS_API_KEY is required while the eBay UK sold-price benchmark is enabled.",
+  );
+}
+if (ebayUkSoldWritePrices && !ebayUkSoldCustomerVisible) {
+  blocker(
+    "EBAY_UK_SOLD_CUSTOMER_VISIBLE",
+    "EBAY_UK_SOLD_WRITE_PRICES=true is prohibited until the shadow benchmark passes and EBAY_UK_SOLD_CUSTOMER_VISIBLE=true is explicitly approved.",
+  );
+}
 
 const blockers = checks.filter((check) => check.level === "blocker");
 const warnings = checks.filter((check) => check.level === "warning");

@@ -5,9 +5,16 @@ const priceChartingSources = new Set([
 const quarantinedPriceSources = new Set([
   "cardtrader-sealed-quarantined",
 ]);
+const ebayUkSoldSources = new Set([
+  "ebay-uk-sold",
+]);
 
 export function priceChartingLicenceConfirmed(env = process.env) {
   return String(env.PRICECHARTING_LICENCE_CONFIRMED ?? "").trim().toLowerCase() === "true";
+}
+
+export function ebayUkSoldCustomerVisible(env = process.env) {
+  return String(env.EBAY_UK_SOLD_CUSTOMER_VISIBLE ?? "").trim().toLowerCase() === "true";
 }
 
 export function customerVisiblePriceSource(source, env = process.env) {
@@ -17,12 +24,17 @@ export function customerVisiblePriceSource(source, env = process.env) {
     return false;
   }
 
+  if (ebayUkSoldSources.has(normalized) && !ebayUkSoldCustomerVisible(env)) {
+    return false;
+  }
+
   return !priceChartingSources.has(normalized) || priceChartingLicenceConfirmed(env);
 }
 
 export function restrictedCustomerPriceSources(env = process.env) {
   return [
     ...(!priceChartingLicenceConfirmed(env) ? priceChartingSources : []),
+    ...(!ebayUkSoldCustomerVisible(env) ? ebayUkSoldSources : []),
     ...quarantinedPriceSources,
   ];
 }
