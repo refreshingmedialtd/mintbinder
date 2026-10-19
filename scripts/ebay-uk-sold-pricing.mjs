@@ -110,7 +110,9 @@ export async function syncEbayUkSoldPrices(options = {}) {
         number: target.card.number,
         priceMinor: estimate.priceMinor,
         query,
+        rejectedSamples: estimate.rejectedSamples,
         rejectionReasons: estimate.rejectionReasons,
+        returnedListings: Array.isArray(response.results) ? response.results.length : 0,
         sampleSize: estimate.sampleSize,
         set: target.card.cardSet.name,
         spreadRatio: estimate.spreadRatio,
@@ -155,6 +157,16 @@ export async function selectEbayUkSoldTargets(prisma, { cardIds = [], limit = 10
     name: true,
     number: true,
     rarity: true,
+    priceSnapshots: {
+      orderBy: { observedAt: "desc" },
+      select: {
+        condition: true,
+        language: true,
+        priceMinor: true,
+        variantLabel: true,
+      },
+      take: 20,
+    },
     variantMetadata: true,
   };
   const [owned, wanted] = await Promise.all([
@@ -202,7 +214,10 @@ export async function selectEbayUkSoldTargets(prisma, { cardIds = [], limit = 10
       card: item.cardPrinting,
       condition: item.condition,
       demand: "owned",
-      priorityScore: 10_000 + Math.max(1, Number(item.quantity) || 1) * 100,
+      priorityScore:
+        10_000 +
+        Math.max(1, Number(item.quantity) || 1) * 100 +
+        Math.min(100_000, marketReferencePriceMinor(item.cardPrinting, item.variantLabel)) / 10,
       updatedAt: item.updatedAt,
       variantLabel: item.variantLabel ?? "Standard",
     });
@@ -257,10 +272,8 @@ export function buildEbayUkSearchQuery(target) {
   const terms = [
     target.card.name,
     collectorNumberQuery(target.card),
-    target.card.cardSet.name,
+    setQueryQualifier(target.card),
     variantQueryTerms(target.variantLabel),
-    languageQueryTerm(target.card.language),
-    rawConditionQueryTerm(target.condition),
   ].filter(Boolean);
 
   return uniqueStrings(terms).join(" ").replace(/\s+/g, " ").trim().slice(0, 300);
@@ -310,6 +323,7 @@ export function estimateEbayUkSoldPrice(target, listings, {
   now = new Date(),
 } = {}) {
   const rejectionReasons = {};
+  const rejectedSamples = [];
   const acceptedByIdentity = new Map();
 
   for (const listing of Array.isArray(listings) ? listings : []) {
@@ -317,6 +331,12 @@ export function estimateEbayUkSoldPrice(target, listings, {
 
     if (!classification.accepted) {
       rejectionReasons[classification.reason] = (rejectionReasons[classification.reason] ?? 0) + 1;
+      if (rejectedSamples.length < 5) {
+        rejectedSamples.push({
+          reason: classification.reason,
+          title: stringSetting(listing?.title).slice(0, 180),
+        });
+      }
       continue;
     }
 
@@ -353,6 +373,7 @@ export function estimateEbayUkSoldPrice(target, listings, {
       : null,
     latestSaleAt,
     priceMinor: accepted ? Math.round(median(values)) : null,
+    rejectedSamples,
     rejectionReasons,
     sampleSize: values.length,
     spreadRatio: Number.isFinite(spreadRatio) ? Number(spreadRatio.toFixed(3)) : null,
@@ -498,7 +519,7 @@ function collectorNumberQuery(card) {
   return subset && /^(?:GG|TG)$/i.test(subset[1])
     ? `${number}/${subset[1].toUpperCase()}${total}`
     : /^\d+$/.test(number)
-      ? `${number}/${total}`
+      ? `${number}/${number.startsWith("0") ? String(total).padStart(number.length, "0") : total}`
       : number;
 }
 
@@ -517,6 +538,7 @@ function titleMatchesCollectorNumber(title, card) {
   const rawNumber = String(card.number ?? "").trim();
   const prefix = rawNumber.match(/^([A-Za-z]{1,3})\d+$/)?.[1]?.toLowerCase();
   if (Number.isFinite(total) && total > 0 && (/^\d+$/.test(rawNumber) || /^(?:gg|tg)$/.test(prefix ?? ""))) {
+    if (/^\d+$/.test(rawNumber)) return titleHasNumericCollectorFraction(title, rawNumber, total);
     const denominator = prefix ? `${prefix}${total}` : String(total);
     return compactTitle.includes(`${number}/${denominator}`) || compactTitle.includes(`${number}-${denominator}`);
   }
@@ -529,6 +551,9 @@ function titleMatchesSet(title, card) {
   if (title.includes(normalizedSet)) return true;
   const distinctive = normalizedSet.split(" ").filter((token) => token.length >= 4 && !setStopWords.has(token));
   if (distinctive.length > 0 && distinctive.every((token) => title.includes(token))) return true;
+
+  const aliases = setIdentityAliases(card.cardSet.name);
+  if (aliases.some((alias) => alias.every((token) => title.includes(token)))) return true;
 
   // Provider-style prefixed collector numbers (MEP 070, SWSH123, GG12/GG70)
   // identify their catalogue family without forcing sellers to spell out the
@@ -550,7 +575,8 @@ function titleMatchesVariant(title, variantLabel) {
   const shadowless = /\bshadowless\b/.test(title);
   const reverse = /\breverse\s*(?:holo|holofoil|foil)\b/.test(title);
   const holo = /\b(?:holo|holofoil)\b/.test(title);
-  const stamped = /\b(?:stamp|stamped)\b/.test(title);
+  const pokemonCenter = /\bpokemon\s*center\b|\bpc\s*(?:stamp|stamped|promo)\b/.test(title);
+  const stamped = /\b(?:stamp|stamped)\b/.test(title) || pokemonCenter;
 
   if (variant.includes("1stedition") && !firstEdition) return { ok: false, reason: "first_edition_mismatch" };
   if (!variant.includes("1stedition") && firstEdition) return { ok: false, reason: "first_edition_mismatch" };
@@ -561,7 +587,7 @@ function titleMatchesVariant(title, variantLabel) {
   if (expectsNamedStamp) {
     const stampTokens = variantStampTokens(variantLabel);
     const pokemonCenterIdentity = variant.includes("pokemoncenterstamp");
-    if (!stampTokens.every((token) => title.includes(token))) {
+    if (pokemonCenterIdentity ? !pokemonCenter : !stampTokens.every((token) => title.includes(token))) {
       return { ok: false, reason: "stamp_identity_mismatch" };
     }
     if (!stamped && !pokemonCenterIdentity) {
@@ -605,15 +631,40 @@ function variantQueryTerms(variantLabel) {
   return "";
 }
 
-function languageQueryTerm(language) {
-  const normalized = String(language ?? "en").trim().toLowerCase();
-  if (normalized === "ja") return "Japanese";
-  return normalized === "en" ? "English" : normalized;
+function setQueryQualifier(card) {
+  const aliases = setIdentityAliases(card?.cardSet?.name);
+  if (!aliases.length) return "";
+  return aliases[0].join(" ").toUpperCase();
 }
 
-function rawConditionQueryTerm(condition) {
-  void condition;
-  return "near mint";
+function setIdentityAliases(value) {
+  const set = normalizeText(value);
+  if (!set) return [];
+  if (/\bmep\b/.test(set) && /black star promo/.test(set)) {
+    return [["mep"], ["mega", "evolution", "promo"], ["black", "star", "promo"]];
+  }
+  if (/\bsvp\b/.test(set) && /black star promo/.test(set)) {
+    return [["svp"], ["scarlet", "violet", "promo"], ["black", "star", "promo"]];
+  }
+  if (/\bswsh\b/.test(set) && /black star promo/.test(set)) {
+    return [["swsh"], ["sword", "shield", "promo"], ["black", "star", "promo"]];
+  }
+  if (/\bsm\b/.test(set) && /black star promo/.test(set)) {
+    return [["sm"], ["sun", "moon", "promo"], ["black", "star", "promo"]];
+  }
+  if (/\bxy\b/.test(set) && /black star promo/.test(set)) {
+    return [["xy"], ["black", "star", "promo"]];
+  }
+  return [];
+}
+
+function titleHasNumericCollectorFraction(title, rawNumber, total) {
+  const numerator = Number(rawNumber);
+  if (!Number.isFinite(numerator) || !Number.isFinite(total)) return false;
+  return new RegExp(
+    `(?:^|[^0-9])0*${numerator}[/-]0*${total}(?:$|[^0-9])`,
+    "i",
+  ).test(title);
 }
 
 function variantStampTokens(value) {
@@ -631,6 +682,18 @@ function primaryVariantFromMetadata(metadata) {
   if (first) return first;
   if (typeof metadata.finish === "string" && metadata.finish.trim()) return metadata.finish.trim();
   return "Standard";
+}
+
+function marketReferencePriceMinor(card, variantLabel) {
+  const snapshots = Array.isArray(card?.priceSnapshots) ? card.priceSnapshots : [];
+  const variant = normalizeVariant(variantLabel);
+  const language = String(card?.language ?? "en").trim().toLowerCase();
+  const matching = snapshots.find((snapshot) =>
+    normalizeVariant(snapshot?.variantLabel) === variant &&
+    String(snapshot?.language ?? language).trim().toLowerCase() === language &&
+    Number(snapshot?.priceMinor) > 0,
+  );
+  return Number(matching?.priceMinor) || 0;
 }
 
 function validSoldSearchResponse(value) {
@@ -685,11 +748,8 @@ function normalizeIdentityText(value) {
 }
 
 function normalizeVariant(value) {
-  return String(value ?? "")
-    .trim()
-    .toLowerCase()
+  return normalizeText(value)
     .replace(/first/g, "1st")
-    .replace(/foil/g, "foil")
     .replace(/[^a-z0-9]+/g, "");
 }
 

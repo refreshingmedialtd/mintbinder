@@ -6,6 +6,7 @@ import {
   ebayUkSoldOptionsFromEnv,
   estimateEbayUkSoldPrice,
   robustComparableSales,
+  selectEbayUkSoldTargets,
   syncEbayUkSoldPrices,
 } from "../scripts/ebay-uk-sold-pricing.mjs";
 
@@ -48,10 +49,47 @@ test("UK sold pricing remains fail-closed by default", () => {
   assert.equal(options.timeoutMs, 95_000);
 });
 
-test("builds an exact UK card query with printing, finish, language and condition", () => {
+test("automatic benchmarking prioritizes meaningful owned value over recent low-value additions", async () => {
+  const card = (id, name, priceMinor) => ({
+    cardSet: { name: "Team Rocket", printedTotal: 82, total: 83 },
+    id,
+    language: "en",
+    name,
+    number: "83",
+    priceSnapshots: [{ language: "en", priceMinor, variantLabel: "Holofoil" }],
+    rarity: "Rare Secret",
+    variantMetadata: {},
+  });
+  const prisma = {
+    collectionItem: {
+      findMany: async () => [
+        {
+          cardPrinting: card("new-low", "Recent card", 100),
+          condition: "NEAR_MINT",
+          quantity: 1,
+          updatedAt: new Date("2026-10-09"),
+          variantLabel: "Holofoil",
+        },
+        {
+          cardPrinting: card("older-high", "Representative card", 50_000),
+          condition: "NEAR_MINT",
+          quantity: 1,
+          updatedAt: new Date("2026-09-01"),
+          variantLabel: "Holofoil",
+        },
+      ],
+    },
+    wishlistItem: { findMany: async () => [] },
+  };
+
+  const selected = await selectEbayUkSoldTargets(prisma, { limit: 1 });
+  assert.equal(selected[0].card.id, "older-high");
+});
+
+test("builds a focused UK card query without title terms sellers commonly omit", () => {
   assert.equal(
     buildEbayUkSearchQuery(target),
-    "Dark Raichu 83/82 Team Rocket 1st Edition holo English near mint",
+    "Dark Raichu 83/82 1st Edition holo",
   );
 });
 
@@ -75,7 +113,53 @@ test("uses subset-prefixed denominators and does not invent promo denominators",
       number: "MEP 070",
     },
     variantLabel: "Holofoil",
-  }), /MEP 070 MEP Black Star Promos/);
+  }), /MEP 070 MEP holo/);
+});
+
+test("normalizes the accented Pokémon Center stamp into a distinct search", () => {
+  const stamped = buildEbayUkSearchQuery({
+    ...target,
+    card: {
+      ...target.card,
+      cardSet: { name: "MEP Black Star Promos", printedTotal: null, total: 86 },
+      name: "Fennekin",
+      number: "080",
+    },
+    variantLabel: "Pokémon Center Stamp Holofoil",
+  });
+  const regular = buildEbayUkSearchQuery({
+    ...target,
+    card: {
+      ...target.card,
+      cardSet: { name: "MEP Black Star Promos", printedTotal: null, total: 86 },
+      name: "Fennekin",
+      number: "080",
+    },
+    variantLabel: "Holofoil",
+  });
+
+  assert.equal(stamped, "Fennekin 080/086 MEP Pokemon Center stamp");
+  assert.equal(regular, "Fennekin 080/086 MEP holo");
+  assert.notEqual(stamped, regular);
+});
+
+test("matches Pokémon Center stamp identity while rejecting it for a regular holo", () => {
+  const stampedTarget = {
+    ...target,
+    card: {
+      ...target.card,
+      cardSet: { name: "MEP Black Star Promos", printedTotal: 86, total: 86 },
+      name: "Fennekin",
+      number: "080",
+    },
+    variantLabel: "Pokémon Center Stamp Holofoil",
+  };
+  const listing = sale({
+    title: "Pokemon Fennekin 080/086 MEP Pokemon Center Promo Holo Near Mint",
+  });
+
+  assert.equal(classifyEbayUkSoldListing(stampedTarget, listing, { now }).accepted, true);
+  assert.equal(classifyEbayUkSoldListing({ ...stampedTarget, variantLabel: "Holofoil" }, listing, { now }).reason, "stamp_mismatch");
 });
 
 test("prefixed promo numbers can prove the set without an expanded catalogue label", () => {
