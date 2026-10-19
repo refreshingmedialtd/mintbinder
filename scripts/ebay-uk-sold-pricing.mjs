@@ -18,7 +18,7 @@ export function ebayUkSoldOptionsFromEnv(env = process.env) {
     customerVisible: booleanSetting(env.EBAY_UK_SOLD_CUSTOMER_VISIBLE, false),
     enabled: booleanSetting(env.EBAY_UK_SOLD_ENABLED, false),
     limit: Math.min(50, positiveInteger(env.EBAY_UK_SOLD_LIMIT, 10)),
-    lookbackDays: Math.min(365, positiveInteger(env.EBAY_UK_SOLD_LOOKBACK_DAYS, 90)),
+    lookbackDays: Math.min(365, positiveInteger(env.EBAY_UK_SOLD_LOOKBACK_DAYS, 365)),
     minComparableSales: Math.min(20, positiveInteger(env.EBAY_UK_SOLD_MIN_COMPARABLE_SALES, 3)),
     requestCount: Math.min(240, positiveInteger(env.EBAY_UK_SOLD_REQUEST_COUNT, 120)),
     retryAttempts: Math.min(5, positiveInteger(env.EBAY_UK_SOLD_RETRY_ATTEMPTS, 4)),
@@ -93,7 +93,7 @@ export async function syncEbayUkSoldPrices(options = {}) {
       summary.candidatesChecked += 1;
       const query = buildEbayUkSearchQuery(target);
       const response = await request(query, {
-        lookbackDays: Math.min(365, positiveInteger(options.lookbackDays, 90)),
+        lookbackDays: Math.min(365, positiveInteger(options.lookbackDays, 365)),
         now: observedAt,
       });
       const estimate = estimateEbayUkSoldPrice(target, response.results, {
@@ -290,7 +290,7 @@ export function classifyEbayUkSoldListing(target, listing, { now = new Date() } 
   if (!titleMatchesSet(normalizedTitle, target.card)) return rejected("set_mismatch");
   if (!titleMatchesLanguage(normalizedTitle, target.card.language)) return rejected("language_mismatch");
 
-  const variant = titleMatchesVariant(normalizedTitle, target.variantLabel);
+  const variant = titleMatchesVariant(normalizedTitle, target.variantLabel, target.card);
   if (!variant.ok) return rejected(variant.reason);
 
   if (!titleMatchesNearMint(normalizedTitle, listing?.condition)) {
@@ -569,7 +569,7 @@ function titleMatchesLanguage(title, language) {
   return normalizedLanguage === "en" ? !foreign : title.includes(normalizedLanguage);
 }
 
-function titleMatchesVariant(title, variantLabel) {
+function titleMatchesVariant(title, variantLabel, card) {
   const variant = normalizeVariant(variantLabel);
   const firstEdition = /\b(?:1st|first)\s*edition\b/.test(title);
   const shadowless = /\bshadowless\b/.test(title);
@@ -597,7 +597,12 @@ function titleMatchesVariant(title, variantLabel) {
     return { ok: false, reason: "stamp_mismatch" };
   }
 
-  if (variant.includes("holo") && !variant.includes("reverseholo") && !holo) {
+  if (
+    variant.includes("holo") &&
+    !variant.includes("reverseholo") &&
+    !holo &&
+    !catalogueProvesImplicitHolo(card, variantLabel)
+  ) {
     return { ok: false, reason: "holo_mismatch" };
   }
   if (!["standard", "normal", "unlimited"].includes(variant) && !variant.includes("holo")) {
@@ -627,7 +632,6 @@ function variantQueryTerms(variantLabel) {
   if (variant.includes("1stedition")) return variant.includes("holo") ? "1st Edition holo" : "1st Edition";
   if (variant.includes("shadowless")) return variant.includes("holo") ? "shadowless holo" : "shadowless";
   if (variant.includes("reverseholo")) return "reverse holo";
-  if (variant.includes("holo")) return "holo";
   return "";
 }
 
@@ -694,6 +698,24 @@ function marketReferencePriceMinor(card, variantLabel) {
     Number(snapshot?.priceMinor) > 0,
   );
   return Number(matching?.priceMinor) || 0;
+}
+
+function catalogueProvesImplicitHolo(card, variantLabel) {
+  const target = normalizeVariant(variantLabel);
+  if (!target.includes("holo") || target.includes("reverseholo")) return false;
+  const metadata = card?.variantMetadata;
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return false;
+
+  const labels = [
+    ...(Array.isArray(metadata.availablePrices) ? metadata.availablePrices : []),
+    ...(Array.isArray(metadata.reviewedVariants) ? metadata.reviewedVariants : []),
+  ]
+    .map((entry) => typeof entry === "string" ? entry : entry?.label)
+    .map(normalizeVariant)
+    .filter(Boolean)
+    .filter((label) => !label.includes("stamp"));
+
+  return labels.length > 0 && labels.every((label) => label.includes("holo") && !label.includes("reverseholo"));
 }
 
 function validSoldSearchResponse(value) {

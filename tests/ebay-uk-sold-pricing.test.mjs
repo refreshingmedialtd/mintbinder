@@ -46,6 +46,7 @@ test("UK sold pricing remains fail-closed by default", () => {
   assert.equal(options.customerVisible, false);
   assert.equal(options.writePrices, false);
   assert.equal(options.limit, 10);
+  assert.equal(options.lookbackDays, 365);
   assert.equal(options.timeoutMs, 95_000);
 });
 
@@ -113,7 +114,7 @@ test("uses subset-prefixed denominators and does not invent promo denominators",
       number: "MEP 070",
     },
     variantLabel: "Holofoil",
-  }), /MEP 070 MEP holo/);
+  }), /MEP 070 MEP$/);
 });
 
 test("normalizes the accented Pokémon Center stamp into a distinct search", () => {
@@ -139,7 +140,7 @@ test("normalizes the accented Pokémon Center stamp into a distinct search", () 
   });
 
   assert.equal(stamped, "Fennekin 080/086 MEP Pokemon Center stamp");
-  assert.equal(regular, "Fennekin 080/086 MEP holo");
+  assert.equal(regular, "Fennekin 080/086 MEP");
   assert.notEqual(stamped, regular);
 });
 
@@ -160,6 +161,28 @@ test("matches Pokémon Center stamp identity while rejecting it for a regular ho
 
   assert.equal(classifyEbayUkSoldListing(stampedTarget, listing, { now }).accepted, true);
   assert.equal(classifyEbayUkSoldListing({ ...stampedTarget, variantLabel: "Holofoil" }, listing, { now }).reason, "stamp_mismatch");
+});
+
+test("infers an omitted holo word only when catalogue evidence makes the finish unambiguous", () => {
+  const inherentHolo = {
+    ...target,
+    card: {
+      ...target.card,
+      variantMetadata: { availablePrices: ["holofoil"] },
+    },
+    variantLabel: "Holofoil",
+  };
+  const ambiguous = {
+    ...inherentHolo,
+    card: {
+      ...inherentHolo.card,
+      variantMetadata: { availablePrices: ["normal", "holofoil"] },
+    },
+  };
+  const listing = sale({ title: "Pokemon Dark Raichu 83/82 Team Rocket NM" });
+
+  assert.equal(classifyEbayUkSoldListing(inherentHolo, listing, { now }).accepted, true);
+  assert.equal(classifyEbayUkSoldListing(ambiguous, listing, { now }).reason, "holo_mismatch");
 });
 
 test("prefixed promo numbers can prove the set without an expanded catalogue label", () => {
