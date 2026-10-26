@@ -148,16 +148,16 @@
     "sharp": "^0.35.3"
   },
   "devDependencies": {
-    "@eslint/eslintrc": "^3.1.0",
-    "@types/node": "^22.10.0",
+    "@eslint/eslintrc": "^3.3.7",
+    "@types/node": "^26.6.5",
     "@types/nodemailer": "^8.0.1",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
-    "eslint": "^9.16.0",
-    "eslint-config-next": "15.5.21",
-    "playwright-core": "^1.63.0",
-    "pm2": "^7.0.4",
-    "prisma": "6.19.3",
-    "typescript": "^5.7.0"
+    "eslint": "^10.13.0",
+    "eslint-config-next": "16.4.2",
+    "playwright-core": "^1.64.1",
+    "pm2": "^7.1.0",
+    "prisma": "7.10.1",
+    "typescript": "^7.0.2"
   }
 }
